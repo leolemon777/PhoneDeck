@@ -134,7 +134,10 @@ Samsung 真机：
   后续同签名 APK 可以覆盖升级。
 - 语音灵敏度改进版已用同一签名覆盖安装；原独立“停止”控制已合并到大号语音主按钮，“暂停/继续”仍为辅助控制。
 - 单主按钮版的 `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功，并已用同一长期签名 Release 覆盖安装到该 Samsung 手机。
-- 真机在同一大按钮坐标完成“开始 → 停止”：听写时按钮变为红色“停止说话”，再点回到“点击开始说话”；Android AppOps 记录本次采集约 1.677 秒并已停止，Windows 健康检查为 `audio.streaming=false`、`dictation.active=false`。
+- 上述“开始 → 停止”真机试验只证明 Android 录音已停和服务内部标志已清，不能证明 Typeless 真实停止。项目所有者随后实测发现 Typeless 仍在电脑端录音，该结论已撤回。
+- 根因已确认：当前 Windows 没有 VB-CABLE，Typeless 还选择 `Auto-detect (麦克风阵列)`；旧服务在 WASAPI 初始化完成前提前公布会话，导致 Typeless 启动后又立即收到停止切换键，Electron 可能漏处理第二次按键。
+- 修复后，WASAPI 成功启动前不再公布音频会话；启动前强制检查 VB-CABLE 和 Typeless 选中麦克风；停止后通过 Windows Core Audio 会话核对 Typeless 进程是否仍在录音，仅在确认仍为 Active 时重试一次停止键。
+- 修复版 Windows Release 构建 0 警告/0 错误；Android Debug、Release 和 Lint 成功，同签名 Release 已覆盖安装。当前环境点击语音后手机直接显示“缺少 VB-CABLE，未启动 Typeless”；Android AppOps 未出现新录音，Typeless `Recordings` 目录没有新文件，健康状态为 `capturing=false`。
 - 在没有键盘注入能力的本地安全模拟接收器上完成“开始 → 暂停 → 继续 → 停止”：
   开始后 Android AppOps 显示麦克风 `running`；暂停后不再 `running`、HTTP 会话保持；
   继续后重新 `running`；停止后模拟端音频和听写状态均为 false。
@@ -148,6 +151,7 @@ Samsung 真机：
 - 同签名重复安装已确认不重新安装包，但尚未用自定义配置证明文件级持久化。
 - 暂停/继续已经通过真机加安全模拟接收器验证，但尚未连接真实 VB-CABLE，也未验证
   Typeless 对长时间静音保活、暂停后继续识别和最终文字的实际效果。
+- 新增的 Typeless 真实录音状态确认已在当前机读取到 `capturing=false`，但因缺少 VB-CABLE，尚未完成真实手机音频下的“开始 → 停止 → capturing=false”端到端验收。
 - 未进行连续 20 次开始/停止和 20 次 USB 拔插/切换。
 - 未验证断线发生在“音频已连接但 Typeless 尚未确认”等竞态点。
 - 未验证蓝牙 v2 `hello`、自定义快捷键和 ACK 的真实连接。

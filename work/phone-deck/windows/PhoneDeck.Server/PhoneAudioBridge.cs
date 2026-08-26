@@ -86,12 +86,6 @@ internal sealed class PhoneAudioBridge : IDisposable
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
-        lock (sessionSync)
-        {
-            activeSessionId = sessionId;
-            activeCancellation = sessionCancellation;
-        }
-
         MMDevice? selected = null;
         List<MMDevice>? devices = null;
         try
@@ -119,6 +113,15 @@ internal sealed class PhoneAudioBridge : IDisposable
                 latency: 60);
             output.Init(provider);
             output.Play();
+
+            // 只有虚拟音频设备已找到且 WASAPI 真正启动后，
+            // 才允许听写管理器唤醒 Typeless。否则手机的并发
+            // /dictation/start 可能在初始化失败前短暂看到假的活动会话。
+            lock (sessionSync)
+            {
+                activeSessionId = sessionId;
+                activeCancellation = sessionCancellation;
+            }
 
             var bytes = new byte[16 * 1024];
             var carry = 0;

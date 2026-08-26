@@ -83,6 +83,8 @@ public final class MainActivity extends Activity {
     private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
     private volatile boolean managedDictationSupported;
+    private volatile boolean phoneAudioAvailable;
+    private volatile boolean typelessVirtualCableSelected;
     private volatile int serverProtocolVersion;
     private volatile String targetComputerId;
     private final String clientSessionId = UUID.randomUUID().toString();
@@ -489,6 +491,12 @@ public final class MainActivity extends Activity {
                     }
                     managedDictationSupported = supportsManagedDictation;
                     serverProtocolVersion = health.optInt("protocolVersion", 0);
+                    JSONObject audio = health.optJSONObject("audio");
+                    phoneAudioAvailable = audio != null
+                            && audio.optBoolean("available", false);
+                    JSONObject typeless = health.optJSONObject("typeless");
+                    typelessVirtualCableSelected = typeless != null
+                            && typeless.optBoolean("virtualCableSelected", false);
                     String healthComputerId = health.optString("computerId", null);
                     if (healthComputerId != null && !healthComputerId.isBlank()) {
                         targetComputerId = healthComputerId;
@@ -502,6 +510,8 @@ public final class MainActivity extends Activity {
                 boolean wasConnected = usbConnected;
                 usbConnected = false;
                 managedDictationSupported = false;
+                phoneAudioAvailable = false;
+                typelessVirtualCableSelected = false;
                 mainHandler.post(() -> {
                     updateConnectionDisplay();
                     if (wasConnected) {
@@ -748,6 +758,22 @@ public final class MainActivity extends Activity {
         if (!usbConnected) {
             showConnection("手机音频需要 USB 连接", COLOR_DANGER);
             showActionFeedback("✕  请连接 USB，并重新运行电脑端启动脚本", COLOR_DANGER);
+            testConnection();
+            return;
+        }
+        if (!phoneAudioAvailable) {
+            showConnection("USB 已连接 · 缺少 VB-CABLE", COLOR_PENDING);
+            showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动 Typeless", COLOR_DANGER);
+            microphoneLevel.setText("手机麦克风  ○ 未启动");
+            microphoneLevel.setTextColor(COLOR_MUTED);
+            testConnection();
+            return;
+        }
+        if (!typelessVirtualCableSelected) {
+            showConnection("USB 已连接 · Typeless 麦克风未配置", COLOR_PENDING);
+            showActionFeedback("✕  请先在 Typeless 中选择 CABLE Output", COLOR_DANGER);
+            microphoneLevel.setText("手机麦克风  ○ 未启动");
+            microphoneLevel.setTextColor(COLOR_MUTED);
             testConnection();
             return;
         }
@@ -1044,7 +1070,13 @@ public final class MainActivity extends Activity {
 
     private void updateConnectionDisplay() {
         if (usbConnected) {
-            showConnection("USB 已连接", COLOR_SUCCESS);
+            if (!phoneAudioAvailable) {
+                showConnection("USB 已连接 · 缺少 VB-CABLE", COLOR_PENDING);
+            } else if (!typelessVirtualCableSelected) {
+                showConnection("USB 已连接 · Typeless 麦克风未配置", COLOR_PENDING);
+            } else {
+                showConnection("USB 已连接", COLOR_SUCCESS);
+            }
         } else if (bluetoothConnected) {
             showConnection(bluetoothDetail, COLOR_SUCCESS);
         } else if (bluetoothTransport != null && bluetoothTransport.isSupported()) {

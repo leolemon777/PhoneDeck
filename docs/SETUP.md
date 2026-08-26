@@ -114,6 +114,8 @@ adb shell am start -n com.codex.phonedeck/.MainActivity
 
 8. 手机先显示 USB 已连接，再点击大号“开始说话”主按钮。启动阶段同一按钮会变为“取消启动”。
 9. 听写中同一主按钮会变为“停止说话”，点击它完成本次文字；下方“暂停”会停止手机麦克风采集但保持会话，“继续”恢复采集。
+
+如果手机显示“USB 已连接 · 缺少 VB-CABLE”，语音按钮不会启动 Typeless。安装并启用 VB-CABLE 后，还必须在 Typeless 设置中把麦克风选为 `CABLE Output (VB-Audio Virtual Cable)`；保持“Auto-detect / 系统默认麦克风”会被 PhoneDeck 拒绝，以防误录电脑自带麦克风。
 10. 电脑上先把光标放到真正的文字输入框。
 
 服务器健康检查：

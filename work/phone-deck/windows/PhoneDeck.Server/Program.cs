@@ -61,6 +61,12 @@ app.MapGet("/api/health", () =>
         {
             active = dictationSessions.IsActive,
             sessionId = dictationSessions.ActiveSessionId
+        },
+        typeless = new
+        {
+            capturing = TypelessStateProbe.IsCapturing(),
+            virtualCableSelected = KeyboardInput.TypelessUsesVirtualCable,
+            microphone = KeyboardInput.TypelessMicrophoneDescription
         }
     });
 });
@@ -176,6 +182,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");
     Console.WriteLine($"  Typeless 唤醒键：{KeyboardInput.TypelessShortcutDescription}");
+    Console.WriteLine($"  Typeless 麦克风：{KeyboardInput.TypelessMicrophoneDescription}");
     Console.WriteLine("  保持此窗口运行；按 Ctrl+C 可退出。");
     Console.WriteLine("========================================");
 });
@@ -258,6 +265,19 @@ internal static class KeyboardInput
     private const ushort VkMediaPlayPause = 0xB3;
 
     internal static string TypelessShortcutDescription => ReadTypelessShortcutBinding();
+    internal static string TypelessMicrophoneDescription =>
+        ReadTypelessMicrophoneDescription() ?? "未读取到配置";
+    internal static bool TypelessUsesVirtualCable
+    {
+        get
+        {
+            var microphone = ReadTypelessMicrophoneDescription();
+            return microphone is not null
+                && (microphone.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
+                    || microphone.Contains(
+                        "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
+        }
+    }
 
     internal static void Execute(string action, string? text)
     {
@@ -515,6 +535,33 @@ internal static class KeyboardInput
             // Typeless 未安装、配置文件被占用或格式变化时，退回官方 Windows 默认键。
         }
         return "RightAlt";
+    }
+
+    private static string? ReadTypelessMicrophoneDescription()
+    {
+        try
+        {
+            var settingsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Typeless.exe", "app-settings.json");
+            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            var selected = document.RootElement.GetProperty("selectedMicrophoneDevice");
+            var label = selected.TryGetProperty("label", out var labelValue)
+                ? labelValue.GetString()
+                : null;
+            var description = selected.TryGetProperty("description", out var descriptionValue)
+                ? descriptionValue.GetString()
+                : null;
+            if (!string.IsNullOrWhiteSpace(label) && !string.IsNullOrWhiteSpace(description))
+            {
+                return $"{label} / {description}";
+            }
+            return string.IsNullOrWhiteSpace(label) ? description : label;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private static ushort? ParseTypelessKey(string token)

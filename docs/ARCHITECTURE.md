@@ -36,7 +36,8 @@ Windows PhoneDeck.Server        │
 - `Program.cs`：Kestrel、本地 API、Typeless 快捷键读取、SendInput 和请求去重。
 - `InputCommandProcessor.cs`：协议 v2 信封、目标电脑和动作验证。
 - `ReceiverIdentity.cs`：首次启动生成并持久化稳定电脑 ID。
-- `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权。
+- `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；只有虚拟音频输出真正启动后才公布会话。
+- `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
 
 ## 当前单电脑限制
