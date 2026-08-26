@@ -138,6 +138,8 @@ Samsung 真机：
 - 根因已确认：当前 Windows 没有 VB-CABLE，Typeless 还选择 `Auto-detect (麦克风阵列)`；旧服务在 WASAPI 初始化完成前提前公布会话，导致 Typeless 启动后又立即收到停止切换键，Electron 可能漏处理第二次按键。
 - 修复后，WASAPI 成功启动前不再公布音频会话；启动前强制检查 VB-CABLE 和 Typeless 选中麦克风；停止后通过 Windows Core Audio 会话核对 Typeless 进程是否仍在录音，仅在确认仍为 Active 时重试一次停止键。
 - 修复版 Windows Release 构建 0 警告/0 错误；Android Debug、Release 和 Lint 成功，同签名 Release 已覆盖安装。当前环境点击语音后手机直接显示“缺少 VB-CABLE，未启动 Typeless”；Android AppOps 未出现新录音，Typeless `Recordings` 目录没有新文件，健康状态为 `capturing=false`。
+- 项目所有者提供的 `ChatGPT Image 2026年8月26日 11_11_07.png` 已作为 Android 应用图标；原图未重绘，1024 px 母版保存为 `android/artwork/phonedeck-app-icon-1024.png`，并生成 mdpi、hdpi、xhdpi、xxhdpi、xxxhdpi 五档 `mipmap` PNG。
+- 图标版 `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功；APK 资源清单确认 160–640 dpi 图标均已打包，长期签名 SHA-256 仍为 `df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f`，同签名 Release 覆盖安装成功，Samsung “应用程序信息”页已显示新的蓝紫麦克风图标。
 - 在没有键盘注入能力的本地安全模拟接收器上完成“开始 → 暂停 → 继续 → 停止”：
   开始后 Android AppOps 显示麦克风 `running`；暂停后不再 `running`、HTTP 会话保持；
   继续后重新 `running`；停止后模拟端音频和听写状态均为 false。

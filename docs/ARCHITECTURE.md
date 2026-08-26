@@ -30,6 +30,7 @@ Windows PhoneDeck.Server        │
 - `AudioStreamer.java`：AudioRecord、PCM 音量计算和 HTTP chunked 音频流；暂停时停止
   AudioRecord，并按实时速率发送 PCM 静音保持同一 HTTP/Typeless 会话，继续时恢复采集。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
+- `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
 
