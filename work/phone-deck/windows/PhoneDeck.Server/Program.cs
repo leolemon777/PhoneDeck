@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -21,14 +22,15 @@ builder.Services.Configure<JsonOptions>(options =>
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.AddServerHeader = false;
-    options.Limits.MaxRequestBodySize = null;
+    options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
 });
 
 var app = builder.Build();
+var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
-await using var bluetoothReceiver = new BluetoothReceiver();
+await using var bluetoothReceiver = new BluetoothReceiver(receiverIdentity.ComputerId);
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 
 app.MapGet("/api/health", () =>
@@ -38,11 +40,15 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.4.1",
-        protocolVersion = 1,
+        version = "1.5.0",
+        protocolVersion = 2,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        platform = receiverIdentity.Platform,
+        architecture = receiverIdentity.Architecture,
         capabilities = new[]
         {
-            "fixedAction", "text", "phoneAudio", "managedDictation"
+            "fixedAction", "keyChord", "text", "phoneAudio", "managedDictation"
         },
         audio = new
         {
@@ -61,6 +67,11 @@ app.MapGet("/api/health", () =>
 
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
 {
+    var bodySizeFeature = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (bodySizeFeature is { IsReadOnly: false })
+    {
+        bodySizeFeature.MaxRequestBodySize = null;
+    }
     if (!string.Equals(request.Headers["X-PhoneDeck-Audio"], "pcm-s16le",
             StringComparison.OrdinalIgnoreCase))
     {
@@ -132,25 +143,16 @@ app.MapPost("/api/dictation/stop", (DictationCommand command) =>
 
 app.MapPost("/api/input", (InputCommand command) =>
 {
-    if (string.IsNullOrWhiteSpace(command.Action))
-    {
-        return Results.BadRequest(new { ok = false, error = "缺少 action" });
-    }
-
-    if (command.Text is { Length: > 4096 })
-    {
-        return Results.BadRequest(new { ok = false, error = "输入数据过大" });
-    }
-
     try
     {
-        var duplicate = KeyboardInput.ExecuteOnce(
-            command.Action, command.Text, command.RequestId);
+        var result = InputCommandProcessor.Execute(command, receiverIdentity.ComputerId);
         return Results.Ok(new
         {
             ok = true,
-            duplicate,
+            duplicate = result.Duplicate,
             requestId = command.RequestId,
+            computerId = receiverIdentity.ComputerId,
+            message = result.Message,
             text = (string?)null
         });
     }
@@ -170,6 +172,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("========================================");
     Console.WriteLine("  手机键盘电脑端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
+    Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");
     Console.WriteLine($"  Typeless 唤醒键：{KeyboardInput.TypelessShortcutDescription}");
@@ -200,7 +203,15 @@ static IResult ExecuteDictationCommand(Func<IResult> execute)
     }
 }
 
-internal sealed record InputCommand(string? Action, string? Text, string? RequestId);
+internal sealed record InputCommand(
+    int? ProtocolVersion,
+    string? Action,
+    string? Text,
+    string? RequestId,
+    string? SessionId,
+    string? TargetComputerId,
+    string[]? Keys,
+    int? HoldMs);
 internal sealed record DictationCommand(string? SessionId, string? RequestId);
 
 internal static class KeyboardInput
@@ -225,7 +236,13 @@ internal static class KeyboardInput
     private const ushort VkUp = 0x26;
     private const ushort VkRight = 0x27;
     private const ushort VkDown = 0x28;
+    private const ushort VkSnapshot = 0x2C;
+    private const ushort VkInsert = 0x2D;
     private const ushort VkDelete = 0x2E;
+    private const ushort VkHome = 0x24;
+    private const ushort VkEnd = 0x23;
+    private const ushort VkPageUp = 0x21;
+    private const ushort VkPageDown = 0x22;
     private const ushort VkLWin = 0x5B;
     private const ushort VkLeftShift = 0xA0;
     private const ushort VkRightShift = 0xA1;
@@ -236,6 +253,9 @@ internal static class KeyboardInput
     private const ushort VkVolumeMute = 0xAD;
     private const ushort VkVolumeDown = 0xAE;
     private const ushort VkVolumeUp = 0xAF;
+    private const ushort VkMediaNext = 0xB0;
+    private const ushort VkMediaPrevious = 0xB1;
+    private const ushort VkMediaPlayPause = 0xB3;
 
     internal static string TypelessShortcutDescription => ReadTypelessShortcutBinding();
 
@@ -245,6 +265,27 @@ internal static class KeyboardInput
     }
 
     internal static bool ExecuteOnce(string action, string? text, string? requestId)
+    {
+        return ExecuteOnceCore(requestId, () => ExecuteCore(action, text));
+    }
+
+    internal static bool ExecuteKeyChordOnce(
+        string[]? keyNames,
+        int? requestedHoldMilliseconds,
+        string? requestId,
+        out string description)
+    {
+        var keys = ParseKeyChord(keyNames, out description);
+        var holdMilliseconds = requestedHoldMilliseconds ?? 45;
+        if (holdMilliseconds is < 20 or > 500)
+        {
+            throw new ArgumentException("holdMs 必须在 20–500 毫秒之间");
+        }
+        return ExecuteOnceCore(requestId,
+            () => SendChordSafely(holdMilliseconds, keys));
+    }
+
+    private static bool ExecuteOnceCore(string? requestId, Action execute)
     {
         lock (SyncRoot)
         {
@@ -266,7 +307,7 @@ internal static class KeyboardInput
                 }
             }
 
-            ExecuteCore(action, text);
+            execute();
             if (normalizedRequestId is not null)
             {
                 RecentRequestIds[normalizedRequestId] = now;
@@ -285,6 +326,107 @@ internal static class KeyboardInput
             RecentRequestIds.Remove(requestId);
         }
     }
+
+    private static ushort[] ParseKeyChord(string[]? keyNames, out string description)
+    {
+        if (keyNames is null || keyNames.Length is < 1 or > 4)
+        {
+            throw new ArgumentException("组合键必须包含 1–4 个键");
+        }
+
+        var normalizedNames = new List<string>(keyNames.Length);
+        var mappedKeys = new List<ushort>(keyNames.Length);
+        foreach (var rawName in keyNames)
+        {
+            var normalized = NormalizeKeyName(rawName);
+            if (normalizedNames.Contains(normalized, StringComparer.Ordinal))
+            {
+                throw new ArgumentException($"组合键包含重复键：{normalized}");
+            }
+            normalizedNames.Add(normalized);
+            mappedKeys.Add(MapKeyName(normalized));
+        }
+
+        var ordinaryKeyCount = mappedKeys.Count(key => !IsModifier(key));
+        if (ordinaryKeyCount != 1)
+        {
+            throw new ArgumentException("组合键必须且只能包含一个普通键");
+        }
+
+        var ordered = normalizedNames
+            .Zip(mappedKeys)
+            .OrderBy(pair => IsModifier(pair.Second) ? ModifierOrder(pair.Second) : 10)
+            .ToArray();
+        description = string.Join(" + ", ordered.Select(pair => pair.First));
+        return ordered.Select(pair => pair.Second).ToArray();
+    }
+
+    private static string NormalizeKeyName(string? keyName)
+    {
+        var normalized = keyName?.Trim().Replace(" ", string.Empty,
+            StringComparison.Ordinal).Replace("_", string.Empty,
+            StringComparison.Ordinal).Replace("-", string.Empty,
+            StringComparison.Ordinal).ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 24)
+        {
+            throw new ArgumentException("组合键包含无效按键名称");
+        }
+        return normalized == "PRIMARY" ? "CTRL" : normalized;
+    }
+
+    private static ushort MapKeyName(string keyName)
+    {
+        if (keyName.Length == 1 && char.IsLetterOrDigit(keyName[0]))
+        {
+            return keyName[0];
+        }
+        if (keyName.Length > 1 && keyName[0] == 'F'
+            && int.TryParse(keyName[1..], out var functionNumber)
+            && functionNumber is >= 1 and <= 24)
+        {
+            return (ushort)(0x6F + functionNumber);
+        }
+
+        return keyName switch
+        {
+            "CTRL" or "CONTROL" => VkControl,
+            "SHIFT" => VkShift,
+            "ALT" => VkMenu,
+            "WIN" or "WINDOWS" => VkLWin,
+            "ENTER" or "RETURN" => VkReturn,
+            "ESC" or "ESCAPE" => VkEscape,
+            "TAB" => VkTab,
+            "SPACE" or "SPACEBAR" => VkSpace,
+            "BACKSPACE" => VkBack,
+            "DELETE" => VkDelete,
+            "INSERT" => VkInsert,
+            "HOME" => VkHome,
+            "END" => VkEnd,
+            "PAGEUP" => VkPageUp,
+            "PAGEDOWN" => VkPageDown,
+            "UP" => VkUp,
+            "DOWN" => VkDown,
+            "LEFT" => VkLeft,
+            "RIGHT" => VkRight,
+            "PRINTSCREEN" or "PRTSC" => VkSnapshot,
+            "VOLUMEUP" => VkVolumeUp,
+            "VOLUMEDOWN" => VkVolumeDown,
+            "VOLUMEMUTE" or "MUTE" => VkVolumeMute,
+            "MEDIAPLAYPAUSE" or "PLAYPAUSE" => VkMediaPlayPause,
+            "MEDIANEXT" or "NEXTTRACK" => VkMediaNext,
+            "MEDIAPREVIOUS" or "PREVIOUSTRACK" => VkMediaPrevious,
+            _ => throw new ArgumentException($"不支持的按键：{keyName}")
+        };
+    }
+
+    private static int ModifierOrder(ushort key) => key switch
+    {
+        VkControl or VkLeftControl or VkRightControl => 0,
+        VkShift or VkLeftShift or VkRightShift => 1,
+        VkMenu or VkLeftMenu or VkRightMenu => 2,
+        VkLWin => 3,
+        _ => 10
+    };
 
     private static void ExecuteCore(string action, string? text)
     {
@@ -424,36 +566,49 @@ internal static class KeyboardInput
 
     private static void SendChord(params ushort[] keys)
     {
-        var inputs = new List<Input>(keys.Length * 2);
-        foreach (var key in keys)
-        {
-            inputs.Add(VirtualKey(key, keyUp: false));
-        }
-        for (var index = keys.Length - 1; index >= 0; index--)
-        {
-            inputs.Add(VirtualKey(keys[index], keyUp: true));
-        }
-        Send(inputs);
+        SendChordSafely(0, keys);
     }
 
     private static void SendChordWithHold(int holdMilliseconds, params ushort[] keys)
     {
-        var downInputs = keys
-            .Select(key => VirtualKey(key, keyUp: false))
-            .ToArray();
-        var upInputs = keys
-            .Reverse()
-            .Select(key => VirtualKey(key, keyUp: true))
-            .ToArray();
+        SendChordSafely(holdMilliseconds, keys);
+    }
 
-        Send(downInputs);
+    private static void SendChordSafely(int holdMilliseconds, IReadOnlyList<ushort> keys)
+    {
+        var pressedKeys = new List<ushort>(keys.Count);
         try
         {
-            Thread.Sleep(holdMilliseconds);
+            foreach (var key in keys)
+            {
+                pressedKeys.Add(key);
+                Send([VirtualKey(key, keyUp: false)]);
+            }
+            if (holdMilliseconds > 0)
+            {
+                Thread.Sleep(holdMilliseconds);
+            }
         }
         finally
         {
-            Send(upInputs);
+            Exception? releaseFailure = null;
+            for (var index = pressedKeys.Count - 1; index >= 0; index--)
+            {
+                try
+                {
+                    Send([VirtualKey(pressedKeys[index], keyUp: true)]);
+                }
+                catch (Exception exception)
+                {
+                    releaseFailure ??= exception;
+                    Console.Error.WriteLine(
+                        $"释放按键 0x{pressedKeys[index]:X2} 失败：{exception.Message}");
+                }
+            }
+            if (releaseFailure is not null)
+            {
+                throw new InvalidOperationException("未能释放全部组合键", releaseFailure);
+            }
         }
     }
 

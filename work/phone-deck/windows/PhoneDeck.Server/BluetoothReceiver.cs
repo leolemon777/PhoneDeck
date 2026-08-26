@@ -11,9 +11,15 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
     };
 
     private readonly CancellationTokenSource ownCancellation = new();
+    private readonly string computerId;
     private Task? worker;
     private IntPtr activeSocket = BluetoothNative.InvalidSocket;
     private string lastStatus = string.Empty;
+
+    internal BluetoothReceiver(string computerId)
+    {
+        this.computerId = computerId;
+    }
 
     internal void Start(CancellationToken applicationStopping)
     {
@@ -92,7 +98,7 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
 
             WriteStatus($"蓝牙：已连接 {device.Name}");
             BluetoothNative.SetReceiveTimeout(socket, 2500);
-            BluetoothNative.SendHeartbeat(socket);
+            SendHello(socket, computerId);
 
             var received = new byte[4096];
             var pending = new List<byte>(4096);
@@ -106,7 +112,7 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
                         var value = received[index];
                         if (value == (byte)'\n')
                         {
-                            HandleMessage(socket, pending);
+                            HandleMessage(socket, pending, computerId);
                             pending.Clear();
                         }
                         else if (pending.Count < 32 * 1024)
@@ -153,7 +159,7 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
         return false;
     }
 
-    private static void HandleMessage(IntPtr socket, List<byte> bytes)
+    private static void HandleMessage(IntPtr socket, List<byte> bytes, string computerId)
     {
         if (bytes.Count == 0)
         {
@@ -169,19 +175,9 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
                 return;
             }
             requestId = command.RequestId;
-            if (string.IsNullOrWhiteSpace(command.Action))
-            {
-                SendAcknowledgement(socket, requestId, false, false, "缺少 action");
-                return;
-            }
-            if (command.Text is { Length: > 4096 })
-            {
-                SendAcknowledgement(socket, requestId, false, false, "输入数据过大");
-                return;
-            }
-            var duplicate = KeyboardInput.ExecuteOnce(
-                command.Action, command.Text, command.RequestId);
-            SendAcknowledgement(socket, command.RequestId, true, duplicate, null);
+            var result = InputCommandProcessor.Execute(command, computerId);
+            SendAcknowledgement(socket, command.RequestId, true,
+                result.Duplicate, null, computerId, result.Message);
         }
         catch (JsonException)
         {
@@ -190,13 +186,30 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
         catch (ArgumentException exception)
         {
             // 丢弃未知动作，不允许手机端调用任意电脑命令。
-            SendAcknowledgement(socket, requestId, false, false, exception.Message);
+            SendAcknowledgement(socket, requestId, false, false,
+                exception.Message, computerId, null);
         }
         catch (Exception exception)
         {
             Console.Error.WriteLine($"蓝牙输入失败：{exception.Message}");
-            SendAcknowledgement(socket, requestId, false, false, "电脑端执行失败");
+            SendAcknowledgement(socket, requestId, false, false,
+                "电脑端执行失败", computerId, null);
         }
+    }
+
+    private static void SendHello(IntPtr socket, string computerId)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            type = "hello",
+            name = "PhoneDeck",
+            version = "1.5.0",
+            protocolVersion = 2,
+            computerId,
+            platform = "windows",
+            capabilities = new[] { "fixedAction", "keyChord", "text" }
+        });
+        BluetoothNative.SendMessage(socket, Encoding.UTF8.GetBytes(json + "\n"));
     }
 
     private static void SendAcknowledgement(
@@ -204,7 +217,9 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
         string? requestId,
         bool ok,
         bool duplicate,
-        string? error)
+        string? error,
+        string computerId,
+        string? message)
     {
         if (string.IsNullOrWhiteSpace(requestId))
         {
@@ -216,7 +231,9 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
             requestId,
             ok,
             duplicate,
-            error
+            error,
+            computerId,
+            message
         });
         BluetoothNative.SendMessage(socket,
             Encoding.UTF8.GetBytes(json + "\n"));

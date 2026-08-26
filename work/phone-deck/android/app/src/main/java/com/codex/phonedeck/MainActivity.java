@@ -67,6 +67,7 @@ public final class MainActivity extends Activity {
     private TextView microphoneLevel;
     private TextView voiceModeText;
     private Button typelessButton;
+    private GridLayout shortcutGrid;
     private boolean typelessInFlight;
     private boolean audioStartPending;
     private boolean dictationActive;
@@ -78,10 +79,14 @@ public final class MainActivity extends Activity {
     private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
     private volatile boolean managedDictationSupported;
+    private volatile int serverProtocolVersion;
+    private volatile String targetComputerId;
+    private final String clientSessionId = UUID.randomUUID().toString();
     private volatile boolean bluetoothConnected;
     private volatile String bluetoothDetail = "等待电脑蓝牙连接";
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
+    private ShortcutConfigRepository configRepository;
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
@@ -101,6 +106,7 @@ public final class MainActivity extends Activity {
         getWindow().setStatusBarColor(COLOR_BACKGROUND);
         getWindow().setNavigationBarColor(COLOR_BACKGROUND);
 
+        configRepository = new ShortcutConfigRepository(this);
         setContentView(createInterface());
         audioStreamer = new AudioStreamer(this, SERVER, new AudioStreamer.Listener() {
             @Override
@@ -134,6 +140,9 @@ public final class MainActivity extends Activity {
         if (voiceModeText != null && typelessButton != null) {
             updateVoiceModeInterface();
         }
+        if (shortcutGrid != null && configRepository != null) {
+            refreshShortcutGrid();
+        }
     }
 
     private View createInterface() {
@@ -155,7 +164,7 @@ public final class MainActivity extends Activity {
         eyebrow.setLetterSpacing(0.12f);
         page.addView(eyebrow);
 
-        TextView title = text("手机键盘", 30, COLOR_TEXT, Typeface.BOLD);
+        TextView title = text("PhoneDeck 手机控制台", 28, COLOR_TEXT, Typeface.BOLD);
         page.addView(title, marginTop(dp(4)));
 
         TextView subtitle = text("电脑端 Typeless · USB / 蓝牙双连接", 14, COLOR_MUTED, Typeface.NORMAL);
@@ -203,27 +212,10 @@ public final class MainActivity extends Activity {
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(3);
         grid.setUseDefaultMargins(false);
+        shortcutGrid = grid;
         page.addView(grid, margins(dp(-4), dp(10), dp(-4), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        addKey(grid, "复制\nCtrl+C", "copy");
-        addKey(grid, "粘贴\nCtrl+V", "paste");
-        addKey(grid, "剪切\nCtrl+X", "cut");
-        addKey(grid, "撤销\nCtrl+Z", "undo");
-        addKey(grid, "重做\nCtrl+Y", "redo");
-        addKey(grid, "全选\nCtrl+A", "selectAll");
-        addKey(grid, "保存\nCtrl+S", "save");
-        addKey(grid, "切换窗口\nAlt+Tab", "altTab");
-        addKey(grid, "截图\nWin+Shift+S", "screenshot");
-        addKey(grid, "回车\nEnter", "enter");
-        addKey(grid, "退格\nBackspace", "backspace");
-        addKey(grid, "退出\nEsc", "escape");
-        addKey(grid, "切换输入法\nWin+Space", "switchInputMethod");
-        addKey(grid, "音量 −", "volumeDown");
-        addKey(grid, "静音", "volumeMute");
-        addKey(grid, "音量 +", "volumeUp");
-        addKey(grid, "←", "left");
-        addKey(grid, "→", "right");
+        refreshShortcutGrid();
 
         root.addView(scrollView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -291,25 +283,50 @@ public final class MainActivity extends Activity {
         return root;
     }
 
-    private void addKey(GridLayout grid, String label, String action) {
+    private void refreshShortcutGrid() {
+        shortcutGrid.removeAllViews();
+        try {
+            for (ShortcutButtonConfig config : configRepository.load()) {
+                if (config.visible) {
+                    addKey(shortcutGrid, config);
+                }
+            }
+            if (actionFeedback != null) {
+                String recoveryNotice = configRepository.consumeRecoveryNotice();
+                if (recoveryNotice != null) {
+                    showActionFeedback("●  " + recoveryNotice, COLOR_PENDING);
+                }
+            }
+        } catch (Exception exception) {
+            if (actionFeedback != null) {
+                showActionFeedback("✕  无法读取快捷键配置；语音输入仍可使用", COLOR_DANGER);
+            }
+        }
+    }
+
+    private void addKey(GridLayout grid, ShortcutButtonConfig config) {
         Button button = new Button(this);
-        button.setText(label);
-        button.setTextSize(label.length() <= 2 ? 20 : 13);
+        String iconLine = config.icon.isEmpty() ? "" : config.icon + "  ";
+        button.setText(iconLine + config.label + "\n" + config.subtitle());
+        button.setTextSize(config.label.length() <= 2 ? 18 : 12);
         button.setTextColor(COLOR_TEXT);
         button.setAllCaps(false);
         button.setGravity(Gravity.CENTER);
         button.setPadding(dp(4), dp(4), dp(4), dp(4));
         button.setBackground(pressableRoundRect(
-                COLOR_KEY, Color.rgb(57, 73, 116), 15));
+                colorForShortcut(config.color), Color.rgb(74, 91, 138), 15));
         button.setStateListAnimator(null);
+        button.setContentDescription(config.label + "，" + config.subtitle()
+                + "。长按编辑");
         installTouchFeedback(button);
-        button.setOnClickListener(view -> triggerAction(
-                button,
-                action,
-                null,
-                "正在发送：" + label.replace("\n", " "),
-                "已发送：" + label.replace("\n", " "),
-                false));
+        button.setOnClickListener(view -> triggerShortcut(button, config));
+        button.setOnLongClickListener(view -> {
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            Intent intent = new Intent(this, ShortcutEditActivity.class);
+            intent.putExtra(ShortcutEditActivity.EXTRA_BUTTON_ID, config.id);
+            startActivity(intent);
+            return true;
+        });
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
@@ -319,10 +336,93 @@ public final class MainActivity extends Activity {
         grid.addView(button, params);
     }
 
+    private int colorForShortcut(String color) {
+        switch (color) {
+            case "purple": return Color.rgb(76, 57, 112);
+            case "green": return Color.rgb(34, 84, 72);
+            case "orange": return Color.rgb(102, 69, 37);
+            case "red": return Color.rgb(103, 49, 63);
+            case "slate": return COLOR_KEY;
+            default: return Color.rgb(39, 66, 112);
+        }
+    }
+
+    private void triggerShortcut(Button source, ShortcutButtonConfig config) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("requestId", UUID.randomUUID().toString());
+            if (serverProtocolVersion >= 2 && targetComputerId != null
+                    && !targetComputerId.isBlank()) {
+                body.put("protocolVersion", 2);
+                body.put("sessionId", clientSessionId);
+                body.put("targetComputerId", targetComputerId);
+                body.put("action", "keyChord");
+                org.json.JSONArray keys = new org.json.JSONArray();
+                for (String key : config.keys) {
+                    keys.put(key);
+                }
+                body.put("keys", keys);
+                body.put("holdMs", config.holdMs);
+            } else {
+                String legacyAction = legacyActionForId(config.id);
+                if (legacyAction == null) {
+                    showActionFeedback("✕  自定义按键需要电脑端升级到 1.5.0", COLOR_DANGER);
+                    return;
+                }
+                body.put("action", legacyAction);
+            }
+        } catch (Exception exception) {
+            showActionFeedback("✕  快捷键配置无效，请进入设置修复", COLOR_DANGER);
+            return;
+        }
+
+        showActionFeedback("●  正在发送：" + config.label + " · " + config.subtitle(),
+                COLOR_PENDING);
+        actionExecutor.execute(() -> {
+            try {
+                String transport = sendCommand(body);
+                mainHandler.post(() -> {
+                    showConnection(transport + " 已连接", COLOR_SUCCESS);
+                    showActionFeedback("✓  已发送：" + config.label + " · " + transport,
+                            COLOR_SUCCESS);
+                    performResultHaptic(source, true);
+                    flashResult(source, COLOR_SUCCESS);
+                });
+            } catch (Exception exception) {
+                mainHandler.post(() -> {
+                    showConnection("发送失败，请连接 USB 或蓝牙", COLOR_DANGER);
+                    showActionFeedback("✕  电脑未确认快捷键：" + config.label,
+                            COLOR_DANGER);
+                    performResultHaptic(source, false);
+                    flashResult(source, COLOR_DANGER);
+                });
+            }
+        });
+    }
+
+    private static String legacyActionForId(String id) {
+        switch (id) {
+            case "copy": case "paste": case "cut": case "undo": case "redo":
+            case "selectAll": case "save": case "altTab": case "screenshot":
+            case "enter": case "backspace": case "escape": case "switchInputMethod":
+            case "volumeDown": case "volumeMute": case "volumeUp":
+            case "left": case "right":
+                return id;
+            default:
+                return null;
+        }
+    }
+
     private void prepareBluetooth() {
         bluetoothTransport = new BluetoothTransport(this, (connected, detail) -> mainHandler.post(() -> {
             bluetoothConnected = connected;
             bluetoothDetail = detail;
+            if (connected && bluetoothTransport != null
+                    && bluetoothTransport.getComputerId() != null) {
+                targetComputerId = bluetoothTransport.getComputerId();
+                serverProtocolVersion = Math.max(
+                        serverProtocolVersion, bluetoothTransport.getProtocolVersion());
+            }
             updateConnectionDisplay();
         }));
 
@@ -367,6 +467,11 @@ public final class MainActivity extends Activity {
                         }
                     }
                     managedDictationSupported = supportsManagedDictation;
+                    serverProtocolVersion = health.optInt("protocolVersion", 0);
+                    String healthComputerId = health.optString("computerId", null);
+                    if (healthComputerId != null && !healthComputerId.isBlank()) {
+                        targetComputerId = healthComputerId;
+                    }
                     usbConnected = true;
                     mainHandler.post(this::updateConnectionDisplay);
                 } else {
@@ -416,28 +521,6 @@ public final class MainActivity extends Activity {
         microphoneLevel.setTextColor(COLOR_DANGER);
         showActionFeedback("✕  USB 已断开；电脑端会自动尝试复位 Typeless",
                 COLOR_DANGER);
-    }
-
-    private void triggerAction(
-            Button source,
-            String action,
-            String text,
-            String pendingMessage,
-            String successMessage,
-            boolean guardTypeless) {
-        if (guardTypeless && typelessInFlight) {
-            showActionFeedback("●  Typeless 指令正在处理，请稍候", COLOR_PENDING);
-            return;
-        }
-
-        if (guardTypeless) {
-            typelessInFlight = true;
-            source.setEnabled(false);
-            source.setAlpha(0.74f);
-            source.setText("正在发送，请稍候…");
-        }
-        showActionFeedback("●  " + pendingMessage, COLOR_PENDING);
-        sendAction(action, text, successMessage, source, guardTypeless);
     }
 
     private void toggleTypelessWithPhoneMic() {
@@ -720,42 +803,6 @@ public final class MainActivity extends Activity {
             typelessButton.setAlpha(1f);
             typelessButton.setText(voiceButtonLabel());
         }
-    }
-
-    private void sendAction(
-            String action,
-            String text,
-            String successMessage,
-            Button source,
-            boolean guardTypeless) {
-        actionExecutor.execute(() -> {
-            try {
-                JSONObject body = new JSONObject();
-                body.put("action", action);
-                body.put("requestId", UUID.randomUUID().toString());
-                if (text != null) {
-                    body.put("text", text);
-                }
-                String finalTransport = sendCommand(body);
-                mainHandler.post(() -> {
-                    showConnection(finalTransport + " 已连接", COLOR_SUCCESS);
-                    showActionFeedback("✓  " + successMessage + " · " + finalTransport,
-                            COLOR_SUCCESS);
-                    performResultHaptic(source, true);
-                    flashResult(source, COLOR_SUCCESS);
-                    finishGuardedAction(source, guardTypeless);
-                });
-            } catch (Exception exception) {
-                mainHandler.post(() -> {
-                    showConnection("发送失败，请连接 USB 或蓝牙", COLOR_DANGER);
-                    showActionFeedback("✕  没有收到电脑确认 · 请检查连接后重试",
-                            COLOR_DANGER);
-                    performResultHaptic(source, false);
-                    flashResult(source, COLOR_DANGER);
-                    finishGuardedAction(source, guardTypeless);
-                });
-            }
-        });
     }
 
     private String sendCommand(JSONObject body) throws Exception {

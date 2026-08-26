@@ -1,6 +1,7 @@
 package com.codex.phonedeck;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -13,6 +14,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class SettingsActivity extends Activity {
@@ -45,10 +47,12 @@ public final class SettingsActivity extends Activity {
     }
 
     private View createInterface() {
+        ScrollView scroll = new ScrollView(this);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(20), dp(20), dp(20), dp(24));
         page.setBackgroundColor(BACKGROUND);
+        scroll.addView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -63,14 +67,18 @@ public final class SettingsActivity extends Activity {
         back.setOnClickListener(view -> finish());
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
 
-        TextView headerTitle = text("语音输入设置", 22, TEXT, Typeface.BOLD);
+        TextView headerTitle = text("设置", 22, TEXT, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         titleParams.leftMargin = dp(13);
         header.addView(headerTitle, titleParams);
 
-        TextView intro = text("选择最顺手的操作方式。设置会立即保存。", 14, MUTED, Typeface.NORMAL);
+        TextView intro = text("语音模式会立即保存；快捷键和布局可单独编辑。",
+                14, MUTED, Typeface.NORMAL);
         page.addView(intro, topMargin(dp(22)));
+
+        TextView voiceHeading = text("语音输入", 17, TEXT, Typeface.BOLD);
+        page.addView(voiceHeading, topMargin(dp(22)));
 
         tapOption = option("点击说话", "点一下开始听写，再点一下停止并输入文字", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
@@ -88,7 +96,23 @@ public final class SettingsActivity extends Activity {
         tip.setPadding(dp(14), dp(13), dp(14), dp(13));
         tip.setBackground(roundRect(PANEL, 14, 1, PANEL));
         page.addView(tip, fullWidthMargins(dp(22)));
-        return page;
+
+        TextView shortcutHeading = text("快捷键与布局", 17, TEXT, Typeface.BOLD);
+        page.addView(shortcutHeading, topMargin(dp(28)));
+
+        Button shortcuts = new Button(this);
+        shortcuts.setText("编辑按钮、按键、颜色和顺序  →");
+        shortcuts.setTextSize(15);
+        shortcuts.setTextColor(TEXT);
+        shortcuts.setAllCaps(false);
+        shortcuts.setGravity(Gravity.CENTER_VERTICAL);
+        shortcuts.setPadding(dp(18), 0, dp(18), 0);
+        shortcuts.setBackground(roundRect(Color.rgb(27, 45, 76), 16, 1, PRIMARY));
+        shortcuts.setOnClickListener(view ->
+                startActivity(new Intent(this, ShortcutSettingsActivity.class)));
+        page.addView(shortcuts, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(60)));
+        return scroll;
     }
 
     private LinearLayout option(String title, String detail, boolean tap) {

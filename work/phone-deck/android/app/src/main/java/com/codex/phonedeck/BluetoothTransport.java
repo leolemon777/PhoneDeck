@@ -38,6 +38,8 @@ final class BluetoothTransport implements AutoCloseable {
     private volatile BluetoothServerSocket serverSocket;
     private volatile BluetoothSocket socket;
     private volatile OutputStream output;
+    private volatile String computerId;
+    private volatile int protocolVersion;
     private Thread worker;
 
     BluetoothTransport(Context context, Listener listener) {
@@ -57,6 +59,14 @@ final class BluetoothTransport implements AutoCloseable {
     boolean isConnected() {
         BluetoothSocket current = socket;
         return current != null && current.isConnected() && output != null;
+    }
+
+    String getComputerId() {
+        return computerId;
+    }
+
+    int getProtocolVersion() {
+        return protocolVersion;
     }
 
     synchronized void start() {
@@ -127,6 +137,8 @@ final class BluetoothTransport implements AutoCloseable {
 
                 socket = accepted;
                 output = accepted.getOutputStream();
+                computerId = null;
+                protocolVersion = 0;
                 String deviceName = accepted.getRemoteDevice().getName();
                 listener.onStateChanged(true,
                         deviceName == null ? "蓝牙已连接" : "蓝牙已连接 · " + deviceName);
@@ -180,6 +192,12 @@ final class BluetoothTransport implements AutoCloseable {
         }
         try {
             JSONObject message = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            if ("hello".equals(message.optString("type"))) {
+                computerId = message.optString("computerId", null);
+                protocolVersion = message.optInt("protocolVersion", 0);
+                listener.onStateChanged(true, "蓝牙已连接 · 协议 v" + protocolVersion);
+                return;
+            }
             if (!"ack".equals(message.optString("type"))) {
                 return;
             }
