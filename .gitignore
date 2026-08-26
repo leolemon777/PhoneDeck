@@ -1,0 +1,51 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Android and Gradle generated files
+**/.gradle/
+**/build/
+**/local.properties
+*.apk
+*.aab
+
+# .NET generated files
+**/bin/
+**/obj/
+*.dll
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+
+# Local release/output trees and bundled toolchains
+outputs/
+work/tools/
+work/drivers/
+work/phone-deck/artifacts/
+work/phone-deck/dist/
+
+# Signing material and credentials
+work/phone-deck/signing/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+
+# Local logs, recordings and generated packages
+*.log
+*.wav
+*.zip
+*.exe
+*.tmp
+*.bak
+
+# Keep the Gradle bootstrap binary in source control
+!**/gradle/wrapper/gradle-wrapper.jar
