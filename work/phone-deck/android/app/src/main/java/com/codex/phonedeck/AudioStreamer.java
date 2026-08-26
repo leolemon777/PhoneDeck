@@ -19,12 +19,17 @@ final class AudioStreamer implements AutoCloseable {
     }
 
     private static final int SAMPLE_RATE = 48_000;
+    private static final int PAUSE_KEEPALIVE_INTERVAL_MS = 100;
+    private static final int PAUSE_SILENCE_BYTES =
+            SAMPLE_RATE * 2 * PAUSE_KEEPALIVE_INTERVAL_MS / 1_000;
     private final Context context;
     private final String server;
     private final Listener listener;
     private final Object syncRoot = new Object();
     private volatile boolean shouldRun;
     private volatile boolean streaming;
+    private volatile boolean paused;
+    private volatile boolean recorderNeedsRestart;
     private volatile AudioRecord recorder;
     private volatile HttpURLConnection activeConnection;
     private Thread worker;
@@ -45,6 +50,10 @@ final class AudioStreamer implements AutoCloseable {
         }
     }
 
+    boolean isPaused() {
+        return paused;
+    }
+
     boolean start(String sessionId) {
         if (sessionId == null || sessionId.isBlank() || sessionId.length() > 128) {
             throw new IllegalArgumentException("无效的音频 sessionId");
@@ -54,14 +63,43 @@ final class AudioStreamer implements AutoCloseable {
                 return false;
             }
             shouldRun = true;
+            paused = false;
+            recorderNeedsRestart = false;
             worker = new Thread(() -> runStream(sessionId), "PhoneDeck-Microphone");
             worker.start();
             return true;
         }
     }
 
+    boolean pause() {
+        if (!streaming || !isRunning()) {
+            return false;
+        }
+        paused = true;
+        recorderNeedsRestart = true;
+        AudioRecord current = recorder;
+        if (current != null) {
+            try {
+                current.stop();
+            } catch (IllegalStateException ignored) {
+                // 工作线程可能已经完成暂停。
+            }
+        }
+        return true;
+    }
+
+    boolean resume() {
+        if (!streaming || !isRunning()) {
+            return false;
+        }
+        paused = false;
+        return true;
+    }
+
     void stop() {
         shouldRun = false;
+        paused = false;
+        recorderNeedsRestart = false;
         AudioRecord current = recorder;
         if (current != null) {
             try {
@@ -79,6 +117,7 @@ final class AudioStreamer implements AutoCloseable {
     private void runStream(String sessionId) {
         HttpURLConnection connection = null;
         AudioRecord localRecorder = null;
+        boolean recorderStarted = false;
         String stoppedReason = null;
         try {
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
@@ -116,15 +155,45 @@ final class AudioStreamer implements AutoCloseable {
             activeConnection = connection;
 
             byte[] buffer = new byte[bufferSize];
+            byte[] silence = new byte[PAUSE_SILENCE_BYTES];
             try (OutputStream output = connection.getOutputStream()) {
                 localRecorder.startRecording();
+                recorderStarted = true;
                 streaming = true;
                 listener.onReady(sessionId);
                 long lastLevelUpdate = 0;
                 while (shouldRun) {
+                    if (paused) {
+                        if (recorderStarted) {
+                            try {
+                                localRecorder.stop();
+                            } catch (IllegalStateException ignored) {
+                                // pause() 可能已经停止录音。
+                            }
+                            recorderStarted = false;
+                        }
+                        output.write(silence);
+                        output.flush();
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (now - lastLevelUpdate >= 200) {
+                            listener.onLevel(0);
+                            lastLevelUpdate = now;
+                        }
+                        Thread.sleep(PAUSE_KEEPALIVE_INTERVAL_MS);
+                        continue;
+                    }
+                    if (!recorderStarted || recorderNeedsRestart) {
+                        localRecorder.startRecording();
+                        recorderStarted = true;
+                        recorderNeedsRestart = false;
+                    }
                     int count = localRecorder.read(
                             buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
                     if (count <= 0) {
+                        if (shouldRun && (paused || recorderNeedsRestart)) {
+                            recorderStarted = false;
+                            continue;
+                        }
                         if (shouldRun) {
                             throw new IllegalStateException("手机麦克风读取中断：" + count);
                         }
@@ -149,6 +218,8 @@ final class AudioStreamer implements AutoCloseable {
         } finally {
             shouldRun = false;
             streaming = false;
+            paused = false;
+            recorderNeedsRestart = false;
             recorder = null;
             activeConnection = null;
             if (localRecorder != null) {

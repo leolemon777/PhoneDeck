@@ -80,7 +80,7 @@ public final class SettingsActivity extends Activity {
         TextView voiceHeading = text("语音输入", 17, TEXT, Typeface.BOLD);
         page.addView(voiceHeading, topMargin(dp(22)));
 
-        tapOption = option("点击说话", "点一下开始听写，再点一下停止并输入文字", true);
+        tapOption = option("点击说话", "点击开始；可随时暂停、继续或停止并完成文字", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
         page.addView(tapOption, fullWidthMargins(dp(18)));
@@ -90,7 +90,7 @@ public final class SettingsActivity extends Activity {
         holdOption.setOnClickListener(view -> selectMode(MODE_HOLD));
         page.addView(holdOption, fullWidthMargins(dp(12)));
 
-        TextView tip = text("提示：长按模式更适合短句；点击模式更适合连续或较长的内容。",
+        TextView tip = text("提示：点击模式适合长内容，暂停时会停止采集麦克风；长按模式更适合短句。",
                 13, MUTED, Typeface.NORMAL);
         tip.setLineSpacing(0, 1.18f);
         tip.setPadding(dp(14), dp(13), dp(14), dp(13));

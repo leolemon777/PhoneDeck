@@ -67,12 +67,17 @@ public final class MainActivity extends Activity {
     private TextView microphoneLevel;
     private TextView voiceModeText;
     private Button typelessButton;
+    private LinearLayout voiceActionRow;
+    private Button pauseResumeButton;
+    private Button stopDictationButton;
     private GridLayout shortcutGrid;
     private boolean typelessInFlight;
     private boolean audioStartPending;
     private boolean dictationActive;
+    private boolean dictationPaused;
     private boolean holdGestureActive;
     private boolean holdReleasePending;
+    private String voiceBusyLabel;
     private String voiceMode = MODE_TAP;
     private String currentSessionId;
     private boolean currentSessionManaged;
@@ -255,6 +260,35 @@ public final class MainActivity extends Activity {
         installVoiceGesture();
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
+
+        voiceActionRow = new LinearLayout(this);
+        voiceActionRow.setOrientation(LinearLayout.HORIZONTAL);
+        voiceActionRow.setGravity(Gravity.CENTER);
+
+        pauseResumeButton = smallButton("Ⅱ  暂停");
+        pauseResumeButton.setTextSize(15);
+        pauseResumeButton.setBackground(pressableRoundRect(
+                Color.rgb(40, 58, 94), Color.rgb(55, 78, 122), 16));
+        pauseResumeButton.setContentDescription("暂停或继续手机语音输入");
+        pauseResumeButton.setOnClickListener(view -> toggleDictationPause());
+        installTouchFeedback(pauseResumeButton);
+        voiceActionRow.addView(pauseResumeButton, new LinearLayout.LayoutParams(
+                0, dp(52), 1f));
+
+        stopDictationButton = smallButton("■  停止");
+        stopDictationButton.setTextSize(15);
+        stopDictationButton.setBackground(pressableRoundRect(
+                Color.rgb(96, 48, 59), Color.rgb(128, 59, 75), 16));
+        stopDictationButton.setContentDescription("停止并完成手机语音输入");
+        stopDictationButton.setOnClickListener(view -> stopOrCancelDictation());
+        installTouchFeedback(stopDictationButton);
+        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(
+                0, dp(52), 1f);
+        stopParams.leftMargin = dp(8);
+        voiceActionRow.addView(stopDictationButton, stopParams);
+        voiceDock.addView(voiceActionRow, margins(dp(0), dp(7), dp(0), dp(0),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         actionFeedback = text("●  准备就绪 · 操作状态会显示在这里",
                 13, COLOR_MUTED, Typeface.BOLD);
@@ -524,15 +558,83 @@ public final class MainActivity extends Activity {
     }
 
     private void toggleTypelessWithPhoneMic() {
-        if (typelessInFlight) {
-            showActionFeedback("●  Typeless 指令正在处理，请稍候", COLOR_PENDING);
-            return;
-        }
-        if (dictationActive) {
-            stopPhoneDictation();
-        } else {
+        if (isVoiceStarting()) {
+            cancelPendingDictation();
+        } else if (!dictationActive && !typelessInFlight) {
             beginPhoneDictation();
         }
+    }
+
+    private boolean isVoiceStarting() {
+        return !dictationActive && (audioStartPending || typelessInFlight);
+    }
+
+    private void stopOrCancelDictation() {
+        if (isVoiceStarting()) {
+            cancelPendingDictation();
+        } else if (dictationActive) {
+            stopPhoneDictation();
+        } else {
+            showActionFeedback("●  当前没有正在进行的听写", COLOR_MUTED);
+        }
+    }
+
+    private void toggleDictationPause() {
+        if (!dictationActive || typelessInFlight || audioStreamer == null) {
+            return;
+        }
+        if (dictationPaused) {
+            if (!audioStreamer.resume()) {
+                showActionFeedback("✕  音频会话已经结束，请重新开始", COLOR_DANGER);
+                clearVoiceSessionState();
+                return;
+            }
+            dictationPaused = false;
+            microphoneLevel.setText("手机麦克风  ◌ 正在恢复");
+            microphoneLevel.setTextColor(COLOR_PENDING);
+            showActionFeedback("▶  已继续，可以接着说话", COLOR_SUCCESS);
+        } else {
+            if (!audioStreamer.pause()) {
+                showActionFeedback("✕  暂停失败，音频会话可能已经结束", COLOR_DANGER);
+                return;
+            }
+            dictationPaused = true;
+            microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
+            microphoneLevel.setTextColor(COLOR_PENDING);
+            showActionFeedback("Ⅱ  已暂停；点击继续可接着说，点击停止可完成", COLOR_PENDING);
+        }
+        performResultHaptic(pauseResumeButton, true);
+        updateVoiceControls();
+    }
+
+    private void cancelPendingDictation() {
+        String sessionId = currentSessionId;
+        boolean managed = currentSessionManaged;
+        intentionalAudioStopSessionId = sessionId;
+        if (audioStreamer != null) {
+            audioStreamer.stop();
+        }
+        clearVoiceSessionState();
+        microphoneLevel.setText("手机麦克风  ○ 已取消");
+        microphoneLevel.setTextColor(COLOR_MUTED);
+        showActionFeedback("✓  已立即取消语音启动", COLOR_MUTED);
+        performResultHaptic(stopDictationButton, true);
+        if (managed && sessionId != null) {
+            bestEffortStopManagedDictation(sessionId);
+        }
+    }
+
+    private void bestEffortStopManagedDictation(String sessionId) {
+        actionExecutor.execute(() -> {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("sessionId", sessionId);
+                body.put("requestId", UUID.randomUUID().toString());
+                postUsbWithRetry("/api/dictation/stop", body, 2);
+            } catch (Exception ignored) {
+                // 本地音频已经停止；电脑端也会在音频断流时复位 managed 会话。
+            }
+        });
     }
 
     private void installVoiceGesture() {
@@ -585,19 +687,63 @@ public final class MainActivity extends Activity {
         boolean holdMode = MODE_HOLD.equals(voiceMode);
         voiceModeText.setText(holdMode ? "按住说话模式" : "点击说话模式");
         voiceModeText.setTextColor(holdMode ? COLOR_PENDING : COLOR_PRIMARY);
-        if (!typelessInFlight) {
-            typelessButton.setText(voiceButtonLabel());
-        }
         typelessButton.setContentDescription(holdMode
                 ? "按住开始 Typeless 语音输入，松开结束"
-                : "点击开始 Typeless 语音输入，再点一次结束");
+                : "点击开始语音输入；使用暂停、继续和停止按钮控制听写");
+        updateVoiceControls();
     }
 
     private String voiceButtonLabel() {
         if (MODE_HOLD.equals(voiceMode)) {
+            if (voiceBusyLabel != null) {
+                return voiceBusyLabel;
+            }
             return dictationActive ? "■  松开即可结束" : "●  按住说话";
         }
-        return dictationActive ? "■  正在听写 · 点击停止" : "●  点击开始说话";
+        if (voiceBusyLabel != null) {
+            return voiceBusyLabel;
+        }
+        if (dictationActive) {
+            return dictationPaused ? "Ⅱ  语音已暂停" : "●  正在听写";
+        }
+        return "●  点击开始说话";
+    }
+
+    private void updateVoiceControls() {
+        if (typelessButton == null) {
+            return;
+        }
+        typelessButton.setText(voiceButtonLabel());
+        boolean holdMode = MODE_HOLD.equals(voiceMode);
+        if (voiceActionRow != null) {
+            voiceActionRow.setVisibility(holdMode ? View.GONE : View.VISIBLE);
+        }
+        if (holdMode) {
+            setControlEnabled(typelessButton, !typelessInFlight || holdGestureActive);
+            return;
+        }
+
+        boolean starting = isVoiceStarting();
+        boolean stopping = dictationActive && typelessInFlight;
+        setControlEnabled(typelessButton, !dictationActive && !stopping);
+        if (pauseResumeButton != null) {
+            pauseResumeButton.setText(dictationPaused ? "▶  继续" : "Ⅱ  暂停");
+            pauseResumeButton.setContentDescription(dictationPaused
+                    ? "继续手机语音输入" : "暂停手机语音输入");
+            setControlEnabled(pauseResumeButton, dictationActive && !typelessInFlight);
+        }
+        if (stopDictationButton != null) {
+            stopDictationButton.setText(starting ? "×  取消" : "■  停止");
+            stopDictationButton.setContentDescription(starting
+                    ? "取消语音启动" : "停止并完成手机语音输入");
+            setControlEnabled(stopDictationButton,
+                    (starting || dictationActive) && !stopping);
+        }
+    }
+
+    private void setControlEnabled(Button button, boolean enabled) {
+        button.setEnabled(enabled);
+        button.setAlpha(enabled ? 1f : 0.45f);
     }
 
     private void beginPhoneDictation() {
@@ -610,11 +756,14 @@ public final class MainActivity extends Activity {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
             audioStartPending = true;
+            voiceBusyLabel = "等待麦克风权限…";
+            updateVoiceControls();
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MICROPHONE);
             return;
         }
 
         audioStartPending = true;
+        dictationPaused = false;
         currentSessionId = UUID.randomUUID().toString();
         currentSessionManaged = managedDictationSupported;
         intentionalAudioStopSessionId = null;
@@ -635,8 +784,12 @@ public final class MainActivity extends Activity {
             return;
         }
         intentionalAudioStopSessionId = currentSessionId;
+        dictationPaused = false;
         setTypelessBusy("正在结束听写…");
-        showActionFeedback("●  正在停止 Typeless 并收尾音频…", COLOR_PENDING);
+        showActionFeedback("■  手机录音已停止，正在让电脑完成文字…", COLOR_PENDING);
+        if (audioStreamer != null) {
+            audioStreamer.stop();
+        }
         sendTypelessToggle(false);
     }
 
@@ -646,6 +799,7 @@ public final class MainActivity extends Activity {
         }
         audioStartPending = false;
         showActionFeedback("●  手机麦克风已连接，正在唤醒 Typeless…", COLOR_PENDING);
+        setTypelessBusy("正在唤醒 Typeless…");
         sendTypelessToggle(true);
     }
 
@@ -679,6 +833,9 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     dictationActive = starting;
+                    if (starting) {
+                        dictationPaused = false;
+                    }
                     showConnection(transport + " 已连接", COLOR_SUCCESS);
                     showActionFeedback(starting
                                     ? "✓  Typeless 正在使用手机麦克风听写 · " + transport
@@ -731,13 +888,17 @@ public final class MainActivity extends Activity {
 
     private void setTypelessBusy(String label) {
         typelessInFlight = true;
-        typelessButton.setEnabled(!MODE_TAP.equals(voiceMode) && holdGestureActive);
-        typelessButton.setAlpha(0.74f);
-        typelessButton.setText(label);
+        voiceBusyLabel = label;
+        updateVoiceControls();
     }
 
     private void updateMicrophoneLevel(int percent) {
         if (!audioStreamer.isStreaming()) {
+            return;
+        }
+        if (audioStreamer.isPaused()) {
+            microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
+            microphoneLevel.setTextColor(COLOR_PENDING);
             return;
         }
         int bars = Math.min(10, Math.max(0, (percent + 9) / 10));
@@ -793,15 +954,15 @@ public final class MainActivity extends Activity {
     private void clearVoiceSessionState() {
         audioStartPending = false;
         dictationActive = false;
+        dictationPaused = false;
         typelessInFlight = false;
         holdGestureActive = false;
         holdReleasePending = false;
         currentSessionId = null;
         currentSessionManaged = false;
+        voiceBusyLabel = null;
         if (typelessButton != null) {
-            typelessButton.setEnabled(true);
-            typelessButton.setAlpha(1f);
-            typelessButton.setText(voiceButtonLabel());
+            updateVoiceControls();
         }
     }
 
@@ -912,9 +1073,8 @@ public final class MainActivity extends Activity {
             return;
         }
         typelessInFlight = false;
-        source.setEnabled(true);
-        source.setAlpha(1f);
-        source.setText(voiceButtonLabel());
+        voiceBusyLabel = null;
+        updateVoiceControls();
     }
 
     private void installTouchFeedback(Button button) {
@@ -968,7 +1128,7 @@ public final class MainActivity extends Activity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 beginPhoneDictation();
             } else {
-                audioStartPending = false;
+                clearVoiceSessionState();
                 showActionFeedback("✕  未授予麦克风权限，无法传输手机声音", COLOR_DANGER);
             }
         }
