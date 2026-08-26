@@ -25,7 +25,7 @@ Android 配置版本：`schemaVersion=1`
 - 新增幂等 `/api/dictation/start` 与 `/api/dictation/stop`。
 - 音频异常断流时，Windows 对本会话执行一次尽力而为的 Typeless 复位。
 - 服务器退出时也会尝试清理当前 PhoneDeck Typeless 会话。
-- 点击说话模式现在固定显示“暂停/继续”和“停止/取消”，启动请求期间不再锁死取消入口。
+- 点击说话模式已改为单主按钮交互：同一个大按钮在空闲、启动中和听写中分别显示“开始说话”、“取消启动”和“停止说话”；下方只保留“暂停/继续”。
 - 暂停会立即停止 Android `AudioRecord`，同时按 PCM 实时速率发送静音维持同一音频和
   Typeless 会话；继续时恢复手机麦克风采集，不需要重新建立会话。
 - 停止会先立即停止手机录音，再异步等待电脑端完成 Typeless 和文字收尾。
@@ -132,7 +132,9 @@ Samsung 真机：
   reverse 后，手机自动回到“USB 已连接”；
 - 用同一长期签名再次执行 `adb install -r` 成功，`firstInstallTime` 保持不变，证明
   后续同签名 APK 可以覆盖升级。
-- 语音灵敏度改进版已用同一签名覆盖安装，真机界面显示独立“暂停”和“停止”控制。
+- 语音灵敏度改进版已用同一签名覆盖安装；原独立“停止”控制已合并到大号语音主按钮，“暂停/继续”仍为辅助控制。
+- 单主按钮版的 `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功，并已用同一长期签名 Release 覆盖安装到该 Samsung 手机。
+- 真机在同一大按钮坐标完成“开始 → 停止”：听写时按钮变为红色“停止说话”，再点回到“点击开始说话”；Android AppOps 记录本次采集约 1.677 秒并已停止，Windows 健康检查为 `audio.streaming=false`、`dictation.active=false`。
 - 在没有键盘注入能力的本地安全模拟接收器上完成“开始 → 暂停 → 继续 → 停止”：
   开始后 Android AppOps 显示麦克风 `running`；暂停后不再 `running`、HTTP 会话保持；
   继续后重新 `running`；停止后模拟端音频和听写状态均为 false。

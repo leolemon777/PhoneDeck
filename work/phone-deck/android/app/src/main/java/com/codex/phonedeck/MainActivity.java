@@ -69,7 +69,6 @@ public final class MainActivity extends Activity {
     private Button typelessButton;
     private LinearLayout voiceActionRow;
     private Button pauseResumeButton;
-    private Button stopDictationButton;
     private GridLayout shortcutGrid;
     private boolean typelessInFlight;
     private boolean audioStartPending;
@@ -273,19 +272,7 @@ public final class MainActivity extends Activity {
         pauseResumeButton.setOnClickListener(view -> toggleDictationPause());
         installTouchFeedback(pauseResumeButton);
         voiceActionRow.addView(pauseResumeButton, new LinearLayout.LayoutParams(
-                0, dp(52), 1f));
-
-        stopDictationButton = smallButton("■  停止");
-        stopDictationButton.setTextSize(15);
-        stopDictationButton.setBackground(pressableRoundRect(
-                Color.rgb(96, 48, 59), Color.rgb(128, 59, 75), 16));
-        stopDictationButton.setContentDescription("停止并完成手机语音输入");
-        stopDictationButton.setOnClickListener(view -> stopOrCancelDictation());
-        installTouchFeedback(stopDictationButton);
-        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(
-                0, dp(52), 1f);
-        stopParams.leftMargin = dp(8);
-        voiceActionRow.addView(stopDictationButton, stopParams);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
         voiceDock.addView(voiceActionRow, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -558,9 +545,9 @@ public final class MainActivity extends Activity {
     }
 
     private void toggleTypelessWithPhoneMic() {
-        if (isVoiceStarting()) {
-            cancelPendingDictation();
-        } else if (!dictationActive && !typelessInFlight) {
+        if (isVoiceStarting() || dictationActive) {
+            stopOrCancelDictation();
+        } else if (!typelessInFlight) {
             beginPhoneDictation();
         }
     }
@@ -601,7 +588,7 @@ public final class MainActivity extends Activity {
             dictationPaused = true;
             microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
             microphoneLevel.setTextColor(COLOR_PENDING);
-            showActionFeedback("Ⅱ  已暂停；点击继续可接着说，点击停止可完成", COLOR_PENDING);
+            showActionFeedback("Ⅱ  已暂停；点击继续可接着说，点击上方主按钮可停止", COLOR_PENDING);
         }
         performResultHaptic(pauseResumeButton, true);
         updateVoiceControls();
@@ -618,7 +605,7 @@ public final class MainActivity extends Activity {
         microphoneLevel.setText("手机麦克风  ○ 已取消");
         microphoneLevel.setTextColor(COLOR_MUTED);
         showActionFeedback("✓  已立即取消语音启动", COLOR_MUTED);
-        performResultHaptic(stopDictationButton, true);
+        performResultHaptic(typelessButton, true);
         if (managed && sessionId != null) {
             bestEffortStopManagedDictation(sessionId);
         }
@@ -689,7 +676,7 @@ public final class MainActivity extends Activity {
         voiceModeText.setTextColor(holdMode ? COLOR_PENDING : COLOR_PRIMARY);
         typelessButton.setContentDescription(holdMode
                 ? "按住开始 Typeless 语音输入，松开结束"
-                : "点击开始语音输入；使用暂停、继续和停止按钮控制听写");
+                : "点击开始语音输入；再次点击同一按钮停止");
         updateVoiceControls();
     }
 
@@ -700,11 +687,17 @@ public final class MainActivity extends Activity {
             }
             return dictationActive ? "■  松开即可结束" : "●  按住说话";
         }
-        if (voiceBusyLabel != null) {
-            return voiceBusyLabel;
+        if (dictationActive && typelessInFlight) {
+            return "■  正在停止…";
+        }
+        if (isVoiceStarting()) {
+            return "×  取消启动";
         }
         if (dictationActive) {
-            return dictationPaused ? "Ⅱ  语音已暂停" : "●  正在听写";
+            return "■  停止说话";
+        }
+        if (voiceBusyLabel != null) {
+            return voiceBusyLabel;
         }
         return "●  点击开始说话";
     }
@@ -715,6 +708,20 @@ public final class MainActivity extends Activity {
         }
         typelessButton.setText(voiceButtonLabel());
         boolean holdMode = MODE_HOLD.equals(voiceMode);
+        boolean starting = isVoiceStarting();
+        boolean stopping = dictationActive && typelessInFlight;
+        boolean stopState = starting || dictationActive;
+        typelessButton.setBackground(stopState
+                ? pressableRoundRect(Color.rgb(176, 67, 87), Color.rgb(211, 84, 105), 22)
+                : pressableRoundRect(COLOR_PRIMARY, Color.rgb(164, 196, 255), 22));
+        typelessButton.setTextColor(stopState ? COLOR_TEXT : COLOR_BACKGROUND);
+        typelessButton.setContentDescription(holdMode
+                ? "按住开始手机语音输入，松开停止"
+                : starting
+                ? "取消语音启动"
+                : dictationActive
+                ? "停止并完成手机语音输入"
+                : "开始手机语音输入");
         if (voiceActionRow != null) {
             voiceActionRow.setVisibility(holdMode ? View.GONE : View.VISIBLE);
         }
@@ -723,21 +730,12 @@ public final class MainActivity extends Activity {
             return;
         }
 
-        boolean starting = isVoiceStarting();
-        boolean stopping = dictationActive && typelessInFlight;
-        setControlEnabled(typelessButton, !dictationActive && !stopping);
+        setControlEnabled(typelessButton, !stopping);
         if (pauseResumeButton != null) {
             pauseResumeButton.setText(dictationPaused ? "▶  继续" : "Ⅱ  暂停");
             pauseResumeButton.setContentDescription(dictationPaused
                     ? "继续手机语音输入" : "暂停手机语音输入");
             setControlEnabled(pauseResumeButton, dictationActive && !typelessInFlight);
-        }
-        if (stopDictationButton != null) {
-            stopDictationButton.setText(starting ? "×  取消" : "■  停止");
-            stopDictationButton.setContentDescription(starting
-                    ? "取消语音启动" : "停止并完成手机语音输入");
-            setControlEnabled(stopDictationButton,
-                    (starting || dictationActive) && !stopping);
         }
     }
 

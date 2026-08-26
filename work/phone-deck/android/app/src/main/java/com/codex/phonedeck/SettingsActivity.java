@@ -80,7 +80,7 @@ public final class SettingsActivity extends Activity {
         TextView voiceHeading = text("语音输入", 17, TEXT, Typeface.BOLD);
         page.addView(voiceHeading, topMargin(dp(22)));
 
-        tapOption = option("点击说话", "点击开始；可随时暂停、继续或停止并完成文字", true);
+        tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止；可暂停或继续", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
         page.addView(tapOption, fullWidthMargins(dp(18)));

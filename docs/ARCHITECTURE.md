@@ -23,7 +23,7 @@ Windows PhoneDeck.Server        │
 ### Android 主要组件
 
 - `MainActivity.java`：动态主界面、开始/取消/暂停/继续/停止语音状态、连接选择、动作发送和反馈。
-- `SettingsActivity.java`：设置入口和点击/按住语音模式；点击模式显示独立暂停与停止控制。
+- `SettingsActivity.java`：设置入口和点击/按住语音模式；点击模式使用同一主按钮开始/停止，另保留暂停/继续辅助控制。
 - `ShortcutConfigRepository.java`：原子保存、版本检查、损坏备份和默认配置。
 - `ShortcutSettingsActivity.java` / `ShortcutEditActivity.java`：列表、排序、编辑、测试和恢复。
 - `KeyPickerActivity.java` / `KeyCatalog.java`：受控键位选择、规范化和显示。
