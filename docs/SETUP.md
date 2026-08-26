@@ -104,12 +104,25 @@ Invoke-RestMethod http://127.0.0.1:8765/api/health
 ```
 
 应返回 `ok: true`，并显示找到 `CABLE Input (VB-Audio Virtual Cable)`。
+1.5.0 候选版还会返回 `protocolVersion: 2`、稳定 `computerId`、平台、架构、能力列表，
+以及当前音频/Typeless 会话状态。
 
 ## 6. USB 重连
 
 USB 断开或 ADB transport 改变后，`adb reverse` 会丢失。发行包可将 `scripts/windows/AutoReconnectUsb.ps1` 复制到 `PhoneDeck.Server.exe` 同一目录，并在启动服务器时以隐藏 PowerShell 进程启动。
 
-该脚本解决端口转发恢复，但当前版本仍需要继续加强“语音过程中断线”的会话状态清理，详见 [HANDOFF.md](./HANDOFF.md)。
+该脚本只负责恢复端口转发和唤醒 App。1.5.0 候选源码已经加入显式音频会话、
+幂等 Typeless 开始/停止和断流清理，但仍必须按 [HANDOFF.md](./HANDOFF.md) 使用真实
+手机完成连续断线验收，不能只凭构建结果视为稳定。
+
+## 6.1 1.5.0 快捷键配置
+
+快捷键布局保存在 Android 应用私有目录中的 `shortcut-config.json`，普通文件管理器不会
+直接看到。首次从 1.4.0 覆盖安装时会按原布局生成默认配置，原有语音模式继续保存在
+独立 `SharedPreferences` 中。不要为了测试清除 App 数据，否则会同时清除配置与语音模式。
+
+配置损坏时 App 会保留 `shortcut-config.corrupt-<timestamp>.json` 并恢复默认布局。
+1.5.0 正式验收必须覆盖：编辑、隐藏、排序、新增、删除、单个恢复、全部恢复和重启持久化。
 
 ## 7. 蓝牙
 

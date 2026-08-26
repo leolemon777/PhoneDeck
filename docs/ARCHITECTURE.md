@@ -1,44 +1,53 @@
 # PhoneDeck 架构说明
 
-## 当前 1.4.0 数据流
+## 当前 1.5.0 候选版数据流
 
 ```text
 Android MainActivity
-  ├─ 快捷键 JSON ───────────────┐
-  └─ AudioRecord PCM 48k mono ──┤
+  ├─ schemaVersion=1 动态按钮配置 ─┐
+  ├─ protocol v2 keyChord JSON ────┤
+  └─ AudioRecord PCM 48k mono ─────┤
                                 │ ADB reverse 127.0.0.1:8765
 Windows PhoneDeck.Server        │
-  ├─ /api/input ◀───────────────┘
-  │    └─ 白名单动作 → SendInput → 当前前台窗口
+  ├─ /api/input ◀──────────────────┘
+  │    ├─ 旧固定动作兼容
+  │    └─ v2 信封/目标/键位白名单 → SendInput → 当前前台窗口
   ├─ /api/audio/stream
-  │    └─ NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
+  │    └─ sessionId → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
+  ├─ /api/dictation/start|stop
+  │    └─ 幂等会话 → Typeless；断流时尽力复位
   └─ BluetoothReceiver
        └─ RFCOMM 快捷键 + ACK；无音频
 ```
 
 ### Android 主要组件
 
-- `MainActivity.java`：界面、语音手势、连接选择、动作发送和反馈。
-- `SettingsActivity.java`：点击/按住语音模式设置。
+- `MainActivity.java`：动态主界面、语音手势、连接选择、动作发送和反馈。
+- `SettingsActivity.java`：设置入口和点击/按住语音模式。
+- `ShortcutConfigRepository.java`：原子保存、版本检查、损坏备份和默认配置。
+- `ShortcutSettingsActivity.java` / `ShortcutEditActivity.java`：列表、排序、编辑、测试和恢复。
+- `KeyPickerActivity.java` / `KeyCatalog.java`：受控键位选择、规范化和显示。
 - `AudioStreamer.java`：AudioRecord、PCM 音量计算和 HTTP chunked 音频流。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
 
 ### Windows 主要组件
 
 - `Program.cs`：Kestrel、本地 API、Typeless 快捷键读取、SendInput 和请求去重。
-- `PhoneAudioBridge.cs`：选择 VB-CABLE 播放端并使用 WASAPI 输出 PCM。
+- `InputCommandProcessor.cs`：协议 v2 信封、目标电脑和动作验证。
+- `ReceiverIdentity.cs`：首次启动生成并持久化稳定电脑 ID。
+- `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
 
 ## 当前单电脑限制
 
-1. Android 服务器地址写死为 `http://127.0.0.1:8765`。
+1. Android USB 服务器地址仍为 `http://127.0.0.1:8765`。
 2. ADB reverse 只能指向当前 USB 主机。
 3. Android 蓝牙传输只保存一个 socket。
-4. 没有稳定 `computerId`、设备列表或当前目标模型。
+4. 已有单机稳定 `computerId` 和请求目标字段，但尚无设备列表、发现或配对模型。
 5. Windows 服务没有配对鉴权，因为 localhost USB 隧道不需要局域网暴露。
-6. 音频状态主要由手机本地布尔值推断，断线时可能和 Typeless 实际状态不同。
+6. 音频/Typeless 已有显式会话清理，但真实 USB 切换和外部 Typeless 状态仍待硬件验收。
 
-## 目标协议分层
+## 已实现的协议 v2 基础与目标分层
 
 ```text
 Android UI / Profiles / Actions

@@ -2,7 +2,9 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前稳定基线是 **PhoneDeck 1.4.0**。仓库正在规划 1.5.0 及后续版本，尚未开始实现 1.5.0 功能。
+当前源码版本是 **PhoneDeck 1.5.0 候选版**，上一版真实手机/电脑稳定基线是
+**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建和协议边界验证，但仍需完成
+Samsung 手机、ADB 断线、VB-CABLE、Typeless 和蓝牙实机验收后才能视为正式稳定版。
 
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
 
@@ -30,14 +32,20 @@ PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可�
 - 自动读取 Typeless 的主听写快捷键，读取失败时退回 RightAlt。
 - 点击说话和按住说话两种模式。
 - 手机端音量条、震动、等待、成功和失败反馈。
-- 固定快捷键网格。
+- 3 列动态快捷键网格，底部语音区保持固定。
+- 手机本地 `schemaVersion=1` 快捷键配置和损坏回退。
+- 新增、编辑、隐藏、删除自定义按钮和拖动/上下移动排序。
+- 单键与最多 4 键的安全组合键选择器。
+- 名称、预设颜色、内置图标/Emoji、测试动作和恢复默认。
+- 协议 v2、稳定电脑 ID、目标电脑校验和安全键位白名单。
 - 蓝牙 RFCOMM 快捷键备用通道；蓝牙暂不传输音频。
 - 请求 ID、确认、有限重试和电脑端去重。
+- 显式音频 `sessionId`、幂等 Typeless 开始/停止和断流自动清理。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
 ## 当前尚未实现
 
-- 用户自定义按钮和任意安全键位组合。
+- 配置导入导出和跨设备备份（计划 1.5.x）。
 - 多配置、宏、快速文字和 AI 工具命令预设。
 - 多电脑设备列表、局域网配对和手机内目标切换。
 - macOS 接收端、Core Audio 和 macOS 输入注入。
@@ -86,9 +94,9 @@ dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj 
 
 ## 接下来的开发顺序
 
-1. 先修复并回归 USB 重连时可能残留音频/Typeless 状态的问题。
-2. PhoneDeck 1.5.0：可编程快捷键、配置数据模型和协议 v2。
-3. 协议 v2 从一开始预留 `computerId`、`targetComputerId`、平台和能力字段。
+1. 使用真实 Samsung 手机完成 1.5.0 覆盖安装、连续开始/停止和 USB 断线回归。
+2. 验证 VB-CABLE、Typeless 和蓝牙自定义快捷键，并修复候选版问题。
+3. 完成验收后发布 PhoneDeck 1.5.0；协议 v2 已预留 `computerId`、`targetComputerId`、平台和能力字段。
 4. PhoneDeck 1.6.0：Windows 多电脑切换中心、安全配对和本地无线连接。
 5. 实测正规的四电脑 USB 共享切换器，保留无局域网硬件模式。
 6. PhoneDeck 1.7.0：多配置与前台软件自动切换。

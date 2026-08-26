@@ -1,6 +1,6 @@
 # PhoneDeck 源代码
 
-当前版本：1.4.0。
+当前源码版本：1.5.0 候选版；上一实机稳定基线：1.4.0。
 
 目录：
 
@@ -11,7 +11,8 @@
 `%APPDATA%\Typeless.exe\app-settings.json`，解析 `dictationMode` 快捷键后通过
 Windows `SendInput` 触发；读取失败时退回 Typeless 官方 Windows 默认键 `RightAlt`。
 Typeless 快捷键会保持按下约 55 毫秒以提高全局快捷键识别率。手机为每条指令生成唯一
-`requestId`，电脑端在 USB 和蓝牙通道统一去重并返回确认。
+`requestId`，电脑端在 USB 和蓝牙通道统一去重并返回确认。1.5.0 新增协议 v2、
+稳定 `computerId`、目标电脑校验和最多 4 键的安全 `keyChord` 白名单。
 
 USB 音频由 Android `AudioRecord` 以 48 kHz / PCM 16-bit / mono 采集，通过
 `/api/audio/stream` 的 ADB 反向隧道持续发送。电脑端使用 NAudio/WASAPI 把音频写入
@@ -21,13 +22,19 @@ USB 音频由 Android `AudioRecord` 以 48 kHz / PCM 16-bit / mono 采集，通�
 Android 主界面将语音操作区固定在屏幕底部。语音手势支持 `tap`（点击开始、再次
 点击停止）和 `hold`（按下开始、松开停止）两种状态机；设置保存在应用私有的
 `SharedPreferences` 中。长按模式对“音频尚在连接时已经松手”的情况做了延迟收尾，
-避免 Typeless 或手机录音残留在启动状态。
+避免 Typeless 或手机录音残留在启动状态。1.5.0 进一步为每次听写加入显式
+`sessionId`，电脑端在异常断流或退出时尽力清理 WASAPI 流与 Typeless。
+
+快捷键布局由 `ShortcutConfigRepository` 保存到 Android 应用私有 JSON，使用
+`schemaVersion=1` 和 `AtomicFile`。主界面动态读取配置，设置页支持编辑、新增、隐藏、
+删除自定义按钮、拖动/上下移动排序、按键测试和恢复默认。
 
 Android 开发构建需要 JDK 17、Android SDK 35 和 Gradle 8.9：
 
 ```powershell
 cd android
-gradle assembleDebug
+.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:lintDebug
 ```
 
 Windows 构建：
