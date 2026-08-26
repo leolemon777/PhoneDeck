@@ -1,0 +1,6 @@
+# Copy this file to signing/signing.properties after restoring the private
+# PhoneDeck keystore into work/phone-deck/signing/. Never commit either file.
+storeFile=phonedeck-release.jks
+storePassword=replace-with-local-secret
+keyAlias=phonedeck
+keyPassword=replace-with-local-secret

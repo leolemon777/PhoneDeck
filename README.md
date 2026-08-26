@@ -2,9 +2,10 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前源码版本是 **PhoneDeck 1.5.0 候选版**，上一版真实手机/电脑稳定基线是
-**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建和协议边界验证，但仍需完成
-Samsung 手机、ADB 断线、VB-CABLE、Typeless 和蓝牙实机验收后才能视为正式稳定版。
+当前源码版本是 **PhoneDeck 1.5.0 候选版**，上一版完整实机稳定基线是
+**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
+一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
+VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
 
@@ -94,7 +95,7 @@ dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj 
 
 ## 接下来的开发顺序
 
-1. 使用真实 Samsung 手机完成 1.5.0 覆盖安装、连续开始/停止和 USB 断线回归。
+1. 使用当前 Samsung 手机完成快捷键编辑、真实输入、连续开始/停止和 20 轮 USB 断线回归。
 2. 验证 VB-CABLE、Typeless 和蓝牙自定义快捷键，并修复候选版问题。
 3. 完成验收后发布 PhoneDeck 1.5.0；协议 v2 已预留 `computerId`、`targetComputerId`、平台和能力字段。
 4. PhoneDeck 1.6.0：Windows 多电脑切换中心、安全配对和本地无线连接。

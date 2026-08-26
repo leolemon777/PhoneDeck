@@ -2,6 +2,16 @@ plugins {
     id "com.android.application"
 }
 
+def phoneDeckSigningPropertiesFile = rootProject.file("../signing/signing.properties")
+def phoneDeckSigningProperties = new Properties()
+def hasPhoneDeckSigning = phoneDeckSigningPropertiesFile.exists()
+
+if (hasPhoneDeckSigning) {
+    phoneDeckSigningPropertiesFile.withInputStream {
+        phoneDeckSigningProperties.load(it)
+    }
+}
+
 android {
     namespace "com.codex.phonedeck"
     compileSdk 35
@@ -19,9 +29,29 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (hasPhoneDeckSigning) {
+            phoneDeck {
+                storeFile rootProject.file("../signing/${phoneDeckSigningProperties["storeFile"]}")
+                storePassword phoneDeckSigningProperties["storePassword"]
+                keyAlias phoneDeckSigningProperties["keyAlias"]
+                keyPassword phoneDeckSigningProperties["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasPhoneDeckSigning) {
+                signingConfig signingConfigs.phoneDeck
+            }
+        }
+
         release {
             minifyEnabled false
+            if (hasPhoneDeckSigning) {
+                signingConfig signingConfigs.phoneDeck
+            }
         }
     }
 

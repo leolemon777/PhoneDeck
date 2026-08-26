@@ -57,7 +57,25 @@ adb devices -l
 adb install -r work\phone-deck\android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Release APK 需要项目所有者自己的签名。仓库不包含签名密钥；其他开发者应创建自己的测试密钥，不要覆盖正式签名身份。
+PhoneDeck 1.5.0 起使用固定的项目签名。仓库只包含
+`work/phone-deck/signing.properties.example`，不包含私钥或真实密码。新电脑必须通过安全的
+离线方式恢复以下两个文件：
+
+```text
+work/phone-deck/signing/phonedeck-release.jks
+work/phone-deck/signing/signing.properties
+```
+
+本机备份当前位于 `E:\Desktop\PhoneDeck-Signing-Backup`。复制到新电脑后应放回上面的
+Git 忽略目录；不要改名、重新生成或提交 GitHub。Gradle 检测到本地配置后，会让 Debug
+和 Release 使用同一长期签名。当前证书 SHA-256 为：
+
+```text
+df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f
+```
+
+如果缺少本地签名配置，Debug 会回退到该电脑自己的 Android Debug 证书，不能用于覆盖
+手机中的长期签名版本；此时生成的 Release 也不能作为正式包交付。
 
 ## 4. Windows 构建
 
@@ -137,9 +155,14 @@ USB 断开或 ADB transport 改变后，`adb reverse` 会丢失。发行包可�
 - 快捷键对管理员程序无效：Windows UIPI 会阻止低权限程序向高权限窗口注入输入。
 - Release APK 无法覆盖正式版：签名不同；不要卸载用户正式版，除非已经备份并明确接受应用数据丢失。
 
-## 9. 不应复制到新电脑或 GitHub 的内容
+## 9. 新电脑迁移与秘密材料
 
-- Android 正式签名密钥；
+必须通过加密离线介质单独迁移 PhoneDeck 长期签名密钥和对应
+`signing.properties`，然后放入 Git 忽略的 `work/phone-deck/signing/`。不要通过 GitHub、
+Issue、PR、聊天或普通网盘传输它们。
+
+以下内容不应复制到新电脑或提交 GitHub：
+
 - ADB 私钥；
 - GitHub/API 令牌；
 - Typeless 个人配置；

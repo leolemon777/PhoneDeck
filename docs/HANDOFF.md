@@ -10,8 +10,9 @@ Android 配置版本：`schemaVersion=1`
 
 ## 给下一台电脑和下一位 Agent 的一句话
 
-1.5.0 的源码、构建和协议边界验证已经完成；下一步不是继续扩大功能，而是使用真实
-Samsung 手机、ADB、VB-CABLE、Typeless 和蓝牙完成候选版验收，修复实机问题后再发布。
+1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成；下一步
+不是继续扩大功能，而是补齐快捷键编辑、真实输入、VB-CABLE、Typeless、连续断线和
+蓝牙验收，修复实机问题后再发布。
 
 ## 本轮完成的代码
 
@@ -65,7 +66,7 @@ Windows：
 
 结果：成功，0 个警告，0 个错误。
 
-Android：
+Android（长期签名已接入 Debug/Release）：
 
 ```powershell
 $env:JAVA_HOME = 'E:\Android\Jdk17\jdk-17.0.20.1+1'
@@ -74,10 +75,10 @@ $env:GRADLE_USER_HOME = 'E:\Android\GradleCache'
 $env:TEMP = 'E:\Android\Temp'
 $env:TMP = 'E:\Android\Temp'
 cd work\phone-deck\android
-.\gradlew.bat :app:assembleDebug :app:lintDebug --no-daemon
+.\gradlew.bat clean :app:assembleDebug :app:assembleRelease :app:lintDebug --no-daemon
 ```
 
-结果：两项均成功；lint 为 0 error，仍有既有/非阻塞的方向锁定、硬编码界面文字和
+结果：三项均成功；lint 为 0 error，仍有既有/非阻塞的方向锁定、硬编码界面文字和
 触摸可访问性 warning。
 
 本机 PATH 先命中 `C:\Program Files (x86)\dotnet\dotnet.exe`，该宿主没有 SDK，因此
@@ -94,6 +95,15 @@ APK 元数据已用 `aapt2 dump badging` 验证：
 - `targetSdk=35`；
 - 应用名：`PhoneDeck 手机控制台`。
 
+长期签名：
+
+- 主密钥：`work/phone-deck/signing/phonedeck-release.jks`，已被 Git 忽略；
+- 本机独立备份：`E:\Desktop\PhoneDeck-Signing-Backup`；
+- Debug 与 Release APK 的证书 SHA-256 均为
+  `df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f`；
+- 两个 APK 均通过 APK Signature Scheme v2 验证；
+- 密钥和密码没有提交到 Git，也不得写入 Issue、PR 或聊天。
+
 本地服务器接口验证未发送任何真实快捷键，确认：
 
 - 健康检查返回 1.5.0 / protocol v2 / 稳定电脑 ID；
@@ -107,30 +117,42 @@ APK 元数据已用 `aapt2 dump badging` 验证：
 - 重复停止听写为幂等 200；
 - 旧协议未知固定动作仍返回 400。
 
+Samsung 真机：
+
+- 设备：Samsung `SM-G9880`，Android 12，ADB 已授权；
+- 手机原有 1.4.0 使用已经遗失的 `PhoneDeck Local` 私钥，无法无损覆盖；
+- 经项目所有者明确同意，执行一次性卸载 1.4.0，并安装长期签名的 1.5.0 Release；
+- 1.5.0 冷启动成功，主界面显示 18 个默认快捷键、语音区和连接状态；
+- 建立 `adb reverse tcp:8765 tcp:8765` 后，手机显示绿色“USB 已连接”；
+- 执行一次真实 `adb kill-server` 后，手机自动回到等待连接状态；重启 ADB 并恢复
+  reverse 后，手机自动回到“USB 已连接”；
+- 用同一长期签名再次执行 `adb install -r` 成功，`firstInstallTime` 保持不变，证明
+  后续同签名 APK 可以覆盖升级。
+
 ### 尚未验证，不得写成 PASS
 
-- 未把 1.5.0 APK 覆盖安装到项目所有者的 Samsung 手机。
 - 未在真实手机上验证动态网格、编辑页、长按不误触、拖动排序和字体放大。
-- 未验证 1.4.0 → 1.5.0 覆盖安装后麦克风权限与语音模式是否保留。
+- 因 1.4.0 原签名私钥遗失，本次只能一次性清除旧版数据，不能声称旧版配置迁移通过。
+- 同签名重复安装已确认不重新安装包，但尚未用自定义配置证明文件级持久化。
 - 未连接真实 VB-CABLE，也未让 Typeless 使用手机音频。
 - 未进行连续 20 次开始/停止和 20 次 USB 拔插/切换。
 - 未验证断线发生在“音频已连接但 Typeless 尚未确认”等竞态点。
 - 未验证蓝牙 v2 `hello`、自定义快捷键和 ACK 的真实连接。
 - 未测试 Windows UIPI、高权限目标软件、F1–F24 和媒体键的真实输入效果。
-- 未执行 Release APK 正式签名、Windows 自包含 publish 或发布包替换。
+- 未执行 Windows 自包含 publish、正式发布包替换、Git 标签或 GitHub Release。
 
 ## 下一步严格顺序
 
-1. 备份手机当前正式版与配置，不卸载 1.4.0。
-2. 启动新 Windows 接收端，确认健康检查显示 1.5.0 / protocol v2。
-3. 使用 Debug APK 覆盖安装，确认权限和语音模式保留。
-4. 先在 FocusSink 或普通文本框验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
-5. 验证编辑、隐藏、排序、新增、删除、单按钮恢复和全部恢复。
-6. 验证 USB 与蓝牙发送同一自定义组合键。
-7. 接入 VB-CABLE 与 Typeless，连续开始/停止 20 次。
-8. 在听写的启动中、进行中和停止中分别断开 USB，确认三端都能复位。
-9. 连续 USB 断开/恢复 20 次并保存日志、视频和失败步骤。
-10. 修复实机问题并重跑构建/lint；通过后再更新为正式 1.5.0、打标签和发布。
+1. 把 `E:\Desktop\PhoneDeck-Signing-Backup` 加密复制到另一个可靠介质，不上传 GitHub。
+2. 在 FocusSink 或普通文本框验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
+3. 验证编辑、隐藏、排序、新增、删除、单按钮恢复、全部恢复和重启持久化。
+4. 安装并确认 VB-CABLE，启动 Typeless 并选择正确的 `CABLE Output`。
+5. 连续开始/停止听写 20 次。
+6. 在听写的启动中、进行中和停止中分别断开 USB，确认三端都能复位。
+7. 连续 USB 断开/恢复 20 次并保存日志、视频和失败步骤。
+8. 验证 USB 与蓝牙发送同一自定义组合键。
+9. 修复实机问题并重跑构建/lint。
+10. 全部通过后再执行 Windows publish、发布包替换、打标签和 GitHub Release。
 
 ## 安全和范围边界
 
