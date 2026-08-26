@@ -27,6 +27,7 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 using var audioBridge = new PhoneAudioBridge();
+using var dictationSessions = new DictationSessionManager(audioBridge);
 await using var bluetoothReceiver = new BluetoothReceiver();
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 
@@ -37,11 +38,23 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.4.0",
+        version = "1.4.1",
+        protocolVersion = 1,
+        capabilities = new[]
+        {
+            "fixedAction", "text", "phoneAudio", "managedDictation"
+        },
         audio = new
         {
             available = audioDevice is not null,
-            device = audioDevice
+            device = audioDevice,
+            streaming = audioBridge.IsStreaming,
+            sessionId = audioBridge.ActiveSessionId
+        },
+        dictation = new
+        {
+            active = dictationSessions.IsActive,
+            sessionId = dictationSessions.ActiveSessionId
         }
     });
 });
@@ -54,10 +67,24 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
         return Results.BadRequest(new { ok = false, error = "不支持的音频格式" });
     }
 
+    var sessionId = request.Headers["X-PhoneDeck-Session"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(sessionId))
+    {
+        sessionId = Guid.NewGuid().ToString();
+    }
+    else if (sessionId.Length > 128 || !Guid.TryParse(sessionId, out _))
+    {
+        return Results.BadRequest(new { ok = false, error = "无效的音频 sessionId" });
+    }
+
     try
     {
-        var bytes = await audioBridge.StreamAsync(request.Body, cancellationToken);
-        return Results.Ok(new { ok = true, bytes });
+        var bytes = await audioBridge.StreamAsync(
+            request.Body,
+            sessionId,
+            dictationSessions.AudioEnded,
+            cancellationToken);
+        return Results.Ok(new { ok = true, sessionId, bytes });
     }
     catch (OperationCanceledException)
     {
@@ -74,6 +101,34 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
         return Results.StatusCode(StatusCodes.Status500InternalServerError);
     }
 });
+
+app.MapPost("/api/dictation/start", (DictationCommand command) =>
+    ExecuteDictationCommand(() =>
+    {
+        var duplicate = dictationSessions.Start(command.SessionId, command.RequestId);
+        return Results.Ok(new
+        {
+            ok = true,
+            duplicate,
+            requestId = command.RequestId,
+            sessionId = command.SessionId,
+            active = true
+        });
+    }));
+
+app.MapPost("/api/dictation/stop", (DictationCommand command) =>
+    ExecuteDictationCommand(() =>
+    {
+        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId);
+        return Results.Ok(new
+        {
+            ok = true,
+            duplicate,
+            requestId = command.RequestId,
+            sessionId = command.SessionId,
+            active = false
+        });
+    }));
 
 app.MapPost("/api/input", (InputCommand command) =>
 {
@@ -124,7 +179,29 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 await app.RunAsync();
 
+static IResult ExecuteDictationCommand(Func<IResult> execute)
+{
+    try
+    {
+        return execute();
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { ok = false, error = exception.Message });
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Typeless 会话处理失败：{exception.Message}");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+}
+
 internal sealed record InputCommand(string? Action, string? Text, string? RequestId);
+internal sealed record DictationCommand(string? SessionId, string? RequestId);
 
 internal static class KeyboardInput
 {

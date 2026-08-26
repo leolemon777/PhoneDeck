@@ -13,9 +13,9 @@ import java.net.URL;
 
 final class AudioStreamer implements AutoCloseable {
     interface Listener {
-        void onReady();
+        void onReady(String sessionId);
         void onLevel(int percent);
-        void onStopped(String reason);
+        void onStopped(String sessionId, String reason);
     }
 
     private static final int SAMPLE_RATE = 48_000;
@@ -26,6 +26,7 @@ final class AudioStreamer implements AutoCloseable {
     private volatile boolean shouldRun;
     private volatile boolean streaming;
     private volatile AudioRecord recorder;
+    private volatile HttpURLConnection activeConnection;
     private Thread worker;
 
     AudioStreamer(Context context, String server, Listener listener) {
@@ -38,14 +39,24 @@ final class AudioStreamer implements AutoCloseable {
         return streaming;
     }
 
-    void start() {
+    boolean isRunning() {
+        synchronized (syncRoot) {
+            return worker != null && worker.isAlive();
+        }
+    }
+
+    boolean start(String sessionId) {
+        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 128) {
+            throw new IllegalArgumentException("无效的音频 sessionId");
+        }
         synchronized (syncRoot) {
             if (worker != null && worker.isAlive()) {
-                return;
+                return false;
             }
             shouldRun = true;
-            worker = new Thread(this::runStream, "PhoneDeck-Microphone");
+            worker = new Thread(() -> runStream(sessionId), "PhoneDeck-Microphone");
             worker.start();
+            return true;
         }
     }
 
@@ -59,9 +70,13 @@ final class AudioStreamer implements AutoCloseable {
                 // 录音尚未完全启动或已经停止。
             }
         }
+        HttpURLConnection connection = activeConnection;
+        if (connection != null) {
+            connection.disconnect();
+        }
     }
 
-    private void runStream() {
+    private void runStream(String sessionId) {
         HttpURLConnection connection = null;
         AudioRecord localRecorder = null;
         String stoppedReason = null;
@@ -95,14 +110,16 @@ final class AudioStreamer implements AutoCloseable {
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "audio/L16; rate=48000; channels=1");
             connection.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
+            connection.setRequestProperty("X-PhoneDeck-Session", sessionId);
             connection.setChunkedStreamingMode(8192);
             connection.setDoOutput(true);
+            activeConnection = connection;
 
             byte[] buffer = new byte[bufferSize];
             try (OutputStream output = connection.getOutputStream()) {
                 localRecorder.startRecording();
                 streaming = true;
-                listener.onReady();
+                listener.onReady(sessionId);
                 long lastLevelUpdate = 0;
                 while (shouldRun) {
                     int count = localRecorder.read(
@@ -133,6 +150,7 @@ final class AudioStreamer implements AutoCloseable {
             shouldRun = false;
             streaming = false;
             recorder = null;
+            activeConnection = null;
             if (localRecorder != null) {
                 try {
                     if (localRecorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
@@ -149,7 +167,7 @@ final class AudioStreamer implements AutoCloseable {
             synchronized (syncRoot) {
                 worker = null;
             }
-            listener.onStopped(stoppedReason);
+            listener.onStopped(sessionId, stoppedReason);
         }
     }
 

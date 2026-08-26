@@ -29,6 +29,8 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -45,6 +47,7 @@ public final class MainActivity extends Activity {
     private static final String PREF_VOICE_MODE = "voice_mode";
     private static final String MODE_TAP = "tap";
     private static final String MODE_HOLD = "hold";
+    private static final long HEALTH_CHECK_INTERVAL_MS = 2_000;
     private static final int COLOR_BACKGROUND = Color.rgb(11, 16, 32);
     private static final int COLOR_PANEL = Color.rgb(22, 29, 50);
     private static final int COLOR_KEY = Color.rgb(31, 41, 68);
@@ -67,15 +70,28 @@ public final class MainActivity extends Activity {
     private boolean typelessInFlight;
     private boolean audioStartPending;
     private boolean dictationActive;
-    private boolean intentionalAudioStop;
     private boolean holdGestureActive;
     private boolean holdReleasePending;
     private String voiceMode = MODE_TAP;
+    private String currentSessionId;
+    private boolean currentSessionManaged;
+    private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
+    private volatile boolean managedDictationSupported;
     private volatile boolean bluetoothConnected;
     private volatile String bluetoothDetail = "等待电脑蓝牙连接";
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
+    private final Runnable periodicHealthCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            testConnection();
+            mainHandler.postDelayed(this, HEALTH_CHECK_INTERVAL_MS);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,8 +104,8 @@ public final class MainActivity extends Activity {
         setContentView(createInterface());
         audioStreamer = new AudioStreamer(this, SERVER, new AudioStreamer.Listener() {
             @Override
-            public void onReady() {
-                mainHandler.post(MainActivity.this::onAudioReady);
+            public void onReady(String sessionId) {
+                mainHandler.post(() -> onAudioReady(sessionId));
             }
 
             @Override
@@ -98,12 +114,13 @@ public final class MainActivity extends Activity {
             }
 
             @Override
-            public void onStopped(String reason) {
-                mainHandler.post(() -> onAudioStopped(reason));
+            public void onStopped(String sessionId, String reason) {
+                mainHandler.post(() -> onAudioStopped(sessionId, reason));
             }
         });
         prepareBluetooth();
         testConnection();
+        mainHandler.postDelayed(periodicHealthCheck, HEALTH_CHECK_INTERVAL_MS);
     }
 
     @Override
@@ -326,7 +343,9 @@ public final class MainActivity extends Activity {
     }
 
     private void testConnection() {
-        showConnection("正在检测电脑端…", COLOR_MUTED);
+        if (!usbConnected && !bluetoothConnected) {
+            showConnection("正在检测电脑端…", COLOR_MUTED);
+        }
         connectionExecutor.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -336,20 +355,67 @@ public final class MainActivity extends Activity {
                 connection.setRequestMethod("GET");
                 int response = connection.getResponseCode();
                 if (response == 200) {
+                    JSONObject health = readJsonResponse(connection);
+                    boolean supportsManagedDictation = false;
+                    org.json.JSONArray capabilities = health.optJSONArray("capabilities");
+                    if (capabilities != null) {
+                        for (int index = 0; index < capabilities.length(); index++) {
+                            if ("managedDictation".equals(capabilities.optString(index))) {
+                                supportsManagedDictation = true;
+                                break;
+                            }
+                        }
+                    }
+                    managedDictationSupported = supportsManagedDictation;
                     usbConnected = true;
                     mainHandler.post(this::updateConnectionDisplay);
                 } else {
                     throw new IllegalStateException("HTTP " + response);
                 }
             } catch (Exception exception) {
+                boolean wasConnected = usbConnected;
                 usbConnected = false;
-                mainHandler.post(this::updateConnectionDisplay);
+                managedDictationSupported = false;
+                mainHandler.post(() -> {
+                    updateConnectionDisplay();
+                    if (wasConnected) {
+                        handleUsbConnectionLost();
+                    }
+                });
             } finally {
                 if (connection != null) {
                     connection.disconnect();
                 }
             }
         });
+    }
+
+    private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
+        StringBuilder json = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                connection.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                json.append(line);
+            }
+        }
+        return new JSONObject(json.toString());
+    }
+
+    private void handleUsbConnectionLost() {
+        if (!audioStartPending && !dictationActive && !typelessInFlight
+                && (audioStreamer == null || !audioStreamer.isRunning())) {
+            return;
+        }
+        intentionalAudioStopSessionId = currentSessionId;
+        if (audioStreamer != null) {
+            audioStreamer.stop();
+        }
+        clearVoiceSessionState();
+        microphoneLevel.setText("手机麦克风  ✕ USB 已断开");
+        microphoneLevel.setTextColor(COLOR_DANGER);
+        showActionFeedback("✕  USB 已断开；电脑端会自动尝试复位 Typeless",
+                COLOR_DANGER);
     }
 
     private void triggerAction(
@@ -466,22 +532,33 @@ public final class MainActivity extends Activity {
         }
 
         audioStartPending = true;
-        intentionalAudioStop = false;
+        currentSessionId = UUID.randomUUID().toString();
+        currentSessionManaged = managedDictationSupported;
+        intentionalAudioStopSessionId = null;
         setTypelessBusy("正在连接手机麦克风…");
         showActionFeedback("●  正在建立 USB 音频通道…", COLOR_PENDING);
         microphoneLevel.setText("手机麦克风  ◌ 正在连接");
         microphoneLevel.setTextColor(COLOR_PENDING);
-        audioStreamer.start();
+        if (!audioStreamer.start(currentSessionId)) {
+            clearVoiceSessionState();
+            showActionFeedback("✕  上一个手机音频会话仍在收尾，请稍后重试", COLOR_DANGER);
+        }
     }
 
     private void stopPhoneDictation() {
+        if (currentSessionId == null) {
+            clearVoiceSessionState();
+            showActionFeedback("●  当前没有需要停止的听写会话", COLOR_MUTED);
+            return;
+        }
+        intentionalAudioStopSessionId = currentSessionId;
         setTypelessBusy("正在结束听写…");
         showActionFeedback("●  正在停止 Typeless 并收尾音频…", COLOR_PENDING);
         sendTypelessToggle(false);
     }
 
-    private void onAudioReady() {
-        if (!audioStartPending) {
+    private void onAudioReady(String sessionId) {
+        if (!audioStartPending || !sessionId.equals(currentSessionId)) {
             return;
         }
         audioStartPending = false;
@@ -490,18 +567,34 @@ public final class MainActivity extends Activity {
     }
 
     private void sendTypelessToggle(boolean starting) {
+        final String sessionId = currentSessionId;
+        if (sessionId == null) {
+            clearVoiceSessionState();
+            showActionFeedback("✕  听写会话已失效，请重新开始", COLOR_DANGER);
+            return;
+        }
+        final boolean managed = currentSessionManaged;
         actionExecutor.execute(() -> {
             try {
-                JSONObject body = new JSONObject();
-                body.put("action", "typeless");
-                body.put("requestId", UUID.randomUUID().toString());
-                String transport = sendCommand(body);
+                String transport;
+                if (managed) {
+                    transport = sendManagedDictationCommand(starting, sessionId);
+                } else {
+                    JSONObject body = new JSONObject();
+                    body.put("action", "typeless");
+                    body.put("requestId", UUID.randomUUID().toString());
+                    transport = sendCommand(body);
+                }
                 if (!starting) {
-                    Thread.sleep(280);
-                    intentionalAudioStop = true;
+                    if (!managed) {
+                        Thread.sleep(280);
+                    }
                     audioStreamer.stop();
                 }
                 mainHandler.post(() -> {
+                    if (!sessionId.equals(currentSessionId)) {
+                        return;
+                    }
                     dictationActive = starting;
                     showConnection(transport + " 已连接", COLOR_SUCCESS);
                     showActionFeedback(starting
@@ -516,17 +609,20 @@ public final class MainActivity extends Activity {
                         mainHandler.postDelayed(this::stopPhoneDictation, 80);
                     }
                     if (!starting) {
+                        clearVoiceSessionState();
                         microphoneLevel.setText("手机麦克风  ○ 已停止");
                         microphoneLevel.setTextColor(COLOR_MUTED);
                     }
                 });
             } catch (Exception exception) {
-                if (starting) {
-                    intentionalAudioStop = true;
-                    audioStreamer.stop();
-                }
+                intentionalAudioStopSessionId = sessionId;
+                audioStreamer.stop();
                 mainHandler.post(() -> {
+                    if (!sessionId.equals(currentSessionId)) {
+                        return;
+                    }
                     holdReleasePending = false;
+                    clearVoiceSessionState();
                     showConnection("Typeless 指令发送失败", COLOR_DANGER);
                     showActionFeedback("✕  电脑没有确认，请检查 USB 连接后重试", COLOR_DANGER);
                     performResultHaptic(typelessButton, false);
@@ -535,6 +631,19 @@ public final class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private String sendManagedDictationCommand(boolean starting, String sessionId)
+            throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("sessionId", sessionId);
+        body.put("requestId", UUID.randomUUID().toString());
+        String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
+        if (!postUsbWithRetry(endpoint, body, 2)) {
+            usbConnected = false;
+            throw new IllegalStateException("电脑端未确认 Typeless 会话");
+        }
+        return "USB";
     }
 
     private void setTypelessBusy(String label) {
@@ -557,27 +666,59 @@ public final class MainActivity extends Activity {
         microphoneLevel.setTextColor(percent > 0 ? COLOR_SUCCESS : COLOR_MUTED);
     }
 
-    private void onAudioStopped(String reason) {
-        if (intentionalAudioStop) {
-            intentionalAudioStop = false;
+    private void onAudioStopped(String sessionId, String reason) {
+        boolean intentional = sessionId.equals(intentionalAudioStopSessionId);
+        if (intentional) {
+            intentionalAudioStopSessionId = null;
+        }
+        if (!sessionId.equals(currentSessionId)) {
+            return;
+        }
+        if (intentional) {
+            audioStartPending = false;
             return;
         }
         if (reason == null && !audioStartPending && !dictationActive) {
             return;
         }
+        boolean wasDictationActive = dictationActive;
+        boolean wasManaged = currentSessionManaged;
         audioStartPending = false;
+        clearVoiceSessionState();
         microphoneLevel.setText("手机麦克风  ✕ 音频中断");
         microphoneLevel.setTextColor(COLOR_DANGER);
         showActionFeedback("✕  手机音频中断" + (reason == null ? "" : "：" + reason),
                 COLOR_DANGER);
-        if (!dictationActive) {
-            finishGuardedAction(typelessButton, true);
-        } else {
+        if (wasDictationActive && !wasManaged) {
+            bestEffortStopLegacyTypeless();
+        }
+    }
+
+    private void bestEffortStopLegacyTypeless() {
+        actionExecutor.execute(() -> {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("action", "typeless");
+                body.put("requestId", UUID.randomUUID().toString());
+                sendCommand(body);
+            } catch (Exception ignored) {
+                // 旧电脑端无法保证状态；新版 managedDictation 会在断流时自动复位。
+            }
+        });
+    }
+
+    private void clearVoiceSessionState() {
+        audioStartPending = false;
+        dictationActive = false;
+        typelessInFlight = false;
+        holdGestureActive = false;
+        holdReleasePending = false;
+        currentSessionId = null;
+        currentSessionManaged = false;
+        if (typelessButton != null) {
             typelessButton.setEnabled(true);
             typelessButton.setAlpha(1f);
-            typelessButton.setText(MODE_HOLD.equals(voiceMode)
-                    ? "■  音频中断 · 松开结束"
-                    : "■  音频中断 · 点击停止");
+            typelessButton.setText(voiceButtonLabel());
         }
     }
 
@@ -624,7 +765,7 @@ public final class MainActivity extends Activity {
 
         if (usbConnected) {
             usbAttempted = true;
-            sent = postUsbWithRetry(body, 2);
+            sent = postUsbWithRetry("/api/input", body, 2);
             if (sent) {
                 transport = "USB";
             } else {
@@ -640,7 +781,7 @@ public final class MainActivity extends Activity {
         }
 
         if (!sent && !usbAttempted) {
-            sent = postUsbWithRetry(body, 2);
+            sent = postUsbWithRetry("/api/input", body, 2);
             if (sent) {
                 usbConnected = true;
                 transport = "USB";
@@ -653,9 +794,9 @@ public final class MainActivity extends Activity {
         return transport;
     }
 
-    private boolean postUsbWithRetry(JSONObject body, int attempts) {
+    private boolean postUsbWithRetry(String endpoint, JSONObject body, int attempts) {
         for (int attempt = 0; attempt < attempts; attempt++) {
-            if (postUsb(body)) {
+            if (postUsb(endpoint, body)) {
                 return true;
             }
             if (attempt + 1 < attempts) {
@@ -670,11 +811,11 @@ public final class MainActivity extends Activity {
         return false;
     }
 
-    private boolean postUsb(JSONObject body) {
+    private boolean postUsb(String endpoint, JSONObject body) {
         HttpURLConnection connection = null;
         try {
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection = (HttpURLConnection) new URL(SERVER + "/api/input").openConnection();
+            connection = (HttpURLConnection) new URL(SERVER + endpoint).openConnection();
             connection.setConnectTimeout(500);
             connection.setReadTimeout(1600);
             connection.setRequestMethod("POST");
@@ -788,12 +929,15 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacks(periodicHealthCheck);
         if (bluetoothTransport != null) {
             bluetoothTransport.close();
         }
         if (audioStreamer != null) {
+            intentionalAudioStopSessionId = currentSessionId;
             audioStreamer.close();
         }
+        clearVoiceSessionState();
         actionExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
         super.onDestroy();

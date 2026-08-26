@@ -5,6 +5,31 @@ internal sealed class PhoneAudioBridge : IDisposable
 {
     private const int SampleRate = 48_000;
     private readonly SemaphoreSlim streamGate = new(1, 1);
+    private readonly object sessionSync = new();
+    private CancellationTokenSource? activeCancellation;
+    private string? activeSessionId;
+
+    internal bool IsStreaming
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                return activeSessionId is not null;
+            }
+        }
+    }
+
+    internal string? ActiveSessionId
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                return activeSessionId;
+            }
+        }
+    }
 
     internal string? FindVirtualCable()
     {
@@ -25,11 +50,46 @@ internal sealed class PhoneAudioBridge : IDisposable
         }
     }
 
-    internal async Task<long> StreamAsync(Stream input, CancellationToken cancellationToken)
+    internal bool IsSessionActive(string sessionId)
+    {
+        lock (sessionSync)
+        {
+            return string.Equals(activeSessionId, sessionId, StringComparison.Ordinal);
+        }
+    }
+
+    internal bool StopSession(string sessionId)
+    {
+        CancellationTokenSource? cancellation;
+        lock (sessionSync)
+        {
+            if (!string.Equals(activeSessionId, sessionId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            cancellation = activeCancellation;
+        }
+        cancellation?.Cancel();
+        return true;
+    }
+
+    internal async Task<long> StreamAsync(
+        Stream input,
+        string sessionId,
+        Action<string> sessionEnded,
+        CancellationToken cancellationToken)
     {
         if (!await streamGate.WaitAsync(0, cancellationToken))
         {
             throw new InvalidOperationException("已有手机麦克风正在传输");
+        }
+
+        using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        lock (sessionSync)
+        {
+            activeSessionId = sessionId;
+            activeCancellation = sessionCancellation;
         }
 
         MMDevice? selected = null;
@@ -66,7 +126,8 @@ internal sealed class PhoneAudioBridge : IDisposable
             while (true)
             {
                 var read = await input.ReadAsync(
-                    bytes.AsMemory(carry, bytes.Length - carry), cancellationToken);
+                    bytes.AsMemory(carry, bytes.Length - carry),
+                    sessionCancellation.Token);
                 if (read == 0)
                 {
                     break;
@@ -92,6 +153,15 @@ internal sealed class PhoneAudioBridge : IDisposable
         }
         finally
         {
+            lock (sessionSync)
+            {
+                if (ReferenceEquals(activeCancellation, sessionCancellation))
+                {
+                    activeCancellation = null;
+                    activeSessionId = null;
+                }
+            }
+            sessionEnded(sessionId);
             if (devices is not null)
             {
                 foreach (var device in devices)
@@ -113,6 +183,11 @@ internal sealed class PhoneAudioBridge : IDisposable
 
     public void Dispose()
     {
-        streamGate.Dispose();
+        CancellationTokenSource? cancellation;
+        lock (sessionSync)
+        {
+            cancellation = activeCancellation;
+        }
+        cancellation?.Cancel();
     }
 }
