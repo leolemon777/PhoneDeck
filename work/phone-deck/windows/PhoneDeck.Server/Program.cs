@@ -13,6 +13,8 @@ if (!isFirstInstance)
     return;
 }
 
+var receiverIdentity = ReceiverIdentity.LoadOrCreate();
+using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services.Configure<JsonOptions>(options =>
@@ -24,16 +26,38 @@ builder.WebHost.ConfigureKestrel(options =>
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
+    options.ListenAnyIP(lanIdentity.HttpsPort, listen =>
+    {
+        listen.Protocols = HttpProtocols.Http1;
+        listen.UseHttps(lanIdentity.Certificate);
+    });
 });
 
 var app = builder.Build();
-var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
 await using var bluetoothReceiver = new BluetoothReceiver(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName);
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
+
+app.Use(async (context, next) =>
+{
+    if (!LanRequestAuthenticator.IsAuthorized(
+            context.Connection.LocalPort,
+            context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
+            lanIdentity.AccessToken))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            ok = false,
+            error = "局域网连接尚未配对或密钥无效"
+        });
+        return;
+    }
+    await next();
+});
 
 app.MapGet("/api/health", () =>
 {
@@ -42,7 +66,7 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.1",
+        version = "1.6.0-dev.2",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -50,7 +74,8 @@ app.MapGet("/api/health", () =>
         architecture = receiverIdentity.Architecture,
         capabilities = new[]
         {
-            "fixedAction", "keyChord", "text", "phoneAudio", "managedDictation"
+            "fixedAction", "keyChord", "text", "phoneAudio", "managedDictation",
+            "secureLan"
         },
         audio = new
         {
@@ -70,6 +95,28 @@ app.MapGet("/api/health", () =>
             virtualCableSelected = KeyboardInput.TypelessUsesVirtualCable,
             microphone = KeyboardInput.TypelessMicrophoneDescription
         }
+    });
+});
+
+app.MapPost("/api/lan/pair", (HttpContext context) =>
+{
+    if (!LanRequestAuthenticator.IsUsbPairingRequest(
+            context.Connection.LocalPort,
+            context.Connection.RemoteIpAddress))
+    {
+        return Results.NotFound();
+    }
+    return Results.Ok(new
+    {
+        ok = true,
+        protocolVersion = 2,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        platform = receiverIdentity.Platform,
+        addresses = lanIdentity.GetCandidateAddresses(),
+        port = lanIdentity.HttpsPort,
+        certificateSha256 = lanIdentity.CertificateSha256,
+        accessToken = lanIdentity.AccessToken
     });
 });
 
@@ -216,6 +263,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("========================================");
     Console.WriteLine("  手机键盘电脑端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
+    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（需先通过 USB 配对）");
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");

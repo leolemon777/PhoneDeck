@@ -17,14 +17,29 @@ final class TargetDeviceManager {
         final String platform;
         final int slot;
         final long lastSeenAt;
+        final List<String> lanAddresses;
+        final int lanPort;
+        final String lanToken;
+        final String certificateSha256;
 
         Device(String computerId, String displayName, String platform,
-               int slot, long lastSeenAt) {
+               int slot, long lastSeenAt, List<String> lanAddresses,
+               int lanPort, String lanToken, String certificateSha256) {
             this.computerId = computerId;
             this.displayName = displayName;
             this.platform = platform;
             this.slot = slot;
             this.lastSeenAt = lastSeenAt;
+            this.lanAddresses = new ArrayList<>(lanAddresses);
+            this.lanPort = lanPort;
+            this.lanToken = lanToken;
+            this.certificateSha256 = certificateSha256;
+        }
+
+        boolean hasLanPairing() {
+            return !lanAddresses.isEmpty() && lanPort > 0
+                    && lanToken != null && !lanToken.isBlank()
+                    && certificateSha256 != null && !certificateSha256.isBlank();
         }
     }
 
@@ -77,7 +92,11 @@ final class TargetDeviceManager {
         int slot = existing == null ? nextSlot() : existing.slot;
         Device updated = new Device(
                 computerId.trim(), safeName, safePlatform, slot,
-                System.currentTimeMillis());
+                System.currentTimeMillis(),
+                existing == null ? java.util.Collections.emptyList() : existing.lanAddresses,
+                existing == null ? 0 : existing.lanPort,
+                existing == null ? null : existing.lanToken,
+                existing == null ? null : existing.certificateSha256);
         if (existing != null) {
             devices.remove(existing);
         } else if (devices.size() >= MAX_DEVICES) {
@@ -96,6 +115,41 @@ final class TargetDeviceManager {
         }
         save();
         return updated;
+    }
+
+    synchronized Device saveLanPairing(
+            String computerId,
+            String displayName,
+            String platform,
+            List<String> addresses,
+            int port,
+            String accessToken,
+            String certificateSha256) {
+        Device base = upsert(computerId, displayName, platform);
+        if (base == null || addresses == null || addresses.isEmpty()
+                || port < 1 || port > 65535
+                || accessToken == null || accessToken.isBlank()
+                || certificateSha256 == null || certificateSha256.isBlank()) {
+            return null;
+        }
+        ArrayList<String> safeAddresses = new ArrayList<>();
+        for (String address : addresses) {
+            if (address != null && !address.isBlank() && address.length() <= 255
+                    && !safeAddresses.contains(address.trim())) {
+                safeAddresses.add(address.trim());
+            }
+        }
+        if (safeAddresses.isEmpty()) {
+            return null;
+        }
+        Device paired = new Device(
+                base.computerId, base.displayName, base.platform,
+                base.slot, System.currentTimeMillis(), safeAddresses, port,
+                accessToken.trim(), certificateSha256.trim().toLowerCase());
+        devices.remove(base);
+        devices.add(paired);
+        save();
+        return paired;
     }
 
     synchronized boolean select(String computerId) {
@@ -129,12 +183,27 @@ final class TargetDeviceManager {
                 if (computerId.isEmpty() || find(computerId) != null) {
                     continue;
                 }
+                ArrayList<String> addresses = new ArrayList<>();
+                JSONArray addressArray = item.optJSONArray("lanAddresses");
+                if (addressArray != null) {
+                    for (int addressIndex = 0;
+                         addressIndex < addressArray.length(); addressIndex++) {
+                        String address = addressArray.optString(addressIndex, "").trim();
+                        if (!address.isEmpty()) {
+                            addresses.add(address);
+                        }
+                    }
+                }
                 devices.add(new Device(
                         computerId,
                         item.optString("displayName", "未命名电脑"),
                         item.optString("platform", "unknown"),
                         item.optInt("slot", nextSlot()),
-                        item.optLong("lastSeenAt", 0L)));
+                        item.optLong("lastSeenAt", 0L),
+                        addresses,
+                        item.optInt("lanPort", 0),
+                        item.optString("lanToken", null),
+                        item.optString("certificateSha256", null)));
             }
         } catch (Exception ignored) {
             devices.clear();
@@ -156,6 +225,10 @@ final class TargetDeviceManager {
                 item.put("platform", device.platform);
                 item.put("slot", device.slot);
                 item.put("lastSeenAt", device.lastSeenAt);
+                item.put("lanAddresses", new JSONArray(device.lanAddresses));
+                item.put("lanPort", device.lanPort);
+                item.put("lanToken", device.lanToken);
+                item.put("certificateSha256", device.certificateSha256);
                 array.put(item);
             }
         } catch (Exception ignored) {

@@ -2,7 +2,7 @@
 
 更新时间：2026-08-27
 当前分支：`agent/multi-pc-1.6.0`
-当前源码：PhoneDeck 1.6.0-dev.1（多目标基础）
+当前源码：PhoneDeck 1.6.0-dev.2（安全 Wi-Fi MVP）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.3
 Android 配置版本：`schemaVersion=1`
@@ -11,9 +11,22 @@ Android 配置版本：`schemaVersion=1`
 ## 给下一台电脑和下一位 Agent 的一句话
 
 1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成。本轮
-1.6.0-dev.1 已把目标电脑 ID 贯穿到听写、PCM 音频和快捷键，并加入已确认设备的手机端
-切换条；它仍不是三台电脑同时在线版本。下一步是独立实现已鉴权的局域网/手机热点传输，
-再做真实多机语音验收。
+1.6.0-dev.2 已把目标电脑 ID 贯穿到听写、PCM 音频和快捷键，加入手机端设备切换条，并
+完成独立 HTTPS Wi-Fi 通道。当前 Samsung 已在移除 ADB reverse 后显示本机“Wi-Fi 在线”。
+下一步是把接收端装到另外两台电脑、逐台 USB 自动配对，再做三机语音联合验收。
+
+## Wi-Fi MVP 使用方式
+
+1. 手机和电脑连接同一个 Wi-Fi；音频只在局域网内传输，不消耗手机流量。
+2. 每台 Windows 以管理员身份运行一次 `scripts/windows/Enable-PhoneDeckLan.ps1`。
+3. 每台电脑运行 1.6.0-dev.2 接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
+4. App 自动读取该电脑的证书指纹、随机密钥和 LAN 地址；顶部出现“Wi-Fi 在线”后可移除
+   ADB reverse 或拔掉 USB。
+5. 对第二、第三台电脑重复一次；之后三台接收端同时运行，手机切换目标即可。
+
+当前配对凭据保存在 Windows `%LOCALAPPDATA%\PhoneDeck` 和 Android 应用私有存储；不得
+提交到 Git。电脑 IP 变化后，重新连接 USB 即会自动刷新无线配对资料；
+后续 mDNS 会消除这一手动恢复步骤。
 
 ## 本轮方案审核结论
 
@@ -110,6 +123,20 @@ Android 配置版本：`schemaVersion=1`
 ## 本轮实际执行的验证
 
 ### 已验证
+
+1.6.0-dev.2 安全 Wi-Fi MVP：
+
+- Windows Release 构建成功，0 个警告、0 个错误；单元测试 14/14 通过，
+  包括 LAN 密钥缺失、错误和正确三种情况。
+- Android `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功；当前 Release
+  因修复工作树无 `signing.properties` 而未签名。
+- Samsung `SM-G9880` 已安装 `com.codex.phonedeck` 1.6.0-dev.2 Debug。
+- 已通过 USB loopback 自动配对；移除 `adb reverse tcp:8765` 后，手机界面仍显示
+  `DESKTOP-74F6FT5 · Wi-Fi 在线`。
+- 实际 HTTPS 健康检查已确认：不带配对密钥返回 401，携带正确密钥返回
+  1.6.0-dev.2 和稳定电脑 ID。
+- 本机防火墙已启用仅限 `LocalSubnet` 的 TCP 8766 入站规则，当前接收端
+  同时监听 loopback HTTP 8765 与 HTTPS 8766。
 
 UI 主题（Samsung SM-G9880 / Android 12，独立 Preview 包）：
 
@@ -219,6 +246,9 @@ Samsung 真机：
 
 ### 尚未验证，不得写成 PASS
 
+- 尚未在拔掉 USB 后执行真实 Wi-Fi 语音启动/停止并核对 Typeless 文字。
+- 尚未在第二、第三台 Windows 电脑进行同时在线与语音目标切换验收。
+- 尚未实现 mDNS 自动发现、手动撤销/重配凭据和 macOS 接收端。
 - 未在真实手机上验证动态网格、编辑页、长按不误触、拖动排序和字体放大。
 - 因 1.4.0 原签名私钥遗失，本次只能一次性清除旧版数据，不能声称旧版配置迁移通过。
 - 同签名重复安装已确认不重新安装包，但尚未用自定义配置证明文件级持久化。
@@ -231,21 +261,19 @@ Samsung 真机：
 
 ## 下一步严格顺序
 
-1. 把 `E:\Desktop\PhoneDeck-Signing-Backup` 加密复制到另一个可靠介质，不上传 GitHub。
-2. 在 FocusSink 或普通文本框验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
-3. 验证编辑、隐藏、排序、新增、删除、单按钮恢复、全部恢复和重启持久化。
-4. 使用长期签名属性构建并覆盖安装 Android 修复版，验收“USB 已恢复”反馈。
-5. 由用户说一段固定文本，核对暂停前后和最终 Typeless 识别结果。
-6. 在听写的启动中和停止中分别断开 USB，确认三端都能复位。
-7. 连续 USB 断开/恢复 20 次并保存日志、视频和失败步骤。
-8. 验证 USB 与蓝牙发送同一自定义组合键。
-9. 修复实机问题并重跑构建/lint。
-10. 全部通过后再执行 Windows publish、发布包替换、打标签和 GitHub Release。
+1. 拔掉 USB，由用户说一段固定文本，验收 Wi-Fi 音频、暂停/继续和最终 Typeless 文字。
+2. 在听写启动中、正在听写和停止中分别断开 Wi-Fi，确认三端都能复位。
+3. 在第二、第三台 Windows 重复安装、防火墙开启和 USB 自动配对。
+4. 验收三台接收端同时在线、手机切换和音频只进入当前目标。
+5. 实现 mDNS 自动发现、凭据撤销/重配和设备删除交互。
+6. 回归快捷键编辑、隐藏、排序、新增、删除和重启持久化。
+7. 在 FocusSink 验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
+8. 使用长期签名属性构建并覆盖安装正式候选版。
 
 ## 安全和范围边界
 
 - 不加入任意 PowerShell、CMD、shell 或脚本执行。
 - 不把当前 localhost 无鉴权入口开放到局域网。
 - 不提交签名密钥、ADB 私钥、Typeless 个人配置、录音或发布缓存。
-- 1.6.0 的多电脑发现/配对、1.7.0 多配置和 1.8.0 宏不进入本轮候选版。
+- 1.6.0 MVP 之外的 mDNS、macOS、1.7.0 多配置和 1.8.0 宏不进入本轮候选版。
 - 构建通过不能替代真实手机、音频、Typeless、蓝牙和现场验收。

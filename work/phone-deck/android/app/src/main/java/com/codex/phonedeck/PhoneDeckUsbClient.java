@@ -84,6 +84,20 @@ final class PhoneDeckUsbClient {
             }
         }
 
+        TargetDeviceManager.Device activeDevice = deviceManager.find(activeComputerId);
+        PhoneDeckLanClient.ProbeResult lanResult = PhoneDeckLanClient.probe(activeDevice);
+        if (lanResult != null) {
+            JSONObject body = createKeyChordBody(
+                    keyArray, holdMs, requestId, sessionId, activeComputerId);
+            try {
+                JSONObject result = PhoneDeckHttp.postJson(
+                        lanResult.endpoint, "/api/input", body, 1800);
+                return result.optString("message", "电脑已确认") + " · Wi-Fi";
+            } catch (Exception ignored) {
+                // 使用同一 requestId 尝试同一目标电脑的 USB/蓝牙备用通道。
+            }
+        }
+
         if (usbServer != null
                 && usbServer.protocolVersion >= 2
                 && !usbServer.computerId.isEmpty()
@@ -124,7 +138,7 @@ final class PhoneDeckUsbClient {
         }
         throw new IllegalStateException(
                 usbFailure == null || usbFailure.getMessage() == null
-                        ? "当前目标电脑没有可用的 USB 或蓝牙连接"
+                        ? "当前目标电脑没有可用的 Wi-Fi、USB 或蓝牙连接"
                         : usbFailure.getMessage(),
                 usbFailure);
     }

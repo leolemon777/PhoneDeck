@@ -31,11 +31,11 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -76,9 +76,11 @@ public final class MainActivity extends Activity {
     private String currentSessionId;
     private boolean currentSessionManaged;
     private String currentSessionTargetComputerId;
+    private PhoneDeckEndpoint currentSessionEndpoint;
     private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
     private volatile boolean usbRecoveryFeedbackPending;
+    private volatile boolean lanCheckInFlight;
     private volatile boolean managedDictationSupported;
     private volatile boolean phoneAudioAvailable;
     private volatile boolean typelessVirtualCableSelected;
@@ -95,6 +97,8 @@ public final class MainActivity extends Activity {
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
     private TargetDeviceManager targetDeviceManager;
+    private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
+            new ConcurrentHashMap<>();
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
@@ -102,6 +106,7 @@ public final class MainActivity extends Activity {
                 return;
             }
             testConnection();
+            testLanConnections();
             mainHandler.postDelayed(this, HEALTH_CHECK_INTERVAL_MS);
         }
     };
@@ -118,7 +123,7 @@ public final class MainActivity extends Activity {
         configRepository = new ShortcutConfigRepository(this);
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
-        audioStreamer = new AudioStreamer(this, SERVER, new AudioStreamer.Listener() {
+        audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
             @Override
             public void onReady(String sessionId) {
                 mainHandler.post(() -> onAudioReady(sessionId));
@@ -136,6 +141,7 @@ public final class MainActivity extends Activity {
         });
         prepareBluetooth();
         testConnection();
+        testLanConnections();
         mainHandler.postDelayed(periodicHealthCheck, HEALTH_CHECK_INTERVAL_MS);
     }
 
@@ -534,7 +540,8 @@ public final class MainActivity extends Activity {
             return;
         }
         applyStoredTarget();
-        String channel = isUsbTargetOnline() ? "USB" : "蓝牙快捷键";
+        String channel = isLanTargetOnline()
+                ? "Wi-Fi" : isUsbTargetOnline() ? "USB" : "蓝牙快捷键";
         showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
                 + device.displayName + " · " + channel, theme.success);
         performResultHaptic(source, true);
@@ -550,7 +557,10 @@ public final class MainActivity extends Activity {
         } else {
             targetComputerId = active.computerId;
             targetDisplayName = active.displayName;
-            if (isUsbTargetOnline()) {
+            LanTargetStatus lanStatus = lanTargets.get(active.computerId);
+            if (lanStatus != null) {
+                serverProtocolVersion = lanStatus.protocolVersion;
+            } else if (isUsbTargetOnline()) {
                 serverProtocolVersion = usbProtocolVersion;
             } else if (isBluetoothTargetOnline() && bluetoothTransport != null) {
                 serverProtocolVersion = bluetoothTransport.getProtocolVersion();
@@ -563,9 +573,14 @@ public final class MainActivity extends Activity {
     }
 
     private boolean isDeviceOnline(String computerId) {
-        return usbConnected && sameComputer(computerId, usbComputerId)
+        return lanTargets.containsKey(computerId)
+                || usbConnected && sameComputer(computerId, usbComputerId)
                 || bluetoothConnected && bluetoothTransport != null
                 && sameComputer(computerId, bluetoothTransport.getComputerId());
+    }
+
+    private boolean isLanTargetOnline() {
+        return targetComputerId != null && lanTargets.containsKey(targetComputerId);
     }
 
     private boolean isUsbTargetOnline() {
@@ -580,6 +595,36 @@ public final class MainActivity extends Activity {
 
     private static boolean sameComputer(String left, String right) {
         return left != null && right != null && left.equalsIgnoreCase(right);
+    }
+
+    private PhoneDeckEndpoint endpointForActiveTarget() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        if (lanStatus != null) {
+            return lanStatus.endpoint;
+        }
+        return isUsbTargetOnline() ? PhoneDeckEndpoint.USB : null;
+    }
+
+    private boolean activePhoneAudioAvailable() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        return lanStatus != null ? lanStatus.phoneAudioAvailable
+                : isUsbTargetOnline() && phoneAudioAvailable;
+    }
+
+    private boolean activeTypelessVirtualCableSelected() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        return lanStatus != null ? lanStatus.typelessVirtualCableSelected
+                : isUsbTargetOnline() && typelessVirtualCableSelected;
+    }
+
+    private boolean activeManagedDictationSupported() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        return lanStatus != null ? lanStatus.managedDictationSupported
+                : isUsbTargetOnline() && managedDictationSupported;
     }
 
     private void prepareBluetooth() {
@@ -613,7 +658,7 @@ public final class MainActivity extends Activity {
     }
 
     private void testConnection() {
-        if (!usbConnected && !bluetoothConnected) {
+        if (!usbConnected && !bluetoothConnected && lanTargets.isEmpty()) {
             showConnection("正在检测电脑端…", theme.muted);
         }
         connectionExecutor.execute(() -> {
@@ -627,12 +672,15 @@ public final class MainActivity extends Activity {
                 if (response == 200) {
                     JSONObject health = readJsonResponse(connection);
                     boolean supportsManagedDictation = false;
+                    boolean supportsSecureLan = false;
                     org.json.JSONArray capabilities = health.optJSONArray("capabilities");
                     if (capabilities != null) {
                         for (int index = 0; index < capabilities.length(); index++) {
                             if ("managedDictation".equals(capabilities.optString(index))) {
                                 supportsManagedDictation = true;
-                                break;
+                            }
+                            if ("secureLan".equals(capabilities.optString(index))) {
+                                supportsSecureLan = true;
                             }
                         }
                     }
@@ -653,6 +701,18 @@ public final class MainActivity extends Activity {
                         usbDisplayName = healthDisplayName;
                     }
                     String healthPlatform = health.optString("platform", "windows");
+                    TargetDeviceManager.Device existingDevice =
+                            targetDeviceManager.find(healthComputerId);
+                    boolean lanPairingNeedsRefresh = existingDevice == null
+                            || !existingDevice.hasLanPairing()
+                            || !lanTargets.containsKey(healthComputerId);
+                    if (supportsSecureLan && lanPairingNeedsRefresh) {
+                        try {
+                            PhoneDeckLanClient.pairOverUsb(targetDeviceManager);
+                        } catch (Exception ignored) {
+                            // USB 主功能继续可用；配对失败会在界面保持 USB 状态。
+                        }
+                    }
                     boolean recoveredAfterVoiceDisconnect = usbRecoveryFeedbackPending;
                     usbRecoveryFeedbackPending = false;
                     usbConnected = true;
@@ -692,6 +752,50 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void testLanConnections() {
+        if (lanCheckInFlight) {
+            return;
+        }
+        lanCheckInFlight = true;
+        connectionExecutor.execute(() -> {
+            try {
+                ConcurrentHashMap<String, LanTargetStatus> discovered =
+                        new ConcurrentHashMap<>();
+                for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
+                    PhoneDeckLanClient.ProbeResult result = PhoneDeckLanClient.probe(device);
+                    if (result == null) {
+                        continue;
+                    }
+                    JSONObject health = result.health;
+                    boolean supportsManagedDictation = false;
+                    org.json.JSONArray capabilities = health.optJSONArray("capabilities");
+                    if (capabilities != null) {
+                        for (int index = 0; index < capabilities.length(); index++) {
+                            if ("managedDictation".equals(capabilities.optString(index))) {
+                                supportsManagedDictation = true;
+                                break;
+                            }
+                        }
+                    }
+                    JSONObject audio = health.optJSONObject("audio");
+                    JSONObject typeless = health.optJSONObject("typeless");
+                    discovered.put(device.computerId, new LanTargetStatus(
+                            result.endpoint,
+                            health.optInt("protocolVersion", 0),
+                            supportsManagedDictation,
+                            audio != null && audio.optBoolean("available", false),
+                            typeless != null
+                                    && typeless.optBoolean("virtualCableSelected", false)));
+                }
+                lanTargets.clear();
+                lanTargets.putAll(discovered);
+                mainHandler.post(this::applyStoredTarget);
+            } finally {
+                lanCheckInFlight = false;
+            }
+        });
+    }
+
     private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
         StringBuilder json = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
@@ -705,6 +809,9 @@ public final class MainActivity extends Activity {
     }
 
     private void handleUsbConnectionLost() {
+        if (currentSessionEndpoint != PhoneDeckEndpoint.USB) {
+            return;
+        }
         if (!audioStartPending && !dictationActive && !typelessInFlight
                 && (audioStreamer == null || !audioStreamer.isRunning())) {
             return;
@@ -775,6 +882,7 @@ public final class MainActivity extends Activity {
         String sessionId = currentSessionId;
         boolean managed = currentSessionManaged;
         String sessionTargetComputerId = currentSessionTargetComputerId;
+        PhoneDeckEndpoint sessionEndpoint = currentSessionEndpoint;
         intentionalAudioStopSessionId = sessionId;
         if (audioStreamer != null) {
             audioStreamer.stop();
@@ -785,13 +893,15 @@ public final class MainActivity extends Activity {
         showActionFeedback("✓  已立即取消语音启动", theme.muted);
         performResultHaptic(typelessButton, true);
         if (managed && sessionId != null) {
-            bestEffortStopManagedDictation(sessionId, sessionTargetComputerId);
+            bestEffortStopManagedDictation(
+                    sessionId, sessionTargetComputerId, sessionEndpoint);
         }
     }
 
     private void bestEffortStopManagedDictation(
             String sessionId,
-            String sessionTargetComputerId) {
+            String sessionTargetComputerId,
+            PhoneDeckEndpoint sessionEndpoint) {
         actionExecutor.execute(() -> {
             try {
                 JSONObject body = new JSONObject();
@@ -799,7 +909,8 @@ public final class MainActivity extends Activity {
                 body.put("sessionId", sessionId);
                 body.put("requestId", UUID.randomUUID().toString());
                 body.put("targetComputerId", sessionTargetComputerId);
-                postUsbWithRetry("/api/dictation/stop", body, 2);
+                postEndpointWithRetry(
+                        sessionEndpoint, "/api/dictation/stop", body, 2);
             } catch (Exception ignored) {
                 // 本地音频已经停止；电脑端也会在音频断流时复位 managed 会话。
             }
@@ -942,28 +1053,30 @@ public final class MainActivity extends Activity {
     }
 
     private void beginPhoneDictation() {
-        if (!isUsbTargetOnline()) {
+        PhoneDeckEndpoint endpoint = endpointForActiveTarget();
+        if (endpoint == null) {
             if (isBluetoothTargetOnline()) {
                 showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
-                showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；语音需 USB 或后续局域网通道",
+                showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；请连接 Wi-Fi 或 USB",
                         theme.danger);
             } else {
                 showConnection(targetDisplayName + " · 当前离线", theme.danger);
                 showActionFeedback("✕  目标电脑未连接，请选择一台在线电脑", theme.danger);
             }
             testConnection();
+            testLanConnections();
             return;
         }
-        if (!phoneAudioAvailable) {
-            showConnection("USB 已连接 · 缺少 VB-CABLE", theme.warning);
+        if (!activePhoneAudioAvailable()) {
+            showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
             showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动 Typeless", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
             testConnection();
             return;
         }
-        if (!typelessVirtualCableSelected) {
-            showConnection("USB 已连接 · Typeless 麦克风未配置", theme.warning);
+        if (!activeTypelessVirtualCableSelected()) {
+            showConnection(targetDisplayName + " · Typeless 麦克风未配置", theme.warning);
             showActionFeedback("✕  请先在 Typeless 中选择 CABLE Output", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
@@ -982,9 +1095,10 @@ public final class MainActivity extends Activity {
         audioStartPending = true;
         dictationPaused = false;
         currentSessionId = UUID.randomUUID().toString();
-        currentSessionManaged = managedDictationSupported;
+        currentSessionManaged = activeManagedDictationSupported();
         currentSessionTargetComputerId = serverProtocolVersion >= 2
                 ? targetComputerId : null;
+        currentSessionEndpoint = endpoint;
         if (currentSessionManaged
                 && (currentSessionTargetComputerId == null
                 || currentSessionTargetComputerId.isBlank())) {
@@ -995,10 +1109,13 @@ public final class MainActivity extends Activity {
         }
         intentionalAudioStopSessionId = null;
         setTypelessBusy("正在连接手机麦克风…");
-        showActionFeedback("●  正在建立 USB 音频通道…", theme.warning);
+        showActionFeedback("●  正在建立 " + endpoint.label + " 音频通道…", theme.warning);
         microphoneLevel.setText("手机麦克风  ◌ 正在连接");
         microphoneLevel.setTextColor(theme.warning);
-        if (!audioStreamer.start(currentSessionId, currentSessionTargetComputerId)) {
+        if (!audioStreamer.start(
+                currentSessionId,
+                currentSessionTargetComputerId,
+                currentSessionEndpoint)) {
             clearVoiceSessionState();
             showActionFeedback("✕  上一个手机音频会话仍在收尾，请稍后重试", theme.danger);
         }
@@ -1039,12 +1156,13 @@ public final class MainActivity extends Activity {
         }
         final boolean managed = currentSessionManaged;
         final String sessionTargetComputerId = currentSessionTargetComputerId;
+        final PhoneDeckEndpoint sessionEndpoint = currentSessionEndpoint;
         actionExecutor.execute(() -> {
             try {
                 String transport;
                 if (managed) {
                     transport = sendManagedDictationCommand(
-                            starting, sessionId, sessionTargetComputerId);
+                            starting, sessionId, sessionTargetComputerId, sessionEndpoint);
                 } else {
                     JSONObject body = new JSONObject();
                     body.put("action", "typeless");
@@ -1093,7 +1211,7 @@ public final class MainActivity extends Activity {
                     holdReleasePending = false;
                     clearVoiceSessionState();
                     showConnection("Typeless 指令发送失败", theme.danger);
-                    showActionFeedback("✕  电脑没有确认，请检查 USB 连接后重试", theme.danger);
+                    showActionFeedback("✕  电脑没有确认，请检查 Wi-Fi/USB 连接后重试", theme.danger);
                     performResultHaptic(typelessButton, false);
                     flashResult(typelessButton, theme.danger);
                     finishGuardedAction(typelessButton, true);
@@ -1105,10 +1223,14 @@ public final class MainActivity extends Activity {
     private String sendManagedDictationCommand(
             boolean starting,
             String sessionId,
-            String sessionTargetComputerId)
+            String sessionTargetComputerId,
+            PhoneDeckEndpoint sessionEndpoint)
             throws Exception {
         if (sessionTargetComputerId == null || sessionTargetComputerId.isBlank()) {
             throw new IllegalStateException("尚未确认目标电脑");
+        }
+        if (sessionEndpoint == null) {
+            throw new IllegalStateException("目标电脑连接已经失效");
         }
         JSONObject body = new JSONObject();
         body.put("protocolVersion", 2);
@@ -1116,11 +1238,10 @@ public final class MainActivity extends Activity {
         body.put("requestId", UUID.randomUUID().toString());
         body.put("targetComputerId", sessionTargetComputerId);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
-        if (!postUsbWithRetry(endpoint, body, 2)) {
-            usbConnected = false;
+        if (!postEndpointWithRetry(sessionEndpoint, endpoint, body, 2)) {
             throw new IllegalStateException("电脑端未确认 Typeless 会话");
         }
-        return "USB";
+        return sessionEndpoint.label;
     }
 
     private void setTypelessBusy(String label) {
@@ -1203,6 +1324,7 @@ public final class MainActivity extends Activity {
         currentSessionId = null;
         currentSessionManaged = false;
         currentSessionTargetComputerId = null;
+        currentSessionEndpoint = null;
         voiceBusyLabel = null;
         if (typelessButton != null) {
             updateVoiceControls();
@@ -1213,7 +1335,17 @@ public final class MainActivity extends Activity {
         boolean sent = false;
         String transport = "";
 
-        if (isUsbTargetOnline()) {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        if (lanStatus != null) {
+            sent = postEndpointWithRetry(
+                    lanStatus.endpoint, "/api/input", body, 2);
+            if (sent) {
+                transport = "Wi-Fi";
+            }
+        }
+
+        if (!sent && isUsbTargetOnline()) {
             sent = postUsbWithRetry("/api/input", body, 2);
             if (sent) {
                 transport = "USB";
@@ -1236,8 +1368,19 @@ public final class MainActivity extends Activity {
     }
 
     private boolean postUsbWithRetry(String endpoint, JSONObject body, int attempts) {
+        return postEndpointWithRetry(PhoneDeckEndpoint.USB, endpoint, body, attempts);
+    }
+
+    private boolean postEndpointWithRetry(
+            PhoneDeckEndpoint connectionEndpoint,
+            String endpoint,
+            JSONObject body,
+            int attempts) {
+        if (connectionEndpoint == null) {
+            return false;
+        }
         for (int attempt = 0; attempt < attempts; attempt++) {
-            if (postUsb(endpoint, body)) {
+            if (postEndpoint(connectionEndpoint, endpoint, body)) {
                 return true;
             }
             if (attempt + 1 < attempts) {
@@ -1252,36 +1395,31 @@ public final class MainActivity extends Activity {
         return false;
     }
 
-    private boolean postUsb(String endpoint, JSONObject body) {
-        HttpURLConnection connection = null;
+    private boolean postEndpoint(
+            PhoneDeckEndpoint connectionEndpoint,
+            String endpoint,
+            JSONObject body) {
         try {
-            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection = (HttpURLConnection) new URL(SERVER + endpoint).openConnection();
-            connection.setConnectTimeout(500);
-            connection.setReadTimeout(1600);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            connection.setFixedLengthStreamingMode(bytes.length);
-            connection.setDoOutput(true);
-            try (OutputStream output = connection.getOutputStream()) {
-                output.write(bytes);
-            }
-            int response = connection.getResponseCode();
-            return response >= 200 && response < 300;
+            PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, 1800);
+            return true;
         } catch (Exception exception) {
             return false;
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
         }
     }
 
     private void updateConnectionDisplay() {
-        if (isUsbTargetOnline()) {
-            if (!phoneAudioAvailable) {
+        if (isLanTargetOnline()) {
+            if (!activePhoneAudioAvailable()) {
+                showConnection(targetDisplayName + " · Wi-Fi · 缺少 VB-CABLE", theme.warning);
+            } else if (!activeTypelessVirtualCableSelected()) {
+                showConnection(targetDisplayName + " · Wi-Fi · 麦克风未配置", theme.warning);
+            } else {
+                showConnection(targetDisplayName + " · Wi-Fi 在线", theme.success);
+            }
+        } else if (isUsbTargetOnline()) {
+            if (!activePhoneAudioAvailable()) {
                 showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
-            } else if (!typelessVirtualCableSelected) {
+            } else if (!activeTypelessVirtualCableSelected()) {
                 showConnection(targetDisplayName + " · 麦克风未配置", theme.warning);
             } else {
                 showConnection(targetDisplayName + " · USB 在线", theme.success);
@@ -1435,6 +1573,27 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height);
         params.setMargins(left, top, right, bottom);
         return params;
+    }
+
+    private static final class LanTargetStatus {
+        final PhoneDeckEndpoint endpoint;
+        final int protocolVersion;
+        final boolean managedDictationSupported;
+        final boolean phoneAudioAvailable;
+        final boolean typelessVirtualCableSelected;
+
+        LanTargetStatus(
+                PhoneDeckEndpoint endpoint,
+                int protocolVersion,
+                boolean managedDictationSupported,
+                boolean phoneAudioAvailable,
+                boolean typelessVirtualCableSelected) {
+            this.endpoint = endpoint;
+            this.protocolVersion = protocolVersion;
+            this.managedDictationSupported = managedDictationSupported;
+            this.phoneAudioAvailable = phoneAudioAvailable;
+            this.typelessVirtualCableSelected = typelessVirtualCableSelected;
+        }
     }
 
     private int dp(int value) {

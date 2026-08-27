@@ -1,6 +1,6 @@
 # PhoneDeck 架构说明
 
-## 当前 1.6.0-dev.1 数据流
+## 当前 1.6.0-dev.2 数据流
 
 ```text
 Android MainActivity
@@ -8,6 +8,7 @@ Android MainActivity
   ├─ protocol v2 keyChord JSON ────┤
   └─ AudioRecord PCM 48k mono ─────┤
                                 │ ADB reverse 127.0.0.1:8765
+                                │ 或证书固定 HTTPS Wi-Fi :8766
 Windows PhoneDeck.Server        │
   ├─ /api/input ◀──────────────────┘
   │    ├─ 旧固定动作兼容
@@ -31,7 +32,9 @@ Windows PhoneDeck.Server        │
   AudioRecord，并按实时速率发送 PCM 静音保持同一 HTTP/Typeless 会话，继续时恢复采集。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
 - `TargetDeviceManager.java`：保存已由健康检查或蓝牙 hello 确认的电脑 ID、显示名、平台和
-  手机端编号；只允许切换到当前 USB/蓝牙实际可达的设备。它不是局域网发现或配对实现。
+  手机端编号，以及经 USB 获取的 LAN 地址、访问密钥和证书指纹。
+- `PhoneDeckHttp.java` / `PhoneDeckLanClient.java`：固定电脑证书 SHA-256 指纹，通过 HTTPS
+  心跳确认真实在线状态，并把命令与音频路由到当前 Wi-Fi 目标。
 - `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
@@ -39,6 +42,8 @@ Windows PhoneDeck.Server        │
 - `Program.cs`：Kestrel、本地 API、Typeless 快捷键读取、SendInput 和请求去重。
 - `InputCommandProcessor.cs`：协议 v2 信封、目标电脑和动作验证。
 - `ReceiverIdentity.cs`：首次启动生成并持久化稳定电脑 ID。
+- `LanIdentity.cs`：生成并持久化局域网 TLS 证书和随机访问密钥；配对资料只允许从 USB
+  loopback 端口读取。Wi-Fi 端口独立监听 8766，未携带正确密钥返回 401。
 - `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；只有虚拟音频输出真正启动后才公布会话。
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
@@ -125,7 +130,7 @@ Typeless 状态机前校验目标，不匹配直接返回 400。
 - 语音交接；
 - USB 共享切换器验证。
 
-当前 `1.6.0-dev.1` 已先完成目标 ID 贯穿和已达设备切换基础；局域网入口、配对和多机
-语音路由仍属于后续增量，不能由当前 localhost API 直接替代。
+当前 `1.6.0-dev.2` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳和当前目标的
+快捷键/听写/PCM 路由。仍缺 mDNS 自动发现、凭据撤销/重配和三台电脑联合实测。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。
