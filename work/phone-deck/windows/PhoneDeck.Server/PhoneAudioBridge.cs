@@ -1,7 +1,7 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
-internal sealed class PhoneAudioBridge : IDisposable
+internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposable
 {
     private const int SampleRate = 48_000;
     private readonly SemaphoreSlim streamGate = new(1, 1);
@@ -50,7 +50,7 @@ internal sealed class PhoneAudioBridge : IDisposable
         }
     }
 
-    internal bool IsSessionActive(string sessionId)
+    public bool IsSessionActive(string sessionId)
     {
         lock (sessionSync)
         {
@@ -58,7 +58,22 @@ internal sealed class PhoneAudioBridge : IDisposable
         }
     }
 
-    internal bool StopSession(string sessionId)
+    public bool WaitForSessionActive(string sessionId, int timeoutMilliseconds)
+    {
+        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        do
+        {
+            if (IsSessionActive(sessionId))
+            {
+                return true;
+            }
+            Thread.Sleep(20);
+        }
+        while (Environment.TickCount64 < deadline);
+        return IsSessionActive(sessionId);
+    }
+
+    public bool StopSession(string sessionId)
     {
         CancellationTokenSource? cancellation;
         lock (sessionSync)
@@ -164,15 +179,24 @@ internal sealed class PhoneAudioBridge : IDisposable
                     activeSessionId = null;
                 }
             }
-            sessionEnded(sessionId);
-            if (devices is not null)
+            try
             {
-                foreach (var device in devices)
+                if (devices is not null)
                 {
-                    device.Dispose();
+                    foreach (var device in devices)
+                    {
+                        device.Dispose();
+                    }
                 }
             }
-            streamGate.Release();
+            finally
+            {
+                // 先允许下一条音频流进入，再通知听写管理器。
+                // 否则快速“停止→重新开始”时，旧流的 AudioEnded
+                // 可能等待管理器锁，而新流又在等待旧流释放闸门。
+                streamGate.Release();
+                sessionEnded(sessionId);
+            }
         }
     }
 

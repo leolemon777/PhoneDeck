@@ -51,24 +51,92 @@ final class PhoneDeckUsbClient {
         }
     }
 
-    static String sendKeyChord(List<String> keys, int holdMs) throws Exception {
-        ServerInfo server = health();
-        if (server.protocolVersion < 2 || server.computerId.isEmpty()) {
-            throw new IllegalStateException("电脑端需要升级到 PhoneDeck 1.5.0");
-        }
+    static String sendKeyChord(
+            List<String> keys,
+            int holdMs,
+            BluetoothTransport bluetoothTransport) throws Exception {
         JSONArray keyArray = new JSONArray();
         for (String key : KeyCatalog.normalizeChord(keys)) {
             keyArray.put(key);
         }
+        String requestId = UUID.randomUUID().toString();
+        String sessionId = UUID.randomUUID().toString();
+
+        Exception usbFailure = null;
+        ServerInfo usbServer;
+        try {
+            usbServer = health();
+        } catch (Exception exception) {
+            usbServer = null;
+            usbFailure = exception;
+        }
+
+        if (usbServer != null
+                && usbServer.protocolVersion >= 2
+                && !usbServer.computerId.isEmpty()) {
+            JSONObject body = createKeyChordBody(
+                    keyArray, holdMs, requestId, sessionId, usbServer.computerId);
+            try {
+                return post("/api/input", body) + " · USB";
+            } catch (Exception exception) {
+                if (canUseBluetooth(bluetoothTransport)
+                        && usbServer.computerId.equalsIgnoreCase(
+                        bluetoothTransport.getComputerId())
+                        && bluetoothTransport.sendAndWaitForAck(body, 1400)) {
+                    return "电脑已确认 · 蓝牙";
+                }
+                // USB 请求可能已经执行但响应丢失。只有同一 computerId 的
+                // 蓝牙连接可以用同一 requestId 安全补收 ACK，不能误发给另一台电脑。
+                throw exception;
+            }
+        }
+        if (usbServer != null) {
+            usbFailure = new IllegalStateException(
+                    "USB 电脑端需要升级到 PhoneDeck 1.5.0");
+        }
+
+        if (canUseBluetooth(bluetoothTransport)) {
+            JSONObject body = createKeyChordBody(
+                    keyArray,
+                    holdMs,
+                    requestId,
+                    sessionId,
+                    bluetoothTransport.getComputerId());
+            if (bluetoothTransport.sendAndWaitForAck(body, 1400)) {
+                return "电脑已确认 · 蓝牙";
+            }
+            throw new IllegalStateException("蓝牙电脑没有确认测试按键", usbFailure);
+        }
+        throw new IllegalStateException(
+                usbFailure == null || usbFailure.getMessage() == null
+                        ? "没有可用的 USB 或蓝牙连接"
+                        : usbFailure.getMessage(),
+                usbFailure);
+    }
+
+    private static boolean canUseBluetooth(BluetoothTransport transport) {
+        return transport != null
+                && transport.isConnected()
+                && transport.getProtocolVersion() >= 2
+                && transport.getComputerId() != null
+                && !transport.getComputerId().isBlank();
+    }
+
+    private static JSONObject createKeyChordBody(
+            JSONArray keys,
+            int holdMs,
+            String requestId,
+            String sessionId,
+            String computerId) throws Exception {
         JSONObject body = new JSONObject();
         body.put("protocolVersion", 2);
-        body.put("requestId", UUID.randomUUID().toString());
-        body.put("sessionId", UUID.randomUUID().toString());
-        body.put("targetComputerId", server.computerId);
+        body.put("requestId", requestId);
+        body.put("sessionId", sessionId);
+        body.put("targetComputerId", computerId);
         body.put("action", "keyChord");
-        body.put("keys", keyArray);
+        body.put("keys", keys);
         body.put("holdMs", holdMs);
-        return post("/api/input", body);
+        return body;
     }
 
     private static String post(String endpoint, JSONObject body) throws Exception {

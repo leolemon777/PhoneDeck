@@ -225,7 +225,10 @@ public final class ShortcutEditActivity extends Activity {
         showFeedback("正在发送测试：" + candidate.subtitle(), PENDING);
         executor.execute(() -> {
             try {
-                String message = PhoneDeckUsbClient.sendKeyChord(candidate.keys, candidate.holdMs);
+                String message = PhoneDeckUsbClient.sendKeyChord(
+                        candidate.keys,
+                        candidate.holdMs,
+                        BluetoothTransport.current());
                 runOnUiThread(() -> {
                     showFeedback("✓  " + message, SUCCESS);
                     testButton.setEnabled(true);

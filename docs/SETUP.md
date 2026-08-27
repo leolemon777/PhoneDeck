@@ -79,6 +79,12 @@ df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f
 
 ## 4. Windows 构建
 
+语音会话状态机测试：
+
+```powershell
+dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
+```
+
 普通构建：
 
 ```powershell

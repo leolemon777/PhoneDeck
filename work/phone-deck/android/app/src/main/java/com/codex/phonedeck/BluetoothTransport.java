@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 final class BluetoothTransport implements AutoCloseable {
     static final UUID SERVICE_UUID = UUID.fromString("7d2ea28a-f7bd-485a-bd9d-92ad6ecfe93e");
+    private static volatile BluetoothTransport activeInstance;
 
     interface Listener {
         void onStateChanged(boolean connected, String detail);
@@ -46,6 +47,11 @@ final class BluetoothTransport implements AutoCloseable {
         this.context = context.getApplicationContext();
         this.listener = listener;
         this.adapter = BluetoothAdapter.getDefaultAdapter();
+        activeInstance = this;
+    }
+
+    static BluetoothTransport current() {
+        return activeInstance;
     }
 
     boolean isSupported() {
@@ -253,6 +259,9 @@ final class BluetoothTransport implements AutoCloseable {
         disconnect();
         if (worker != null) {
             worker.interrupt();
+        }
+        if (activeInstance == this) {
+            activeInstance = null;
         }
     }
 

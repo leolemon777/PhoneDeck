@@ -1,0 +1,47 @@
+name: PhoneDeck CI
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows receiver and tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Run receiver tests
+        run: dotnet test work/phone-deck/windows/PhoneDeck.Server.Tests/PhoneDeck.Server.Tests.csproj -c Release
+      - name: Build receiver
+        run: dotnet build work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release
+      - name: Publish self-contained receiver
+        run: dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+  android:
+    name: Android build and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: work/phone-deck/android/**/*.gradle*
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+      - name: Build and lint Android app
+        working-directory: work/phone-deck/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug --no-daemon

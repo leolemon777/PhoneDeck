@@ -82,6 +82,7 @@ public final class MainActivity extends Activity {
     private boolean currentSessionManaged;
     private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
+    private volatile boolean usbRecoveryFeedbackPending;
     private volatile boolean managedDictationSupported;
     private volatile boolean phoneAudioAvailable;
     private volatile boolean typelessVirtualCableSelected;
@@ -501,8 +502,18 @@ public final class MainActivity extends Activity {
                     if (healthComputerId != null && !healthComputerId.isBlank()) {
                         targetComputerId = healthComputerId;
                     }
+                    boolean recoveredAfterVoiceDisconnect = usbRecoveryFeedbackPending;
+                    usbRecoveryFeedbackPending = false;
                     usbConnected = true;
-                    mainHandler.post(this::updateConnectionDisplay);
+                    mainHandler.post(() -> {
+                        updateConnectionDisplay();
+                        if (recoveredAfterVoiceDisconnect
+                                && !audioStartPending && !dictationActive) {
+                            showActionFeedback("✓  USB 已恢复，可以继续使用", COLOR_SUCCESS);
+                            microphoneLevel.setText("手机麦克风  ○ 已停止");
+                            microphoneLevel.setTextColor(COLOR_MUTED);
+                        }
+                    });
                 } else {
                     throw new IllegalStateException("HTTP " + response);
                 }
@@ -543,6 +554,7 @@ public final class MainActivity extends Activity {
                 && (audioStreamer == null || !audioStreamer.isRunning())) {
             return;
         }
+        usbRecoveryFeedbackPending = true;
         intentionalAudioStopSessionId = currentSessionId;
         if (audioStreamer != null) {
             audioStreamer.stop();

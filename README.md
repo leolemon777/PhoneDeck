@@ -93,6 +93,8 @@ cd work\phone-deck\android
 Windows 接收端：
 
 ```powershell
+dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
+
 dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```

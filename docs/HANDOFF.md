@@ -34,6 +34,18 @@ Android 配置版本：`schemaVersion=1`
 
 - `eaa6291 Fix USB dictation session cleanup`
 
+### PR 复审后的会话与测试通道修复
+
+- `/dictation/start` 的重复 `requestId` 仍必须重新核对真实录音状态，不能跳过确认后假报成功。
+- Typeless 状态探针不可用时启动会明确失败；停止会尽力发送一次切换，但不会在未确认时返回成功。
+- 停止或断流清理失败后仍释放服务内部会话所有权，避免陈旧 `sessionId` 永久阻塞后续听写。
+- 第二次停止切换前立即重读 Core Audio 状态，避免 Typeless 刚停止又被切换回开启。
+- Android 音频 POST 与 `/dictation/start` 并发时，Windows 会在 1.2 秒内等待真实 WASAPI 会话登记，避免把正常的几十毫秒竞态误报成 USB 断线。
+- 旧音频流先释放设备与流闸门，再触发 `AudioEnded` 回调，避免快速“停止 → 重新开始”时形成锁等待。
+- 快捷键编辑页“发送测试”现在先用 USB，USB 不可用时复用主界面的蓝牙连接；USB 请求可能已执行时，只允许向相同 `computerId` 的蓝牙连接补收确认。
+- USB 听写中断后重新连接时，Android 会把红色旧提示替换为“USB 已恢复，可以继续使用”，并把麦克风状态复位为已停止。
+- 新增 6 个 Windows 状态机单元测试和 GitHub Actions，持续构建 Android、Windows、发布包并运行测试。
+
 ### PhoneDeck 1.5.0 可编程快捷键
 
 - Android 应用显示名升级为“PhoneDeck 手机控制台”，版本为 `1.5.0` / `versionCode 6`。
@@ -69,6 +81,14 @@ Windows：
 ```
 
 结果：成功，0 个警告，0 个错误。
+
+PR 复审新增状态机测试：
+
+```powershell
+dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
+```
+
+结果：6/6 通过，覆盖失败启动的同请求重试、音频登记并发等待、探针不可用、停止失败释放所有权、断流失败释放所有权和第二次切换前重读状态。Windows 自包含 publish 也已成功。
 
 Android（长期签名已接入 Debug/Release）：
 
@@ -145,29 +165,32 @@ Samsung 真机：
   继续后重新 `running`；停止后模拟端音频和听写状态均为 false。
 - 真机执行“开始后约 180 ms 立即取消”，Android 记录采集约 233 ms 后停止，正式
   Windows 健康检查确认 `audio.streaming=false`、`dictation.active=false`，应用无崩溃。
+- 当前 Samsung + VB-CABLE + Typeless 真实链路已完成“开始 → 暂停 → 继续 → 停止”：开始时服务端三项状态均为 true；暂停时手机 AudioRecord 为 inactive、电脑音频和 Typeless 会话保持；继续后 AudioRecord 恢复 active；停止后三项状态均为 false。
+- 连续 20 轮真实开始/停止全部通过；每轮均确认音频、听写与 Typeless 状态，结束后无残留会话。
+- 听写中执行真实 `adb kill-server` 后，Windows 自动复位 Typeless 并清除音频/听写状态；ADB 与 `tcp:8765` reverse 已恢复，手机顶部重新显示绿色“USB 已连接”。
+- 压力测试发现并修复两个额外竞态：音频登记晚于 start 请求，以及旧流回调阻塞下一条流闸门。
+- 本轮 Android 源码与 APK 构建通过，但当前修复工作树没有签名属性文件，因此没有卸载或覆盖手机上已有的 1.5.0；新增的“USB 已恢复”反馈仍需用长期签名包做一次屏幕验收。
 
 ### 尚未验证，不得写成 PASS
 
 - 未在真实手机上验证动态网格、编辑页、长按不误触、拖动排序和字体放大。
 - 因 1.4.0 原签名私钥遗失，本次只能一次性清除旧版数据，不能声称旧版配置迁移通过。
 - 同签名重复安装已确认不重新安装包，但尚未用自定义配置证明文件级持久化。
-- 暂停/继续已经通过真机加安全模拟接收器验证，但尚未连接真实 VB-CABLE，也未验证
-  Typeless 对长时间静音保活、暂停后继续识别和最终文字的实际效果。
-- 新增的 Typeless 真实录音状态确认已在当前机读取到 `capturing=false`，但因缺少 VB-CABLE，尚未完成真实手机音频下的“开始 → 停止 → capturing=false”端到端验收。
-- 未进行连续 20 次开始/停止和 20 次 USB 拔插/切换。
+- 当前电脑已经安装并启用 VB-CABLE，Typeless 也已选中 `CABLE Output`；真实链路的暂停/继续状态已验证，但尚未由用户对着手机说一段固定文本并核对最终识别文字和长时间静音保活效果。
+- 未进行连续 20 次 USB 拔插/切换；本轮只完成 1 次听写中 ADB 通道中断与恢复。
 - 未验证断线发生在“音频已连接但 Typeless 尚未确认”等竞态点。
 - 未验证蓝牙 v2 `hello`、自定义快捷键和 ACK 的真实连接。
 - 未测试 Windows UIPI、高权限目标软件、F1–F24 和媒体键的真实输入效果。
-- 未执行 Windows 自包含 publish、正式发布包替换、Git 标签或 GitHub Release。
+- Windows 自包含 publish 已验证；尚未替换正式发布包、创建 Git 标签或 GitHub Release。
 
 ## 下一步严格顺序
 
 1. 把 `E:\Desktop\PhoneDeck-Signing-Backup` 加密复制到另一个可靠介质，不上传 GitHub。
 2. 在 FocusSink 或普通文本框验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
 3. 验证编辑、隐藏、排序、新增、删除、单按钮恢复、全部恢复和重启持久化。
-4. 安装并确认 VB-CABLE，启动 Typeless 并选择正确的 `CABLE Output`。
-5. 连续开始/停止听写 20 次。
-6. 在听写的启动中、进行中和停止中分别断开 USB，确认三端都能复位。
+4. 使用长期签名属性构建并覆盖安装 Android 修复版，验收“USB 已恢复”反馈。
+5. 由用户说一段固定文本，核对暂停前后和最终 Typeless 识别结果。
+6. 在听写的启动中和停止中分别断开 USB，确认三端都能复位。
 7. 连续 USB 断开/恢复 20 次并保存日志、视频和失败步骤。
 8. 验证 USB 与蓝牙发送同一自定义组合键。
 9. 修复实机问题并重跑构建/lint。

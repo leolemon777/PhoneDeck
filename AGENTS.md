@@ -69,6 +69,7 @@ cd work\phone-deck\android
 
 # Windows
 dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release
+dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
 ```
 
 涉及真实语音、ADB、Typeless、VB-CABLE、蓝牙、Mac 权限或 USB 共享切换器时，自动化构建不能替代真实硬件验收。报告中必须明确区分“代码通过构建”和“已在真实设备验证”。
