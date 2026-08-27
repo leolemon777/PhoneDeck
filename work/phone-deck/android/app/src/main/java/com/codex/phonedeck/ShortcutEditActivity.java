@@ -3,20 +3,17 @@ package com.codex.phonedeck;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
+import android.widget.HorizontalScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -28,21 +25,15 @@ import java.util.concurrent.Executors;
 public final class ShortcutEditActivity extends Activity {
     static final String EXTRA_BUTTON_ID = "buttonId";
     private static final int REQUEST_KEYS = 2001;
-    private static final int BACKGROUND = Color.rgb(11, 16, 32);
-    private static final int PANEL = Color.rgb(22, 29, 50);
-    private static final int PRIMARY = Color.rgb(121, 168, 255);
-    private static final int TEXT = Color.rgb(247, 249, 255);
-    private static final int MUTED = Color.rgb(159, 172, 202);
-    private static final int SUCCESS = Color.rgb(79, 220, 156);
-    private static final int PENDING = Color.rgb(255, 195, 92);
-    private static final int DANGER = Color.rgb(255, 112, 132);
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private PhoneDeckTheme theme;
     private ShortcutConfigRepository repository;
     private ShortcutButtonConfig draft;
     private EditText labelInput;
     private EditText iconInput;
-    private Spinner colorSpinner;
+    private LinearLayout colorContainer;
+    private String selectedColor;
     private Switch visibleSwitch;
     private TextView keySummary;
     private TextView feedback;
@@ -52,8 +43,8 @@ public final class ShortcutEditActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(BACKGROUND);
-        getWindow().setNavigationBarColor(BACKGROUND);
+        theme = PhoneDeckTheme.load(this);
+        theme.applyWindow(this);
         repository = new ShortcutConfigRepository(this);
         String id = getIntent().getStringExtra(EXTRA_BUTTON_ID);
         draft = id == null ? repository.newCustomButton() : findButton(id);
@@ -80,15 +71,15 @@ public final class ShortcutEditActivity extends Activity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(20), dp(20), dp(20), dp(34));
-        page.setBackgroundColor(BACKGROUND);
+        page.setBackgroundColor(theme.contentBackground());
         scroll.addView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button("←", PANEL, TEXT);
+        Button back = button("←", theme.surfaceRaised, theme.text);
         back.setOnClickListener(view -> requestClose());
         header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
-        TextView title = text(draft.builtIn ? "编辑按钮" : "新增按钮", 22, TEXT,
+        TextView title = text(draft.builtIn ? "编辑按钮" : "新增按钮", 22, theme.text,
                 Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -106,37 +97,36 @@ public final class ShortcutEditActivity extends Activity {
         page.addView(iconInput, fieldParams());
         LinearLayout presets = new LinearLayout(this);
         for (String icon : Arrays.asList("✨", "📋", "💾", "🎙", "▶", "⚙")) {
-            Button preset = button(icon, PANEL, TEXT);
+            Button preset = button(icon, theme.surface, theme.text);
             preset.setOnClickListener(view -> iconInput.setText(icon));
             presets.addView(preset, new LinearLayout.LayoutParams(0, dp(44), 1f));
         }
         page.addView(presets, topMargin(dp(7)));
 
         page.addView(label("按钮颜色"), topMargin(dp(18)));
-        colorSpinner = new Spinner(this);
-        ArrayAdapter<String> colors = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item,
-                Arrays.asList("蓝色", "紫色", "绿色", "橙色", "红色", "深灰"));
-        colors.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        colorSpinner.setAdapter(colors);
-        colorSpinner.setBackgroundColor(PANEL);
-        page.addView(colorSpinner, fieldParams());
+        colorContainer = new LinearLayout(this);
+        colorContainer.setOrientation(LinearLayout.HORIZONTAL);
+        HorizontalScrollView colorScroll = new HorizontalScrollView(this);
+        colorScroll.addView(colorContainer, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        colorScroll.setHorizontalScrollBarEnabled(false);
+        page.addView(colorScroll, topMargin(dp(8)));
 
         visibleSwitch = new Switch(this);
         visibleSwitch.setText("在主界面显示这个按钮");
-        visibleSwitch.setTextColor(TEXT);
+        visibleSwitch.setTextColor(theme.text);
         visibleSwitch.setTextSize(15);
         visibleSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
         page.addView(visibleSwitch, topMargin(dp(18)));
 
         page.addView(label("按键动作"), topMargin(dp(20)));
-        keySummary = text("", 17, PRIMARY, Typeface.BOLD);
+        keySummary = text("", 17, theme.primary, Typeface.BOLD);
         keySummary.setGravity(Gravity.CENTER);
         keySummary.setPadding(dp(14), dp(15), dp(14), dp(15));
-        keySummary.setBackgroundColor(PANEL);
+        keySummary.setBackground(theme.shape(this, theme.surfaceRaised, 16, 1, theme.outline));
         page.addView(keySummary, topMargin(dp(7)));
 
-        Button choose = button("选择单键或组合键", PANEL, TEXT);
+        Button choose = button("选择单键或组合键", theme.surface, theme.text);
         choose.setOnClickListener(view -> {
             Intent intent = new Intent(this, KeyPickerActivity.class);
             intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
@@ -146,35 +136,66 @@ public final class ShortcutEditActivity extends Activity {
         page.addView(choose, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
 
-        testButton = button("发送测试（不会保存）", Color.rgb(50, 65, 104), TEXT);
+        testButton = button("发送测试（不会保存）", theme.surfaceRaised, theme.text);
         testButton.setOnClickListener(view -> testAction());
         page.addView(testButton, topMargin(dp(18)));
 
-        feedback = text("先测试，再保存。电脑端必须为 1.5.0。", 13, MUTED,
+        feedback = text("先测试，再保存。电脑端必须为 1.5.0。", 13, theme.muted,
                 Typeface.NORMAL);
         feedback.setPadding(dp(12), dp(10), dp(12), dp(10));
+        feedback.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
         page.addView(feedback, topMargin(dp(7)));
 
-        Button save = button("保存并返回主界面", PRIMARY, BACKGROUND);
+        Button save = button("保存并返回主界面", theme.primary, theme.onPrimary);
         save.setOnClickListener(view -> saveAndFinish());
         page.addView(save, topMargin(dp(18)));
 
         Button restoreOrDelete = button(
                 draft.builtIn ? "恢复这个内置按钮" : "删除这个自定义按钮",
-                Color.rgb(78, 39, 51), DANGER);
+                theme.feedbackSurface(theme.danger), theme.danger);
         restoreOrDelete.setOnClickListener(view -> confirmRestoreOrDelete());
         page.addView(restoreOrDelete, topMargin(dp(12)));
-        return scroll;
+        return theme.wrapContent(this, scroll);
     }
 
     private void bindDraft() {
         labelInput.setText(draft.label);
         iconInput.setText(draft.icon);
-        int colorIndex = KeyCatalog.COLORS.indexOf(draft.color);
-        colorSpinner.setSelection(Math.max(0, colorIndex));
+        selectColor(draft.color);
         visibleSwitch.setChecked(draft.visible);
         updateKeySummary();
         dirty = false;
+    }
+
+    private void selectColor(String color) {
+        selectedColor = color;
+        colorContainer.removeAllViews();
+        for (String c : KeyCatalog.COLORS) {
+            View swatch = new View(this);
+            int size = dp(48);
+            boolean isSelected = c.equals(color);
+            swatch.setBackground(theme.shape(this, theme.shortcutColor(c), size / 2, isSelected ? 3 : 0, theme.text));
+            swatch.setContentDescription("选择" + colorName(c) + "按钮颜色"
+                    + (isSelected ? "，当前已选择" : ""));
+            swatch.setOnClickListener(v -> {
+                selectColor(c);
+                dirty = true;
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+            params.rightMargin = dp(12);
+            colorContainer.addView(swatch, params);
+        }
+    }
+
+    private String colorName(String color) {
+        switch (color) {
+            case "purple": return "紫色";
+            case "green": return "绿色";
+            case "orange": return "橙色";
+            case "red": return "红色";
+            case "slate": return "深灰色";
+            default: return "蓝色";
+        }
     }
 
     private void installDirtyTracking() {
@@ -188,13 +209,6 @@ public final class ShortcutEditActivity extends Activity {
         labelInput.addTextChangedListener(watcher);
         iconInput.addTextChangedListener(watcher);
         visibleSwitch.setOnCheckedChangeListener((button, checked) -> dirty = true);
-        colorSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view,
-                                                  int position, long id) {
-                dirty = true;
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) { }
-        });
     }
 
     private ShortcutButtonConfig collectDraft() {
@@ -208,7 +222,7 @@ public final class ShortcutEditActivity extends Activity {
         }
         return new ShortcutButtonConfig(
                 draft.id, label, icon,
-                KeyCatalog.COLORS.get(colorSpinner.getSelectedItemPosition()),
+                selectedColor == null ? "blue" : selectedColor,
                 visibleSwitch.isChecked(), draft.sortIndex, draft.builtIn,
                 draft.keys, draft.holdMs, System.currentTimeMillis());
     }
@@ -218,11 +232,11 @@ public final class ShortcutEditActivity extends Activity {
         try {
             candidate = collectDraft();
         } catch (Exception exception) {
-            showFeedback(exception.getMessage(), DANGER);
+            showFeedback(exception.getMessage(), theme.danger);
             return;
         }
         testButton.setEnabled(false);
-        showFeedback("正在发送测试：" + candidate.subtitle(), PENDING);
+        showFeedback("正在发送测试：" + candidate.subtitle(), theme.warning);
         executor.execute(() -> {
             try {
                 String message = PhoneDeckUsbClient.sendKeyChord(
@@ -230,12 +244,12 @@ public final class ShortcutEditActivity extends Activity {
                         candidate.holdMs,
                         BluetoothTransport.current());
                 runOnUiThread(() -> {
-                    showFeedback("✓  " + message, SUCCESS);
+                    showFeedback("✓  " + message, theme.success);
                     testButton.setEnabled(true);
                 });
             } catch (Exception exception) {
                 runOnUiThread(() -> {
-                    showFeedback("✕  " + exception.getMessage(), DANGER);
+                    showFeedback("✕  " + exception.getMessage(), theme.danger);
                     testButton.setEnabled(true);
                 });
             }
@@ -261,7 +275,7 @@ public final class ShortcutEditActivity extends Activity {
             dirty = false;
             finish();
         } catch (Exception exception) {
-            showFeedback("✕  " + exception.getMessage(), DANGER);
+            showFeedback("✕  " + exception.getMessage(), theme.danger);
         }
     }
 
@@ -293,7 +307,7 @@ public final class ShortcutEditActivity extends Activity {
                     repository.save(buttons);
                     draft = restored.copy();
                     bindDraft();
-                    showFeedback("✓  已恢复这个按钮", SUCCESS);
+                    showFeedback("✓  已恢复这个按钮", theme.success);
                 } else {
                     buttons.remove(index);
                     repository.save(buttons);
@@ -307,7 +321,7 @@ public final class ShortcutEditActivity extends Activity {
                 finish();
             }
         } catch (Exception exception) {
-            showFeedback("✕  " + exception.getMessage(), DANGER);
+            showFeedback("✕  " + exception.getMessage(), theme.danger);
         }
     }
 
@@ -359,22 +373,23 @@ public final class ShortcutEditActivity extends Activity {
     private void showFeedback(String message, int color) {
         feedback.setText(message == null ? "操作失败" : message);
         feedback.setTextColor(color);
+        feedback.setBackground(theme.shape(this, theme.feedbackSurface(color), 12, 1, color));
         feedback.announceForAccessibility(feedback.getText());
     }
 
     private TextView label(String value) {
-        return text(value, 15, TEXT, Typeface.BOLD);
+        return text(value, 15, theme.text, Typeface.BOLD);
     }
 
     private EditText input(String hint) {
         EditText input = new EditText(this);
         input.setHint(hint);
-        input.setHintTextColor(MUTED);
-        input.setTextColor(TEXT);
+        input.setHintTextColor(theme.muted);
+        input.setTextColor(theme.text);
         input.setTextSize(16);
         input.setSingleLine(true);
         input.setPadding(dp(12), 0, dp(12), 0);
-        input.setBackgroundColor(PANEL);
+        input.setBackground(theme.shape(this, theme.surface, 14, 1, theme.outline));
         return input;
     }
 
@@ -384,7 +399,8 @@ public final class ShortcutEditActivity extends Activity {
         button.setTextColor(foreground);
         button.setTextSize(15);
         button.setAllCaps(false);
-        button.setBackgroundColor(background);
+        button.setBackground(theme.pressable(this, background,
+                PhoneDeckTheme.blend(background, theme.primary, 0.16f), 14));
         return button;
     }
 
