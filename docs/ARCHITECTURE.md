@@ -1,6 +1,6 @@
 # PhoneDeck 架构说明
 
-## 当前 1.5.0 候选版数据流
+## 当前 1.6.0-dev.1 数据流
 
 ```text
 Android MainActivity
@@ -13,7 +13,7 @@ Windows PhoneDeck.Server        │
   │    ├─ 旧固定动作兼容
   │    └─ v2 信封/目标/键位白名单 → SendInput → 当前前台窗口
   ├─ /api/audio/stream
-  │    └─ sessionId → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
+  │    └─ sessionId + targetComputerId header → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
   ├─ /api/dictation/start|stop
   │    └─ 幂等会话 → Typeless；断流时尽力复位
   └─ BluetoothReceiver
@@ -30,6 +30,8 @@ Windows PhoneDeck.Server        │
 - `AudioStreamer.java`：AudioRecord、PCM 音量计算和 HTTP chunked 音频流；暂停时停止
   AudioRecord，并按实时速率发送 PCM 静音保持同一 HTTP/Typeless 会话，继续时恢复采集。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
+- `TargetDeviceManager.java`：保存已由健康检查或蓝牙 hello 确认的电脑 ID、显示名、平台和
+  手机端编号；只允许切换到当前 USB/蓝牙实际可达的设备。它不是局域网发现或配对实现。
 - `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
@@ -42,13 +44,13 @@ Windows PhoneDeck.Server        │
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
 
-## 当前单电脑限制
+## 当前单电脑/传输限制
 
 1. Android USB 服务器地址仍为 `http://127.0.0.1:8765`。
 2. ADB reverse 只能指向当前 USB 主机。
 3. Android 蓝牙传输只保存一个 socket。
-4. 已有单机稳定 `computerId` 和请求目标字段，但尚无设备列表、发现或配对模型。
-5. Windows 服务没有配对鉴权，因为 localhost USB 隧道不需要局域网暴露。
+4. 已有稳定 `computerId`、请求目标字段和手机端已知设备列表，但尚无局域网发现或配对模型。
+5. Windows 服务没有配对鉴权，因为 localhost USB 隧道不需要局域网暴露；不能直接绑定到局域网地址。
 6. 音频/Typeless 已有显式会话清理，但真实 USB 切换和外部 Typeless 状态仍待硬件验收。
 
 ## 已实现的协议 v2 基础与目标分层
@@ -80,6 +82,11 @@ Android UI / Profiles / Actions
   "keys": ["PRIMARY", "C"]
 }
 ```
+
+听写会话也必须绑定同一目标。JSON 端点使用 `protocolVersion`、`sessionId`、
+`targetComputerId`；PCM 流使用 `X-PhoneDeck-Protocol: 2`、
+`X-PhoneDeck-Session` 和 `X-PhoneDeck-Computer-Id` 请求头。服务端在进入音频或
+Typeless 状态机前校验目标，不匹配直接返回 400。
 
 `PRIMARY` 在 Windows 映射为 Ctrl，在 macOS 映射为 Command。
 
@@ -117,5 +124,8 @@ Android UI / Profiles / Actions
 - 手机目标选择；
 - 语音交接；
 - USB 共享切换器验证。
+
+当前 `1.6.0-dev.1` 已先完成目标 ID 贯穿和已达设备切换基础；局域网入口、配对和多机
+语音路由仍属于后续增量，不能由当前 localhost API 直接替代。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。

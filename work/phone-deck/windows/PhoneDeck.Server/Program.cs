@@ -30,7 +30,9 @@ var app = builder.Build();
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
-await using var bluetoothReceiver = new BluetoothReceiver(receiverIdentity.ComputerId);
+await using var bluetoothReceiver = new BluetoothReceiver(
+    receiverIdentity.ComputerId,
+    receiverIdentity.DisplayName);
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 
 app.MapGet("/api/health", () =>
@@ -40,7 +42,7 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.5.0",
+        version = "1.6.0-dev.1",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -84,6 +86,28 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
         return Results.BadRequest(new { ok = false, error = "不支持的音频格式" });
     }
 
+    int? protocolVersion = null;
+    var protocolHeader = request.Headers["X-PhoneDeck-Protocol"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(protocolHeader))
+    {
+        if (!int.TryParse(protocolHeader, out var parsedProtocolVersion))
+        {
+            return Results.BadRequest(new { ok = false, error = "无效的 protocolVersion" });
+        }
+        protocolVersion = parsedProtocolVersion;
+    }
+    try
+    {
+        TargetEnvelopeValidator.ValidateProtocolAndTarget(
+            protocolVersion,
+            request.Headers["X-PhoneDeck-Computer-Id"].FirstOrDefault(),
+            receiverIdentity.ComputerId);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+
     var sessionId = request.Headers["X-PhoneDeck-Session"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(sessionId))
     {
@@ -122,6 +146,12 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
 app.MapPost("/api/dictation/start", (DictationCommand command) =>
     ExecuteDictationCommand(() =>
     {
+        TargetEnvelopeValidator.Validate(
+            command.ProtocolVersion,
+            command.RequestId,
+            command.SessionId,
+            command.TargetComputerId,
+            receiverIdentity.ComputerId);
         var duplicate = dictationSessions.Start(command.SessionId, command.RequestId);
         return Results.Ok(new
         {
@@ -129,6 +159,7 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
             duplicate,
             requestId = command.RequestId,
             sessionId = command.SessionId,
+            computerId = receiverIdentity.ComputerId,
             active = true
         });
     }));
@@ -136,6 +167,12 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
 app.MapPost("/api/dictation/stop", (DictationCommand command) =>
     ExecuteDictationCommand(() =>
     {
+        TargetEnvelopeValidator.Validate(
+            command.ProtocolVersion,
+            command.RequestId,
+            command.SessionId,
+            command.TargetComputerId,
+            receiverIdentity.ComputerId);
         var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId);
         return Results.Ok(new
         {
@@ -143,6 +180,7 @@ app.MapPost("/api/dictation/stop", (DictationCommand command) =>
             duplicate,
             requestId = command.RequestId,
             sessionId = command.SessionId,
+            computerId = receiverIdentity.ComputerId,
             active = false
         });
     }));
@@ -219,7 +257,11 @@ internal sealed record InputCommand(
     string? TargetComputerId,
     string[]? Keys,
     int? HoldMs);
-internal sealed record DictationCommand(string? SessionId, string? RequestId);
+internal sealed record DictationCommand(
+    int? ProtocolVersion,
+    string? SessionId,
+    string? RequestId,
+    string? TargetComputerId);
 
 internal static class KeyboardInput
 {

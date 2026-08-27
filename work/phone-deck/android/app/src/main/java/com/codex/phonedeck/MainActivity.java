@@ -22,6 +22,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -63,6 +64,7 @@ public final class MainActivity extends Activity {
     private Button pauseResumeButton;
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
+    private LinearLayout targetDeviceRow;
     private boolean typelessInFlight;
     private boolean audioStartPending;
     private boolean dictationActive;
@@ -73,6 +75,7 @@ public final class MainActivity extends Activity {
     private String voiceMode = MODE_TAP;
     private String currentSessionId;
     private boolean currentSessionManaged;
+    private String currentSessionTargetComputerId;
     private volatile String intentionalAudioStopSessionId;
     private volatile boolean usbConnected;
     private volatile boolean usbRecoveryFeedbackPending;
@@ -82,12 +85,16 @@ public final class MainActivity extends Activity {
     private volatile int serverProtocolVersion;
     private volatile String targetComputerId;
     private volatile String targetDisplayName = "当前电脑";
+    private volatile String usbComputerId;
+    private volatile String usbDisplayName;
+    private volatile int usbProtocolVersion;
     private final String clientSessionId = UUID.randomUUID().toString();
     private volatile boolean bluetoothConnected;
     private volatile String bluetoothDetail = "等待电脑蓝牙连接";
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
+    private TargetDeviceManager targetDeviceManager;
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
@@ -109,6 +116,7 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
+        targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
         audioStreamer = new AudioStreamer(this, SERVER, new AudioStreamer.Listener() {
             @Override
@@ -221,6 +229,32 @@ public final class MainActivity extends Activity {
         settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
         installTouchFeedback(settings);
         connection.addView(settings, new LinearLayout.LayoutParams(dp(60), dp(38)));
+
+        LinearLayout targetHeader = new LinearLayout(this);
+        targetHeader.setOrientation(LinearLayout.HORIZONTAL);
+        targetHeader.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(targetHeader, marginTop(dp(2)));
+
+        TextView targetTitle = text("输入目标", 13, theme.text, Typeface.BOLD);
+        targetHeader.addView(targetTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView targetHint = text("只显示已确认的电脑", 11,
+                theme.muted, Typeface.NORMAL);
+        targetHeader.addView(targetHint);
+
+        HorizontalScrollView targetScroller = new HorizontalScrollView(this);
+        targetScroller.setHorizontalScrollBarEnabled(false);
+        targetScroller.setFillViewport(false);
+        targetDeviceRow = new LinearLayout(this);
+        targetDeviceRow.setOrientation(LinearLayout.HORIZONTAL);
+        targetDeviceRow.setGravity(Gravity.CENTER_VERTICAL);
+        targetScroller.addView(targetDeviceRow, new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
+        page.addView(targetScroller, margins(dp(0), dp(7), dp(0), dp(12),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        refreshTargetSwitcher();
 
         TextView shortcutTitle = text("快捷操作", 18, theme.text, Typeface.BOLD);
         page.addView(shortcutTitle, marginTop(dp(4)));
@@ -441,17 +475,125 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void refreshTargetSwitcher() {
+        if (targetDeviceRow == null || targetDeviceManager == null) {
+            return;
+        }
+        targetDeviceRow.removeAllViews();
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            TextView empty = text("连接电脑后，会自动出现在这里", 12,
+                    theme.muted, Typeface.NORMAL);
+            targetDeviceRow.addView(empty, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(38)));
+            return;
+        }
+
+        String activeComputerId = targetDeviceManager.getActiveComputerId();
+        for (TargetDeviceManager.Device device : devices) {
+            boolean selected = sameComputer(device.computerId, activeComputerId);
+            boolean online = isDeviceOnline(device.computerId);
+            Button chip = smallButton(device.slot + "号 · " + device.displayName);
+            chip.setAllCaps(false);
+            chip.setSingleLine(true);
+            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setBackground(theme.shape(
+                    this,
+                    selected ? theme.primary : theme.surfaceRaised,
+                    16,
+                    1,
+                    selected ? theme.primary : theme.outline));
+            chip.setAlpha(online ? 1f : 0.48f);
+            chip.setEnabled(online);
+            chip.setContentDescription(device.slot + "号电脑 " + device.displayName
+                    + (online ? selected ? "，当前目标" : "，在线" : "，离线"));
+            chip.setOnClickListener(view -> selectTargetDevice(device, chip));
+            installTouchFeedback(chip);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
+            params.rightMargin = dp(8);
+            targetDeviceRow.addView(chip, params);
+        }
+    }
+
+    private void selectTargetDevice(TargetDeviceManager.Device device, View source) {
+        if (isVoiceStarting() || dictationActive || typelessInFlight
+                || audioStreamer != null && audioStreamer.isRunning()) {
+            showActionFeedback("✕  请先停止当前语音，再切换目标电脑", theme.warning);
+            performResultHaptic(source, false);
+            return;
+        }
+        if (!isDeviceOnline(device.computerId)) {
+            showActionFeedback("✕  " + device.displayName + " 当前未连接", theme.danger);
+            performResultHaptic(source, false);
+            return;
+        }
+        if (!targetDeviceManager.select(device.computerId)) {
+            showActionFeedback("✕  无法选择目标电脑", theme.danger);
+            performResultHaptic(source, false);
+            return;
+        }
+        applyStoredTarget();
+        String channel = isUsbTargetOnline() ? "USB" : "蓝牙快捷键";
+        showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
+                + device.displayName + " · " + channel, theme.success);
+        performResultHaptic(source, true);
+    }
+
+    private void applyStoredTarget() {
+        TargetDeviceManager.Device active = targetDeviceManager == null
+                ? null : targetDeviceManager.find(targetDeviceManager.getActiveComputerId());
+        if (active == null) {
+            targetComputerId = null;
+            targetDisplayName = "当前电脑";
+            serverProtocolVersion = 0;
+        } else {
+            targetComputerId = active.computerId;
+            targetDisplayName = active.displayName;
+            if (isUsbTargetOnline()) {
+                serverProtocolVersion = usbProtocolVersion;
+            } else if (isBluetoothTargetOnline() && bluetoothTransport != null) {
+                serverProtocolVersion = bluetoothTransport.getProtocolVersion();
+            } else {
+                serverProtocolVersion = 0;
+            }
+        }
+        refreshTargetSwitcher();
+        updateConnectionDisplay();
+    }
+
+    private boolean isDeviceOnline(String computerId) {
+        return usbConnected && sameComputer(computerId, usbComputerId)
+                || bluetoothConnected && bluetoothTransport != null
+                && sameComputer(computerId, bluetoothTransport.getComputerId());
+    }
+
+    private boolean isUsbTargetOnline() {
+        return usbConnected && sameComputer(targetComputerId, usbComputerId);
+    }
+
+    private boolean isBluetoothTargetOnline() {
+        return bluetoothConnected && bluetoothTransport != null
+                && bluetoothTransport.isConnected()
+                && sameComputer(targetComputerId, bluetoothTransport.getComputerId());
+    }
+
+    private static boolean sameComputer(String left, String right) {
+        return left != null && right != null && left.equalsIgnoreCase(right);
+    }
+
     private void prepareBluetooth() {
         bluetoothTransport = new BluetoothTransport(this, (connected, detail) -> mainHandler.post(() -> {
             bluetoothConnected = connected;
             bluetoothDetail = detail;
             if (connected && bluetoothTransport != null
                     && bluetoothTransport.getComputerId() != null) {
-                targetComputerId = bluetoothTransport.getComputerId();
-                serverProtocolVersion = Math.max(
-                        serverProtocolVersion, bluetoothTransport.getProtocolVersion());
+                targetDeviceManager.upsert(
+                        bluetoothTransport.getComputerId(),
+                        bluetoothTransport.getDisplayName(),
+                        "windows");
             }
-            updateConnectionDisplay();
+            applyStoredTarget();
         }));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -495,7 +637,7 @@ public final class MainActivity extends Activity {
                         }
                     }
                     managedDictationSupported = supportsManagedDictation;
-                    serverProtocolVersion = health.optInt("protocolVersion", 0);
+                    usbProtocolVersion = health.optInt("protocolVersion", 0);
                     JSONObject audio = health.optJSONObject("audio");
                     phoneAudioAvailable = audio != null
                             && audio.optBoolean("available", false);
@@ -504,17 +646,22 @@ public final class MainActivity extends Activity {
                             && typeless.optBoolean("virtualCableSelected", false);
                     String healthComputerId = health.optString("computerId", null);
                     if (healthComputerId != null && !healthComputerId.isBlank()) {
-                        targetComputerId = healthComputerId;
+                        usbComputerId = healthComputerId;
                     }
                     String healthDisplayName = health.optString("displayName", null);
                     if (healthDisplayName != null && !healthDisplayName.isBlank()) {
-                        targetDisplayName = healthDisplayName;
+                        usbDisplayName = healthDisplayName;
                     }
+                    String healthPlatform = health.optString("platform", "windows");
                     boolean recoveredAfterVoiceDisconnect = usbRecoveryFeedbackPending;
                     usbRecoveryFeedbackPending = false;
                     usbConnected = true;
                     mainHandler.post(() -> {
-                        updateConnectionDisplay();
+                        targetDeviceManager.upsert(
+                                healthComputerId,
+                                healthDisplayName,
+                                healthPlatform);
+                        applyStoredTarget();
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
@@ -532,7 +679,7 @@ public final class MainActivity extends Activity {
                 phoneAudioAvailable = false;
                 typelessVirtualCableSelected = false;
                 mainHandler.post(() -> {
-                    updateConnectionDisplay();
+                    applyStoredTarget();
                     if (wasConnected) {
                         handleUsbConnectionLost();
                     }
@@ -627,6 +774,7 @@ public final class MainActivity extends Activity {
     private void cancelPendingDictation() {
         String sessionId = currentSessionId;
         boolean managed = currentSessionManaged;
+        String sessionTargetComputerId = currentSessionTargetComputerId;
         intentionalAudioStopSessionId = sessionId;
         if (audioStreamer != null) {
             audioStreamer.stop();
@@ -637,16 +785,20 @@ public final class MainActivity extends Activity {
         showActionFeedback("✓  已立即取消语音启动", theme.muted);
         performResultHaptic(typelessButton, true);
         if (managed && sessionId != null) {
-            bestEffortStopManagedDictation(sessionId);
+            bestEffortStopManagedDictation(sessionId, sessionTargetComputerId);
         }
     }
 
-    private void bestEffortStopManagedDictation(String sessionId) {
+    private void bestEffortStopManagedDictation(
+            String sessionId,
+            String sessionTargetComputerId) {
         actionExecutor.execute(() -> {
             try {
                 JSONObject body = new JSONObject();
+                body.put("protocolVersion", 2);
                 body.put("sessionId", sessionId);
                 body.put("requestId", UUID.randomUUID().toString());
+                body.put("targetComputerId", sessionTargetComputerId);
                 postUsbWithRetry("/api/dictation/stop", body, 2);
             } catch (Exception ignored) {
                 // 本地音频已经停止；电脑端也会在音频断流时复位 managed 会话。
@@ -790,9 +942,15 @@ public final class MainActivity extends Activity {
     }
 
     private void beginPhoneDictation() {
-        if (!usbConnected) {
-            showConnection("手机音频需要 USB 连接", theme.danger);
-            showActionFeedback("✕  请连接 USB，并重新运行电脑端启动脚本", theme.danger);
+        if (!isUsbTargetOnline()) {
+            if (isBluetoothTargetOnline()) {
+                showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
+                showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；语音需 USB 或后续局域网通道",
+                        theme.danger);
+            } else {
+                showConnection(targetDisplayName + " · 当前离线", theme.danger);
+                showActionFeedback("✕  目标电脑未连接，请选择一台在线电脑", theme.danger);
+            }
             testConnection();
             return;
         }
@@ -825,12 +983,22 @@ public final class MainActivity extends Activity {
         dictationPaused = false;
         currentSessionId = UUID.randomUUID().toString();
         currentSessionManaged = managedDictationSupported;
+        currentSessionTargetComputerId = serverProtocolVersion >= 2
+                ? targetComputerId : null;
+        if (currentSessionManaged
+                && (currentSessionTargetComputerId == null
+                || currentSessionTargetComputerId.isBlank())) {
+            clearVoiceSessionState();
+            showActionFeedback("✕  尚未确认目标电脑，请重新检测连接", theme.danger);
+            testConnection();
+            return;
+        }
         intentionalAudioStopSessionId = null;
         setTypelessBusy("正在连接手机麦克风…");
         showActionFeedback("●  正在建立 USB 音频通道…", theme.warning);
         microphoneLevel.setText("手机麦克风  ◌ 正在连接");
         microphoneLevel.setTextColor(theme.warning);
-        if (!audioStreamer.start(currentSessionId)) {
+        if (!audioStreamer.start(currentSessionId, currentSessionTargetComputerId)) {
             clearVoiceSessionState();
             showActionFeedback("✕  上一个手机音频会话仍在收尾，请稍后重试", theme.danger);
         }
@@ -870,11 +1038,13 @@ public final class MainActivity extends Activity {
             return;
         }
         final boolean managed = currentSessionManaged;
+        final String sessionTargetComputerId = currentSessionTargetComputerId;
         actionExecutor.execute(() -> {
             try {
                 String transport;
                 if (managed) {
-                    transport = sendManagedDictationCommand(starting, sessionId);
+                    transport = sendManagedDictationCommand(
+                            starting, sessionId, sessionTargetComputerId);
                 } else {
                     JSONObject body = new JSONObject();
                     body.put("action", "typeless");
@@ -932,11 +1102,19 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private String sendManagedDictationCommand(boolean starting, String sessionId)
+    private String sendManagedDictationCommand(
+            boolean starting,
+            String sessionId,
+            String sessionTargetComputerId)
             throws Exception {
+        if (sessionTargetComputerId == null || sessionTargetComputerId.isBlank()) {
+            throw new IllegalStateException("尚未确认目标电脑");
+        }
         JSONObject body = new JSONObject();
+        body.put("protocolVersion", 2);
         body.put("sessionId", sessionId);
         body.put("requestId", UUID.randomUUID().toString());
+        body.put("targetComputerId", sessionTargetComputerId);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
         if (!postUsbWithRetry(endpoint, body, 2)) {
             usbConnected = false;
@@ -1024,6 +1202,7 @@ public final class MainActivity extends Activity {
         holdReleasePending = false;
         currentSessionId = null;
         currentSessionManaged = false;
+        currentSessionTargetComputerId = null;
         voiceBusyLabel = null;
         if (typelessButton != null) {
             updateVoiceControls();
@@ -1033,10 +1212,8 @@ public final class MainActivity extends Activity {
     private String sendCommand(JSONObject body) throws Exception {
         boolean sent = false;
         String transport = "";
-        boolean usbAttempted = false;
 
-        if (usbConnected) {
-            usbAttempted = true;
+        if (isUsbTargetOnline()) {
             sent = postUsbWithRetry("/api/input", body, 2);
             if (sent) {
                 transport = "USB";
@@ -1045,23 +1222,15 @@ public final class MainActivity extends Activity {
             }
         }
 
-        if (!sent && bluetoothTransport != null && bluetoothTransport.isConnected()) {
+        if (!sent && isBluetoothTargetOnline()) {
             sent = bluetoothTransport.sendAndWaitForAck(body, 1400);
             if (sent) {
                 transport = "蓝牙";
             }
         }
 
-        if (!sent && !usbAttempted) {
-            sent = postUsbWithRetry("/api/input", body, 2);
-            if (sent) {
-                usbConnected = true;
-                transport = "USB";
-            }
-        }
-
         if (!sent) {
-            throw new IllegalStateException("没有可用连接");
+            throw new IllegalStateException("目标电脑当前没有可用连接");
         }
         return transport;
     }
@@ -1109,7 +1278,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateConnectionDisplay() {
-        if (usbConnected) {
+        if (isUsbTargetOnline()) {
             if (!phoneAudioAvailable) {
                 showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
             } else if (!typelessVirtualCableSelected) {
@@ -1117,8 +1286,10 @@ public final class MainActivity extends Activity {
             } else {
                 showConnection(targetDisplayName + " · USB 在线", theme.success);
             }
-        } else if (bluetoothConnected) {
-            showConnection(targetDisplayName + " · 蓝牙在线", theme.success);
+        } else if (isBluetoothTargetOnline()) {
+            showConnection(targetDisplayName + " · 蓝牙快捷键在线", theme.success);
+        } else if (targetComputerId != null) {
+            showConnection(targetDisplayName + " · 当前离线", theme.muted);
         } else {
             showConnection("等待电脑连接", theme.muted);
         }

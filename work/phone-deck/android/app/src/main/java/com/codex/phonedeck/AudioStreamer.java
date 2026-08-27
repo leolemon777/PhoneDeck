@@ -54,9 +54,13 @@ final class AudioStreamer implements AutoCloseable {
         return paused;
     }
 
-    boolean start(String sessionId) {
+    boolean start(String sessionId, String targetComputerId) {
         if (sessionId == null || sessionId.isBlank() || sessionId.length() > 128) {
             throw new IllegalArgumentException("无效的音频 sessionId");
+        }
+        if (targetComputerId != null
+                && (targetComputerId.isBlank() || targetComputerId.length() > 128)) {
+            throw new IllegalArgumentException("无效的目标电脑 ID");
         }
         synchronized (syncRoot) {
             if (worker != null && worker.isAlive()) {
@@ -65,7 +69,9 @@ final class AudioStreamer implements AutoCloseable {
             shouldRun = true;
             paused = false;
             recorderNeedsRestart = false;
-            worker = new Thread(() -> runStream(sessionId), "PhoneDeck-Microphone");
+            worker = new Thread(
+                    () -> runStream(sessionId, targetComputerId),
+                    "PhoneDeck-Microphone");
             worker.start();
             return true;
         }
@@ -114,7 +120,7 @@ final class AudioStreamer implements AutoCloseable {
         }
     }
 
-    private void runStream(String sessionId) {
+    private void runStream(String sessionId, String targetComputerId) {
         HttpURLConnection connection = null;
         AudioRecord localRecorder = null;
         boolean recorderStarted = false;
@@ -150,6 +156,11 @@ final class AudioStreamer implements AutoCloseable {
             connection.setRequestProperty("Content-Type", "audio/L16; rate=48000; channels=1");
             connection.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
             connection.setRequestProperty("X-PhoneDeck-Session", sessionId);
+            if (targetComputerId != null && !targetComputerId.isBlank()) {
+                connection.setRequestProperty("X-PhoneDeck-Protocol", "2");
+                connection.setRequestProperty(
+                        "X-PhoneDeck-Computer-Id", targetComputerId);
+            }
             connection.setChunkedStreamingMode(8192);
             connection.setDoOutput(true);
             activeConnection = connection;

@@ -240,6 +240,7 @@ public final class ShortcutEditActivity extends Activity {
         executor.execute(() -> {
             try {
                 String message = PhoneDeckUsbClient.sendKeyChord(
+                        this,
                         candidate.keys,
                         candidate.holdMs,
                         BluetoothTransport.current());

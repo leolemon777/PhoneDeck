@@ -12,13 +12,15 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
 
     private readonly CancellationTokenSource ownCancellation = new();
     private readonly string computerId;
+    private readonly string displayName;
     private Task? worker;
     private IntPtr activeSocket = BluetoothNative.InvalidSocket;
     private string lastStatus = string.Empty;
 
-    internal BluetoothReceiver(string computerId)
+    internal BluetoothReceiver(string computerId, string displayName)
     {
         this.computerId = computerId;
+        this.displayName = displayName;
     }
 
     internal void Start(CancellationToken applicationStopping)
@@ -98,7 +100,7 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
 
             WriteStatus($"蓝牙：已连接 {device.Name}");
             BluetoothNative.SetReceiveTimeout(socket, 2500);
-            SendHello(socket, computerId);
+            SendHello(socket, computerId, displayName);
 
             var received = new byte[4096];
             var pending = new List<byte>(4096);
@@ -197,15 +199,16 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
         }
     }
 
-    private static void SendHello(IntPtr socket, string computerId)
+    private static void SendHello(IntPtr socket, string computerId, string displayName)
     {
         var json = JsonSerializer.Serialize(new
         {
             type = "hello",
             name = "PhoneDeck",
-            version = "1.5.0",
+            version = "1.6.0-dev.1",
             protocolVersion = 2,
             computerId,
+            displayName,
             platform = "windows",
             capabilities = new[] { "fixedAction", "keyChord", "text" }
         });

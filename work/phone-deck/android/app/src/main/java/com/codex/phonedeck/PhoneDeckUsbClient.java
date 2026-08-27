@@ -1,5 +1,7 @@
 package com.codex.phonedeck;
 
+import android.content.Context;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -52,6 +54,7 @@ final class PhoneDeckUsbClient {
     }
 
     static String sendKeyChord(
+            Context context,
             List<String> keys,
             int holdMs,
             BluetoothTransport bluetoothTransport) throws Exception {
@@ -71,9 +74,20 @@ final class PhoneDeckUsbClient {
             usbFailure = exception;
         }
 
+        TargetDeviceManager deviceManager = new TargetDeviceManager(context);
+        String activeComputerId = deviceManager.getActiveComputerId();
+        if (activeComputerId == null || activeComputerId.isBlank()) {
+            if (usbServer != null && !usbServer.computerId.isEmpty()) {
+                activeComputerId = usbServer.computerId;
+            } else if (canUseBluetooth(bluetoothTransport)) {
+                activeComputerId = bluetoothTransport.getComputerId();
+            }
+        }
+
         if (usbServer != null
                 && usbServer.protocolVersion >= 2
-                && !usbServer.computerId.isEmpty()) {
+                && !usbServer.computerId.isEmpty()
+                && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
             JSONObject body = createKeyChordBody(
                     keyArray, holdMs, requestId, sessionId, usbServer.computerId);
             try {
@@ -90,12 +104,13 @@ final class PhoneDeckUsbClient {
                 throw exception;
             }
         }
-        if (usbServer != null) {
+        if (usbServer != null && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
             usbFailure = new IllegalStateException(
                     "USB 电脑端需要升级到 PhoneDeck 1.5.0");
         }
 
-        if (canUseBluetooth(bluetoothTransport)) {
+        if (canUseBluetooth(bluetoothTransport)
+                && bluetoothTransport.getComputerId().equalsIgnoreCase(activeComputerId)) {
             JSONObject body = createKeyChordBody(
                     keyArray,
                     holdMs,
@@ -109,7 +124,7 @@ final class PhoneDeckUsbClient {
         }
         throw new IllegalStateException(
                 usbFailure == null || usbFailure.getMessage() == null
-                        ? "没有可用的 USB 或蓝牙连接"
+                        ? "当前目标电脑没有可用的 USB 或蓝牙连接"
                         : usbFailure.getMessage(),
                 usbFailure);
     }

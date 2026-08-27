@@ -1,8 +1,8 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-08-27
-当前分支：`agent/ui-themes-1.5.0`
-当前源码：PhoneDeck 1.5.0 候选版
+当前分支：`agent/multi-pc-1.6.0`
+当前源码：PhoneDeck 1.6.0-dev.1（多目标基础）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.3
 Android 配置版本：`schemaVersion=1`
@@ -10,9 +10,33 @@ Android 配置版本：`schemaVersion=1`
 
 ## 给下一台电脑和下一位 Agent 的一句话
 
-1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成；下一步
-不是继续扩大功能，而是补齐快捷键编辑、真实输入、VB-CABLE、Typeless、连续断线和
-蓝牙验收，修复实机问题后再发布。
+1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成。本轮
+1.6.0-dev.1 已把目标电脑 ID 贯穿到听写、PCM 音频和快捷键，并加入已确认设备的手机端
+切换条；它仍不是三台电脑同时在线版本。下一步是独立实现已鉴权的局域网/手机热点传输，
+再做真实多机语音验收。
+
+## 本轮方案审核结论
+
+- USB 只能连当前一台主机；普通 Hub/Y 线不可能提供三台主机并联。
+- 当前蓝牙只保持一个 RFCOMM 电脑连接，且不传语音，所以不能承诺蓝牙三机语音。
+- 手机端设备列表现在只把健康检查或蓝牙 `hello` 确认过的电脑记为已知设备；离线设备不可
+  误选，蓝牙-only 目标会明确提示语音需要 USB 或后续局域网通道。
+- 局域网必须使用独立端口、配对、消息认证和心跳，不能把 localhost 无鉴权 API 直接暴露。
+
+## 1.6.0-dev.1 本轮代码变更
+
+- `TargetEnvelopeValidator.cs` 统一校验 protocol v2 的 request/session/target，快捷键和
+  听写入口共用同一规则；PCM 流通过 `X-PhoneDeck-Protocol` 与
+  `X-PhoneDeck-Computer-Id` 请求头校验。
+- Android `AudioStreamer`、听写 start/stop 均携带会话目标 ID；同一听写会话不会因目标
+  状态变化而把停止命令发给另一台电脑。
+- `TargetDeviceManager.java` 持久化已确认电脑的编号、名称、平台和最近在线时间；主界面
+  增加目标切换条。切换只允许在线 USB/蓝牙设备，语音对蓝牙-only 目标会明确提示尚需
+  USB 或局域网通道。
+- 蓝牙 hello 现在回传电脑显示名，便于手机建立可读的设备卡片。
+
+验证：Windows Release build、11 项单元测试、Android `assembleDebug` 和 `lintDebug`
+均通过；尚未进行真实多电脑或局域网验收。
 
 ## 本轮完成的代码
 
