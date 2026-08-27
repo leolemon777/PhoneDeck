@@ -84,6 +84,7 @@ PhoneDeck/
 ├─ docs/
 │  ├─ HANDOFF.md               # 当前状态与 Agent 接力说明
 │  ├─ SETUP.md                 # 新电脑搭建、构建和运行
+│  ├─ WINDOWS_WIFI_DEPLOY.md   # 第二/第三台 Windows 无线部署
 │  └─ ARCHITECTURE.md          # 当前与目标架构
 ├─ scripts/windows/            # 发行包辅助脚本模板
 └─ work/phone-deck/
