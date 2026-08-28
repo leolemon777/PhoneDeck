@@ -339,7 +339,15 @@ internal sealed record InputCommand(
     string? SessionId,
     string? TargetComputerId,
     string[]? Keys,
-    int? HoldMs);
+    int? HoldMs,
+    MacroStep[]? Steps);
+internal sealed record MacroStep(
+    string? Type,
+    string[]? Keys,
+    int? HoldMs,
+    string? Text,
+    bool? Submit,
+    int? DelayBeforeMs);
 internal sealed record DictationCommand(
     int? ProtocolVersion,
     string? SessionId,
@@ -540,6 +548,100 @@ internal static class KeyboardInput
         return ExecuteOnceCore(requestId,
             () => SendChordSafely(holdMilliseconds, keys));
     }
+
+    internal static bool ExecuteMacroOnce(
+        MacroStep[]? steps,
+        string? requestId,
+        out string description)
+    {
+        var plan = ParseMacroSteps(steps, out description);
+        return ExecuteOnceCore(requestId, () => RunMacro(plan));
+    }
+
+    /// 仅供单元测试：完整校验宏步骤但不执行。
+    internal static void ValidateMacroSteps(MacroStep[]? steps)
+    {
+        _ = ParseMacroSteps(steps, out _);
+    }
+
+    private static List<MacroStepPlan> ParseMacroSteps(
+        MacroStep[]? steps, out string description)
+    {
+        if (steps is null || steps.Length is < 1 or > 8)
+        {
+            throw new ArgumentException("宏必须包含 1–8 个步骤");
+        }
+        var plan = new List<MacroStepPlan>(steps.Length);
+        var descriptions = new List<string>(steps.Length);
+        foreach (var step in steps)
+        {
+            var delay = step.DelayBeforeMs ?? 0;
+            if (delay is < 0 or > 2000)
+            {
+                throw new ArgumentException("宏步骤延迟必须在 0–2000 毫秒之间");
+            }
+            var prefix = delay > 0 ? $"等{delay}ms·" : "";
+            var type = (step.Type ?? "").Trim().ToLowerInvariant();
+            if (type == "keychord")
+            {
+                var keys = ParseKeyChord(step.Keys, out var keyDescription);
+                var hold = step.HoldMs ?? 45;
+                if (hold is < 20 or > 500)
+                {
+                    throw new ArgumentException("holdMs 必须在 20–500 毫秒之间");
+                }
+                plan.Add(new MacroStepPlan(delay, keys, hold, null, false));
+                descriptions.Add(prefix + keyDescription);
+            }
+            else if (type == "text")
+            {
+                if (string.IsNullOrEmpty(step.Text) || step.Text.Length > 4096)
+                {
+                    throw new ArgumentException("宏的文本步骤内容无效");
+                }
+                plan.Add(new MacroStepPlan(delay, Array.Empty<ushort>(), 0, step.Text,
+                    step.Submit ?? false));
+                descriptions.Add(prefix + "输入文本" + (step.Submit == true ? "并回车" : ""));
+            }
+            else
+            {
+                throw new ArgumentException($"未知的宏步骤类型：{step.Type}");
+            }
+        }
+        description = string.Join(" → ", descriptions);
+        return plan;
+    }
+
+    private static void RunMacro(List<MacroStepPlan> plan)
+    {
+        foreach (var step in plan)
+        {
+            if (step.DelayMs > 0)
+            {
+                Thread.Sleep(step.DelayMs);
+            }
+            if (step.Text is not null)
+            {
+                SendText(step.Text);
+                if (step.Submit)
+                {
+                    Thread.Sleep(45);
+                    SendKey(VkReturn);
+                }
+            }
+            else
+            {
+                SendChordSafely(step.HoldMs, step.Keys);
+            }
+        }
+    }
+
+    private sealed record MacroStepPlan(
+        int DelayMs,
+        ushort[] Keys,
+        int HoldMs,
+        string? Text,
+        bool Submit);
 
     private static bool ExecuteOnceCore(string? requestId, Action execute)
     {
