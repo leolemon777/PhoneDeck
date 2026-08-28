@@ -2,10 +2,12 @@ internal sealed class DictationSessionManager : IDisposable
 {
     private const int AudioSessionReadyTimeoutMilliseconds = 1_200;
     private const int TypelessStateTimeoutMilliseconds = 1_200;
+    private static readonly string[] ValidModes = { "dictation", "translation", "ask" };
     private readonly object syncRoot = new();
     private readonly IPhoneAudioSessionController audioBridge;
     private readonly ITypelessController typeless;
     private string? activeDictationSessionId;
+    private string activeMode = "dictation";
 
     internal DictationSessionManager(PhoneAudioBridge audioBridge)
         : this(audioBridge, new WindowsTypelessController())
@@ -42,10 +44,16 @@ internal sealed class DictationSessionManager : IDisposable
         }
     }
 
-    internal bool Start(string? sessionId, string? requestId)
+    internal bool Start(string? sessionId, string? requestId, string? mode)
     {
         var normalizedSessionId = ValidateSessionId(sessionId);
         var normalizedRequestId = ValidateRequestId(requestId);
+        var normalizedMode = NormalizeMode(mode);
+        if (!typeless.IsModeConfigured(normalizedMode))
+        {
+            throw new InvalidOperationException(
+                "Typeless 未配置该模式的快捷键，无法启动");
+        }
         lock (syncRoot)
         {
             if (string.Equals(activeDictationSessionId, normalizedSessionId,
@@ -82,7 +90,8 @@ internal sealed class DictationSessionManager : IDisposable
                     "Typeless 已在听写，请先在电脑端停止后重试");
             }
 
-            var duplicate = typeless.ToggleOnce(normalizedRequestId);
+            activeMode = normalizedMode;
+            var duplicate = typeless.ToggleOnce(normalizedRequestId, normalizedMode);
             activeDictationSessionId = normalizedSessionId;
             bool? started;
             try
@@ -224,7 +233,7 @@ internal sealed class DictationSessionManager : IDisposable
 
         duplicate = requestId is null
             ? ToggleWithoutRequestId()
-            : typeless.ToggleOnce(requestId);
+            : typeless.ToggleOnce(requestId, activeMode);
         var stopped = typeless.WaitForCapturing(
             expected: false, TypelessStateTimeoutMilliseconds);
         if (stopped is true)
@@ -252,7 +261,7 @@ internal sealed class DictationSessionManager : IDisposable
 
         // 仅当音频会话仍明确为 Active 时重试一次，
         // 避免已经停止后又被双击切换回开启。
-        typeless.Toggle();
+        typeless.Toggle(activeMode);
         stopped = typeless.WaitForCapturing(
             expected: false, TypelessStateTimeoutMilliseconds);
         return stopped is true;
@@ -260,8 +269,20 @@ internal sealed class DictationSessionManager : IDisposable
 
     private bool ToggleWithoutRequestId()
     {
-        typeless.Toggle();
+        typeless.Toggle(activeMode);
         return false;
+    }
+
+    private static string NormalizeMode(string? mode)
+    {
+        var normalized = string.IsNullOrWhiteSpace(mode)
+            ? "dictation"
+            : mode.Trim().ToLowerInvariant();
+        if (!ValidModes.Contains(normalized))
+        {
+            throw new ArgumentException($"未知的 Typeless 模式：{mode}");
+        }
+        return normalized;
     }
 
     private void ResetFailedStart(string sessionId)

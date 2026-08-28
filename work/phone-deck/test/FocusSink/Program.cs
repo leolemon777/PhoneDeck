@@ -31,7 +31,7 @@ form.FormClosed += (_, _) =>
     Console.WriteLine(encoded);
 };
 
-var timeout = new System.Windows.Forms.Timer { Interval = 120000 };
+var timeout = new System.Windows.Forms.Timer { Interval = 600000 };
 timeout.Tick += (_, _) => form.Close();
 timeout.Start();
 Application.Run(form);
