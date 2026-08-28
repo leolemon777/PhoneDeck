@@ -54,18 +54,56 @@ internal sealed class LanIdentity : IDisposable
     }
 
     internal string[] GetCandidateAddresses() =>
-        NetworkInterface.GetAllNetworkInterfaces()
+        SelectCandidateAddresses(NetworkInterface.GetAllNetworkInterfaces()
             .Where(network => network.OperationalStatus == OperationalStatus.Up
                 && network.NetworkInterfaceType is not NetworkInterfaceType.Loopback
                 && network.NetworkInterfaceType is not NetworkInterfaceType.Tunnel)
-            .SelectMany(network => network.GetIPProperties().UnicastAddresses)
-            .Where(address => address.Address.AddressFamily == AddressFamily.InterNetwork
-                && !IPAddress.IsLoopback(address.Address)
-                && !address.Address.ToString().StartsWith("169.254.",
-                    StringComparison.Ordinal))
-            .Select(address => address.Address.ToString())
+            .SelectMany(network => network
+                .GetIPProperties().UnicastAddresses
+                .Where(address => address.Address.AddressFamily == AddressFamily.InterNetwork
+                    && !IPAddress.IsLoopback(address.Address)
+                    && !IsExcludedAddress(address.Address))
+                .Select(address => new AddressCandidate(
+                    address.Address,
+                    network.GetIPProperties().GatewayAddresses.Count > 0,
+                    network.NetworkInterfaceType))));
+
+    internal readonly record struct AddressCandidate(
+        IPAddress Address,
+        bool InterfaceHasGateway,
+        NetworkInterfaceType InterfaceType);
+
+    /// <summary>按“有网关的真实接口优先”排序，并排除回环、APIPA 和
+    /// 198.18.0.0/15 基准/TUN 网段；独立成纯函数以便单元测试。</summary>
+    internal static string[] SelectCandidateAddresses(
+        IEnumerable<AddressCandidate> candidates) =>
+        candidates
+            .Where(candidate => !IsExcludedAddress(candidate.Address))
+            .OrderByDescending(candidate => candidate.InterfaceHasGateway)
+            .ThenBy(candidate => InterfaceTypeRank(candidate.InterfaceType))
+            .Select(candidate => candidate.Address.ToString())
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+
+    /// <summary>排除回环 127.0.0.0/8、APIPA 169.254.0.0/16 与
+    /// RFC 2544 基准网段 198.18.0.0/15（Meta/Clash 等 TUN 虚拟网卡常用）。</summary>
+    internal static bool IsExcludedAddress(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length != 4)
+        {
+            return true;
+        }
+        return bytes[0] == 127
+            || (bytes[0] == 169 && bytes[1] == 254)
+            || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19));
+    }
+
+    private static int InterfaceTypeRank(NetworkInterfaceType type) => type switch
+    {
+        NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211 => 0,
+        _ => 1
+    };
 
     private static string ReadOrCreateSecret(string path, int byteCount)
     {

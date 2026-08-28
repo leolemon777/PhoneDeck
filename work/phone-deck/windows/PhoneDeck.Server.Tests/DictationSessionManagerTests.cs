@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 [TestClass]
@@ -179,11 +180,101 @@ public sealed class DictationSessionManagerTests
         return sessionId;
     }
 
+    [TestMethod]
+    public void StartReleasesPreRollOnlyAfterTypelessCapturingConfirmed()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+        var sessionId = Guid.NewGuid().ToString();
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+
+        Assert.IsFalse(manager.Start(sessionId, "start-request", "dictation"));
+        Assert.AreEqual(1, audio.BeginPlaybackCalls,
+            "Typeless 确认采集后必须放行 pre-roll");
+    }
+
+    [TestMethod]
+    public void FailedStartDoesNotReleasePreRoll()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(false);
+        typeless.IsCapturingResults.Enqueue(false);
+
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Start(Guid.NewGuid().ToString(), "start-request", "dictation"));
+        Assert.AreEqual(0, audio.BeginPlaybackCalls);
+    }
+
+    [TestMethod]
+    public void IsActiveAndHealthReadsDoNotBlockDuringSlowStart()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController
+        {
+            WaitForCapturingGate = new ManualResetEventSlim(false)
+        };
+        var manager = new DictationSessionManager(audio, typeless);
+        var sessionId = Guid.NewGuid().ToString();
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+        var startTask = Task.Run(() =>
+            manager.Start(sessionId, "start-request", "dictation"));
+
+        var deadline = Environment.TickCount64 + 5_000;
+        while (!manager.IsActive && Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(10);
+        }
+        Assert.IsTrue(manager.IsActive, "启动线程应已进入 WaitForCapturing 阶段");
+
+        // 启动线程持有 syncRoot 并阻塞在慢速状态等待中，
+        // 无锁读路径（/api/health 的 dictation.active）必须立即返回。
+        var stopwatch = Stopwatch.StartNew();
+        Assert.IsTrue(manager.IsActive);
+        Assert.AreEqual(sessionId, manager.ActiveSessionId);
+        stopwatch.Stop();
+        Assert.IsTrue(stopwatch.ElapsedMilliseconds < 500,
+            $"IsActive 在慢速启动期间耗时 {stopwatch.ElapsedMilliseconds}ms，health 会被拖慢");
+
+        typeless.WaitForCapturingGate.Set();
+        Assert.IsTrue(startTask.Wait(5_000));
+        Assert.AreEqual(1, audio.BeginPlaybackCalls);
+    }
+
+    [TestMethod]
+    public void StopWaitsForAudioDrainBeforeTogglingTypeless()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+        var sessionId = Guid.NewGuid().ToString();
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+        Assert.IsFalse(manager.Start(sessionId, "start-request", "dictation"));
+
+        typeless.IsCapturingResults.Enqueue(false);
+        Assert.IsTrue(manager.Stop(sessionId, "stop-request"));
+        Assert.AreEqual(1, audio.WaitForSessionEndCalls,
+            "停止 Typeless 前必须等待音频流排空，避免丢失 pre-roll 尾部");
+    }
+
     private sealed class FakeAudioSessionController : IPhoneAudioSessionController
     {
         public int StopCalls { get; private set; }
         public int WaitForSessionCalls { get; private set; }
+        public int BeginPlaybackCalls { get; private set; }
+        public int WaitForSessionEndCalls { get; private set; }
         public bool WaitForSessionResult { get; set; } = true;
+        public bool WaitForSessionEndResult { get; set; } = true;
 
         public bool IsSessionActive(string sessionId) => true;
 
@@ -197,6 +288,17 @@ public sealed class DictationSessionManagerTests
         {
             StopCalls++;
             return true;
+        }
+
+        public void BeginPlayback(string sessionId)
+        {
+            BeginPlaybackCalls++;
+        }
+
+        public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds)
+        {
+            WaitForSessionEndCalls++;
+            return WaitForSessionEndResult;
         }
     }
 
@@ -212,12 +314,18 @@ public sealed class DictationSessionManagerTests
         public string LastMode { get; private set; } = "dictation";
         public bool UsesVirtualCable { get; set; } = true;
 
+        /// <summary>非空时 WaitForCapturing 先阻塞在该闸门上，模拟慢速 Typeless。</summary>
+        public ManualResetEventSlim? WaitForCapturingGate { get; set; }
+
         public bool? IsCapturing() => IsCapturingResults.Count > 0
             ? IsCapturingResults.Dequeue()
             : false;
 
-        public bool? WaitForCapturing(bool expected, int timeoutMilliseconds) =>
-            WaitResults.Count > 0 ? WaitResults.Dequeue() : expected;
+        public bool? WaitForCapturing(bool expected, int timeoutMilliseconds)
+        {
+            WaitForCapturingGate?.Wait();
+            return WaitResults.Count > 0 ? WaitResults.Dequeue() : expected;
+        }
 
         public bool IsModeConfigured(string mode) => ConfiguredModes.Contains(mode);
 

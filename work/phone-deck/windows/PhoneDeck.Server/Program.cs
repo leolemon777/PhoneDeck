@@ -39,6 +39,29 @@ var serverSettings = ServerSettings.LoadOrCreate();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
+using var lanDiscovery = new LanDiscoveryResponder(
+    receiverIdentity,
+    lanIdentity.HttpsPort);
+using var diagnostics = new DiagnosticsMonitor(() =>
+{
+    var typelessState = KeyboardInput.ReadTypelessState();
+    return new DiagnosticsSnapshot
+    {
+        CheckedAtMs = Environment.TickCount64,
+        TypelessCapturing = TypelessStateProbe.IsCapturing(),
+        TypelessMicrophone = typelessState.MicrophoneDescription,
+        TypelessUsesVirtualCable = typelessState.UsesVirtualCable,
+        DictationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
+            typelessState.DictationBinding),
+        TranslationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
+            typelessState.TranslationBinding),
+        AskKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
+            typelessState.AskBinding),
+        VirtualCableDevice = audioBridge.FindVirtualCable(),
+        ForegroundApp = KeyboardInput.ForegroundAppName()
+    };
+});
+diagnostics.Start();
 await using var bluetoothReceiver = new BluetoothReceiver(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName);
@@ -50,6 +73,14 @@ if (serverSettings.UsbWatchdog)
 else
 {
     Console.WriteLine("USB 看门狗已在 server-settings.json 中关闭。");
+}
+if (serverSettings.LanDiscovery)
+{
+    lanDiscovery.Start();
+}
+else
+{
+    Console.WriteLine("局域网发现在 server-settings.json 中关闭。");
 }
 
 app.Use(async (context, next) =>
@@ -72,12 +103,16 @@ app.Use(async (context, next) =>
 
 app.MapGet("/api/health", () =>
 {
-    var audioDevice = audioBridge.FindVirtualCable();
+    // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
+    // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
+    var snapshot = diagnostics.Current;
+    var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
+    var stale = ageMs > DiagnosticsMonitor.StaleAfterMs;
     return Results.Ok(new
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.2",
+        version = "1.6.0-dev.3",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -85,22 +120,26 @@ app.MapGet("/api/health", () =>
         architecture = receiverIdentity.Architecture,
         capabilities = new[]
         {
-            "fixedAction", "keyChord", "text", "phoneAudio", "managedDictation",
-            "secureLan"
+            "fixedAction", "keyChord", "text", "macro", "phoneAudio",
+            "managedDictation", "secureLan"
         },
         audio = new
         {
-            available = audioDevice is not null,
-            device = audioDevice,
+            available = snapshot.AudioAvailable,
+            device = snapshot.VirtualCableDevice,
             streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.ActiveSessionId
+            sessionId = audioBridge.ActiveSessionId,
+            checkedAtMs = snapshot.CheckedAtMs,
+            ageMs,
+            lastError = snapshot.LastError,
+            stale
         },
         dictation = new
         {
             active = dictationSessions.IsActive,
             sessionId = dictationSessions.ActiveSessionId
         },
-        foregroundApp = KeyboardInput.ForegroundAppName(),
+        foregroundApp = snapshot.ForegroundApp,
         usbWatchdog = new
         {
             enabled = serverSettings.UsbWatchdog,
@@ -111,15 +150,73 @@ app.MapGet("/api/health", () =>
         },
         typeless = new
         {
-            capturing = TypelessStateProbe.IsCapturing(),
-            virtualCableSelected = KeyboardInput.TypelessUsesVirtualCable,
-            microphone = KeyboardInput.TypelessMicrophoneDescription,
+            capturing = snapshot.TypelessCapturing,
+            virtualCableSelected = snapshot.TypelessUsesVirtualCable,
+            microphone = snapshot.TypelessMicrophone,
             shortcuts = new
             {
-                dictation = KeyboardInput.TypelessModeKeyNames("dictation"),
-                translation = KeyboardInput.TypelessModeKeyNames("translation"),
-                ask = KeyboardInput.TypelessModeKeyNames("ask")
+                dictation = snapshot.DictationKeys,
+                translation = snapshot.TranslationKeys,
+                ask = snapshot.AskKeys
+            },
+            checkedAtMs = snapshot.CheckedAtMs,
+            ageMs,
+            lastError = snapshot.LastError,
+            stale
+        }
+    });
+});
+
+app.MapGet("/api/diagnostics", async () =>
+{
+    // 深诊断：强制刷新一次（带超时），不阻塞 health、音频或快捷键请求。
+    var snapshot = await diagnostics.RefreshAsync(2_000);
+    var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
+    return Results.Ok(new
+    {
+        ok = true,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        checkedAtMs = snapshot.CheckedAtMs,
+        ageMs,
+        lastError = snapshot.LastError,
+        typeless = new
+        {
+            capturing = snapshot.TypelessCapturing,
+            virtualCableSelected = snapshot.TypelessUsesVirtualCable,
+            microphone = snapshot.TypelessMicrophone,
+            shortcuts = new
+            {
+                dictation = snapshot.DictationKeys,
+                translation = snapshot.TranslationKeys,
+                ask = snapshot.AskKeys
             }
+        },
+        audio = new
+        {
+            available = snapshot.AudioAvailable,
+            device = snapshot.VirtualCableDevice,
+            streaming = audioBridge.IsStreaming,
+            sessionId = audioBridge.ActiveSessionId
+        },
+        lan = new
+        {
+            httpsPort = lanIdentity.HttpsPort,
+            candidateAddresses = lanIdentity.GetCandidateAddresses(),
+            discovery = new
+            {
+                enabled = serverSettings.LanDiscovery,
+                portBound = lanDiscovery.PortBound,
+                running = lanDiscovery.Running
+            }
+        },
+        usbWatchdog = new
+        {
+            enabled = serverSettings.UsbWatchdog,
+            running = usbWatchdog.Running,
+            adbFound = usbWatchdog.AdbPath is not null,
+            restoreCount = usbWatchdog.RestoreCount,
+            lastRestoredAt = usbWatchdog.LastRestoredAt
         }
     });
 });
@@ -293,6 +390,8 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("  手机键盘电脑端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
     Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（需先通过 USB 配对）");
+    Console.WriteLine($"  局域网发现：UDP {LanDiscoveryResponder.DiscoveryPort}" +
+        (serverSettings.LanDiscovery ? "（应答中）" : "（已关闭）"));
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");
@@ -431,9 +530,13 @@ internal static class KeyboardInput
         => ReadTypelessModeBinding(NormalizeTypelessMode(mode)) is not null;
 
     /// <summary>规范化键名数组（修饰键在前），如 ["SHIFT","Z"]；未配置该模式时返回 null。</summary>
-    internal static string[]? TypelessModeKeyNames(string mode)
+    internal static string[]? TypelessModeKeyNames(string mode) =>
+        TypelessModeKeyNamesFromBinding(
+            ReadTypelessModeBinding(NormalizeTypelessMode(mode)));
+
+    /// <summary>把 "CTRL+SHIFT+S" 这类绑定字符串规范化为键名数组；空绑定返回 null。</summary>
+    internal static string[]? TypelessModeKeyNamesFromBinding(string? binding)
     {
-        var binding = ReadTypelessModeBinding(NormalizeTypelessMode(mode));
         if (string.IsNullOrWhiteSpace(binding))
         {
             return null;
@@ -751,6 +854,7 @@ internal static class KeyboardInput
             "SHIFT" => VkShift,
             "ALT" => VkMenu,
             "WIN" or "WINDOWS" => VkLWin,
+            "BACKTICK" or "`" => 0xC0,
             "ENTER" or "RETURN" => VkReturn,
             "ESC" or "ESCAPE" => VkEscape,
             "TAB" => VkTab,
@@ -921,6 +1025,70 @@ internal static class KeyboardInput
         catch (Exception)
         {
             return null;
+        }
+    }
+
+    /// <summary>一次读取 Typeless 配置文件，聚合麦克风与三种模式绑定；
+    /// 由后台诊断线程调用，避免每个请求重复读盘。
+    /// 读不到配置时听写键退回官方默认 RightAlt，其余模式视为未配置。</summary>
+    internal static TypelessConfigState ReadTypelessState()
+    {
+        try
+        {
+            var settingsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Typeless.exe", "app-settings.json");
+            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            var root = document.RootElement;
+
+            string? ReadBinding(string propertyName)
+            {
+                if (root.TryGetProperty("featureShortcutBindings", out var bindings)
+                    && bindings.TryGetProperty(propertyName, out var mode)
+                    && mode.ValueKind == JsonValueKind.Array
+                    && mode.GetArrayLength() > 0)
+                {
+                    var binding = mode[0].GetString();
+                    return string.IsNullOrWhiteSpace(binding) ? null : binding;
+                }
+                return null;
+            }
+
+            string? microphone = null;
+            if (root.TryGetProperty("selectedMicrophoneDevice", out var selected))
+            {
+                var label = selected.TryGetProperty("label", out var labelValue)
+                    ? labelValue.GetString()
+                    : null;
+                var description = selected.TryGetProperty("description", out var descriptionValue)
+                    ? descriptionValue.GetString()
+                    : null;
+                if (!string.IsNullOrWhiteSpace(label)
+                    && !string.IsNullOrWhiteSpace(description))
+                {
+                    microphone = $"{label} / {description}";
+                }
+                else
+                {
+                    microphone = string.IsNullOrWhiteSpace(label) ? description : label;
+                }
+            }
+
+            var usesVirtualCable = microphone is not null
+                && (microphone.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
+                    || microphone.Contains(
+                        "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
+
+            return new TypelessConfigState(
+                microphone,
+                usesVirtualCable,
+                ReadBinding("dictationMode") ?? "RightAlt",
+                ReadBinding("translationMode"),
+                ReadBinding("askAnythingMode"));
+        }
+        catch (Exception)
+        {
+            return new TypelessConfigState(null, false, "RightAlt", null, null);
         }
     }
 

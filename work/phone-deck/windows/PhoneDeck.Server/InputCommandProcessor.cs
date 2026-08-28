@@ -34,6 +34,19 @@ internal static class InputCommandProcessor
             return new InputExecutionResult(duplicate, $"已发送 {description}");
         }
 
+        if (string.Equals(command.Action, "macro", StringComparison.Ordinal))
+        {
+            if (command.ProtocolVersion != 2)
+            {
+                throw new ArgumentException("macro 必须使用协议 v2");
+            }
+            var macroDuplicate = KeyboardInput.ExecuteMacroOnce(
+                command.Steps,
+                command.RequestId,
+                out var macroDescription);
+            return new InputExecutionResult(macroDuplicate, $"已执行宏：{macroDescription}");
+        }
+
         var fixedDuplicate = KeyboardInput.ExecuteOnce(
             command.Action,
             command.Text,

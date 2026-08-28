@@ -3,6 +3,12 @@ internal interface IPhoneAudioSessionController
     bool IsSessionActive(string sessionId);
     bool WaitForSessionActive(string sessionId, int timeoutMilliseconds);
     bool StopSession(string sessionId);
+
+    /// <summary>Typeless 确认开始采集后放行 pre-roll，按原顺序快速送入音频桥。</summary>
+    void BeginPlayback(string sessionId);
+
+    /// <summary>等待该会话的音频流（含尾部排空）真正结束。</summary>
+    bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds);
 }
 
 internal interface ITypelessController
