@@ -60,8 +60,6 @@ public final class MainActivity extends Activity {
     private TextView voiceModeText;
     private Button typelessButton;
     private MicrophoneGlyphDrawable voiceIcon;
-    private LinearLayout voiceActionRow;
-    private Button pauseResumeButton;
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
     private LinearLayout targetDeviceRow;
@@ -236,34 +234,8 @@ public final class MainActivity extends Activity {
         installTouchFeedback(settings);
         connection.addView(settings, new LinearLayout.LayoutParams(dp(60), dp(38)));
 
-        LinearLayout targetHeader = new LinearLayout(this);
-        targetHeader.setOrientation(LinearLayout.HORIZONTAL);
-        targetHeader.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(targetHeader, marginTop(dp(2)));
-
-        TextView targetTitle = text("输入目标", 13, theme.text, Typeface.BOLD);
-        targetHeader.addView(targetTitle, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView targetHint = text("只显示已确认的电脑", 11,
-                theme.muted, Typeface.NORMAL);
-        targetHeader.addView(targetHint);
-
-        HorizontalScrollView targetScroller = new HorizontalScrollView(this);
-        targetScroller.setHorizontalScrollBarEnabled(false);
-        targetScroller.setFillViewport(false);
-        targetDeviceRow = new LinearLayout(this);
-        targetDeviceRow.setOrientation(LinearLayout.HORIZONTAL);
-        targetDeviceRow.setGravity(Gravity.CENTER_VERTICAL);
-        targetScroller.addView(targetDeviceRow, new HorizontalScrollView.LayoutParams(
-                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
-                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
-        page.addView(targetScroller, margins(dp(0), dp(7), dp(0), dp(12),
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        refreshTargetSwitcher();
-
         TextView shortcutTitle = text("快捷操作", 18, theme.text, Typeface.BOLD);
-        page.addView(shortcutTitle, marginTop(dp(4)));
+        page.addView(shortcutTitle, marginTop(dp(2)));
 
         TextView shortcutHint = text("点击发送到当前窗口 · 长按可编辑", 12,
                 theme.muted, Typeface.NORMAL);
@@ -324,24 +296,6 @@ public final class MainActivity extends Activity {
         voiceDock.addView(voiceMeter, margins(dp(8), dp(5), dp(8), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
 
-        voiceActionRow = new LinearLayout(this);
-        voiceActionRow.setOrientation(LinearLayout.HORIZONTAL);
-        voiceActionRow.setGravity(Gravity.CENTER);
-
-        pauseResumeButton = smallButton("Ⅱ  暂停");
-        pauseResumeButton.setTextSize(15);
-        pauseResumeButton.setBackground(pressableRoundRect(
-                theme.surfaceRaised, PhoneDeckTheme.blend(
-                        theme.surfaceRaised, theme.primary, 0.22f), 16));
-        pauseResumeButton.setContentDescription("暂停或继续手机语音输入");
-        pauseResumeButton.setOnClickListener(view -> toggleDictationPause());
-        installTouchFeedback(pauseResumeButton);
-        voiceActionRow.addView(pauseResumeButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
-        voiceDock.addView(voiceActionRow, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
         actionFeedback = text("●  准备就绪 · 操作状态会显示在这里",
                 12, theme.muted, Typeface.BOLD);
         actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
@@ -356,6 +310,33 @@ public final class MainActivity extends Activity {
         voiceDock.addView(microphoneLevel, margins(dp(0), dp(2), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout targetDockRow = new LinearLayout(this);
+        targetDockRow.setOrientation(LinearLayout.HORIZONTAL);
+        targetDockRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView targetTitle = text("输入到", 12, theme.muted, Typeface.BOLD);
+        targetDockRow.addView(targetTitle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        HorizontalScrollView targetScroller = new HorizontalScrollView(this);
+        targetScroller.setHorizontalScrollBarEnabled(false);
+        targetScroller.setFillViewport(true);
+        targetDeviceRow = new LinearLayout(this);
+        targetDeviceRow.setOrientation(LinearLayout.HORIZONTAL);
+        targetDeviceRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        targetScroller.addView(targetDeviceRow, new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.MATCH_PARENT,
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams targetScrollerParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        targetScrollerParams.leftMargin = dp(10);
+        targetDockRow.addView(targetScroller, targetScrollerParams);
+        voiceDock.addView(targetDockRow, margins(dp(8), dp(4), dp(0), dp(0),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        refreshTargetSwitcher();
 
         FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -499,7 +480,7 @@ public final class MainActivity extends Activity {
         for (TargetDeviceManager.Device device : devices) {
             boolean selected = sameComputer(device.computerId, activeComputerId);
             boolean online = isDeviceOnline(device.computerId);
-            Button chip = smallButton(device.slot + "号 · " + device.displayName);
+            Button chip = smallButton(device.slot + "号");
             chip.setAllCaps(false);
             chip.setSingleLine(true);
             chip.setTextColor(selected ? theme.onPrimary : theme.text);
@@ -850,34 +831,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void toggleDictationPause() {
-        if (!dictationActive || typelessInFlight || audioStreamer == null) {
-            return;
-        }
-        if (dictationPaused) {
-            if (!audioStreamer.resume()) {
-                showActionFeedback("✕  音频会话已经结束，请重新开始", theme.danger);
-                clearVoiceSessionState();
-                return;
-            }
-            dictationPaused = false;
-            microphoneLevel.setText("手机麦克风  ◌ 正在恢复");
-            microphoneLevel.setTextColor(theme.warning);
-            showActionFeedback("▶  已继续，可以接着说话", theme.success);
-        } else {
-            if (!audioStreamer.pause()) {
-                showActionFeedback("✕  暂停失败，音频会话可能已经结束", theme.danger);
-                return;
-            }
-            dictationPaused = true;
-            microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
-            microphoneLevel.setTextColor(theme.warning);
-            showActionFeedback("Ⅱ  已暂停；点击继续可接着说，点击上方主按钮可停止", theme.warning);
-        }
-        performResultHaptic(pauseResumeButton, true);
-        updateVoiceControls();
-    }
-
     private void cancelPendingDictation() {
         String sessionId = currentSessionId;
         boolean managed = currentSessionManaged;
@@ -1029,22 +982,12 @@ public final class MainActivity extends Activity {
                 : dictationActive
                 ? "停止并完成手机语音输入"
                 : "开始手机语音输入");
-        if (voiceActionRow != null) {
-            voiceActionRow.setVisibility(holdMode || !dictationActive
-                    ? View.GONE : View.VISIBLE);
-        }
         if (holdMode) {
             setControlEnabled(typelessButton, !typelessInFlight || holdGestureActive);
             return;
         }
 
         setControlEnabled(typelessButton, !stopping);
-        if (pauseResumeButton != null) {
-            pauseResumeButton.setText(dictationPaused ? "▶  继续" : "Ⅱ  暂停");
-            pauseResumeButton.setContentDescription(dictationPaused
-                    ? "继续手机语音输入" : "暂停手机语音输入");
-            setControlEnabled(pauseResumeButton, dictationActive && !typelessInFlight);
-        }
     }
 
     private void setControlEnabled(Button button, boolean enabled) {
