@@ -114,7 +114,7 @@ public final class ShortcutSettingsActivity extends Activity {
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text((config.icon.isEmpty() ? "" : config.icon + "  ") + config.label,
+        TextView title = text(config.label,
                 15, config.visible ? theme.text : theme.muted, Typeface.BOLD);
         copy.addView(title);
         copy.addView(text(config.subtitle() + (config.visible ? "" : "  ·  已隐藏"),
@@ -298,7 +298,7 @@ public final class ShortcutSettingsActivity extends Activity {
         button.setAllCaps(false);
         button.setPadding(dp(2), 0, dp(2), 0);
         button.setBackground(theme.pressable(
-                this, background, PhoneDeckTheme.blend(background, theme.primary, 0.16f), 11));
+                this, background, theme.mix(background, theme.primary, 0.16f), 11));
         button.setStateListAnimator(null);
         return button;
     }

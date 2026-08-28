@@ -18,6 +18,11 @@ final class PhoneDeckTheme {
     static final String OLED = "oled";
     static final String PAPER = "paper";
     static final String FROST = "frost";
+    static final String INK_LIGHT = "inklight";
+    static final String INK_DARK = "inkdark";
+    static final String GOLD_BLUE = "goldblue";
+    static final String GOLD_AMBER = "goldamber";
+    static final String GOLD_FOREST = "goldforest";
 
     final String id;
     final String name;
@@ -90,7 +95,9 @@ final class PhoneDeckTheme {
     }
 
     static PhoneDeckTheme[] all() {
-        return new PhoneDeckTheme[]{frost(), ocean(), oled(), paper()};
+        return new PhoneDeckTheme[]{
+                frost(), inkLight(), inkDark(), goldBlue(), goldAmber(), goldForest(),
+                ocean(), oled(), paper()};
     }
 
     static PhoneDeckTheme byId(String id) {
@@ -103,11 +110,30 @@ final class PhoneDeckTheme {
         if (PAPER.equals(id)) {
             return paper();
         }
+        if (INK_LIGHT.equals(id)) {
+            return inkLight();
+        }
+        if (INK_DARK.equals(id)) {
+            return inkDark();
+        }
+        if (GOLD_BLUE.equals(id)) {
+            return goldBlue();
+        }
+        if (GOLD_AMBER.equals(id)) {
+            return goldAmber();
+        }
+        if (GOLD_FOREST.equals(id)) {
+            return goldForest();
+        }
         return ocean();
     }
 
     boolean isFrost() {
         return FROST.equals(id);
+    }
+
+    boolean isMonochrome() {
+        return INK_LIGHT.equals(id) || INK_DARK.equals(id);
     }
 
     int contentBackground() {
@@ -145,11 +171,46 @@ final class PhoneDeckTheme {
         if ("slate".equals(color)) {
             return key;
         }
-        int result = blend(key, accent, isFrost() ? 0.10f : light ? 0.13f : 0.30f);
+        float blendAmount = isFrost() ? 0.10f : isMonochrome() ? 0.32f : light ? 0.13f : 0.30f;
+        int result = mix(key, accent, blendAmount);
         return isFrost() ? withAlpha(result, 214) : result;
     }
 
     int shortcutAccent(String color) {
+        if (isMonochrome()) {
+            // Grok 式单色皮肤：六个预设色统一映射为柔和灰阶，
+            // 让卡片只有深浅差异，不出现彩色。
+            if (light) {
+                switch (color) {
+                    case "purple":
+                        return Color.rgb(71, 71, 76);
+                    case "green":
+                        return Color.rgb(94, 94, 100);
+                    case "orange":
+                        return Color.rgb(117, 117, 123);
+                    case "red":
+                        return Color.rgb(140, 140, 146);
+                    case "slate":
+                        return key;
+                    default:
+                        return Color.rgb(48, 48, 52);
+                }
+            }
+            switch (color) {
+                case "purple":
+                    return Color.rgb(135, 135, 143);
+                case "green":
+                    return Color.rgb(155, 155, 163);
+                case "orange":
+                    return Color.rgb(175, 175, 183);
+                case "red":
+                    return Color.rgb(195, 195, 203);
+                case "slate":
+                    return key;
+                default:
+                    return Color.rgb(115, 115, 123);
+            }
+        }
         switch (color) {
             case "purple":
                 return light ? Color.rgb(116, 75, 216) : Color.rgb(130, 91, 190);
@@ -167,11 +228,16 @@ final class PhoneDeckTheme {
     }
 
     int shortcutPressedColor(String color) {
-        return blend(shortcutColor(color), primary, light ? 0.13f : 0.25f);
+        return mix(shortcutColor(color), primary, light ? 0.13f : 0.25f);
     }
 
     int feedbackSurface(int semanticColor) {
-        return blend(surface, semanticColor, light ? 0.08f : 0.16f);
+        return mix(surface, semanticColor, light ? 0.08f : 0.16f);
+    }
+
+    /// 混色入口：与 blend 一致；保留方法便于各页面统一调用。
+    int mix(int base, int overlay, float amount) {
+        return blend(base, overlay, amount);
     }
 
     GradientDrawable shape(Context context, int fill, int radiusDp) {
@@ -332,5 +398,115 @@ final class PhoneDeckTheme {
                 Color.rgb(184, 59, 82),
                 Color.rgb(214, 210, 201),
                 Color.rgb(252, 250, 246));
+    }
+
+    private static PhoneDeckTheme inkLight() {
+        return new PhoneDeckTheme(
+                INK_LIGHT,
+                "极简墨白",
+                "Grok 风格 · 柔和灰阶层叠，安静克制",
+                true,
+                Color.rgb(248, 248, 247),
+                Color.WHITE,
+                Color.rgb(241, 241, 239),
+                Color.WHITE,
+                Color.rgb(16, 16, 18),
+                Color.rgb(46, 46, 48),
+                Color.WHITE,
+                Color.rgb(20, 20, 22),
+                Color.rgb(113, 113, 122),
+                Color.rgb(58, 58, 63),
+                Color.rgb(142, 142, 147),
+                Color.rgb(23, 23, 26),
+                Color.rgb(233, 233, 230),
+                Color.rgb(255, 255, 255));
+    }
+
+    private static PhoneDeckTheme inkDark() {
+        return new PhoneDeckTheme(
+                INK_DARK,
+                "极简纯黑",
+                "Grok 风格 · 近黑层叠，低刺激深色",
+                false,
+                Color.rgb(10, 10, 11),
+                Color.rgb(23, 23, 26),
+                Color.rgb(32, 32, 36),
+                Color.rgb(26, 26, 30),
+                Color.rgb(242, 242, 243),
+                Color.rgb(255, 255, 255),
+                Color.rgb(11, 11, 12),
+                Color.rgb(244, 244, 245),
+                Color.rgb(139, 139, 146),
+                Color.rgb(201, 201, 206),
+                Color.rgb(126, 126, 132),
+                Color.rgb(255, 255, 255),
+                Color.rgb(44, 44, 49),
+                Color.rgb(16, 16, 19));
+    }
+
+    private static PhoneDeckTheme goldBlue() {
+        return new PhoneDeckTheme(
+                GOLD_BLUE,
+                "黄金靛蓝",
+                "基准色相 215° · 伙伴色按黄金角 137.5° 取绯红",
+                true,
+                Color.rgb(241, 244, 249),
+                Color.rgb(255, 255, 255),
+                Color.rgb(226, 233, 242),
+                Color.rgb(224, 232, 243),
+                Color.rgb(36, 86, 174),
+                Color.rgb(27, 69, 144),
+                Color.WHITE,
+                Color.rgb(22, 35, 58),
+                Color.rgb(92, 112, 137),
+                Color.rgb(46, 125, 91),
+                Color.rgb(168, 114, 31),
+                Color.rgb(178, 58, 71),
+                Color.rgb(203, 216, 232),
+                Color.rgb(250, 251, 253));
+    }
+
+    private static PhoneDeckTheme goldAmber() {
+        return new PhoneDeckTheme(
+                GOLD_AMBER,
+                "黄金琥珀",
+                "基准色相 32° · 青绿与品红按黄金角配对",
+                false,
+                Color.rgb(22, 18, 16),
+                Color.rgb(33, 27, 21),
+                Color.rgb(44, 36, 27),
+                Color.rgb(45, 37, 28),
+                Color.rgb(227, 154, 69),
+                Color.rgb(239, 172, 95),
+                Color.rgb(32, 21, 5),
+                Color.rgb(243, 236, 226),
+                Color.rgb(166, 152, 138),
+                Color.rgb(63, 174, 150),
+                Color.rgb(224, 195, 104),
+                Color.rgb(194, 94, 126),
+                Color.rgb(58, 48, 38),
+                Color.rgb(26, 21, 17));
+    }
+
+    private static PhoneDeckTheme goldForest() {
+        return new PhoneDeckTheme(
+                GOLD_FOREST,
+                "黄金松绿",
+                "基准色相 152° · 橙与紫红按黄金角配对",
+                false,
+                Color.rgb(11, 19, 16),
+                Color.rgb(18, 32, 26),
+                Color.rgb(26, 44, 36),
+                Color.rgb(27, 45, 37),
+                Color.rgb(78, 200, 148),
+                Color.rgb(99, 214, 166),
+                Color.rgb(6, 19, 12),
+                Color.rgb(234, 244, 238),
+                Color.rgb(134, 160, 147),
+                Color.rgb(143, 224, 182),
+                Color.rgb(206, 155, 78),
+                Color.rgb(196, 88, 107),
+                Color.rgb(34, 53, 41),
+                Color.rgb(14, 24, 19));
     }
 }

@@ -2,10 +2,14 @@ package com.codex.phonedeck;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Typeface;
+import android.net.wifi.WifiManager;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
@@ -14,6 +18,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.DragEvent;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.SoundEffectConstants;
@@ -80,6 +85,25 @@ public final class MainActivity extends Activity {
     private volatile boolean usbRecoveryFeedbackPending;
     private volatile boolean lanCheckInFlight;
     private volatile boolean managedDictationSupported;
+    private volatile String[] usbTypelessModes = new String[]{"dictation"};
+    private String selectedTypelessMode = "dictation";
+    private String currentSessionMode;
+    private LinearLayout typelessModeRow;
+    private WifiManager.WifiLock wifiLock;
+    private boolean keepConnectionAlive = true;
+    private String lastFeedbackMessage;
+    private int lastFeedbackColor;
+
+    private static final long REPEAT_INTERVAL_MS = 150;
+    private static final java.util.Set<String> REPEATABLE_KEYS = new java.util.HashSet<>(
+            java.util.Arrays.asList("BACKSPACE", "DELETE", "LEFT", "RIGHT", "UP", "DOWN"));
+    private Runnable repeatRunnable;
+    private ShortcutButtonConfig repeatConfig;
+    private ShortcutKeyView repeatSource;
+    private boolean gridEditMode;
+    private Button gridEditButton;
+    private TextView shortcutHintText;
+    private volatile String usbForegroundApp;
     private volatile boolean phoneAudioAvailable;
     private volatile boolean typelessVirtualCableSelected;
     private volatile int serverProtocolVersion;
@@ -156,11 +180,81 @@ public final class MainActivity extends Activity {
         if (!MODE_HOLD.equals(voiceMode)) {
             voiceMode = MODE_TAP;
         }
+        String storedTypelessMode = preferences.getString("voice_typeless_mode", "dictation");
+        selectedTypelessMode = "translation".equals(storedTypelessMode)
+                || "ask".equals(storedTypelessMode) ? storedTypelessMode : "dictation";
+        keepConnectionAlive = preferences.getBoolean("keep_connection_alive", true);
+        applyWifiLock();
         if (voiceModeText != null && typelessButton != null) {
             updateVoiceModeInterface();
+            refreshTypelessModeChips();
         }
         if (shortcutGrid != null && configRepository != null) {
             refreshShortcutGrid();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // 旋转不重建 Activity：语音会话、连接状态都在字段里，只重建视图。
+        setContentView(createInterface());
+        applyUiState();
+    }
+
+    private void applyUiState() {
+        updateConnectionDisplay();
+        refreshShortcutGrid();
+        refreshTargetSwitcher();
+        if (voiceModeText != null && typelessButton != null) {
+            updateVoiceModeInterface();
+        }
+        if (lastFeedbackMessage != null) {
+            showActionFeedback(lastFeedbackMessage, lastFeedbackColor);
+        }
+        if (microphoneLevel != null) {
+            if (audioStreamer != null && audioStreamer.isPaused()) {
+                microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
+                microphoneLevel.setTextColor(theme.warning);
+            } else if (dictationActive) {
+                microphoneLevel.setText("手机麦克风  ·  使用中");
+                microphoneLevel.setTextColor(theme.muted);
+            } else if (audioStartPending) {
+                microphoneLevel.setText("手机麦克风  ◌ 正在连接");
+                microphoneLevel.setTextColor(theme.warning);
+            } else {
+                microphoneLevel.setText("手机麦克风  ○ 已停止");
+                microphoneLevel.setTextColor(theme.muted);
+            }
+        }
+        updateVoiceControls();
+    }
+
+    private void applyWifiLock() {
+        if (keepConnectionAlive) {
+            if (wifiLock == null) {
+                WifiManager wifiManager = (WifiManager) getApplicationContext()
+                        .getSystemService(Context.WIFI_SERVICE);
+                if (wifiManager == null) {
+                    return;
+                }
+                int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                        : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                wifiLock = wifiManager.createWifiLock(mode, "PhoneDeckKeepAlive");
+                wifiLock.setReferenceCounted(false);
+            }
+            if (!wifiLock.isHeld()) {
+                wifiLock.acquire();
+            }
+        } else if (wifiLock != null && wifiLock.isHeld()) {
+            wifiLock.release();
+        }
+    }
+
+    private void releaseWifiLock() {
+        if (wifiLock != null && wifiLock.isHeld()) {
+            wifiLock.release();
         }
     }
 
@@ -173,6 +267,9 @@ public final class MainActivity extends Activity {
                     FrameLayout.LayoutParams.MATCH_PARENT));
         }
 
+        boolean landscape = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
         scrollView.setBackgroundColor(theme.contentBackground());
@@ -180,7 +277,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(18), dp(18), dp(286));
+        page.setPadding(dp(18), dp(18), dp(18), landscape ? dp(24) : dp(286));
         scrollView.addView(page, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
@@ -234,23 +331,31 @@ public final class MainActivity extends Activity {
         installTouchFeedback(settings);
         connection.addView(settings, new LinearLayout.LayoutParams(dp(60), dp(38)));
 
-        TextView shortcutTitle = text("快捷操作", 18, theme.text, Typeface.BOLD);
-        page.addView(shortcutTitle, marginTop(dp(2)));
+        LinearLayout shortcutHeader = new LinearLayout(this);
+        shortcutHeader.setOrientation(LinearLayout.HORIZONTAL);
+        shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
+        TextView shortcutTitle = text("Agent 快捷操作", 18, theme.text, Typeface.BOLD);
+        shortcutHeader.addView(shortcutTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        gridEditButton = smallButton(gridEditMode ? "完成" : "编辑");
+        gridEditButton.setOnClickListener(view -> toggleGridEditMode());
+        installTouchFeedback(gridEditButton);
+        shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(66), dp(36)));
+        page.addView(shortcutHeader, marginTop(dp(2)));
 
-        TextView shortcutHint = text("点击发送到当前窗口 · 长按可编辑", 12,
+        shortcutHintText = text(gridEditMode
+                ? "点击按钮编辑 · 长按拖动调换位置"
+                : "退格/方向键长按连发 · 点右上「编辑」自定义", 12,
                 theme.muted, Typeface.NORMAL);
-        page.addView(shortcutHint, marginTop(dp(3)));
+        page.addView(shortcutHintText, marginTop(dp(3)));
 
         GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(3);
+        grid.setColumnCount(landscape ? 6 : 3);
         grid.setUseDefaultMargins(false);
         shortcutGrid = grid;
         page.addView(grid, margins(dp(-4), dp(10), dp(-4), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         refreshShortcutGrid();
-
-        root.addView(scrollView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
@@ -271,6 +376,14 @@ public final class MainActivity extends Activity {
         voiceModeText = text("点击说话模式", 11, theme.primary, Typeface.BOLD);
         voiceModeText.setGravity(Gravity.END);
         dockHeader.addView(voiceModeText);
+
+        typelessModeRow = new LinearLayout(this);
+        typelessModeRow.setOrientation(LinearLayout.HORIZONTAL);
+        typelessModeRow.setGravity(Gravity.CENTER_VERTICAL);
+        typelessModeRow.setVisibility(View.GONE);
+        voiceDock.addView(typelessModeRow, margins(dp(0), dp(6), dp(0), dp(0),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
         typelessButton = new Button(this);
         typelessButton.setText("点击开始说话");
@@ -338,11 +451,34 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         refreshTargetSwitcher();
 
-        FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM);
-        dockParams.setMargins(dp(12), dp(0), dp(12), dp(10));
-        root.addView(voiceDock, dockParams);
+        if (landscape) {
+            // 横屏双栏控制台：左侧网格滚动，右侧语音面板固定。
+            LinearLayout console = new LinearLayout(this);
+            console.setOrientation(LinearLayout.HORIZONTAL);
+            console.setBackgroundColor(theme.contentBackground());
+            console.addView(scrollView, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+            ScrollView dockScroll = new ScrollView(this);
+            dockScroll.setFillViewport(true);
+            dockScroll.setBackgroundColor(theme.contentBackground());
+            dockScroll.addView(voiceDock, new ScrollView.LayoutParams(
+                    ScrollView.LayoutParams.MATCH_PARENT,
+                    ScrollView.LayoutParams.WRAP_CONTENT));
+            console.addView(dockScroll, new LinearLayout.LayoutParams(
+                    dp(378), LinearLayout.LayoutParams.MATCH_PARENT));
+            root.addView(console, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            root.addView(scrollView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM);
+            dockParams.setMargins(dp(12), dp(0), dp(12), dp(10));
+            root.addView(voiceDock, dockParams);
+        }
 
         page.setFocusableInTouchMode(true);
         page.requestFocus();
@@ -373,17 +509,36 @@ public final class MainActivity extends Activity {
 
     private void addKey(GridLayout grid, ShortcutButtonConfig config) {
         ShortcutKeyView button = new ShortcutKeyView(this, theme, config);
+        boolean repeatable = isRepeatableKey(config);
+        button.setTag(config.id);
         button.setContentDescription(config.label + "，" + config.subtitle()
-                + "。长按编辑");
-        installTouchFeedback(button);
-        button.setOnClickListener(view -> triggerShortcut(button, config));
-        button.setOnLongClickListener(view -> {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            Intent intent = new Intent(this, ShortcutEditActivity.class);
-            intent.putExtra(ShortcutEditActivity.EXTRA_BUTTON_ID, config.id);
-            startActivity(intent);
-            return true;
+                + (repeatable ? "。点按发送一次，长按连续发送" : ""));
+        button.setOnClickListener(view -> {
+            if (gridEditMode) {
+                openButtonEditor(config.id);
+            } else {
+                triggerShortcut(button, config);
+            }
         });
+        button.setOnLongClickListener(view -> {
+            if (gridEditMode) {
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
+                view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
+                return true;
+            }
+            if (repeatable) {
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                startKeyRepeat(button, config);
+                return true;
+            }
+            return false;
+        });
+        button.setOnDragListener((view, event) -> handleGridDrag(view, event));
+        if (gridEditMode) {
+            button.setAlpha(0.78f);
+        }
+        installTouchFeedback(button, this::stopKeyRepeat);
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
@@ -393,7 +548,121 @@ public final class MainActivity extends Activity {
         grid.addView(button, params);
     }
 
-    private void triggerShortcut(ShortcutKeyView source, ShortcutButtonConfig config) {
+    private void toggleGridEditMode() {
+        gridEditMode = !gridEditMode;
+        stopKeyRepeat();
+        if (gridEditButton != null) {
+            gridEditButton.setText(gridEditMode ? "完成" : "编辑");
+            performResultHaptic(gridEditButton, true);
+        }
+        if (shortcutHintText != null) {
+            shortcutHintText.setText(gridEditMode
+                    ? "点击按钮编辑 · 长按拖动调换位置"
+                    : "退格/方向键长按连发 · 点右上「编辑」自定义");
+        }
+        if (shortcutGrid != null) {
+            for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
+                View child = shortcutGrid.getChildAt(i);
+                child.setAlpha(gridEditMode ? 0.78f : 1f);
+            }
+        }
+        showActionFeedback(gridEditMode
+                ? "✎  编辑模式：点击按钮编辑，长按拖动调位置"
+                : "●  已退出编辑模式", gridEditMode ? theme.warning : theme.muted);
+    }
+
+    private boolean handleGridDrag(View target, DragEvent event) {
+        if (event.getAction() == DragEvent.ACTION_DRAG_STARTED) {
+            return event.getClipDescription() != null
+                    && "PhoneDeckButtonId".equals(event.getClipDescription().getLabel());
+        }
+        if (event.getAction() == DragEvent.ACTION_DRAG_ENTERED) {
+            target.setAlpha(0.45f);
+            return true;
+        }
+        if (event.getAction() == DragEvent.ACTION_DRAG_EXITED
+                || event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
+            target.setAlpha(gridEditMode ? 0.78f : 1f);
+            return true;
+        }
+        if (event.getAction() == DragEvent.ACTION_DROP) {
+            target.setAlpha(gridEditMode ? 0.78f : 1f);
+            if (event.getClipData() == null || event.getClipData().getItemCount() == 0) {
+                return false;
+            }
+            String sourceId = event.getClipData().getItemAt(0).getText().toString();
+            String targetId = String.valueOf(target.getTag());
+            swapGridButtons(sourceId, targetId);
+            return true;
+        }
+        return true;
+    }
+
+    private void swapGridButtons(String sourceId, String targetId) {
+        if (sourceId.equals(targetId)) {
+            return;
+        }
+        try {
+            java.util.ArrayList<ShortcutButtonConfig> buttons = configRepository.load();
+            int sourceIndex = -1;
+            int targetIndex = -1;
+            for (int i = 0; i < buttons.size(); i++) {
+                if (buttons.get(i).id.equals(sourceId)) {
+                    sourceIndex = i;
+                }
+                if (buttons.get(i).id.equals(targetId)) {
+                    targetIndex = i;
+                }
+            }
+            if (sourceIndex < 0 || targetIndex < 0) {
+                return;
+            }
+            java.util.Collections.swap(buttons, sourceIndex, targetIndex);
+            configRepository.save(buttons);
+            refreshShortcutGrid();
+            showActionFeedback("✓  已调换位置", theme.success);
+        } catch (Exception exception) {
+            showActionFeedback("✕  保存按钮顺序失败", theme.danger);
+        }
+    }
+
+    private void openButtonEditor(String buttonId) {
+        Intent intent = new Intent(this, ShortcutEditActivity.class);
+        intent.putExtra(ShortcutEditActivity.EXTRA_BUTTON_ID, buttonId);
+        startActivity(intent);
+    }
+
+    private boolean isRepeatableKey(ShortcutButtonConfig config) {
+        if (config.isTextAction() || config.keys == null || config.keys.size() != 1) {
+            return false;
+        }
+        return REPEATABLE_KEYS.contains(config.keys.get(0));
+    }
+
+    private void startKeyRepeat(ShortcutKeyView source, ShortcutButtonConfig config) {
+        stopKeyRepeat();
+        repeatSource = source;
+        repeatConfig = config;
+        showActionFeedback("●  连发中：" + config.label + "（松手停止）", theme.warning);
+        sendRepeatOnce();
+        repeatRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (repeatConfig == null) {
+                    return;
+                }
+                sendRepeatOnce();
+                mainHandler.postDelayed(this, REPEAT_INTERVAL_MS);
+            }
+        };
+        mainHandler.postDelayed(repeatRunnable, REPEAT_INTERVAL_MS);
+    }
+
+    private void sendRepeatOnce() {
+        ShortcutButtonConfig config = repeatConfig;
+        if (config == null) {
+            return;
+        }
         JSONObject body = new JSONObject();
         try {
             body.put("requestId", UUID.randomUUID().toString());
@@ -409,6 +678,73 @@ public final class MainActivity extends Activity {
                 }
                 body.put("keys", keys);
                 body.put("holdMs", config.holdMs);
+            } else {
+                String legacyAction = legacyActionForKey(config.keys.get(0));
+                if (legacyAction == null) {
+                    return;
+                }
+                body.put("action", legacyAction);
+            }
+        } catch (Exception ignored) {
+            return;
+        }
+        if (repeatSource != null) {
+            repeatSource.showSending();
+        }
+        actionExecutor.execute(() -> {
+            try {
+                sendCommand(body);
+            } catch (Exception ignored) {
+                // 连发中单次失败不打断，松手即停。
+            }
+        });
+    }
+
+    private void stopKeyRepeat() {
+        repeatConfig = null;
+        if (repeatRunnable != null) {
+            mainHandler.removeCallbacks(repeatRunnable);
+            repeatRunnable = null;
+        }
+        if (repeatSource != null) {
+            repeatSource.showSuccess();
+            repeatSource = null;
+        }
+    }
+
+    private static String legacyActionForKey(String key) {
+        switch (key) {
+            case "BACKSPACE": return "backspace";
+            case "DELETE": return "delete";
+            case "LEFT": return "left";
+            case "RIGHT": return "right";
+            case "UP": return "up";
+            case "DOWN": return "down";
+            default: return null;
+        }
+    }
+
+    private void triggerShortcut(ShortcutKeyView source, ShortcutButtonConfig config) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("requestId", UUID.randomUUID().toString());
+            if (serverProtocolVersion >= 2 && targetComputerId != null
+                    && !targetComputerId.isBlank()) {
+                body.put("protocolVersion", 2);
+                body.put("sessionId", clientSessionId);
+                body.put("targetComputerId", targetComputerId);
+                if (config.isTextAction()) {
+                    body.put("action", "text");
+                    body.put("text", config.textForSend());
+                } else {
+                    body.put("action", "keyChord");
+                    org.json.JSONArray keys = new org.json.JSONArray();
+                    for (String key : config.keys) {
+                        keys.put(key);
+                    }
+                    body.put("keys", keys);
+                    body.put("holdMs", config.holdMs);
+                }
             } else {
                 String legacyAction = legacyActionForId(config.id);
                 if (legacyAction == null) {
@@ -550,6 +886,7 @@ public final class MainActivity extends Activity {
             }
         }
         refreshTargetSwitcher();
+        refreshTypelessModeChips();
         updateConnectionDisplay();
     }
 
@@ -606,6 +943,112 @@ public final class MainActivity extends Activity {
                 ? null : lanTargets.get(targetComputerId);
         return lanStatus != null ? lanStatus.managedDictationSupported
                 : isUsbTargetOnline() && managedDictationSupported;
+    }
+
+    private String[] activeTypelessModes() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        if (lanStatus != null) {
+            return lanStatus.typelessModes != null && lanStatus.typelessModes.length > 0
+                    ? lanStatus.typelessModes : new String[]{"dictation"};
+        }
+        return isUsbTargetOnline() ? usbTypelessModes : new String[0];
+    }
+
+    private static String[] parseTypelessModes(JSONObject typeless) {
+        if (typeless == null) {
+            return null;
+        }
+        JSONObject shortcuts = typeless.optJSONObject("shortcuts");
+        if (shortcuts == null) {
+            // 旧版电脑端没有 shortcuts 字段，只保留听写模式。
+            return null;
+        }
+        java.util.ArrayList<String> modes = new java.util.ArrayList<>();
+        if (hasTypelessShortcut(shortcuts, "dictation")) {
+            modes.add("dictation");
+        }
+        if (hasTypelessShortcut(shortcuts, "translation")) {
+            modes.add("translation");
+        }
+        if (hasTypelessShortcut(shortcuts, "ask")) {
+            modes.add("ask");
+        }
+        return modes.toArray(new String[0]);
+    }
+
+    private static boolean hasTypelessShortcut(JSONObject shortcuts, String mode) {
+        org.json.JSONArray keys = shortcuts.optJSONArray(mode);
+        return keys != null && keys.length() > 0;
+    }
+
+    private static String typelessModeLabel(String mode) {
+        if ("translation".equals(mode)) {
+            return "翻译";
+        }
+        if ("ask".equals(mode)) {
+            return "问答";
+        }
+        return "听写";
+    }
+
+    private String typelessIdleActionLabel() {
+        if ("translation".equals(selectedTypelessMode)) {
+            return "点击开始翻译";
+        }
+        if ("ask".equals(selectedTypelessMode)) {
+            return "点击开始提问";
+        }
+        return "点击开始说话";
+    }
+
+    private void refreshTypelessModeChips() {
+        if (typelessModeRow == null) {
+            return;
+        }
+        String[] modes = activeTypelessModes();
+        boolean usable = activeManagedDictationSupported() && modes.length > 1;
+        typelessModeRow.setVisibility(usable ? View.VISIBLE : View.GONE);
+        if (!usable) {
+            return;
+        }
+        typelessModeRow.removeAllViews();
+        TextView modeTitle = text("模式", 11, theme.muted, Typeface.BOLD);
+        typelessModeRow.addView(modeTitle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        for (String mode : modes) {
+            boolean selected = mode.equals(selectedTypelessMode);
+            Button chip = smallButton(typelessModeLabel(mode));
+            chip.setAllCaps(false);
+            chip.setSingleLine(true);
+            chip.setTextSize(12);
+            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setBackground(pressableRoundRect(
+                    selected ? theme.primary : theme.surfaceRaised,
+                    selected ? theme.primaryPressed
+                            : theme.mix(theme.surfaceRaised, theme.primary, 0.15f),
+                    14));
+            chip.setEnabled(!dictationActive);
+            chip.setAlpha(dictationActive ? 0.55f : 1f);
+            chip.setContentDescription("切换语音模式：" + typelessModeLabel(mode));
+            chip.setOnClickListener(view -> {
+                if (dictationActive) {
+                    return;
+                }
+                selectedTypelessMode = mode;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putString("voice_typeless_mode", mode).apply();
+                refreshTypelessModeChips();
+                updateVoiceControls();
+                showActionFeedback("●  语音模式已切换为" + typelessModeLabel(mode), theme.muted);
+            });
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
+            chipParams.leftMargin = dp(8);
+            installTouchFeedback(chip);
+            typelessModeRow.addView(chip, chipParams);
+        }
     }
 
     private void prepareBluetooth() {
@@ -673,6 +1116,13 @@ public final class MainActivity extends Activity {
                     JSONObject typeless = health.optJSONObject("typeless");
                     typelessVirtualCableSelected = typeless != null
                             && typeless.optBoolean("virtualCableSelected", false);
+                    String healthForegroundApp = health.optString("foregroundApp", null);
+                    usbForegroundApp = healthForegroundApp == null
+                            || healthForegroundApp.isBlank() ? null : healthForegroundApp;
+                    String[] typelessModes = parseTypelessModes(typeless);
+                    if (typelessModes != null) {
+                        usbTypelessModes = typelessModes;
+                    }
                     String healthComputerId = health.optString("computerId", null);
                     if (healthComputerId != null && !healthComputerId.isBlank()) {
                         usbComputerId = healthComputerId;
@@ -719,6 +1169,8 @@ public final class MainActivity extends Activity {
                 managedDictationSupported = false;
                 phoneAudioAvailable = false;
                 typelessVirtualCableSelected = false;
+                usbForegroundApp = null;
+                usbTypelessModes = new String[]{"dictation"};
                 mainHandler.post(() -> {
                     applyStoredTarget();
                     if (wasConnected) {
@@ -760,13 +1212,17 @@ public final class MainActivity extends Activity {
                     }
                     JSONObject audio = health.optJSONObject("audio");
                     JSONObject typeless = health.optJSONObject("typeless");
+                    String lanForegroundApp = health.optString("foregroundApp", null);
                     discovered.put(device.computerId, new LanTargetStatus(
                             result.endpoint,
                             health.optInt("protocolVersion", 0),
                             supportsManagedDictation,
                             audio != null && audio.optBoolean("available", false),
                             typeless != null
-                                    && typeless.optBoolean("virtualCableSelected", false)));
+                                    && typeless.optBoolean("virtualCableSelected", false),
+                            parseTypelessModes(typeless),
+                            lanForegroundApp == null || lanForegroundApp.isBlank()
+                                    ? null : lanForegroundApp));
                 }
                 lanTargets.clear();
                 lanTargets.putAll(discovered);
@@ -931,7 +1387,9 @@ public final class MainActivity extends Activity {
             if (voiceBusyLabel != null) {
                 return voiceBusyLabel;
             }
-            return dictationActive ? "松开即可结束" : "按住说话";
+            String holdAction = "translation".equals(selectedTypelessMode) ? "翻译"
+                    : "ask".equals(selectedTypelessMode) ? "提问" : "说话";
+            return dictationActive ? "松开即可结束" : "按住" + holdAction;
         }
         if (dictationActive && typelessInFlight) {
             return "正在停止…";
@@ -940,12 +1398,12 @@ public final class MainActivity extends Activity {
             return "取消启动";
         }
         if (dictationActive) {
-            return "停止说话";
+            return "停止";
         }
         if (voiceBusyLabel != null) {
             return voiceBusyLabel;
         }
-        return "点击开始说话";
+        return typelessIdleActionLabel();
     }
 
     private void updateVoiceControls() {
@@ -953,6 +1411,7 @@ public final class MainActivity extends Activity {
             return;
         }
         typelessButton.setText(voiceButtonLabel());
+        refreshTypelessModeChips();
         boolean holdMode = MODE_HOLD.equals(voiceMode);
         boolean starting = isVoiceStarting();
         boolean stopping = dictationActive && typelessInFlight;
@@ -966,14 +1425,18 @@ public final class MainActivity extends Activity {
                     ? VoiceLevelView.CONNECTING
                     : VoiceLevelView.IDLE);
         }
+        boolean monoVoice = theme.isMonochrome();
+        int stopFill = monoVoice ? theme.primary
+                : theme.mix(theme.voiceDock, theme.danger, 0.72f);
+        int stopInk = monoVoice ? theme.onPrimary : theme.text;
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
-                        PhoneDeckTheme.blend(theme.voiceDock, theme.danger, 0.72f),
-                        theme.danger, 22)
+                        stopFill,
+                        monoVoice ? theme.primaryPressed : theme.danger, 22)
                 : pressableRoundRect(theme.primary, theme.primaryPressed, 22));
-        typelessButton.setTextColor(stopState ? theme.text : theme.onPrimary);
+        typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
-            voiceIcon.setColor(stopState ? theme.text : theme.onPrimary);
+            voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
         }
         typelessButton.setContentDescription(holdMode
                 ? "按住开始手机语音输入，松开停止"
@@ -1042,6 +1505,7 @@ public final class MainActivity extends Activity {
         currentSessionTargetComputerId = serverProtocolVersion >= 2
                 ? targetComputerId : null;
         currentSessionEndpoint = endpoint;
+        currentSessionMode = selectedTypelessMode;
         if (currentSessionManaged
                 && (currentSessionTargetComputerId == null
                 || currentSessionTargetComputerId.isBlank())) {
@@ -1180,6 +1644,7 @@ public final class MainActivity extends Activity {
         body.put("sessionId", sessionId);
         body.put("requestId", UUID.randomUUID().toString());
         body.put("targetComputerId", sessionTargetComputerId);
+        body.put("mode", currentSessionMode == null ? "dictation" : currentSessionMode);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
         if (!postEndpointWithRetry(sessionEndpoint, endpoint, body, 2)) {
             throw new IllegalStateException("电脑端未确认 Typeless 会话");
@@ -1268,6 +1733,7 @@ public final class MainActivity extends Activity {
         currentSessionManaged = false;
         currentSessionTargetComputerId = null;
         currentSessionEndpoint = null;
+        currentSessionMode = null;
         voiceBusyLabel = null;
         if (typelessButton != null) {
             updateVoiceControls();
@@ -1350,6 +1816,20 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private String activeForegroundApp() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        if (lanStatus != null) {
+            return lanStatus.foregroundApp;
+        }
+        return isUsbTargetOnline() ? usbForegroundApp : null;
+    }
+
+    private String foregroundSuffix() {
+        String app = activeForegroundApp();
+        return app == null ? "" : " · " + app;
+    }
+
     private void updateConnectionDisplay() {
         if (isLanTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
@@ -1357,7 +1837,8 @@ public final class MainActivity extends Activity {
             } else if (!activeTypelessVirtualCableSelected()) {
                 showConnection(targetDisplayName + " · Wi-Fi · 麦克风未配置", theme.warning);
             } else {
-                showConnection(targetDisplayName + " · Wi-Fi 在线", theme.success);
+                showConnection(targetDisplayName + " · Wi-Fi 在线" + foregroundSuffix(),
+                        theme.success);
             }
         } else if (isUsbTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
@@ -1365,7 +1846,8 @@ public final class MainActivity extends Activity {
             } else if (!activeTypelessVirtualCableSelected()) {
                 showConnection(targetDisplayName + " · 麦克风未配置", theme.warning);
             } else {
-                showConnection(targetDisplayName + " · USB 在线", theme.success);
+                showConnection(targetDisplayName + " · USB 在线" + foregroundSuffix(),
+                        theme.success);
             }
         } else if (isBluetoothTargetOnline()) {
             showConnection(targetDisplayName + " · 蓝牙快捷键在线", theme.success);
@@ -1383,11 +1865,13 @@ public final class MainActivity extends Activity {
     }
 
     private void showActionFeedback(String message, int color) {
+        lastFeedbackMessage = message;
+        lastFeedbackColor = color;
         actionFeedback.setText(message);
         actionFeedback.setTextColor(color);
         actionFeedback.setBackground(theme.shape(
                 this, theme.feedbackSurface(color), 14, 1,
-                PhoneDeckTheme.blend(theme.outline, color, 0.35f)));
+                theme.mix(theme.outline, color, 0.35f)));
         actionFeedback.announceForAccessibility(message);
     }
 
@@ -1401,16 +1885,24 @@ public final class MainActivity extends Activity {
     }
 
     private void installTouchFeedback(View control) {
+        installTouchFeedback(control, null);
+    }
+
+    private void installTouchFeedback(View control, Runnable onRelease) {
         control.setSoundEffectsEnabled(true);
         control.setHapticFeedbackEnabled(true);
         control.setOnTouchListener((view, event) -> {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN && view.isEnabled()) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
                 view.animate().scaleX(0.965f).scaleY(0.965f).setDuration(55).start();
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 view.playSoundEffect(SoundEffectConstants.CLICK);
-            } else if (event.getActionMasked() == MotionEvent.ACTION_UP
-                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            } else if (action == MotionEvent.ACTION_UP
+                    || action == MotionEvent.ACTION_CANCEL) {
                 view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
+                if (onRelease != null) {
+                    onRelease.run();
+                }
             }
             return false;
         });
@@ -1460,6 +1952,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         mainHandler.removeCallbacks(periodicHealthCheck);
+        stopKeyRepeat();
+        releaseWifiLock();
         if (bluetoothTransport != null) {
             bluetoothTransport.close();
         }
@@ -1481,7 +1975,7 @@ public final class MainActivity extends Activity {
         button.setAllCaps(false);
         button.setPadding(dp(4), 0, dp(4), 0);
         button.setBackground(theme.pressable(
-                this, theme.key, PhoneDeckTheme.blend(theme.key, theme.primary, 0.18f), 12));
+                this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 12));
         button.setStateListAnimator(null);
         return button;
     }
@@ -1524,18 +2018,24 @@ public final class MainActivity extends Activity {
         final boolean managedDictationSupported;
         final boolean phoneAudioAvailable;
         final boolean typelessVirtualCableSelected;
+        final String[] typelessModes;
+        final String foregroundApp;
 
         LanTargetStatus(
                 PhoneDeckEndpoint endpoint,
                 int protocolVersion,
                 boolean managedDictationSupported,
                 boolean phoneAudioAvailable,
-                boolean typelessVirtualCableSelected) {
+                boolean typelessVirtualCableSelected,
+                String[] typelessModes,
+                String foregroundApp) {
             this.endpoint = endpoint;
             this.protocolVersion = protocolVersion;
             this.managedDictationSupported = managedDictationSupported;
             this.phoneAudioAvailable = phoneAudioAvailable;
             this.typelessVirtualCableSelected = typelessVirtualCableSelected;
+            this.typelessModes = typelessModes;
+            this.foregroundApp = foregroundApp;
         }
     }
 

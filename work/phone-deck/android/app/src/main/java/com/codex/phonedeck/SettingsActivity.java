@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public final class SettingsActivity extends Activity {
     private static final String PREFS_NAME = "PhoneDeckSettings";
@@ -27,6 +28,9 @@ public final class SettingsActivity extends Activity {
     private LinearLayout holdOption;
     private TextView tapCheck;
     private TextView holdCheck;
+    private ShortcutConfigRepository repository;
+    private static final int REQUEST_EXPORT_CONFIG = 4101;
+    private static final int REQUEST_IMPORT_CONFIG = 4102;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,6 +39,7 @@ public final class SettingsActivity extends Activity {
         theme.applyWindow(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        repository = new ShortcutConfigRepository(this);
         setContentView(createInterface());
         refreshSelection();
     }
@@ -82,7 +87,7 @@ public final class SettingsActivity extends Activity {
         TextView voiceHeading = text("语音输入", 17, theme.text, Typeface.BOLD);
         page.addView(voiceHeading, topMargin(dp(28)));
 
-        tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止；可暂停或继续", true);
+        tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
         page.addView(tapOption, fullWidthMargins(dp(18)));
@@ -92,12 +97,16 @@ public final class SettingsActivity extends Activity {
         holdOption.setOnClickListener(view -> selectMode(MODE_HOLD));
         page.addView(holdOption, fullWidthMargins(dp(12)));
 
-        TextView tip = text("提示：点击模式适合长内容，暂停时会停止采集麦克风；长按模式更适合短句。",
+        TextView tip = text("提示：点击模式适合长内容，使用同一个主按钮开始和停止；长按模式更适合短句。",
                 13, theme.muted, Typeface.NORMAL);
         tip.setLineSpacing(0, 1.18f);
         tip.setPadding(dp(14), dp(13), dp(14), dp(13));
         tip.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
         page.addView(tip, fullWidthMargins(dp(22)));
+
+        TextView connectionHeading = text("连接保持", 17, theme.text, Typeface.BOLD);
+        page.addView(connectionHeading, topMargin(dp(28)));
+        page.addView(keepAliveOption(), fullWidthMargins(dp(18)));
 
         TextView shortcutHeading = text("快捷键与布局", 17, theme.text, Typeface.BOLD);
         page.addView(shortcutHeading, topMargin(dp(28)));
@@ -115,7 +124,87 @@ public final class SettingsActivity extends Activity {
                 startActivity(new Intent(this, ShortcutSettingsActivity.class)));
         page.addView(shortcuts, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(60)));
+
+        LinearLayout transferRow = new LinearLayout(this);
+        transferRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        Button exportButton = button("导出配置");
+        exportButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "phonedeck-shortcuts.json");
+            startActivityForResult(intent, REQUEST_EXPORT_CONFIG);
+        });
+        transferRow.addView(exportButton, exportParams);
+        Button importButton = button("导入配置");
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        importParams.leftMargin = dp(10);
+        importButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "text/*"});
+            startActivityForResult(intent, REQUEST_IMPORT_CONFIG);
+        });
+        transferRow.addView(importButton, importParams);
+        page.addView(transferRow, topMargin(dp(10)));
         return theme.wrapContent(this, scroll);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        android.net.Uri uri = data.getData();
+        if (requestCode == REQUEST_EXPORT_CONFIG) {
+            String json = repository.exportJson();
+            if (json == null) {
+                Toast.makeText(this, "导出失败：本地还没有配置文件", Toast.LENGTH_LONG).show();
+                return;
+            }
+            try (java.io.OutputStream output = getContentResolver().openOutputStream(uri)) {
+                if (output == null) {
+                    throw new IllegalStateException("无法打开目标文件");
+                }
+                output.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Toast.makeText(this, "配置已导出", Toast.LENGTH_SHORT).show();
+            } catch (Exception exception) {
+                Toast.makeText(this, "导出失败：" + exception.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        } else if (requestCode == REQUEST_IMPORT_CONFIG) {
+            try (java.io.InputStream input = getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                byte[] chunk = new byte[8192];
+                int read;
+                while ((read = input.read(chunk)) > 0) {
+                    buffer.write(chunk, 0, read);
+                }
+                String json = buffer.toString("UTF-8");
+                if (repository.importJson(json)) {
+                    Toast.makeText(this, "配置已导入并生效", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "导入失败：文件无效，原配置未改动", Toast.LENGTH_LONG).show();
+                }
+            } catch (Exception exception) {
+                Toast.makeText(this, "导入失败：" + exception.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private Button button(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setTextColor(theme.text);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(roundRect(theme.surfaceRaised, 16, 1, theme.outline));
+        return button;
     }
 
     private LinearLayout option(String title, String detail, boolean tap) {
@@ -136,6 +225,48 @@ public final class SettingsActivity extends Activity {
         TextView check = text(tap ? "✓" : "○", 22, theme.primary, Typeface.BOLD);
         check.setGravity(Gravity.CENTER);
         row.addView(check, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        return row;
+    }
+
+    private LinearLayout keepAliveOption() {
+        boolean enabled = preferences.getBoolean("keep_connection_alive", true);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(18), dp(17), dp(16), dp(17));
+        row.setBackground(roundRect(
+                enabled ? theme.feedbackSurface(theme.primary) : theme.surface,
+                18, enabled ? 2 : 1,
+                enabled ? theme.primary : theme.outline));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        row.addView(copy, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        copy.addView(text("Wi-Fi 保活", 18, theme.text, Typeface.BOLD));
+        TextView detail = text(
+                "App 运行期间保持 Wi-Fi 高性能模式，降低灭屏或省电导致的无线断流；"
+                        + "USB 断连由电脑端看门狗自动恢复。",
+                13, theme.muted, Typeface.NORMAL);
+        detail.setLineSpacing(0, 1.12f);
+        copy.addView(detail, topMargin(dp(5)));
+
+        android.widget.Switch switchView = new android.widget.Switch(this);
+        switchView.setChecked(enabled);
+        switchView.setContentDescription("Wi-Fi 保活开关");
+        switchView.setOnCheckedChangeListener((view, checked) -> {
+            preferences.edit().putBoolean("keep_connection_alive", checked).apply();
+            row.setBackground(roundRect(
+                    checked ? theme.feedbackSurface(theme.primary) : theme.surface,
+                    18, checked ? 2 : 1,
+                    checked ? theme.primary : theme.outline));
+            row.announceForAccessibility(checked
+                    ? "已开启 Wi-Fi 保活" : "已关闭 Wi-Fi 保活");
+        });
+        row.addView(switchView, new LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
     }
 

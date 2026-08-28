@@ -39,6 +39,25 @@ public final class KeyPickerActivity extends Activity {
         updatePreview();
     }
 
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // 旋转不重建 Activity：保留当前已勾选的组合键。
+        boolean ctrlOn = ctrl.isChecked();
+        boolean shiftOn = shift.isChecked();
+        boolean altOn = alt.isChecked();
+        boolean winOn = win.isChecked();
+        String base = selectedBaseKey;
+        setContentView(createInterface());
+        ctrl.setChecked(ctrlOn);
+        shift.setChecked(shiftOn);
+        alt.setChecked(altOn);
+        win.setChecked(winOn);
+        selectedBaseKey = base;
+        updateBaseKeySelection();
+        updatePreview();
+    }
+
     private View createInterface() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout page = new LinearLayout(this);
@@ -265,7 +284,7 @@ public final class KeyPickerActivity extends Activity {
         button.setTextSize(15);
         button.setAllCaps(false);
         button.setBackground(theme.pressable(this, theme.surfaceRaised,
-                PhoneDeckTheme.blend(theme.surfaceRaised, theme.primary, 0.14f), 14));
+                theme.mix(theme.surfaceRaised, theme.primary, 0.14f), 14));
         return button;
     }
 
