@@ -32,50 +32,22 @@ final class ShortcutKeyView extends FrameLayout {
         setElevation(dp(theme.isFrost() ? 5 : theme.light ? 1 : 2));
 
         content = new LinearLayout(context);
-        content.setOrientation(theme.isFrost() ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        String iconValue = config.icon.isEmpty() ? "·" : config.icon;
-        TextView icon = label(iconValue,
-                config.icon.isEmpty() ? 12
-                        : theme.isFrost() && iconValue.length() > 2 ? 12
-                        : theme.isFrost() ? 21 : 19,
-                config.icon.isEmpty() ? theme.muted
-                        : theme.isFrost() ? theme.shortcutAccent(config.color) : theme.text,
-                Typeface.BOLD);
-        icon.setGravity(Gravity.CENTER);
-        icon.setMaxLines(1);
-        if (theme.isFrost()) {
-            icon.setBackground(theme.shape(context,
-                    theme.feedbackSurface(theme.shortcutAccent(config.color)), 13,
-                    1, theme.outline));
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(34), dp(46));
-            iconParams.rightMargin = dp(6);
-            content.addView(icon, iconParams);
-        } else {
-            content.addView(icon, new LinearLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, dp(25)));
-        }
-
-        LinearLayout copy = theme.isFrost() ? new LinearLayout(context) : content;
-        if (theme.isFrost()) {
-            copy.setOrientation(LinearLayout.VERTICAL);
-            copy.setGravity(Gravity.CENTER_VERTICAL);
-            content.addView(copy, new LinearLayout.LayoutParams(
-                    0, LayoutParams.MATCH_PARENT, 1f));
-        }
-
-        TextView title = label(config.label, theme.isFrost() ? 12 : 13,
+        TextView title = label(config.label, 14,
                 theme.text, Typeface.BOLD);
-        title.setGravity(theme.isFrost() ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
+        title.setGravity(Gravity.CENTER);
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        copy.addView(title, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(22)));
+        content.addView(title, new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp(25)));
 
-        TextView chord = label(config.subtitle(), 10, theme.muted, Typeface.BOLD);
+        TextView chord = label(config.subtitle(), config.isTextAction() ? 11 : 10,
+                config.isTextAction() ? theme.shortcutAccent(config.color) : theme.muted,
+                Typeface.BOLD);
         chord.setGravity(Gravity.CENTER);
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
@@ -83,8 +55,8 @@ final class ShortcutKeyView extends FrameLayout {
         chord.setBackground(theme.shape(context, theme.surface, 9));
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(19));
-        chordParams.topMargin = dp(3);
-        copy.addView(chord, chordParams);
+        chordParams.topMargin = dp(5);
+        content.addView(chord, chordParams);
 
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);
         stateBadge.setGravity(Gravity.CENTER);

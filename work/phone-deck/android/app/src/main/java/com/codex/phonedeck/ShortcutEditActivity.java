@@ -18,7 +18,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,7 +30,8 @@ public final class ShortcutEditActivity extends Activity {
     private ShortcutConfigRepository repository;
     private ShortcutButtonConfig draft;
     private EditText labelInput;
-    private EditText iconInput;
+    private EditText textInput;
+    private Switch submitSwitch;
     private LinearLayout colorContainer;
     private String selectedColor;
     private Switch visibleSwitch;
@@ -55,6 +55,39 @@ public final class ShortcutEditActivity extends Activity {
         setContentView(createInterface());
         bindDraft();
         installDirtyTracking();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // 旋转不重建 Activity：先把界面上的未保存修改收进草稿，再重建视图并还原。
+        harvestDraft();
+        boolean wasDirty = dirty;
+        setContentView(createInterface());
+        bindDraft();
+        installDirtyTracking();
+        dirty = wasDirty;
+    }
+
+    private void harvestDraft() {
+        if (labelInput != null) {
+            String value = labelInput.getText().toString().trim();
+            if (!value.isEmpty()) {
+                draft.label = value;
+            }
+        }
+        if (textInput != null) {
+            draft.text = textInput.getText().toString();
+        }
+        if (submitSwitch != null) {
+            draft.submitText = submitSwitch.isChecked();
+        }
+        if (visibleSwitch != null) {
+            draft.visible = visibleSwitch.isChecked();
+        }
+        if (selectedColor != null) {
+            draft.color = selectedColor;
+        }
     }
 
     private ShortcutButtonConfig findButton(String id) {
@@ -92,17 +125,6 @@ public final class ShortcutEditActivity extends Activity {
         labelInput = input("例如：帮助");
         page.addView(labelInput, fieldParams());
 
-        page.addView(label("图标或 Emoji"), topMargin(dp(18)));
-        iconInput = input("例如：✨");
-        page.addView(iconInput, fieldParams());
-        LinearLayout presets = new LinearLayout(this);
-        for (String icon : Arrays.asList("✨", "📋", "💾", "🎙", "▶", "⚙")) {
-            Button preset = button(icon, theme.surface, theme.text);
-            preset.setOnClickListener(view -> iconInput.setText(icon));
-            presets.addView(preset, new LinearLayout.LayoutParams(0, dp(44), 1f));
-        }
-        page.addView(presets, topMargin(dp(7)));
-
         page.addView(label("按钮颜色"), topMargin(dp(18)));
         colorContainer = new LinearLayout(this);
         colorContainer.setOrientation(LinearLayout.HORIZONTAL);
@@ -119,28 +141,41 @@ public final class ShortcutEditActivity extends Activity {
         visibleSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
         page.addView(visibleSwitch, topMargin(dp(18)));
 
-        page.addView(label("按键动作"), topMargin(dp(20)));
-        keySummary = text("", 17, theme.primary, Typeface.BOLD);
-        keySummary.setGravity(Gravity.CENTER);
-        keySummary.setPadding(dp(14), dp(15), dp(14), dp(15));
-        keySummary.setBackground(theme.shape(this, theme.surfaceRaised, 16, 1, theme.outline));
-        page.addView(keySummary, topMargin(dp(7)));
+        if (draft.isTextAction()) {
+            page.addView(label("AI Agent 文本指令"), topMargin(dp(20)));
+            textInput = input("例如：/plan");
+            page.addView(textInput, fieldParams());
+            submitSwitch = new Switch(this);
+            submitSwitch.setText("输入后自动回车执行");
+            submitSwitch.setTextColor(theme.text);
+            submitSwitch.setTextSize(15);
+            submitSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
+            page.addView(submitSwitch, topMargin(dp(8)));
+        } else {
+            page.addView(label("按键动作"), topMargin(dp(20)));
+            keySummary = text("", 17, theme.primary, Typeface.BOLD);
+            keySummary.setGravity(Gravity.CENTER);
+            keySummary.setPadding(dp(14), dp(15), dp(14), dp(15));
+            keySummary.setBackground(theme.shape(
+                    this, theme.surfaceRaised, 16, 1, theme.outline));
+            page.addView(keySummary, topMargin(dp(7)));
 
-        Button choose = button("选择单键或组合键", theme.surface, theme.text);
-        choose.setOnClickListener(view -> {
-            Intent intent = new Intent(this, KeyPickerActivity.class);
-            intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
-                    new ArrayList<>(draft.keys));
-            startActivityForResult(intent, REQUEST_KEYS);
-        });
-        page.addView(choose, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+            Button choose = button("选择单键或组合键", theme.surface, theme.text);
+            choose.setOnClickListener(view -> {
+                Intent intent = new Intent(this, KeyPickerActivity.class);
+                intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
+                        new ArrayList<>(draft.keys));
+                startActivityForResult(intent, REQUEST_KEYS);
+            });
+            page.addView(choose, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+        }
 
         testButton = button("发送测试（不会保存）", theme.surfaceRaised, theme.text);
         testButton.setOnClickListener(view -> testAction());
         page.addView(testButton, topMargin(dp(18)));
 
-        feedback = text("先测试，再保存。电脑端必须为 1.5.0。", 13, theme.muted,
+        feedback = text("先测试，再保存。文本指令会输入到当前光标位置。", 13, theme.muted,
                 Typeface.NORMAL);
         feedback.setPadding(dp(12), dp(10), dp(12), dp(10));
         feedback.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
@@ -160,7 +195,12 @@ public final class ShortcutEditActivity extends Activity {
 
     private void bindDraft() {
         labelInput.setText(draft.label);
-        iconInput.setText(draft.icon);
+        if (textInput != null) {
+            textInput.setText(draft.text);
+        }
+        if (submitSwitch != null) {
+            submitSwitch.setChecked(draft.submitText);
+        }
         selectColor(draft.color);
         visibleSwitch.setChecked(draft.visible);
         updateKeySummary();
@@ -207,22 +247,35 @@ public final class ShortcutEditActivity extends Activity {
             @Override public void afterTextChanged(Editable text) { }
         };
         labelInput.addTextChangedListener(watcher);
-        iconInput.addTextChangedListener(watcher);
+        if (textInput != null) {
+            textInput.addTextChangedListener(watcher);
+        }
+        if (submitSwitch != null) {
+            submitSwitch.setOnCheckedChangeListener((button, checked) -> dirty = true);
+        }
         visibleSwitch.setOnCheckedChangeListener((button, checked) -> dirty = true);
     }
 
     private ShortcutButtonConfig collectDraft() {
         String label = labelInput.getText().toString().trim();
-        String icon = iconInput.getText().toString().trim();
         if (label.isEmpty() || label.length() > 24) {
             throw new IllegalArgumentException("按钮名称必须为 1–24 个字符");
         }
-        if (icon.length() > 8) {
-            throw new IllegalArgumentException("图标或 Emoji 不能超过 8 个字符");
+        String color = selectedColor == null ? "blue" : selectedColor;
+        if (draft.isTextAction()) {
+            String command = textInput == null ? "" : textInput.getText().toString().trim();
+            if (command.isEmpty() || command.length() > 512
+                    || command.contains("\r") || command.contains("\n")) {
+                throw new IllegalArgumentException("文本指令必须为 1–512 个字符的单行文本");
+            }
+            return ShortcutButtonConfig.textAction(
+                    draft.id, label, color, visibleSwitch.isChecked(),
+                    draft.sortIndex, draft.builtIn, command,
+                    submitSwitch != null && submitSwitch.isChecked(),
+                    System.currentTimeMillis());
         }
         return new ShortcutButtonConfig(
-                draft.id, label, icon,
-                selectedColor == null ? "blue" : selectedColor,
+                draft.id, label, "", color,
                 visibleSwitch.isChecked(), draft.sortIndex, draft.builtIn,
                 draft.keys, draft.holdMs, System.currentTimeMillis());
     }
@@ -239,11 +292,16 @@ public final class ShortcutEditActivity extends Activity {
         showFeedback("正在发送测试：" + candidate.subtitle(), theme.warning);
         executor.execute(() -> {
             try {
-                String message = PhoneDeckUsbClient.sendKeyChord(
-                        this,
-                        candidate.keys,
-                        candidate.holdMs,
-                        BluetoothTransport.current());
+                String message = candidate.isTextAction()
+                        ? PhoneDeckUsbClient.sendText(
+                                this,
+                                candidate.textForSend(),
+                                BluetoothTransport.current())
+                        : PhoneDeckUsbClient.sendKeyChord(
+                                this,
+                                candidate.keys,
+                                candidate.holdMs,
+                                BluetoothTransport.current());
                 runOnUiThread(() -> {
                     showFeedback("✓  " + message, theme.success);
                     testButton.setEnabled(true);
@@ -282,7 +340,7 @@ public final class ShortcutEditActivity extends Activity {
 
     private void confirmRestoreOrDelete() {
         String message = draft.builtIn
-                ? "只恢复这个按钮的名称、颜色、图标和按键吗？"
+                ? "只恢复这个按钮的名称、颜色和动作吗？"
                 : "确定删除这个自定义按钮吗？";
         new AlertDialog.Builder(this)
                 .setTitle(draft.builtIn ? "恢复按钮" : "删除按钮")
@@ -368,7 +426,9 @@ public final class ShortcutEditActivity extends Activity {
     }
 
     private void updateKeySummary() {
-        keySummary.setText(draft.subtitle());
+        if (keySummary != null) {
+            keySummary.setText(draft.subtitle());
+        }
     }
 
     private void showFeedback(String message, int color) {
@@ -401,7 +461,7 @@ public final class ShortcutEditActivity extends Activity {
         button.setTextSize(15);
         button.setAllCaps(false);
         button.setBackground(theme.pressable(this, background,
-                PhoneDeckTheme.blend(background, theme.primary, 0.16f), 14));
+                theme.mix(background, theme.primary, 0.16f), 14));
         return button;
     }
 

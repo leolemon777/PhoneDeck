@@ -8,6 +8,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class ShortcutButtonConfig {
+    static final String ACTION_KEY_CHORD = "keyChord";
+    static final String ACTION_TEXT = "text";
+
     final String id;
     final boolean builtIn;
     String label;
@@ -16,8 +19,11 @@ final class ShortcutButtonConfig {
     boolean visible;
     int sortIndex;
     long updatedAt;
+    String actionType;
     ArrayList<String> keys;
     int holdMs;
+    String text;
+    boolean submitText;
 
     ShortcutButtonConfig(
             String id,
@@ -30,6 +36,24 @@ final class ShortcutButtonConfig {
             List<String> keys,
             int holdMs,
             long updatedAt) {
+        this(id, label, icon, color, visible, sortIndex, builtIn,
+                ACTION_KEY_CHORD, keys, holdMs, "", false, updatedAt);
+    }
+
+    private ShortcutButtonConfig(
+            String id,
+            String label,
+            String icon,
+            String color,
+            boolean visible,
+            int sortIndex,
+            boolean builtIn,
+            String actionType,
+            List<String> keys,
+            int holdMs,
+            String text,
+            boolean submitText,
+            long updatedAt) {
         this.id = id;
         this.label = label;
         this.icon = icon;
@@ -37,30 +61,62 @@ final class ShortcutButtonConfig {
         this.visible = visible;
         this.sortIndex = sortIndex;
         this.builtIn = builtIn;
-        this.keys = KeyCatalog.normalizeChord(keys);
+        this.actionType = actionType;
+        this.keys = ACTION_TEXT.equals(actionType)
+                ? new ArrayList<>() : KeyCatalog.normalizeChord(keys);
         this.holdMs = holdMs;
+        this.text = text == null ? "" : text;
+        this.submitText = submitText;
         this.updatedAt = updatedAt;
+    }
+
+    static ShortcutButtonConfig textAction(
+            String id,
+            String label,
+            String color,
+            boolean visible,
+            int sortIndex,
+            boolean builtIn,
+            String text,
+            boolean submitText,
+            long updatedAt) {
+        return new ShortcutButtonConfig(
+                id, label, "", color, visible, sortIndex, builtIn,
+                ACTION_TEXT, new ArrayList<>(), 45, text, submitText, updatedAt);
+    }
+
+    boolean isTextAction() {
+        return ACTION_TEXT.equals(actionType);
+    }
+
+    String textForSend() {
+        return submitText ? text + "\n" : text;
     }
 
     ShortcutButtonConfig copy() {
         return new ShortcutButtonConfig(
                 id, label, icon, color, visible, sortIndex, builtIn,
-                keys, holdMs, updatedAt);
+                actionType, keys, holdMs, text, submitText, updatedAt);
     }
 
     String subtitle() {
-        return KeyCatalog.displayChord(keys);
+        return isTextAction() ? text : KeyCatalog.displayChord(keys);
     }
 
     JSONObject toJson() throws JSONException {
-        JSONArray keyArray = new JSONArray();
-        for (String key : keys) {
-            keyArray.put(key);
-        }
         JSONObject action = new JSONObject();
-        action.put("type", "keyChord");
-        action.put("keys", keyArray);
-        action.put("holdMs", holdMs);
+        action.put("type", actionType);
+        if (isTextAction()) {
+            action.put("text", text);
+            action.put("submit", submitText);
+        } else {
+            JSONArray keyArray = new JSONArray();
+            for (String key : keys) {
+                keyArray.put(key);
+            }
+            action.put("keys", keyArray);
+            action.put("holdMs", holdMs);
+        }
 
         JSONObject value = new JSONObject();
         value.put("id", id);
@@ -78,7 +134,24 @@ final class ShortcutButtonConfig {
 
     static ShortcutButtonConfig fromJson(JSONObject value) throws JSONException {
         JSONObject action = value.getJSONObject("action");
-        if (!"keyChord".equals(action.getString("type"))) {
+        String actionType = action.getString("type");
+        if (ACTION_TEXT.equals(actionType)) {
+            return new ShortcutButtonConfig(
+                    value.getString("id"),
+                    value.getString("label"),
+                    "",
+                    value.optString("color", "blue"),
+                    value.optBoolean("visible", true),
+                    value.getInt("sortIndex"),
+                    value.optBoolean("isBuiltIn", false),
+                    ACTION_TEXT,
+                    new ArrayList<>(),
+                    45,
+                    action.getString("text"),
+                    action.optBoolean("submit", false),
+                    value.optLong("updatedAt", 0));
+        }
+        if (!ACTION_KEY_CHORD.equals(actionType)) {
             throw new JSONException("不支持的动作类型");
         }
         JSONArray keyArray = action.getJSONArray("keys");
@@ -94,8 +167,11 @@ final class ShortcutButtonConfig {
                 value.optBoolean("visible", true),
                 value.getInt("sortIndex"),
                 value.optBoolean("isBuiltIn", false),
+                ACTION_KEY_CHORD,
                 keys,
                 action.optInt("holdMs", 45),
+                "",
+                false,
                 value.optLong("updatedAt", 0));
     }
 }

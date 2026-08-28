@@ -62,6 +62,27 @@ final class PhoneDeckUsbClient {
         for (String key : KeyCatalog.normalizeChord(keys)) {
             keyArray.put(key);
         }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> createKeyChordBody(
+                        keyArray, holdMs, requestId, sessionId, computerId));
+    }
+
+    static String sendText(
+            Context context,
+            String text,
+            BluetoothTransport bluetoothTransport) throws Exception {
+        if (text == null || text.isEmpty() || text.length() > 513) {
+            throw new IllegalArgumentException("文本指令长度无效");
+        }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> createTextBody(
+                        text, requestId, sessionId, computerId));
+    }
+
+    private static String sendAction(
+            Context context,
+            BluetoothTransport bluetoothTransport,
+            BodyFactory bodyFactory) throws Exception {
         String requestId = UUID.randomUUID().toString();
         String sessionId = UUID.randomUUID().toString();
 
@@ -87,8 +108,8 @@ final class PhoneDeckUsbClient {
         TargetDeviceManager.Device activeDevice = deviceManager.find(activeComputerId);
         PhoneDeckLanClient.ProbeResult lanResult = PhoneDeckLanClient.probe(activeDevice);
         if (lanResult != null) {
-            JSONObject body = createKeyChordBody(
-                    keyArray, holdMs, requestId, sessionId, activeComputerId);
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, activeComputerId);
             try {
                 JSONObject result = PhoneDeckHttp.postJson(
                         lanResult.endpoint, "/api/input", body, 1800);
@@ -102,8 +123,8 @@ final class PhoneDeckUsbClient {
                 && usbServer.protocolVersion >= 2
                 && !usbServer.computerId.isEmpty()
                 && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
-            JSONObject body = createKeyChordBody(
-                    keyArray, holdMs, requestId, sessionId, usbServer.computerId);
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, usbServer.computerId);
             try {
                 return post("/api/input", body) + " · USB";
             } catch (Exception exception) {
@@ -125,12 +146,8 @@ final class PhoneDeckUsbClient {
 
         if (canUseBluetooth(bluetoothTransport)
                 && bluetoothTransport.getComputerId().equalsIgnoreCase(activeComputerId)) {
-            JSONObject body = createKeyChordBody(
-                    keyArray,
-                    holdMs,
-                    requestId,
-                    sessionId,
-                    bluetoothTransport.getComputerId());
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, bluetoothTransport.getComputerId());
             if (bluetoothTransport.sendAndWaitForAck(body, 1400)) {
                 return "电脑已确认 · 蓝牙";
             }
@@ -141,6 +158,11 @@ final class PhoneDeckUsbClient {
                         ? "当前目标电脑没有可用的 Wi-Fi、USB 或蓝牙连接"
                         : usbFailure.getMessage(),
                 usbFailure);
+    }
+
+    private interface BodyFactory {
+        JSONObject create(String requestId, String sessionId, String computerId)
+                throws Exception;
     }
 
     private static boolean canUseBluetooth(BluetoothTransport transport) {
@@ -165,6 +187,21 @@ final class PhoneDeckUsbClient {
         body.put("action", "keyChord");
         body.put("keys", keys);
         body.put("holdMs", holdMs);
+        return body;
+    }
+
+    private static JSONObject createTextBody(
+            String text,
+            String requestId,
+            String sessionId,
+            String computerId) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("protocolVersion", 2);
+        body.put("requestId", requestId);
+        body.put("sessionId", sessionId);
+        body.put("targetComputerId", computerId);
+        body.put("action", "text");
+        body.put("text", text);
         return body;
     }
 
