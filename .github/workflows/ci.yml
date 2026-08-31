@@ -26,6 +26,19 @@ jobs:
       - name: Publish self-contained receiver
         run: dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
+  macos:
+    name: macOS receiver, tests, and app bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Run macOS receiver tests
+        run: dotnet test work/phone-deck/macos/PhoneDeck.Receiver.Tests/PhoneDeck.Receiver.Tests.csproj -c Release
+      - name: Build and ad-hoc sign app bundle
+        run: zsh scripts/macos/Build-PhoneDeckReceiver.sh
+
   android:
     name: Android build and lint
     runs-on: ubuntu-latest

@@ -16,26 +16,28 @@
 
 - Android：`work/phone-deck/android`
 - Windows：`work/phone-deck/windows/PhoneDeck.Server`
+- macOS：`work/phone-deck/macos/PhoneDeck.Receiver`
 - 输入测试工具：`work/phone-deck/test/FocusSink`
 
 不要修改 `outputs` 中的二进制作为源代码。需要发布时从源码重新构建。
 
 ## 当前基线
 
-- 当前源码版本：1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步）；上一实机稳定基线为 1.4.0。
+- 当前 Android/Windows 源码版本：1.6.0-dev.4；macOS 接收端预览：2.0.0-dev.1；上一实机稳定基线为 1.4.0。
 - 当前规格版本：v0.3。
 - 1.5.0 已完成源码、构建/协议、长期签名、Samsung 安装和一轮 ADB 恢复验证；快捷键
   编辑与真实输入、音频、Typeless、连续断线和蓝牙仍待验收。
 - 当前 Android 代码是 Java，不要在没有明确收益和迁移计划时整体改写 Kotlin。
 - 当前 Windows 接收端是 .NET 8/C#，使用 ASP.NET Core、NAudio、SendInput 和原生蓝牙套接字。
-- 当前 macOS 接收端不存在，不要声称已经支持 Mac。
+- 当前 macOS 已有 CGEvent 快捷键/文字接收端预览源码，但尚未在真实 Mac 验收，也没有
+  Core Audio / BlackHole / Typeless 语音链路；不得声称已完整支持 Mac。
 
 ## 当前最高优先级
 
-1. 真实 Wi-Fi 音频验收：拔掉 USB/ADB 后确认手机音频、Typeless 启停和断流清理。
-2. 在第二、第三台 Windows 安装接收端，逐台完成 USB 配对和手机切换验收。
-3. 补齐 mDNS 自动发现、凭据撤销/重配与设备删除交互。
-4. 回归可编程快捷键、配置迁移、触屏排序和蓝牙一致性。
+1. 在真实 Mac 构建 2.0.0-dev.1，完成辅助功能、本地网络、CGEvent、USB 和 Wi-Fi 输入验收。
+2. 与两台 Windows 完成混合三机目标隔离，再接 Core Audio / BlackHole / Typeless 语音。
+3. 回归 Windows 真实 Wi-Fi 音频、第二台安装和快捷键/蓝牙。
+4. 补齐 mDNS 自动发现、凭据撤销/重配与设备删除交互。
 
 ## 不可破坏的行为
 
@@ -70,6 +72,10 @@ cd work\phone-deck\android
 # Windows
 dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release
 dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
+
+# macOS（编译/测试可跨平台执行；CGEvent、权限、ADB、网络必须在真实 Mac 验收）
+dotnet build work\phone-deck\macos\PhoneDeck.Receiver\PhoneDeck.Receiver.csproj -c Release
+dotnet test work\phone-deck\macos\PhoneDeck.Receiver.Tests\PhoneDeck.Receiver.Tests.csproj -c Release
 ```
 
 涉及真实语音、ADB、Typeless、VB-CABLE、蓝牙、Mac 权限或 USB 共享切换器时，自动化构建不能替代真实硬件验收。报告中必须明确区分“代码通过构建”和“已在真实设备验证”。

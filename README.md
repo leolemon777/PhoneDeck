@@ -5,7 +5,8 @@ PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可�
 当前源码版本是 **PhoneDeck 1.6.0-dev.4**，上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
-VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
+VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
+**2.0.0-dev.1 接收端预览**：源码和 10 项跨平台测试已完成，真实 Mac 验收尚未进行。
 
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
 
@@ -64,6 +65,17 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 - Windows 通过真实录音会话检查 Typeless 是否已停止；停止键未被 Typeless 处理时只在确认仍在录音后重试一次。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
+## macOS 2.0.0-dev.1 接收端预览
+
+- 新增 Apple Silicon / Intel 共用源码的 .NET 8 macOS 接收端和 `.app` 构建脚本。
+- 复用现有 USB 8765、安全 HTTPS 8766、UDP 8767、稳定电脑 ID、证书固定、目标校验和请求去重。
+- 使用 `CGEvent` 注入受控按键与 Unicode 文字；异常时反向释放本次已按下的全部按键。
+- 兼容当前 Android 默认组合：`Ctrl/Win/Alt` 在 Mac 上转换为 `Command/Command/Option`；截图、窗口切换和输入法切换使用 macOS 专用映射。
+- 健康检查明确上报 `platform=macos`、`input.backend=CGEvent` 和辅助功能权限状态。
+- 当前预览尚未在真实 Mac 上验收，也尚未接入 Core Audio、BlackHole、Typeless 会话、蓝牙、Developer ID 签名和公证。
+
+Mac 构建、权限、配对与验收步骤见 [docs/MACOS_SETUP.md](./docs/MACOS_SETUP.md)。
+
 ## 当前尚未实现
 
 - 完整的跨设备配置同步；当前只有四个 Agent 文本按钮支持从当前电脑自动同步，其他按钮
@@ -71,7 +83,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 - 多配置、前台软件自动切换和更完整的 Codex / Claude Code / Cursor / ZCode 工具专属指令集。
 - 三台真实电脑同时在线的完整验收；当前版本已完成 Windows Wi-Fi 通道、USB 自动配对和
   受限 UDP 自动发现，但仍需逐台安装接收端并完成三机实测。
-- macOS 接收端、Core Audio 和 macOS 输入注入。
+- macOS Core Audio / BlackHole 手机音频、Typeless 受控会话，以及真实 Mac 输入/网络验收。
 - 正式的跨电脑配置同步。
 
 不要把规划文档中的功能误认为已完成代码。
@@ -97,13 +109,18 @@ PhoneDeck/
 ├─ docs/
 │  ├─ HANDOFF.md               # 当前状态与 Agent 接力说明
 │  ├─ SETUP.md                 # 新电脑搭建、构建和运行
+│  ├─ MACOS_SETUP.md           # Mac 构建、权限、配对与验收
 │  ├─ WINDOWS_WIFI_DEPLOY.md   # 第二/第三台 Windows 无线部署
 │  └─ ARCHITECTURE.md          # 当前与目标架构
-├─ scripts/windows/            # 发行包辅助脚本模板
+├─ scripts/
+│  ├─ windows/                 # Windows 发行包辅助脚本
+│  └─ macos/                   # macOS .app 构建脚本
 └─ work/phone-deck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
    ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
+   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.1）
+   ├─ macos/PhoneDeck.Receiver.Tests # macOS 协议与映射测试
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
 ```
@@ -133,16 +150,21 @@ dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.Control
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
+macOS 接收端（在 Mac 的仓库根目录执行）：
+
+```zsh
+dotnet test work/phone-deck/macos/PhoneDeck.Receiver.Tests/PhoneDeck.Receiver.Tests.csproj -c Release
+zsh scripts/macos/Build-PhoneDeckReceiver.sh
+```
+
 ## 接下来的开发顺序
 
-1. 使用当前 Samsung 手机完成快捷键编辑、真实输入、连续开始/停止和 20 轮 USB 断线回归。
-2. 验证 VB-CABLE、Typeless 和蓝牙自定义快捷键，并修复候选版问题。
-3. 完成验收后发布 PhoneDeck 1.5.0；协议 v2 已预留 `computerId`、`targetComputerId`、平台和能力字段。
-4. PhoneDeck 1.6.0：Windows 多电脑切换中心、安全配对和本地无线连接。
-5. 实测正规的四电脑 USB 共享切换器，保留无局域网硬件模式。
-6. PhoneDeck 1.7.0：多配置与前台软件自动切换。
-7. PhoneDeck 1.8.0：完善实验性宏、快速文字和 AI 编程工具命令。
-8. PhoneDeck 2.0：macOS 接收端和 Windows/macOS 混合多电脑切换。
+1. 在真实 Mac 构建 2.0.0-dev.1，授予辅助功能/本地网络权限，验证 TextEdit 中的文字、复制、截图和窗口切换。
+2. 用 USB 完成 Mac 首次配对，拔线后验证 Wi-Fi 快捷键，并和两台 Windows 做三机目标隔离验收。
+3. 接入 Core Audio → BlackHole 2ch → Typeless，验证手机 48 kHz PCM 与开始/停止状态。
+4. 回归 Windows Wi-Fi 语音、快捷键编辑、真实输入、连续断线和蓝牙。
+5. 补齐标准 mDNS/Bonjour、凭据撤销/重配与 USB 共享切换器实测。
+6. 完成 1.7/1.8 的多配置、自动切换和受控自动化后，再完成 macOS Developer ID 签名、公证与安装包。
 
 ## 关键安全边界
 
@@ -158,5 +180,6 @@ dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.Control
 - [VB-CABLE](https://vb-audio.com/Cable/)：Windows 虚拟音频设备，用户自行安装。
 - Android SDK Platform Tools：ADB USB 通道。
 - NAudio 2.2.1：Windows 接收端 NuGet 依赖。
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 下一阶段虚拟音频设备，用户自行安装。
 
-Typeless、VB-CABLE 和未来可能使用的 macOS 虚拟音频软件不属于本仓库，也不会打包其安装文件。
+Typeless、VB-CABLE 和 BlackHole 不属于本仓库，也不会打包其安装文件。

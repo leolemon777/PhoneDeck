@@ -1,12 +1,29 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-08-31
-当前分支：`agent/multi-pc-1.6.0`
-当前源码：PhoneDeck 1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步）
+当前分支：`agent/macos-receiver-2.0`
+当前源码：Android/Windows 1.6.0-dev.4；macOS 接收端预览 2.0.0-dev.1
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.3
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-08-31 macOS 2.0.0-dev.1 预览
+
+- 用户确认下一步转向第三台 Mac 适配；新增 `work/phone-deck/macos/PhoneDeck.Receiver`，
+  同一源码可发布 `osx-arm64` 与 `osx-x64` 自包含应用。
+- Mac 接收端复用 8765/8766/8767、稳定电脑 ID、USB 安全配对、证书固定、访问令牌、
+  `targetComputerId` 校验和请求去重；健康检查返回 `platform=macos`。
+- 新增 CGEvent 输入后端：受控键位、Unicode 文字、1–8 步受限宏、20–500 ms 按键时长，
+  任一步异常时反向释放所有可能已按下的键。
+- 为当前 Android 默认布局加入 Mac 兼容映射：Ctrl/Win/Alt → Command/Command/Option；
+  Win+Shift+S → Command+Shift+4；Alt+Tab → Command+Tab；Win+Space → Control+Space。
+- 新增 macOS ADB reverse 看门狗、`.app` Info.plist、Apple Silicon/Intel 构建脚本和
+  `docs/MACOS_SETUP.md` 权限/配对/验收说明。
+- Windows 上 `PhoneDeck.Receiver` Release 构建成功，macOS 测试 10/10 通过；尚未在真实
+  Mac 上执行构建、辅助功能授权、CGEvent、USB/Wi-Fi 或三机验收。
+- 本阶段明确不声明 `phoneAudio` / `managedDictation`，`audio.available=false`；Core Audio、
+  BlackHole 2ch、Typeless 会话、蓝牙、Developer ID 签名与公证仍待下一阶段。
 
 ## 2026-08-31 dev.4 新增与验证
 
@@ -31,8 +48,8 @@ Android 配置版本：`schemaVersion=1`
 UDP 自动发现、音频 pre-roll 和实验性多步宏。2026-08-28 会话还完成：Typeless 三模式（听写/
 翻译/问答）、USB 看门狗常连、Wi-Fi 保活、9 套主题（含 Grok 风格黑白双色）、横竖屏
 双栏、主界面编辑模式与退格连发、AI 黄金位预设、前台应用回传和配置
-导入导出，均已在 Samsung SM-G9880 真机验证。下一步仍是把接收端装到另外两台电脑、
-逐台 USB 自动配对，再做三机语音联合验收。
+导入导出，均已在 Samsung SM-G9880 真机验证。下一步改为先在第三台 Mac 验收 CGEvent
+接收端，再与两台 Windows 做混合三机切换，随后接入 Mac 手机音频。
 
 ## 2026-08-30 dev.3 新增与验证
 
@@ -77,13 +94,18 @@ UDP 自动发现、音频 pre-roll 和实验性多步宏。2026-08-28 会话还�
   校验，失败不改现有配置。真机完成导出→导入闭环。
 - **FocusSink**：无操作自动关闭延长到 10 分钟，便于人工验证。
 
-## 待办（下一步严格顺序不变）
+## 待办（下一步严格顺序）
 
-1. 拔 USB 后真实 Wi-Fi 语音文字核对（本轮已验会话启停，识别文字质量待用户实测）。
-2. 第二、第三台 Windows 安装接收端并逐台配对。
-3. 标准 mDNS/Bonjour、凭据撤销/重配；自定义 UDP 地址发现已完成。
-4. 快捷键回归（编辑/隐藏/排序/重启持久化）。
-5. 调研报告 `outputs/PhoneDeck开发工具调研-2026-08-28.md`：第一档四项已完成；
+1. 在真实 Mac 运行 `scripts/macos/Build-PhoneDeckReceiver.sh`，固定安装到 `/Applications`，
+   授予辅助功能和本地网络权限。
+2. 在 TextEdit 验证文字、Command+C/V/Z、Command+Shift+4、Command+Tab、Control+Space，
+   并确认没有修饰键残留。
+3. 用 Samsung 与 Mac 做 USB 初配、拔线 Wi-Fi 输入、IP 变化恢复和 20 轮目标切换。
+4. 与两台 Windows 做混合三机目标隔离：手机只把文字/快捷键发到当前电脑。
+5. 接入 Core Audio → BlackHole 2ch → Typeless，并完成真实语音开始/停止/断流清理。
+6. 回归 Windows 拔 USB 后真实 Wi-Fi 语音文字、快捷键编辑/隐藏/排序/重启持久化和蓝牙。
+7. 标准 mDNS/Bonjour、凭据撤销/重配；自定义 UDP 地址发现已完成。
+8. 调研报告 `outputs/PhoneDeck开发工具调研-2026-08-28.md`：第一档四项已完成；
    第二档中的受限多步宏已进入实验实现；焦点保障、按前台应用自动切配置、分页仍待完成。
 
 ## 构建环境注意（本机）

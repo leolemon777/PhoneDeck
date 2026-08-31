@@ -4,6 +4,10 @@
 *.java text eol=lf
 *.cs text eol=lf
 *.gradle text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.plist text eol=lf
+*.csproj text eol=lf
 gradlew text eol=lf
 *.cmd text eol=crlf
 *.bat text eol=crlf

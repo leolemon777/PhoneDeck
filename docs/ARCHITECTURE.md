@@ -1,6 +1,6 @@
 # PhoneDeck 架构说明
 
-## 当前 1.6.0-dev.4 数据流
+## 当前 Windows 1.6.0-dev.4 数据流
 
 ```text
 Android MainActivity
@@ -52,6 +52,20 @@ Windows PhoneDeck.Server        │
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
 
+### macOS 2.0.0-dev.1 预览组件
+
+- `macos/PhoneDeck.Receiver/Program.cs`：Kestrel 本地 HTTP 8765、安全 HTTPS 8766、健康检查、USB 配对和协议 v2 输入入口。
+- `MacKeyboardInput.cs`：CGEvent 输入后端、macOS 虚拟键码白名单、Unicode 文字、请求去重、宏限制和异常按键释放。
+- `ReceiverIdentity.cs` / `LanIdentity.cs`：在 `~/Library/Application Support/PhoneDeck` 持久化稳定电脑 ID、证书与随机访问令牌；敏感文件限制为当前用户读写。
+- `LanDiscoveryResponder.cs`：复用 UDP 8767 最小发现应答，仍需经过手机已有的证书固定、令牌和 `computerId` 校验。
+- `UsbWatchdog.cs`：在 Mac 检测 `adb` 并恢复 `adb reverse tcp:8765 tcp:8765`。
+- `PhoneDeck.Receiver.Tests`：在不调用 macOS 原生框架的情况下验证平台按键映射、目标校验、去重、文字输入和失败释放路径。
+
+当前 Mac 预览只声明 `fixedAction/keyChord/text/macro/secureLan/macInput` 能力，不声明
+`phoneAudio` 或 `managedDictation`。因此 Android 可以把快捷键和文字发送到 Mac，但会阻止
+手机语音入口误用尚未接入的 Core Audio 链路。此源码已在 Windows 上跨平台编译并通过测试，
+尚未在真实 Mac 上验证 CGEvent、TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
+
 ## 当前单电脑/传输限制
 
 1. Android USB 服务器地址仍为 `http://127.0.0.1:8765`。
@@ -59,7 +73,8 @@ Windows PhoneDeck.Server        │
 3. Android 蓝牙传输只保存一个 socket。
 4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
 5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
-6. 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
+6. Windows 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
+7. macOS 快捷键接收端已有预览源码；Core Audio / BlackHole / Typeless 会话、蓝牙和正式签名尚未接入。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -75,7 +90,8 @@ Android UI / Profiles / Actions
        Receiver Core
       ┌──────┴──────────┐
  Windows backend     macOS backend
- SendInput/WASAPI    CGEvent/Core Audio
+ SendInput/WASAPI    CGEvent（预览已实现）
+                     Core Audio（待实现）
 ```
 
 业务动作只描述语义：
@@ -96,7 +112,10 @@ Android UI / Profiles / Actions
 `X-PhoneDeck-Session` 和 `X-PhoneDeck-Computer-Id` 请求头。服务端在进入音频或
 Typeless 状态机前校验目标，不匹配直接返回 400。
 
-`PRIMARY` 在 Windows 映射为 Ctrl，在 macOS 映射为 Command。
+`PRIMARY` 在 Windows 映射为 Ctrl，在 macOS 映射为 Command。当前 Android 编辑器仍保存
+Windows 风格的 `CTRL/WIN/ALT`；2.0.0-dev.1 Mac 后端为默认布局提供兼容映射，并对截图、
+窗口切换和输入法切换做专用转换。后续 Android 编辑器需要显式区分跨平台“主键”与真实
+Control / Option / Command，消除自定义组合的歧义。
 
 ## 多电脑原则
 
@@ -134,7 +153,8 @@ Typeless 状态机前校验目标，不匹配直接返回 400。
 - USB 共享切换器验证。
 
 当前 `1.6.0-dev.4` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
-自动发现和当前目标的快捷键/听写/PCM 路由。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
-macOS 接收端和三台电脑联合实测。
+自动发现和当前目标的快捷键/听写/PCM 路由。macOS `2.0.0-dev.1` 已新增兼容相同安全
+传输的 CGEvent 快捷键接收端预览。仍缺凭据撤销/重配、标准 mDNS/Bonjour、Mac 音频、
+真实 Mac 权限/网络验收和 Windows/macOS 三机联合实测。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。
