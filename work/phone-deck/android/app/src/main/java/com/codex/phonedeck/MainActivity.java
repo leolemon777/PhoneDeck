@@ -484,6 +484,31 @@ public final class MainActivity extends Activity {
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
 
+        LinearLayout voiceEditRow = new LinearLayout(this);
+        voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
+        voiceEditRow.setGravity(Gravity.CENTER);
+
+        Button backspaceButton = voiceEditButton("退格");
+        backspaceButton.setContentDescription("删除电脑光标前一个字符");
+        backspaceButton.setOnClickListener(view -> triggerVoiceEditAction(
+                backspaceButton, "退格", "BACKSPACE", "backspace"));
+        installTouchFeedback(backspaceButton);
+        voiceEditRow.addView(backspaceButton, new LinearLayout.LayoutParams(
+                0, dp(46), 1f));
+
+        Button enterButton = voiceEditButton("回车");
+        enterButton.setContentDescription("向电脑发送回车键");
+        enterButton.setOnClickListener(view -> triggerVoiceEditAction(
+                enterButton, "回车", "ENTER", "enter"));
+        installTouchFeedback(enterButton);
+        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(
+                0, dp(46), 1f);
+        enterParams.leftMargin = dp(8);
+        voiceEditRow.addView(enterButton, enterParams);
+        voiceDock.addView(voiceEditRow, margins(dp(0), dp(7), dp(0), dp(0),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
         voiceMeter = new VoiceLevelView(this, theme);
         voiceDock.addView(voiceMeter, margins(dp(8), dp(5), dp(8), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
@@ -866,6 +891,48 @@ public final class MainActivity extends Activity {
                             theme.danger);
                     performResultHaptic(source, false);
                     source.showFailure();
+                });
+            }
+        });
+    }
+
+    private void triggerVoiceEditAction(
+            Button source, String label, String key, String legacyAction) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("requestId", UUID.randomUUID().toString());
+            if (serverProtocolVersion >= 2 && targetComputerId != null
+                    && !targetComputerId.isBlank()) {
+                body.put("protocolVersion", 2);
+                body.put("sessionId", clientSessionId);
+                body.put("targetComputerId", targetComputerId);
+                body.put("action", "keyChord");
+                body.put("keys", new org.json.JSONArray().put(key));
+                body.put("holdMs", 40);
+            } else {
+                body.put("action", legacyAction);
+            }
+        } catch (Exception exception) {
+            showActionFeedback("✕  无法创建" + label + "操作", theme.danger);
+            performResultHaptic(source, false);
+            return;
+        }
+
+        showActionFeedback("●  正在发送：" + label, theme.warning);
+        actionExecutor.execute(() -> {
+            try {
+                String transport = sendCommand(body);
+                mainHandler.post(() -> {
+                    showConnection(transport + " 已连接", theme.success);
+                    showActionFeedback("✓  已发送：" + label + " · " + transport,
+                            theme.success);
+                    performResultHaptic(source, true);
+                });
+            } catch (Exception exception) {
+                mainHandler.post(() -> {
+                    showConnection("发送失败，请检查当前电脑连接", theme.danger);
+                    showActionFeedback("✕  电脑未确认" + label + "操作", theme.danger);
+                    performResultHaptic(source, false);
                 });
             }
         });
@@ -2139,6 +2206,16 @@ public final class MainActivity extends Activity {
         button.setBackground(theme.pressable(
                 this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 12));
         button.setStateListAnimator(null);
+        return button;
+    }
+
+    private Button voiceEditButton(String label) {
+        Button button = smallButton(label);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setBackground(theme.pressable(
+                this, theme.surface,
+                theme.mix(theme.surface, theme.primary, 0.16f), 14));
         return button;
     }
 
