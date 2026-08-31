@@ -64,8 +64,65 @@ public sealed class DictationSessionManagerTests
         typeless.WaitResults.Enqueue(true);
 
         Assert.IsFalse(manager.Start(sessionId, "start-request", "dictation"));
-        Assert.AreEqual(1, audio.WaitForSessionCalls);
+        Assert.AreEqual(2, audio.WaitForSessionCalls,
+            "应先短预热一次，再用完整预算复核音频会话");
         Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void StartUsesShortAudioWarmupBeforeRequestingTypeless()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+        var sessionId = Guid.NewGuid().ToString();
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+        audio.OnWaitForSession = call =>
+        {
+            if (call == 1)
+            {
+                Assert.AreEqual(0, typeless.ToggleCount,
+                    "短预热必须发生在 Typeless 启动键之前");
+                Assert.IsTrue(audio.WaitTimeouts[0] <= 250,
+                    "预热窗口不得重新变成长串行等待");
+            }
+            else
+            {
+                Assert.AreEqual(1, typeless.ToggleCount,
+                    "完整音频复核必须发生在 Typeless 启动确认之后");
+            }
+        };
+
+        Assert.IsFalse(manager.Start(sessionId, "start-request", "dictation"));
+        Assert.AreEqual(2, audio.WaitForSessionCalls);
+        Assert.AreEqual(1, audio.BeginPlaybackCalls);
+    }
+
+    [TestMethod]
+    public void MissingAudioAfterFastTypelessStartResetsTypeless()
+    {
+        var audio = new FakeAudioSessionController
+        {
+            WaitForSessionResult = false
+        };
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+        typeless.IsCapturingResults.Enqueue(true);
+        typeless.WaitResults.Enqueue(true);
+
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Start(Guid.NewGuid().ToString(), "start-request", "dictation"));
+
+        StringAssert.Contains(exception.Message, "音频会话不存在");
+        Assert.AreEqual(2, typeless.ToggleCount,
+            "音频未建立时必须把已快速唤醒的 Typeless 自动关闭");
+        Assert.IsFalse(manager.IsActive);
+        Assert.AreEqual(0, audio.BeginPlaybackCalls);
     }
 
     [TestMethod]
@@ -213,6 +270,26 @@ public sealed class DictationSessionManagerTests
     }
 
     [TestMethod]
+    public void StartUsesColdStartBudgetsForTypelessAndWasapi()
+    {
+        var audio = new FakeAudioSessionController();
+        var typeless = new FakeTypelessController();
+        var manager = new DictationSessionManager(audio, typeless);
+
+        typeless.IsCapturingResults.Enqueue(false);
+        typeless.WaitResults.Enqueue(true);
+
+        Assert.IsFalse(manager.Start(
+            Guid.NewGuid().ToString(), "start-request", "dictation"));
+        Assert.IsTrue(typeless.LastWaitTimeoutMilliseconds >= 2_000,
+            "Typeless 冷启动确认窗口不得退回原 1.2 秒竞态值");
+        Assert.IsTrue(audio.LastWaitTimeoutMilliseconds >= 3_000,
+            "WASAPI 冷启动登记窗口不得退回原 1.2 秒竞态值");
+        Assert.IsTrue(audio.WaitTimeouts[0] <= 250,
+            "音频预热只允许使用短窗口，不能拖慢 Typeless 浮窗");
+    }
+
+    [TestMethod]
     public void IsActiveAndHealthReadsDoNotBlockDuringSlowStart()
     {
         var audio = new FakeAudioSessionController();
@@ -273,14 +350,20 @@ public sealed class DictationSessionManagerTests
         public int WaitForSessionCalls { get; private set; }
         public int BeginPlaybackCalls { get; private set; }
         public int WaitForSessionEndCalls { get; private set; }
+        public int LastWaitTimeoutMilliseconds { get; private set; }
+        public List<int> WaitTimeouts { get; } = new();
         public bool WaitForSessionResult { get; set; } = true;
         public bool WaitForSessionEndResult { get; set; } = true;
+        public Action<int>? OnWaitForSession { get; set; }
 
         public bool IsSessionActive(string sessionId) => true;
 
         public bool WaitForSessionActive(string sessionId, int timeoutMilliseconds)
         {
             WaitForSessionCalls++;
+            LastWaitTimeoutMilliseconds = timeoutMilliseconds;
+            WaitTimeouts.Add(timeoutMilliseconds);
+            OnWaitForSession?.Invoke(WaitForSessionCalls);
             return WaitForSessionResult;
         }
 
@@ -313,6 +396,7 @@ public sealed class DictationSessionManagerTests
         public int ToggleCount { get; private set; }
         public string LastMode { get; private set; } = "dictation";
         public bool UsesVirtualCable { get; set; } = true;
+        public int LastWaitTimeoutMilliseconds { get; private set; }
 
         /// <summary>非空时 WaitForCapturing 先阻塞在该闸门上，模拟慢速 Typeless。</summary>
         public ManualResetEventSlim? WaitForCapturingGate { get; set; }
@@ -323,6 +407,7 @@ public sealed class DictationSessionManagerTests
 
         public bool? WaitForCapturing(bool expected, int timeoutMilliseconds)
         {
+            LastWaitTimeoutMilliseconds = timeoutMilliseconds;
             WaitForCapturingGate?.Wait();
             return WaitResults.Count > 0 ? WaitResults.Dequeue() : expected;
         }
