@@ -6,6 +6,8 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.os.SystemClock;
+import android.util.Log;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -17,10 +19,22 @@ final class AudioStreamer implements AutoCloseable {
         void onStopped(String sessionId, String reason);
     }
 
+    private static final String LOG_TAG = "PhoneDeckAudio";
+
     private static final int SAMPLE_RATE = 48_000;
+
+    /// 每次上传的 PCM 帧长：20ms 一帧，首帧不必等满整个系统缓冲。
+    private static final int READ_CHUNK_MS = 20;
+    private static final int READ_CHUNK_BYTES = SAMPLE_RATE * 2 * READ_CHUNK_MS / 1_000;
+
+    /// 点击后先录音、连接建立前最多暂存 1 秒 PCM，保证第一音节不丢。
+    private static final int PRE_ROLL_MS = 1_000;
+    private static final int PRE_ROLL_BYTES = SAMPLE_RATE * 2 * PRE_ROLL_MS / 1_000;
+
     private static final int PAUSE_KEEPALIVE_INTERVAL_MS = 100;
     private static final int PAUSE_SILENCE_BYTES =
             SAMPLE_RATE * 2 * PAUSE_KEEPALIVE_INTERVAL_MS / 1_000;
+
     private final Context context;
     private final Listener listener;
     private final Object syncRoot = new Object();
@@ -30,6 +44,8 @@ final class AudioStreamer implements AutoCloseable {
     private volatile boolean recorderNeedsRestart;
     private volatile AudioRecord recorder;
     private volatile HttpURLConnection activeConnection;
+    private volatile OutputStream linkOutput;
+    private volatile Exception linkFailure;
     private Thread worker;
 
     AudioStreamer(Context context, Listener listener) {
@@ -72,6 +88,9 @@ final class AudioStreamer implements AutoCloseable {
             shouldRun = true;
             paused = false;
             recorderNeedsRestart = false;
+            linkOutput = null;
+            linkFailure = null;
+            activeConnection = null;
             worker = new Thread(
                     () -> runStream(sessionId, targetComputerId, endpoint),
                     "PhoneDeck-Microphone");
@@ -123,14 +142,59 @@ final class AudioStreamer implements AutoCloseable {
         }
     }
 
+    /// 点击后最前面的 PCM 暂存环：只保留最近 PRE_ROLL_BYTES，
+    /// 连接建立后按原写入顺序一次性灌出（不重复、不乱序、不丢失）。
+    private static final class PreRollRing {
+        private final byte[] store = new byte[PRE_ROLL_BYTES];
+        private int writeIndex;
+        private int stored;
+
+        void write(byte[] source, int offset, int count) {
+            if (count <= 0) {
+                return;
+            }
+            if (count >= store.length) {
+                System.arraycopy(
+                        source, offset + count - store.length, store, 0, store.length);
+                writeIndex = 0;
+                stored = store.length;
+                return;
+            }
+            int first = Math.min(count, store.length - writeIndex);
+            System.arraycopy(source, offset, store, writeIndex, first);
+            if (count > first) {
+                System.arraycopy(source, offset + first, store, 0, count - first);
+            }
+            writeIndex = (writeIndex + count) % store.length;
+            stored = Math.min(stored + count, store.length);
+        }
+
+        int drainTo(OutputStream output) throws Exception {
+            int total = stored;
+            if (total == 0) {
+                return 0;
+            }
+            int start = (writeIndex - stored + store.length) % store.length;
+            int first = Math.min(stored, store.length - start);
+            if (first > 0) {
+                output.write(store, start, first);
+            }
+            if (stored > first) {
+                output.write(store, 0, stored - first);
+            }
+            stored = 0;
+            writeIndex = 0;
+            return total;
+        }
+    }
+
     private void runStream(
             String sessionId,
             String targetComputerId,
             PhoneDeckEndpoint endpoint) {
-        HttpURLConnection connection = null;
         AudioRecord localRecorder = null;
-        boolean recorderStarted = false;
         String stoppedReason = null;
+        final long startedAt = SystemClock.elapsedRealtime();
         try {
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED) {
@@ -155,74 +219,81 @@ final class AudioStreamer implements AutoCloseable {
             }
             recorder = localRecorder;
 
-            connection = PhoneDeckHttp.open(
-                    endpoint, "/api/audio/stream", 1800, 2500);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "audio/L16; rate=48000; channels=1");
-            connection.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
-            connection.setRequestProperty("X-PhoneDeck-Session", sessionId);
-            if (targetComputerId != null && !targetComputerId.isBlank()) {
-                connection.setRequestProperty("X-PhoneDeck-Protocol", "2");
-                connection.setRequestProperty(
-                        "X-PhoneDeck-Computer-Id", targetComputerId);
-            }
-            connection.setChunkedStreamingMode(8192);
-            connection.setDoOutput(true);
-            activeConnection = connection;
+            // 先开录：点击后立刻开始捕获，语音进入 pre-roll 环，
+            // 不等 TLS 握手完成，用户立即开口也不会丢第一音节。
+            localRecorder.startRecording();
+            log(sessionId, "audioRecordStarted", startedAt);
 
-            byte[] buffer = new byte[bufferSize];
+            Thread connectThread = new Thread(
+                    () -> openLink(sessionId, targetComputerId, endpoint),
+                    "PhoneDeck-Microphone-Connect");
+            connectThread.start();
+
+            PreRollRing preRoll = new PreRollRing();
+            byte[] chunk = new byte[READ_CHUNK_BYTES];
             byte[] silence = new byte[PAUSE_SILENCE_BYTES];
-            try (OutputStream output = connection.getOutputStream()) {
-                localRecorder.startRecording();
-                recorderStarted = true;
-                streaming = true;
-                listener.onReady(sessionId);
-                long lastLevelUpdate = 0;
-                while (shouldRun) {
-                    if (paused) {
-                        if (recorderStarted) {
-                            try {
-                                localRecorder.stop();
-                            } catch (IllegalStateException ignored) {
-                                // pause() 可能已经停止录音。
-                            }
-                            recorderStarted = false;
-                        }
-                        output.write(silence);
-                        output.flush();
-                        long now = android.os.SystemClock.elapsedRealtime();
+            boolean preRollFlushed = false;
+            boolean firstPcmLogged = false;
+            long lastLevelUpdate = 0;
+            while (shouldRun) {
+                if (paused) {
+                    if (linkOutput != null) {
+                        // 已建立连接：继续发送静音维持同一 HTTP/Typeless 会话。
+                        linkOutput.write(silence);
+                        linkOutput.flush();
+                        long now = SystemClock.elapsedRealtime();
                         if (now - lastLevelUpdate >= 200) {
                             listener.onLevel(0);
                             lastLevelUpdate = now;
                         }
-                        Thread.sleep(PAUSE_KEEPALIVE_INTERVAL_MS);
-                        continue;
                     }
-                    if (!recorderStarted || recorderNeedsRestart) {
-                        localRecorder.startRecording();
-                        recorderStarted = true;
-                        recorderNeedsRestart = false;
-                    }
-                    int count = localRecorder.read(
-                            buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
-                    if (count <= 0) {
-                        if (shouldRun && (paused || recorderNeedsRestart)) {
-                            recorderStarted = false;
-                            continue;
-                        }
-                        if (shouldRun) {
-                            throw new IllegalStateException("手机麦克风读取中断：" + count);
-                        }
-                        break;
-                    }
-                    output.write(buffer, 0, count);
-                    long now = android.os.SystemClock.elapsedRealtime();
+                    Thread.sleep(PAUSE_KEEPALIVE_INTERVAL_MS);
+                    continue;
+                }
+                if (localRecorder.getRecordingState()
+                        != AudioRecord.RECORDSTATE_RECORDING) {
+                    // 从暂停恢复：同一 AudioRecord 实例重新开始采集。
+                    localRecorder.startRecording();
+                }
+                int count = localRecorder.read(
+                        chunk, 0, chunk.length, AudioRecord.READ_BLOCKING);
+                if (count <= 0) {
+                    throw new IllegalStateException("手机麦克风读取中断：" + count);
+                }
+                if (!firstPcmLogged) {
+                    log(sessionId, "firstPcm", startedAt);
+                    firstPcmLogged = true;
+                }
+                if (linkFailure != null) {
+                    throw linkFailure;
+                }
+                OutputStream output = linkOutput;
+                if (output == null) {
+                    // 连接仍在建立：先按序暂存。
+                    preRoll.write(chunk, 0, count);
+                    long now = SystemClock.elapsedRealtime();
                     if (now - lastLevelUpdate >= 100) {
-                        listener.onLevel(calculateLevel(buffer, count));
+                        listener.onLevel(calculateLevel(chunk, count));
                         lastLevelUpdate = now;
                     }
+                    continue;
                 }
+                if (!preRollFlushed) {
+                    int preRolled = preRoll.drainTo(output);
+                    output.flush();
+                    preRollFlushed = true;
+                    log(sessionId, "prerollFlushed bytes=" + preRolled, startedAt);
+                }
+                output.write(chunk, 0, count);
                 output.flush();
+                long now = SystemClock.elapsedRealtime();
+                if (now - lastLevelUpdate >= 100) {
+                    listener.onLevel(calculateLevel(chunk, count));
+                    lastLevelUpdate = now;
+                }
+            }
+            if (linkOutput != null) {
+                linkOutput.flush();
             }
         } catch (Exception exception) {
             if (shouldRun) {
@@ -237,7 +308,7 @@ final class AudioStreamer implements AutoCloseable {
             paused = false;
             recorderNeedsRestart = false;
             recorder = null;
-            activeConnection = null;
+            linkOutput = null;
             if (localRecorder != null) {
                 try {
                     if (localRecorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
@@ -248,14 +319,61 @@ final class AudioStreamer implements AutoCloseable {
                 }
                 localRecorder.release();
             }
+            HttpURLConnection connection = activeConnection;
             if (connection != null) {
                 connection.disconnect();
             }
+            log(sessionId, "sessionStopped", startedAt);
             synchronized (syncRoot) {
                 worker = null;
             }
             listener.onStopped(sessionId, stoppedReason);
         }
+    }
+
+    /// 连接线程：建立 HTTPS 音频请求；成功即回调 onReady，
+    /// 让 /dictation/start 与 Typeless 启动和 pre-roll 灌入并行。
+    private void openLink(
+            String sessionId,
+            String targetComputerId,
+            PhoneDeckEndpoint endpoint) {
+        final long startedAt = SystemClock.elapsedRealtime();
+        log(sessionId, "requestStarted", startedAt);
+        HttpURLConnection connection = null;
+        try {
+            connection = PhoneDeckHttp.open(
+                    endpoint, "/api/audio/stream", 1800, 2500);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty(
+                    "Content-Type", "audio/L16; rate=48000; channels=1");
+            connection.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
+            connection.setRequestProperty("X-PhoneDeck-Session", sessionId);
+            if (targetComputerId != null && !targetComputerId.isBlank()) {
+                connection.setRequestProperty("X-PhoneDeck-Protocol", "2");
+                connection.setRequestProperty(
+                        "X-PhoneDeck-Computer-Id", targetComputerId);
+            }
+            connection.setChunkedStreamingMode(READ_CHUNK_BYTES);
+            connection.setDoOutput(true);
+            activeConnection = connection;
+            OutputStream output = connection.getOutputStream();
+            log(sessionId, "serverHeaders", startedAt);
+            linkOutput = output;
+            streaming = true;
+            listener.onReady(sessionId);
+        } catch (Exception exception) {
+            linkFailure = exception;
+        } finally {
+            if (connection != null && (linkFailure != null || !shouldRun)) {
+                // 失败或工作线程已退出：由连接线程负责断开，避免句柄滞留。
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static void log(String sessionId, String stage, long startedAt) {
+        Log.i(LOG_TAG, sessionId + " " + stage
+                + " +" + (SystemClock.elapsedRealtime() - startedAt) + "ms");
     }
 
     private static int calculateLevel(byte[] pcm, int count) {

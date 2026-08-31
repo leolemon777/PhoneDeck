@@ -24,6 +24,7 @@ import java.util.concurrent.Executors;
 public final class ShortcutEditActivity extends Activity {
     static final String EXTRA_BUTTON_ID = "buttonId";
     private static final int REQUEST_KEYS = 2001;
+    private static final int REQUEST_MACRO_STEP_KEYS = 2002;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private PhoneDeckTheme theme;
@@ -39,6 +40,11 @@ public final class ShortcutEditActivity extends Activity {
     private TextView feedback;
     private Button testButton;
     private boolean dirty;
+    private LinearLayout actionContainer;
+    private LinearLayout typeSelectorRow;
+    private LinearLayout macroStepContainer;
+    private Button macroAddStepButton;
+    private int editingStepIndex = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -141,35 +147,13 @@ public final class ShortcutEditActivity extends Activity {
         visibleSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
         page.addView(visibleSwitch, topMargin(dp(18)));
 
-        if (draft.isTextAction()) {
-            page.addView(label("AI Agent 文本指令"), topMargin(dp(20)));
-            textInput = input("例如：/plan");
-            page.addView(textInput, fieldParams());
-            submitSwitch = new Switch(this);
-            submitSwitch.setText("输入后自动回车执行");
-            submitSwitch.setTextColor(theme.text);
-            submitSwitch.setTextSize(15);
-            submitSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
-            page.addView(submitSwitch, topMargin(dp(8)));
-        } else {
-            page.addView(label("按键动作"), topMargin(dp(20)));
-            keySummary = text("", 17, theme.primary, Typeface.BOLD);
-            keySummary.setGravity(Gravity.CENTER);
-            keySummary.setPadding(dp(14), dp(15), dp(14), dp(15));
-            keySummary.setBackground(theme.shape(
-                    this, theme.surfaceRaised, 16, 1, theme.outline));
-            page.addView(keySummary, topMargin(dp(7)));
+        page.addView(label("动作类型"), topMargin(dp(20)));
+        page.addView(buildTypeSelector(), topMargin(dp(8)));
 
-            Button choose = button("选择单键或组合键", theme.surface, theme.text);
-            choose.setOnClickListener(view -> {
-                Intent intent = new Intent(this, KeyPickerActivity.class);
-                intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
-                        new ArrayList<>(draft.keys));
-                startActivityForResult(intent, REQUEST_KEYS);
-            });
-            page.addView(choose, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
-        }
+        actionContainer = new LinearLayout(this);
+        actionContainer.setOrientation(LinearLayout.VERTICAL);
+        page.addView(actionContainer, topMargin(dp(4)));
+        populateActionSection();
 
         testButton = button("发送测试（不会保存）", theme.surfaceRaised, theme.text);
         testButton.setOnClickListener(view -> testAction());
@@ -191,6 +175,296 @@ public final class ShortcutEditActivity extends Activity {
         restoreOrDelete.setOnClickListener(view -> confirmRestoreOrDelete());
         page.addView(restoreOrDelete, topMargin(dp(12)));
         return theme.wrapContent(this, scroll);
+    }
+
+    private LinearLayout buildTypeSelector() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        String[][] types = {
+                {ShortcutButtonConfig.ACTION_KEY_CHORD, "键盘动作"},
+                {ShortcutButtonConfig.ACTION_TEXT, "文本指令"},
+                {ShortcutButtonConfig.ACTION_MACRO, "多步宏"}};
+        for (String[] entry : types) {
+            Button option = button(entry[1], theme.surface, theme.text);
+            option.setTextSize(14);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    0, dp(44), 1f);
+            if (entry[0].equals(ShortcutButtonConfig.ACTION_TEXT)
+                    || entry[0].equals(ShortcutButtonConfig.ACTION_MACRO)) {
+                params.leftMargin = dp(8);
+            }
+            option.setOnClickListener(view -> switchActionType(entry[0]));
+            row.addView(option, params);
+        }
+        refreshTypeSelector(row);
+        typeSelectorRow = row;
+        return row;
+    }
+
+    private void refreshTypeSelector(LinearLayout row) {
+        for (int index = 0; index < row.getChildCount(); index++) {
+            Button option = (Button) row.getChildAt(index);
+            boolean selected = selectedTypeForIndex(index).equals(draft.actionType);
+            option.setBackground(theme.shape(
+                    this,
+                    selected ? theme.feedbackSurface(theme.primary) : theme.surface,
+                    14, selected ? 2 : 1,
+                    selected ? theme.primary : theme.outline));
+            option.setTextColor(selected ? theme.primary : theme.muted);
+        }
+    }
+
+    private static String selectedTypeForIndex(int index) {
+        switch (index) {
+            case 1: return ShortcutButtonConfig.ACTION_TEXT;
+            case 2: return ShortcutButtonConfig.ACTION_MACRO;
+            default: return ShortcutButtonConfig.ACTION_KEY_CHORD;
+        }
+    }
+
+    private void switchActionType(String newType) {
+        if (newType.equals(draft.actionType)) {
+            return;
+        }
+        draft.actionType = newType;
+        if (ShortcutButtonConfig.ACTION_TEXT.equals(newType)
+                && (draft.text == null || draft.text.isBlank())) {
+            // 新建 Agent 指令以“一键执行”为默认体验；已有指令的开关选择保持不变。
+            draft.submitText = true;
+        }
+        if (ShortcutButtonConfig.ACTION_KEY_CHORD.equals(newType)
+                && (draft.keys == null || draft.keys.isEmpty())) {
+            draft.keys = new ArrayList<>();
+            draft.keys.add("F1");
+        }
+        if (ShortcutButtonConfig.ACTION_MACRO.equals(newType)
+                && (draft.steps == null || draft.steps.isEmpty())) {
+            draft.steps = new ArrayList<>();
+            draft.steps.add(ShortcutButtonConfig.MacroStep.text("", true, 0));
+        }
+        dirty = true;
+        populateActionSection();
+        if (typeSelectorRow != null) {
+            refreshTypeSelector(typeSelectorRow);
+        }
+    }
+
+    private void populateActionSection() {
+        textInput = null;
+        submitSwitch = null;
+        keySummary = null;
+        macroStepContainer = null;
+        macroAddStepButton = null;
+        actionContainer.removeAllViews();
+        if (draft.isTextAction()) {
+            actionContainer.addView(label("AI Agent 文本指令"), topMargin(dp(16)));
+            textInput = input("例如：/plan");
+            textInput.setText(draft.text == null ? "" : draft.text);
+            actionContainer.addView(textInput, fieldParams());
+            submitSwitch = new Switch(this);
+            submitSwitch.setText("输入后自动回车执行");
+            submitSwitch.setTextColor(theme.text);
+            submitSwitch.setTextSize(15);
+            submitSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
+            submitSwitch.setChecked(draft.submitText);
+            actionContainer.addView(submitSwitch, topMargin(dp(8)));
+        } else if (draft.isMacroAction()) {
+            actionContainer.addView(label("宏步骤（最多 8 步，从上到下依次执行）"),
+                    topMargin(dp(16)));
+            macroStepContainer = new LinearLayout(this);
+            macroStepContainer.setOrientation(LinearLayout.VERTICAL);
+            actionContainer.addView(macroStepContainer, topMargin(dp(6)));
+            rebuildMacroSteps();
+            macroAddStepButton = button("＋ 添加步骤", theme.surface, theme.text);
+            macroAddStepButton.setOnClickListener(view -> {
+                if (draft.steps.size() >= 8) {
+                    showFeedback("宏最多 8 个步骤", theme.warning);
+                    return;
+                }
+                draft.steps.add(ShortcutButtonConfig.MacroStep.text("", true, 0));
+                dirty = true;
+                rebuildMacroSteps();
+            });
+            actionContainer.addView(macroAddStepButton, topMargin(dp(10)));
+            actionContainer.addView(macroHintCard());
+        } else {
+            actionContainer.addView(label("按键动作"), topMargin(dp(16)));
+            keySummary = text("", 17, theme.primary, Typeface.BOLD);
+            keySummary.setGravity(Gravity.CENTER);
+            keySummary.setPadding(dp(14), dp(15), dp(14), dp(15));
+            keySummary.setBackground(theme.shape(
+                    this, theme.surfaceRaised, 16, 1, theme.outline));
+            actionContainer.addView(keySummary, topMargin(dp(7)));
+
+            Button choose = button("选择单键或组合键", theme.surface, theme.text);
+            choose.setOnClickListener(view -> {
+                Intent intent = new Intent(this, KeyPickerActivity.class);
+                intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
+                        new ArrayList<>(draft.keys));
+                startActivityForResult(intent, REQUEST_KEYS);
+            });
+            actionContainer.addView(choose, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+            updateKeySummary();
+        }
+    }
+
+    private TextView macroHintCard() {
+        TextView hint = text("示例：先按 Ctrl + ` 唤出终端，延迟 300ms，再输入 /compact 并回车。",
+                13, theme.muted, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.15f);
+        hint.setPadding(dp(12), dp(10), dp(12), dp(10));
+        hint.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
+        return hint;
+    }
+
+    private void rebuildMacroSteps() {
+        macroStepContainer.removeAllViews();
+        for (int index = 0; index < draft.steps.size(); index++) {
+            macroStepContainer.addView(
+                    buildMacroStepCard(index), topMargin(index == 0 ? 0 : dp(10)));
+        }
+    }
+
+    private LinearLayout buildMacroStepCard(final int index) {
+        final ShortcutButtonConfig.MacroStep step = draft.steps.get(index);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setBackground(theme.shape(this, theme.surfaceRaised, 16, 1, theme.outline));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView stepTitle = text("第 " + (index + 1) + " 步 · "
+                + (step.isText() ? "文本" : "按键"), 15, theme.text, Typeface.BOLD);
+        header.addView(stepTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button typeToggle = button(step.isText() ? "改为按键" : "改为文本",
+                theme.surface, theme.text);
+        typeToggle.setTextSize(12);
+        typeToggle.setOnClickListener(view -> {
+            if (step.isText()) {
+                ShortcutButtonConfig.MacroStep replacement =
+                        ShortcutButtonConfig.MacroStep.keyChord(
+                                java.util.Collections.singletonList("F1"), 45,
+                                step.delayBeforeMs);
+                draft.steps.set(index, replacement);
+            } else {
+                ShortcutButtonConfig.MacroStep replacement =
+                        ShortcutButtonConfig.MacroStep.text("", true, step.delayBeforeMs);
+                draft.steps.set(index, replacement);
+            }
+            dirty = true;
+            rebuildMacroSteps();
+        });
+        header.addView(typeToggle, new LinearLayout.LayoutParams(
+                dp(96), dp(38)));
+        card.addView(header);
+
+        LinearLayout delayRow = new LinearLayout(this);
+        delayRow.setOrientation(LinearLayout.HORIZONTAL);
+        delayRow.setGravity(Gravity.CENTER_VERTICAL);
+        delayRow.addView(text("前置延迟 ms", 13, theme.muted, Typeface.NORMAL),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        EditText delayInput = input(String.valueOf(step.delayBeforeMs));
+        delayInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        delayInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(Editable s) {
+                try {
+                    step.delayBeforeMs = Math.max(0, Math.min(2000,
+                            Integer.parseInt(s.toString().trim())));
+                } catch (Exception exception) {
+                    step.delayBeforeMs = 0;
+                }
+                dirty = true;
+            }
+        });
+        delayRow.addView(delayInput, new LinearLayout.LayoutParams(dp(110),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        card.addView(delayRow, topMargin(dp(8)));
+
+        if (step.isText()) {
+            EditText content = input(step.text);
+            content.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+                @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+                @Override public void afterTextChanged(Editable s) {
+                    step.text = s.toString();
+                    dirty = true;
+                }
+            });
+            card.addView(content, topMargin(dp(6)));
+            Switch enter = new Switch(this);
+            enter.setText("这一步输入后自动回车");
+            enter.setTextColor(theme.text);
+            enter.setTextSize(14);
+            enter.setChecked(step.submit);
+            enter.setOnCheckedChangeListener((button, checked) -> {
+                step.submit = checked;
+                dirty = true;
+            });
+            card.addView(enter, topMargin(dp(4)));
+        } else {
+            TextView summary = text(step.description(), 15, theme.primary, Typeface.BOLD);
+            summary.setGravity(Gravity.CENTER);
+            summary.setPadding(dp(10), dp(10), dp(10), dp(10));
+            summary.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
+            card.addView(summary, topMargin(dp(6)));
+
+            Button pick = button("选择按键", theme.surface, theme.text);
+            pick.setOnClickListener(view -> {
+                editingStepIndex = index;
+                Intent intent = new Intent(this, KeyPickerActivity.class);
+                intent.putStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS,
+                        new ArrayList<>(step.keys));
+                startActivityForResult(intent, REQUEST_MACRO_STEP_KEYS);
+            });
+            card.addView(pick, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+        }
+
+        LinearLayout ops = new LinearLayout(this);
+        ops.setOrientation(LinearLayout.HORIZONTAL);
+        ops.setGravity(Gravity.END);
+        Button up = button("↑", theme.surface, theme.text);
+        up.setEnabled(index > 0);
+        up.setAlpha(index > 0 ? 1f : 0.45f);
+        up.setOnClickListener(view -> {
+            if (index > 0) {
+                java.util.Collections.swap(draft.steps, index, index - 1);
+                dirty = true;
+                rebuildMacroSteps();
+            }
+        });
+        Button down = button("↓", theme.surface, theme.text);
+        boolean canDown = index < draft.steps.size() - 1;
+        down.setEnabled(canDown);
+        down.setAlpha(canDown ? 1f : 0.45f);
+        down.setOnClickListener(view -> {
+            if (canDown) {
+                java.util.Collections.swap(draft.steps, index, index + 1);
+                dirty = true;
+                rebuildMacroSteps();
+            }
+        });
+        Button remove = button("删除", theme.feedbackSurface(theme.danger), theme.danger);
+        remove.setOnClickListener(view -> {
+            draft.steps.remove(index);
+            dirty = true;
+            rebuildMacroSteps();
+        });
+        LinearLayout.LayoutParams opParams = new LinearLayout.LayoutParams(
+                dp(64), dp(40));
+        opParams.leftMargin = dp(8);
+        ops.addView(up, opParams);
+        ops.addView(down, opParams);
+        ops.addView(remove, opParams);
+        card.addView(ops, topMargin(dp(8)));
+        return card;
     }
 
     private void bindDraft() {
@@ -262,6 +536,21 @@ public final class ShortcutEditActivity extends Activity {
             throw new IllegalArgumentException("按钮名称必须为 1–24 个字符");
         }
         String color = selectedColor == null ? "blue" : selectedColor;
+        if (draft.isMacroAction()) {
+            if (draft.steps.isEmpty() || draft.steps.size() > 8) {
+                throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
+            }
+            for (ShortcutButtonConfig.MacroStep step : draft.steps) {
+                if (step.isText() && (step.text == null || step.text.trim().isEmpty())) {
+                    throw new IllegalArgumentException("第 " + (draft.steps.indexOf(step) + 1)
+                            + " 步的文本内容不能为空");
+                }
+            }
+            return ShortcutButtonConfig.macroAction(
+                    draft.id, label, color, visibleSwitch.isChecked(),
+                    draft.sortIndex, draft.builtIn, draft.steps,
+                    System.currentTimeMillis());
+        }
         if (draft.isTextAction()) {
             String command = textInput == null ? "" : textInput.getText().toString().trim();
             if (command.isEmpty() || command.length() > 512
@@ -292,16 +581,24 @@ public final class ShortcutEditActivity extends Activity {
         showFeedback("正在发送测试：" + candidate.subtitle(), theme.warning);
         executor.execute(() -> {
             try {
-                String message = candidate.isTextAction()
-                        ? PhoneDeckUsbClient.sendText(
-                                this,
-                                candidate.textForSend(),
-                                BluetoothTransport.current())
-                        : PhoneDeckUsbClient.sendKeyChord(
-                                this,
-                                candidate.keys,
-                                candidate.holdMs,
-                                BluetoothTransport.current());
+                String message;
+                if (candidate.isTextAction()) {
+                    message = PhoneDeckUsbClient.sendText(
+                            this,
+                            candidate.textForSend(),
+                            BluetoothTransport.current());
+                } else if (candidate.isMacroAction()) {
+                    message = PhoneDeckUsbClient.sendMacro(
+                            this,
+                            candidate.steps,
+                            BluetoothTransport.current());
+                } else {
+                    message = PhoneDeckUsbClient.sendKeyChord(
+                            this,
+                            candidate.keys,
+                            candidate.holdMs,
+                            BluetoothTransport.current());
+                }
                 runOnUiThread(() -> {
                     showFeedback("✓  " + message, theme.success);
                     testButton.setEnabled(true);
@@ -409,13 +706,26 @@ public final class ShortcutEditActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_KEYS && resultCode == RESULT_OK && data != null) {
-            ArrayList<String> keys = data.getStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS);
-            if (keys != null) {
-                draft.keys = KeyCatalog.normalizeChord(keys);
+        if (resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        ArrayList<String> keys = data.getStringArrayListExtra(KeyPickerActivity.EXTRA_KEYS);
+        if (keys == null) {
+            return;
+        }
+        if (requestCode == REQUEST_KEYS) {
+            draft.keys = KeyCatalog.normalizeChord(keys);
+            dirty = true;
+            updateKeySummary();
+        } else if (requestCode == REQUEST_MACRO_STEP_KEYS
+                && editingStepIndex >= 0 && editingStepIndex < draft.steps.size()) {
+            ShortcutButtonConfig.MacroStep step = draft.steps.get(editingStepIndex);
+            if (!step.isText()) {
+                step.keys = KeyCatalog.normalizeChord(keys);
                 dirty = true;
-                updateKeySummary();
+                rebuildMacroSteps();
             }
+            editingStepIndex = -1;
         }
     }
 

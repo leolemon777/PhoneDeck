@@ -190,6 +190,30 @@ final class PhoneDeckUsbClient {
         return body;
     }
 
+    static String sendMacro(
+            Context context,
+            List<ShortcutButtonConfig.MacroStep> steps,
+            BluetoothTransport bluetoothTransport) throws Exception {
+        if (steps == null || steps.isEmpty() || steps.size() > 8) {
+            throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
+        }
+        JSONArray stepArray = new JSONArray();
+        for (ShortcutButtonConfig.MacroStep step : steps) {
+            stepArray.put(step.toJson());
+        }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> {
+                    JSONObject body = new JSONObject();
+                    body.put("protocolVersion", 2);
+                    body.put("requestId", requestId);
+                    body.put("sessionId", sessionId);
+                    body.put("targetComputerId", computerId);
+                    body.put("action", "macro");
+                    body.put("steps", stepArray);
+                    return body;
+                });
+    }
+
     private static JSONObject createTextBody(
             String text,
             String requestId,

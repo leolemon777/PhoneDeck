@@ -9,6 +9,10 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.wifi.WifiManager;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
@@ -16,7 +20,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.DragEvent;
 import android.view.HapticFeedbackConstants;
@@ -121,6 +127,19 @@ public final class MainActivity extends Activity {
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
             new ConcurrentHashMap<>();
+    /// 并行探测所有候选地址；死地址短超时快速失败，不互相排队。
+    private final ExecutorService lanProbePool = Executors.newFixedThreadPool(6);
+    /// 单轮 LAN 探测全部失败时的连续计数，用于探测间隔退避。
+    private int lanCheckFailStreak;
+    /// 立即探测的最小间隔，避免网络回调风暴。
+    private long lastLanCheckAt;
+    /// UDP 发现冷却计时（elapsedRealtime）。
+    private volatile long lastDiscoveryAt;
+    /// 单台设备探测失败后到判离线的宽限期。
+    private static final long OFFLINE_GRACE_MS = 6_000;
+    private static final long DISCOVERY_COOLDOWN_MS = 10_000;
+    private ConnectivityManager.NetworkCallback networkCallback;
+
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
@@ -129,9 +148,21 @@ public final class MainActivity extends Activity {
             }
             testConnection();
             testLanConnections();
-            mainHandler.postDelayed(this, HEALTH_CHECK_INTERVAL_MS);
+            mainHandler.postDelayed(this, nextHealthCheckDelayMs());
         }
     };
+
+    /// 一切正常时 2 秒一轮；连续失败按 4/8/16/30 秒退避并加 ±20% 抖动，
+    /// 避免请求风暴与高频耗电；成功后立即恢复正常节奏。
+    private long nextHealthCheckDelayMs() {
+        long base = HEALTH_CHECK_INTERVAL_MS;
+        if (lanCheckFailStreak > 0) {
+            long[] backoff = {HEALTH_CHECK_INTERVAL_MS, 4_000, 8_000, 16_000, 30_000};
+            base = backoff[Math.min(backoff.length - 1, lanCheckFailStreak)];
+        }
+        long jitter = (long) (base * 0.2 * Math.random());
+        return base + jitter;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -162,9 +193,56 @@ public final class MainActivity extends Activity {
             }
         });
         prepareBluetooth();
+        registerNetworkCallbacks();
         testConnection();
         testLanConnections();
         mainHandler.postDelayed(periodicHealthCheck, HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    /// Wi-Fi 切换、DHCP 变化、网络恢复时立即重新探测与发现，不需要 USB。
+    private void registerNetworkCallbacks() {
+        ConnectivityManager manager = (ConnectivityManager) getApplicationContext()
+                .getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null || networkCallback != null) {
+            return;
+        }
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                requestImmediateLanCheck("网络可用");
+            }
+
+            @Override
+            public void onLost(Network network) {
+                requestImmediateLanCheck("网络变化");
+            }
+        };
+        try {
+            manager.registerNetworkCallback(
+                    new NetworkRequest.Builder()
+                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            .build(),
+                    networkCallback);
+        } catch (Exception exception) {
+            Log.w("PhoneDeckNet", "注册网络回调失败：" + exception.getMessage());
+            networkCallback = null;
+        }
+    }
+
+    private void requestImmediateLanCheck(String reason) {
+        mainHandler.post(() -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastLanCheckAt < 1_000) {
+                return;
+            }
+            Log.i("PhoneDeckNet", "立即重新探测：" + reason);
+            lanCheckFailStreak = 0;
+            testConnection();
+            testLanConnections();
+        });
     }
 
     @Override
@@ -185,6 +263,7 @@ public final class MainActivity extends Activity {
                 || "ask".equals(storedTypelessMode) ? storedTypelessMode : "dictation";
         keepConnectionAlive = preferences.getBoolean("keep_connection_alive", true);
         applyWifiLock();
+        requestImmediateLanCheck("App 回到前台");
         if (voiceModeText != null && typelessButton != null) {
             updateVoiceModeInterface();
             refreshTypelessModeChips();
@@ -736,6 +815,13 @@ public final class MainActivity extends Activity {
                 if (config.isTextAction()) {
                     body.put("action", "text");
                     body.put("text", config.textForSend());
+                } else if (config.isMacroAction()) {
+                    body.put("action", "macro");
+                    org.json.JSONArray stepArray = new org.json.JSONArray();
+                    for (ShortcutButtonConfig.MacroStep step : config.steps) {
+                        stepArray.put(step.toJson());
+                    }
+                    body.put("steps", stepArray);
                 } else {
                     body.put("action", "keyChord");
                     org.json.JSONArray keys = new org.json.JSONArray();
@@ -1190,14 +1276,42 @@ public final class MainActivity extends Activity {
             return;
         }
         lanCheckInFlight = true;
+        lastLanCheckAt = SystemClock.elapsedRealtime();
         connectionExecutor.execute(() -> {
             try {
-                ConcurrentHashMap<String, LanTargetStatus> discovered =
+                ConcurrentHashMap<String, LanTargetStatus> next =
                         new ConcurrentHashMap<>();
+                // 防抖：上一轮在线、本轮失败但仍在宽限期内的设备保持在线，
+                // 不再出现“Wi-Fi 在线/离线”来回跳动、按钮变灰。
+                for (java.util.Map.Entry<String, LanTargetStatus> entry
+                        : lanTargets.entrySet()) {
+                    if (SystemClock.elapsedRealtime() - entry.getValue().lastOnlineAt
+                            < OFFLINE_GRACE_MS) {
+                        next.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                boolean anyPaired = false;
+                boolean anySuccess = false;
                 for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
-                    PhoneDeckLanClient.ProbeResult result = PhoneDeckLanClient.probe(device);
+                    if (!device.hasLanPairing()) {
+                        continue;
+                    }
+                    anyPaired = true;
+                    PhoneDeckLanClient.ProbeResult result =
+                            PhoneDeckLanClient.probe(device, lanProbePool);
+                    if (result == null) {
+                        // 缓存地址全部失败：触发一次 UDP 自动发现（带冷却），
+                        // 把新地址并入候选后重试；全程不需要重新插 USB。
+                        result = probeWithDiscovery(device);
+                    }
                     if (result == null) {
                         continue;
+                    }
+                    anySuccess = true;
+                    if (targetDeviceManager.recordLastGoodAddress(
+                            device.computerId, result.hostAddress)) {
+                        Log.i("PhoneDeckNet", "last-good 地址更新："
+                                + device.displayName + " → " + result.hostAddress);
                     }
                     JSONObject health = result.health;
                     boolean supportsManagedDictation = false;
@@ -1213,7 +1327,7 @@ public final class MainActivity extends Activity {
                     JSONObject audio = health.optJSONObject("audio");
                     JSONObject typeless = health.optJSONObject("typeless");
                     String lanForegroundApp = health.optString("foregroundApp", null);
-                    discovered.put(device.computerId, new LanTargetStatus(
+                    next.put(device.computerId, new LanTargetStatus(
                             result.endpoint,
                             health.optInt("protocolVersion", 0),
                             supportsManagedDictation,
@@ -1224,13 +1338,40 @@ public final class MainActivity extends Activity {
                             lanForegroundApp == null || lanForegroundApp.isBlank()
                                     ? null : lanForegroundApp));
                 }
+                lanCheckFailStreak = anyPaired && !anySuccess
+                        ? lanCheckFailStreak + 1 : 0;
                 lanTargets.clear();
-                lanTargets.putAll(discovered);
+                lanTargets.putAll(next);
                 mainHandler.post(this::applyStoredTarget);
             } finally {
                 lanCheckInFlight = false;
             }
         });
+    }
+
+    /// UDP 广播发现（10 秒冷却）。发现结果只并入候选地址；
+    /// 建立连接仍必须通过 HTTPS + 配对令牌 + 证书固定验证。
+    private PhoneDeckLanClient.ProbeResult probeWithDiscovery(
+            TargetDeviceManager.Device device) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDiscoveryAt < DISCOVERY_COOLDOWN_MS) {
+            return null;
+        }
+        lastDiscoveryAt = now;
+        java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> found =
+                LanDiscoveryClient.discover(this, 700);
+        LanDiscoveryClient.DiscoveredComputer discovered = found.get(device.computerId);
+        if (discovered == null
+                || discovered.port != device.lanPort
+                || !targetDeviceManager.mergeDiscoveredAddress(
+                        device.computerId, discovered.hostAddress)) {
+            return null;
+        }
+        Log.i("PhoneDeckNet", "UDP 发现新地址："
+                + device.displayName + " → " + discovered.hostAddress);
+        TargetDeviceManager.Device updated = targetDeviceManager.find(device.computerId);
+        return updated == null
+                ? null : PhoneDeckLanClient.probe(updated, lanProbePool);
     }
 
     private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
@@ -1501,6 +1642,9 @@ public final class MainActivity extends Activity {
         audioStartPending = true;
         dictationPaused = false;
         currentSessionId = UUID.randomUUID().toString();
+        // 单调时钟 tapAt：端到端延迟测量的起点（AudioStreamer 各阶段日志同源）。
+        Log.i("PhoneDeckVoice", currentSessionId + " tap "
+                + SystemClock.elapsedRealtime());
         currentSessionManaged = activeManagedDictationSupported();
         currentSessionTargetComputerId = serverProtocolVersion >= 2
                 ? targetComputerId : null;
@@ -1954,6 +2098,7 @@ public final class MainActivity extends Activity {
         mainHandler.removeCallbacks(periodicHealthCheck);
         stopKeyRepeat();
         releaseWifiLock();
+        unregisterNetworkCallbacks();
         if (bluetoothTransport != null) {
             bluetoothTransport.close();
         }
@@ -1962,9 +2107,26 @@ public final class MainActivity extends Activity {
             audioStreamer.close();
         }
         clearVoiceSessionState();
+        lanProbePool.shutdownNow();
         actionExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
         super.onDestroy();
+    }
+
+    private void unregisterNetworkCallbacks() {
+        if (networkCallback == null) {
+            return;
+        }
+        try {
+            ConnectivityManager manager = (ConnectivityManager) getApplicationContext()
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (manager != null) {
+                manager.unregisterNetworkCallback(networkCallback);
+            }
+        } catch (Exception ignored) {
+            // 系统可能已随网络服务注销。
+        }
+        networkCallback = null;
     }
 
     private Button smallButton(String label) {
@@ -2020,6 +2182,8 @@ public final class MainActivity extends Activity {
         final boolean typelessVirtualCableSelected;
         final String[] typelessModes;
         final String foregroundApp;
+        /// 本状态确认在线的时刻（elapsedRealtime），供离线判定宽限使用。
+        final long lastOnlineAt;
 
         LanTargetStatus(
                 PhoneDeckEndpoint endpoint,
@@ -2036,6 +2200,7 @@ public final class MainActivity extends Activity {
             this.typelessVirtualCableSelected = typelessVirtualCableSelected;
             this.typelessModes = typelessModes;
             this.foregroundApp = foregroundApp;
+            this.lastOnlineAt = android.os.SystemClock.elapsedRealtime();
         }
     }
 

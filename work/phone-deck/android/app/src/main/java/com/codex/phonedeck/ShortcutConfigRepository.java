@@ -165,6 +165,29 @@ final class ShortcutConfigRepository {
                 }
                 value.keys = new ArrayList<>();
                 value.holdMs = 45;
+            } else if (value.isMacroAction()) {
+                if (value.steps == null || value.steps.isEmpty()
+                        || value.steps.size() > 8) {
+                    throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
+                }
+                for (ShortcutButtonConfig.MacroStep step : value.steps) {
+                    step.delayBeforeMs = Math.max(0, Math.min(2000, step.delayBeforeMs));
+                    if (step.isText()) {
+                        step.text = step.text == null ? "" : step.text.trim();
+                        if (step.text.isEmpty() || step.text.length() > 512
+                                || step.text.contains("\r") || step.text.contains("\n")) {
+                            throw new IllegalArgumentException("宏的文本步骤必须为 1–512 个字符的单行文本");
+                        }
+                    } else {
+                        step.type = ShortcutButtonConfig.ACTION_KEY_CHORD;
+                        step.keys = KeyCatalog.normalizeChord(step.keys);
+                        if (step.holdMs < 20 || step.holdMs > 500) {
+                            throw new IllegalArgumentException("宏步骤按键持续时间超出安全范围");
+                        }
+                    }
+                }
+                value.keys = new ArrayList<>();
+                value.text = "";
             } else {
                 value.actionType = ShortcutButtonConfig.ACTION_KEY_CHORD;
                 value.keys = KeyCatalog.normalizeChord(value.keys);

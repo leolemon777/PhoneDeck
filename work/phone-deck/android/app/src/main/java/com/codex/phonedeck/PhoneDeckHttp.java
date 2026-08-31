@@ -58,15 +58,26 @@ final class PhoneDeckHttp {
     }
 
     static JSONObject getJson(PhoneDeckEndpoint endpoint, String path) throws Exception {
+        return getJson(endpoint, path, 900, 1300);
+    }
+
+    static JSONObject getJson(
+            PhoneDeckEndpoint endpoint,
+            String path,
+            int connectTimeout,
+            int readTimeout) throws Exception {
         HttpURLConnection connection = null;
         try {
-            connection = open(endpoint, path, 900, 1300);
+            connection = open(endpoint, path, connectTimeout, readTimeout);
             connection.setRequestMethod("GET");
+            // 成功路径不 disconnect：让 keep-alive 池复用 TLS 连接，
+            // 后续音频 POST 可以省掉一次握手。
             return readResponse(connection);
-        } finally {
+        } catch (Exception exception) {
             if (connection != null) {
                 connection.disconnect();
             }
+            throw exception;
         }
     }
 
@@ -87,10 +98,11 @@ final class PhoneDeckHttp {
                 output.write(bytes);
             }
             return readResponse(connection);
-        } finally {
+        } catch (Exception exception) {
             if (connection != null) {
                 connection.disconnect();
             }
+            throw exception;
         }
     }
 

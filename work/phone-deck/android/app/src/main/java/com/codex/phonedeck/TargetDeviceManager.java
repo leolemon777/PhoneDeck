@@ -21,10 +21,12 @@ final class TargetDeviceManager {
         final int lanPort;
         final String lanToken;
         final String certificateSha256;
+        final String lastGoodAddress;
 
         Device(String computerId, String displayName, String platform,
                int slot, long lastSeenAt, List<String> lanAddresses,
-               int lanPort, String lanToken, String certificateSha256) {
+               int lanPort, String lanToken, String certificateSha256,
+               String lastGoodAddress) {
             this.computerId = computerId;
             this.displayName = displayName;
             this.platform = platform;
@@ -34,6 +36,8 @@ final class TargetDeviceManager {
             this.lanPort = lanPort;
             this.lanToken = lanToken;
             this.certificateSha256 = certificateSha256;
+            this.lastGoodAddress = lastGoodAddress == null || lastGoodAddress.isBlank()
+                    ? null : lastGoodAddress.trim();
         }
 
         boolean hasLanPairing() {
@@ -56,6 +60,21 @@ final class TargetDeviceManager {
         preferences = context.getApplicationContext().getSharedPreferences(
                 PREFS_NAME, Context.MODE_PRIVATE);
         load();
+    }
+
+    /// 稳定身份是 computerId + 证书指纹 + 令牌；IP 只是缓存。
+    /// 保存与读取时都过滤回环、APIPA 和 198.18.0.0/15 TUN 网段，
+    /// 旧版本已保存的虚拟网卡地址在加载时自动清除（其余配对资料不受影响）。
+    static boolean isAddressCandidateSafe(String address) {
+        if (address == null) {
+            return false;
+        }
+        String trimmed = address.trim();
+        return !trimmed.isEmpty()
+                && !trimmed.startsWith("127.")
+                && !trimmed.startsWith("169.254.")
+                && !trimmed.startsWith("198.18.")
+                && !trimmed.startsWith("198.19.");
     }
 
     synchronized List<Device> list() {
@@ -96,7 +115,8 @@ final class TargetDeviceManager {
                 existing == null ? java.util.Collections.emptyList() : existing.lanAddresses,
                 existing == null ? 0 : existing.lanPort,
                 existing == null ? null : existing.lanToken,
-                existing == null ? null : existing.certificateSha256);
+                existing == null ? null : existing.certificateSha256,
+                existing == null ? null : existing.lastGoodAddress);
         if (existing != null) {
             devices.remove(existing);
         } else if (devices.size() >= MAX_DEVICES) {
@@ -134,22 +154,71 @@ final class TargetDeviceManager {
         }
         ArrayList<String> safeAddresses = new ArrayList<>();
         for (String address : addresses) {
-            if (address != null && !address.isBlank() && address.length() <= 255
-                    && !safeAddresses.contains(address.trim())) {
-                safeAddresses.add(address.trim());
+            if (!isAddressCandidateSafe(address)) {
+                continue;
+            }
+            String trimmed = address.trim();
+            if (trimmed.length() <= 255 && !safeAddresses.contains(trimmed)) {
+                safeAddresses.add(trimmed);
             }
         }
         if (safeAddresses.isEmpty()) {
             return null;
         }
+        String lastGood = base.lastGoodAddress != null
+                && safeAddresses.contains(base.lastGoodAddress)
+                ? base.lastGoodAddress : null;
         Device paired = new Device(
                 base.computerId, base.displayName, base.platform,
                 base.slot, System.currentTimeMillis(), safeAddresses, port,
-                accessToken.trim(), certificateSha256.trim().toLowerCase());
+                accessToken.trim(), certificateSha256.trim().toLowerCase(), lastGood);
         devices.remove(base);
         devices.add(paired);
         save();
         return paired;
+    }
+
+    /// 探测成功后记录最近可用地址；地址只是缓存，配对身份不变。
+    synchronized boolean recordLastGoodAddress(String computerId, String address) {
+        Device device = find(computerId);
+        if (device == null || !isAddressCandidateSafe(address)) {
+            return false;
+        }
+        String trimmed = address.trim();
+        if (trimmed.equals(device.lastGoodAddress)) {
+            return false;
+        }
+        Device updated = new Device(
+                device.computerId, device.displayName, device.platform,
+                device.slot, device.lastSeenAt, device.lanAddresses,
+                device.lanPort, device.lanToken, device.certificateSha256, trimmed);
+        devices.remove(device);
+        devices.add(updated);
+        save();
+        return true;
+    }
+
+    /// 合并自动发现得到的新地址（仍需 HTTPS + 令牌 + 证书固定验证后才可用）。
+    synchronized boolean mergeDiscoveredAddress(String computerId, String address) {
+        Device device = find(computerId);
+        if (device == null || !isAddressCandidateSafe(address)) {
+            return false;
+        }
+        String trimmed = address.trim();
+        if (device.lanAddresses.contains(trimmed)) {
+            return false;
+        }
+        ArrayList<String> merged = new ArrayList<>(device.lanAddresses);
+        merged.add(trimmed);
+        Device updated = new Device(
+                device.computerId, device.displayName, device.platform,
+                device.slot, device.lastSeenAt, merged,
+                device.lanPort, device.lanToken, device.certificateSha256,
+                device.lastGoodAddress);
+        devices.remove(device);
+        devices.add(updated);
+        save();
+        return true;
     }
 
     synchronized boolean select(String computerId) {
@@ -189,11 +258,13 @@ final class TargetDeviceManager {
                     for (int addressIndex = 0;
                          addressIndex < addressArray.length(); addressIndex++) {
                         String address = addressArray.optString(addressIndex, "").trim();
-                        if (!address.isEmpty()) {
+                        if (!address.isEmpty() && isAddressCandidateSafe(address)
+                                && !addresses.contains(address)) {
                             addresses.add(address);
                         }
                     }
                 }
+                String lastGood = item.optString("lastGoodAddress", null);
                 devices.add(new Device(
                         computerId,
                         item.optString("displayName", "未命名电脑"),
@@ -203,7 +274,8 @@ final class TargetDeviceManager {
                         addresses,
                         item.optInt("lanPort", 0),
                         item.optString("lanToken", null),
-                        item.optString("certificateSha256", null)));
+                        item.optString("certificateSha256", null),
+                        isAddressCandidateSafe(lastGood) ? lastGood : null));
             }
         } catch (Exception ignored) {
             devices.clear();
@@ -229,6 +301,7 @@ final class TargetDeviceManager {
                 item.put("lanPort", device.lanPort);
                 item.put("lanToken", device.lanToken);
                 item.put("certificateSha256", device.certificateSha256);
+                item.put("lastGoodAddress", device.lastGoodAddress);
                 array.put(item);
             }
         } catch (Exception ignored) {

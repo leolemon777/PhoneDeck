@@ -29,7 +29,7 @@ final class KeyCatalog {
         keys.addAll(Arrays.asList(
                 "ENTER", "ESC", "TAB", "SPACE", "BACKSPACE", "DELETE", "INSERT",
                 "HOME", "END", "PAGEUP", "PAGEDOWN", "UP", "DOWN", "LEFT", "RIGHT",
-                "PRINTSCREEN", "VOLUMEUP", "VOLUMEDOWN", "VOLUMEMUTE",
+                "PRINTSCREEN", "BACKTICK", "VOLUMEUP", "VOLUMEDOWN", "VOLUMEMUTE",
                 "MEDIAPLAYPAUSE", "MEDIAPREVIOUS", "MEDIANEXT"));
         BASE_KEYS = Collections.unmodifiableList(keys);
     }
@@ -90,6 +90,7 @@ final class KeyCatalog {
             case "PAGEUP": return "Page Up";
             case "PAGEDOWN": return "Page Down";
             case "PRINTSCREEN": return "Print Screen";
+            case "BACKTICK": return "`";
             case "VOLUMEUP": return "音量 +";
             case "VOLUMEDOWN": return "音量 −";
             case "VOLUMEMUTE": return "静音";
