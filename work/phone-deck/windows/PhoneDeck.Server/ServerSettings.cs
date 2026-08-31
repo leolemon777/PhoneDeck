@@ -13,9 +13,7 @@ internal sealed class ServerSettings
 
     internal static ServerSettings LoadOrCreate()
     {
-        var path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PhoneDeck", "server-settings.json");
+        var path = Path.Combine(PhoneDeckDataDirectory.Get(), "server-settings.json");
         try
         {
             if (File.Exists(path))

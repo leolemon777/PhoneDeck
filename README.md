@@ -2,7 +2,7 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前源码版本是 **PhoneDeck 1.6.0-dev.3**，上一版完整实机稳定基线是
+当前源码版本是 **PhoneDeck 1.6.0-dev.4**，上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
@@ -48,6 +48,12 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 - 单键与最多 4 键的安全组合键选择器。
 - 纯文字快捷卡片，支持名称、预设颜色、测试动作和恢复默认。
 - 默认第一排提供 Agent 指令：规划 `/plan`、目标 `/goal`、压缩上下文 `/compact`；点击后输入并回车执行。
+- Windows“电脑控制台”可查看接收端、Wi-Fi、手机音频和 USB 状态，启动/停止/重启
+  接收端，并配置自动发现、USB 看门狗、开机启动和 ADB 路径。
+- 电脑控制台可替换规划、目标、压缩上下文和新会话四个 Agent 按钮的名称、发送内容、
+  自动回车与显示状态；手机连接当前电脑后自动同步，普通快捷键与宏不受影响。
+- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；控制台运行包把电脑身份、LAN 证书、
+  配对令牌和设置保存在 E 盘运行目录的 `data` 文件夹。
 - 新增文本指令时默认开启自动回车；实验性多步宏支持 1–8 个受控按键/文本步骤及有限延迟。
 - 协议 v2、稳定电脑 ID、目标电脑校验和安全键位白名单。
 - 蓝牙 RFCOMM 快捷键备用通道；蓝牙暂不传输音频。
@@ -60,7 +66,8 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 
 ## 当前尚未实现
 
-- 正式的跨设备配置同步；当前仅支持手动导入导出配置文件。
+- 完整的跨设备配置同步；当前只有四个 Agent 文本按钮支持从当前电脑自动同步，其他按钮
+  仍通过手机编辑或手动导入导出。
 - 多配置、前台软件自动切换和更完整的 Codex / Claude Code / Cursor / ZCode 工具专属指令集。
 - 三台真实电脑同时在线的完整验收；当前版本已完成 Windows Wi-Fi 通道、USB 自动配对和
   受限 UDP 自动发现，但仍需逐台安装接收端并完成三机实测。
@@ -96,6 +103,7 @@ PhoneDeck/
 └─ work/phone-deck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
+   ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
 ```
@@ -119,6 +127,9 @@ Windows 接收端：
 dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
 
 dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj `
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 

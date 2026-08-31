@@ -1300,6 +1300,11 @@ public final class MainActivity extends Activity {
                     boolean recoveredAfterVoiceDisconnect = usbRecoveryFeedbackPending;
                     usbRecoveryFeedbackPending = false;
                     usbConnected = true;
+                    String activeComputerId = targetDeviceManager.getActiveComputerId();
+                    if (activeComputerId == null
+                            || sameComputer(healthComputerId, activeComputerId)) {
+                        syncAgentShortcuts(PhoneDeckEndpoint.USB);
+                    }
                     mainHandler.post(() -> {
                         targetDeviceManager.upsert(
                                 healthComputerId,
@@ -1381,6 +1386,10 @@ public final class MainActivity extends Activity {
                                 + device.displayName + " → " + result.hostAddress);
                     }
                     JSONObject health = result.health;
+                    if (sameComputer(device.computerId,
+                            targetDeviceManager.getActiveComputerId())) {
+                        syncAgentShortcuts(result.endpoint);
+                    }
                     boolean supportsManagedDictation = false;
                     org.json.JSONArray capabilities = health.optJSONArray("capabilities");
                     if (capabilities != null) {
@@ -1414,6 +1423,21 @@ public final class MainActivity extends Activity {
                 lanCheckInFlight = false;
             }
         });
+    }
+
+    private void syncAgentShortcuts(PhoneDeckEndpoint endpoint) {
+        try {
+            JSONObject remote = PhoneDeckHttp.getJson(
+                    endpoint, "/api/config/agent-shortcuts", 700, 1000);
+            if (configRepository.applyAgentOverrides(remote)) {
+                mainHandler.post(() -> {
+                    refreshShortcutGrid();
+                    showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
+                });
+            }
+        } catch (Exception ignored) {
+            // 旧电脑端没有该接口时继续使用手机本地配置。
+        }
     }
 
     /// UDP 广播发现（10 秒冷却）。发现结果只并入候选地址；

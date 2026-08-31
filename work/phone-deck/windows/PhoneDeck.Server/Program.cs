@@ -112,7 +112,7 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.3",
+        version = "1.6.0-dev.4",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -164,6 +164,25 @@ app.MapGet("/api/health", () =>
             lastError = snapshot.LastError,
             stale
         }
+    });
+});
+
+app.MapGet("/api/config/agent-shortcuts", () =>
+{
+    var settings = AgentShortcutSettings.LoadOrCreate();
+    return Results.Json(new
+    {
+        ok = true,
+        schemaVersion = settings.SchemaVersionValue,
+        updatedAt = settings.UpdatedAt,
+        buttons = settings.Buttons.Select(button => new
+        {
+            id = button.Id,
+            label = button.Label,
+            text = button.Text,
+            submit = button.Submit,
+            visible = button.Visible
+        })
     });
 });
 

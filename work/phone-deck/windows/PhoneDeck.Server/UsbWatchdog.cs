@@ -36,7 +36,7 @@ internal sealed class UsbWatchdog : IDisposable
         {
             Console.WriteLine(
                 "USB 看门狗未启用：未找到 adb.exe。"
-                + "可在 %LOCALAPPDATA%\\PhoneDeck\\server-settings.json 配置 adbPath，"
+                + "可在 PhoneDeck 数据目录的 server-settings.json 配置 adbPath，"
                 + "或把 platform-tools 放到程序目录旁。");
             return;
         }

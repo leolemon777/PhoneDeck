@@ -24,9 +24,7 @@ internal sealed class LanIdentity : IDisposable
 
     internal static LanIdentity LoadOrCreate(string computerId)
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PhoneDeck");
+        var directory = PhoneDeckDataDirectory.Get();
         Directory.CreateDirectory(directory);
         var certificatePath = Path.Combine(directory, "lan-certificate.pfx");
         var passwordPath = Path.Combine(directory, "lan-certificate-password.txt");

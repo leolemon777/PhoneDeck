@@ -1,12 +1,27 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-08-30
+更新时间：2026-08-31
 当前分支：`agent/multi-pc-1.6.0`
-当前源码：PhoneDeck 1.6.0-dev.3（自动发现、首音节优化与实验宏）
+当前源码：PhoneDeck 1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.3
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-08-31 dev.4 新增与验证
+
+- 新增 .NET 8 WinForms `PhoneDeck.ControlCenter`：显示接收端、Wi-Fi、VB-CABLE/Typeless、
+  USB 状态，支持启动/停止/重启、LAN 发现、USB 看门狗、开机启动和 ADB 路径设置。
+- 新增 Agent 操作编辑器，可替换 `agentPlan`、`agentGoal`、`agentCompact`、`agentClear`
+  的名称、文本、自动回车和显示状态；接收端通过 `/api/config/agent-shortcuts` 发布，手机
+  只从当前选中的电脑增量同步这四项，不覆盖普通按键和宏。
+- 接收端增加 `PHONEDECK_DATA_DIR`：本机运行包与配对数据已迁到
+  `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台`，原
+  `%LOCALAPPDATA%\PhoneDeck` 已移除，电脑身份、证书和令牌保持不变。
+- Windows 测试 42/42、ControlCenter Release 构建、Android `assembleDebug` 与
+  `lintDebug` 通过；`1.6.0-dev.4` 接收端、Agent 配置接口和 UDP 8767 已在本机验证。
+- 新 APK 已生成到控制台运行目录，但 Samsung 当前未出现在 ADB 列表，仍需覆盖安装一次
+  才能在手机端启用 Agent 自动同步。
 
 ## 给下一台电脑和下一位 Agent 的一句话
 
@@ -82,14 +97,15 @@ TEMP 指向 `work\tools\temp`。本机 adb 偶发卡死时 `taskkill /IM adb.exe
 
 1. 手机和电脑连接同一个 Wi-Fi；音频只在局域网内传输，不消耗手机流量。
 2. 每台 Windows 以管理员身份运行一次 `scripts/windows/Enable-PhoneDeckLan.ps1`。
-3. 每台电脑运行匹配的 1.6.0-dev.3 接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
+3. 每台电脑运行匹配的 1.6.0-dev.4 接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
 4. App 自动读取该电脑的证书指纹、随机密钥和 LAN 地址；顶部出现“Wi-Fi 在线”后可移除
    ADB reverse 或拔掉 USB。
 5. 对第二、第三台电脑重复一次；之后三台接收端同时运行，手机切换目标即可。
 
-当前配对凭据保存在 Windows `%LOCALAPPDATA%\PhoneDeck` 和 Android 应用私有存储；不得
-提交到 Git。电脑 IP 变化后，手机会先使用受限 UDP 发现刷新候选地址；受限网络禁用广播时，
-重新连接 USB 仍可刷新无线配对资料。后续标准 mDNS/Bonjour 可作为补充发现方式。
+控制台运行包通过 `PHONEDECK_DATA_DIR` 把当前配对凭据保存在相邻 `data` 文件夹；未设置
+该环境变量的传统接收端仍回退 `%LOCALAPPDATA%\PhoneDeck`。凭据不得提交到 Git。电脑
+IP 变化后，手机会先使用受限 UDP 发现刷新候选地址；受限网络禁用广播时，重新连接 USB
+仍可刷新无线配对资料。后续标准 mDNS/Bonjour 可作为补充发现方式。
 
 ## 本轮方案审核结论
 

@@ -1,6 +1,6 @@
 # PhoneDeck 架构说明
 
-## 当前 1.6.0-dev.3 数据流
+## 当前 1.6.0-dev.4 数据流
 
 ```text
 Android MainActivity
@@ -133,7 +133,7 @@ Typeless 状态机前校验目标，不匹配直接返回 400。
 - 语音交接；
 - USB 共享切换器验证。
 
-当前 `1.6.0-dev.3` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
+当前 `1.6.0-dev.4` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
 自动发现和当前目标的快捷键/听写/PCM 路由。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
 macOS 接收端和三台电脑联合实测。
 

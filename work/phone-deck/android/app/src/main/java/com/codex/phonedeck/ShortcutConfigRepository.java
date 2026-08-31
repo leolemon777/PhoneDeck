@@ -1,6 +1,7 @@
 package com.codex.phonedeck;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.util.AtomicFile;
 
 import org.json.JSONArray;
@@ -23,11 +24,15 @@ import java.util.UUID;
 final class ShortcutConfigRepository {
     private static final int SCHEMA_VERSION = 1;
     private static final int MAX_BUTTONS = 100;
+    private static final String SYNC_PREFS = "phonedeck_shortcut_sync";
+    private static final String AGENT_SYNC_REVISION = "agent_sync_revision";
     private final AtomicFile atomicFile;
+    private final SharedPreferences syncPreferences;
     private String recoveryNotice;
 
     ShortcutConfigRepository(Context context) {
         atomicFile = new AtomicFile(new File(context.getFilesDir(), "shortcut-config.json"));
+        syncPreferences = context.getSharedPreferences(SYNC_PREFS, Context.MODE_PRIVATE);
     }
 
     synchronized ArrayList<ShortcutButtonConfig> load() {
@@ -96,6 +101,67 @@ final class ShortcutConfigRepository {
 
     synchronized void resetAll() {
         save(defaults());
+    }
+
+    /// 应用当前电脑控制台发布的 Agent 文本指令。revision 未变化时零写入；
+    /// 普通快捷键、宏和手机本地布局不受影响。
+    synchronized boolean applyAgentOverrides(JSONObject root) {
+        try {
+            if (root.optInt("schemaVersion", 0) != 1) {
+                return false;
+            }
+            long revision = root.optLong("updatedAt", 0);
+            if (revision <= syncPreferences.getLong(AGENT_SYNC_REVISION, 0)) {
+                return false;
+            }
+            JSONArray overrides = root.getJSONArray("buttons");
+            if (overrides.length() == 0 || overrides.length() > 16) {
+                return false;
+            }
+            ArrayList<ShortcutButtonConfig> current = load();
+            Set<String> supportedIds = new HashSet<>(Arrays.asList(
+                    "agentPlan", "agentGoal", "agentCompact", "agentClear"));
+            Set<String> seenIds = new HashSet<>();
+            for (int index = 0; index < overrides.length(); index++) {
+                JSONObject override = overrides.getJSONObject(index);
+                String id = override.getString("id");
+                String label = override.getString("label").trim();
+                String text = override.getString("text").trim();
+                if (!supportedIds.contains(id) || !seenIds.add(id)
+                        || label.isEmpty() || label.length() > 24
+                        || text.isEmpty() || text.length() > 512
+                        || text.contains("\r") || text.contains("\n")) {
+                    return false;
+                }
+                ShortcutButtonConfig target = null;
+                for (ShortcutButtonConfig candidate : current) {
+                    if (candidate.id.equals(id)) {
+                        target = candidate;
+                        break;
+                    }
+                }
+                if (target == null) {
+                    return false;
+                }
+                target.label = label;
+                target.actionType = ShortcutButtonConfig.ACTION_TEXT;
+                target.text = text;
+                target.submitText = override.optBoolean("submit", true);
+                target.visible = override.optBoolean("visible", true);
+                target.keys = new ArrayList<>();
+                target.steps = new ArrayList<>();
+                target.holdMs = 45;
+                target.updatedAt = revision;
+            }
+            if (seenIds.size() != supportedIds.size()) {
+                return false;
+            }
+            save(current);
+            syncPreferences.edit().putLong(AGENT_SYNC_REVISION, revision).apply();
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     synchronized String consumeRecoveryNotice() {
