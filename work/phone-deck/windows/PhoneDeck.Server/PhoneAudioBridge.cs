@@ -210,7 +210,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 selected,
                 AudioClientShareMode.Shared,
                 useEventSync: true,
-                latency: 60);
+                latency: 30);
             output.Init(stream.Provider);
             output.Play();
             Console.WriteLine(

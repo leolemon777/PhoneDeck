@@ -31,6 +31,8 @@ internal sealed class ControlCenterForm : Form
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 2500 };
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private bool expectedRunning = true;
+    private DateTime lastAutoRestartTime = DateTime.MinValue;
     private readonly Label receiverValue = ValueLabel();
     private readonly Label receiverDetail = DetailLabel();
     private readonly Label wifiValue = ValueLabel();
@@ -51,11 +53,16 @@ internal sealed class ControlCenterForm : Form
     private readonly Button stopButton;
     private readonly Button saveButton;
     private readonly Button agentSettingsButton;
+    private readonly Button resetLanTokenButton;
     private bool loadingSettings;
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
-    private static string DataDirectory => Path.Combine(AppDirectory, "data");
+    // 控制台与 PhoneDeck.Server 共用同一份用户级配对/身份数据；
+    // 不能使用控制台发布目录下的 data，否则启动控制台会生成另一套令牌。
+    private static string DataDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PhoneDeck");
     private static string SettingsPath => Path.Combine(DataDirectory, "server-settings.json");
     private static string BundledAdbPath => Path.Combine(AppDirectory, "platform-tools", "adb.exe");
 
@@ -75,7 +82,9 @@ internal sealed class ControlCenterForm : Form
         stopButton = ActionButton("停止", Color.FromArgb(112, 132, 160));
         saveButton = ActionButton("保存并应用", Primary);
         agentSettingsButton = ActionButton("配置 Agent 操作", Color.FromArgb(91, 83, 220));
-        agentSettingsButton.Size = new Size(170, 44);
+        agentSettingsButton.Size = new Size(160, 44);
+        resetLanTokenButton = ActionButton("重置通信密钥", Color.FromArgb(170, 60, 70));
+        resetLanTokenButton.Size = new Size(150, 44);
 
         Controls.Add(BuildLayout());
         WireEvents();
@@ -276,7 +285,17 @@ internal sealed class ControlCenterForm : Form
         layout.Controls.Add(lanDiscoveryCheck, 0, 1);
         layout.Controls.Add(usbWatchdogCheck, 0, 2);
         layout.Controls.Add(autoStartCheck, 0, 3);
-        layout.Controls.Add(agentSettingsButton, 0, 4);
+        var actionsRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            BackColor = Color.Transparent,
+            Margin = Padding.Empty
+        };
+        actionsRow.Controls.Add(agentSettingsButton);
+        actionsRow.Controls.Add(resetLanTokenButton);
+        layout.Controls.Add(actionsRow, 0, 4);
         layout.Controls.Add(new Label
         {
             Text = "ADB 路径（USB 兜底）",
@@ -349,16 +368,19 @@ internal sealed class ControlCenterForm : Form
         refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         startButton.Click += async (_, _) =>
         {
+            expectedRunning = true;
             await EnsureServerAsync();
             await RefreshStatusAsync();
         };
         restartButton.Click += async (_, _) =>
         {
+            expectedRunning = true;
             await RestartServerAsync();
             await RefreshStatusAsync();
         };
         stopButton.Click += async (_, _) =>
         {
+            expectedRunning = false;
             await StopServersAsync();
             await RefreshStatusAsync();
         };
@@ -369,6 +391,33 @@ internal sealed class ControlCenterForm : Form
             if (editor.ShowDialog(this) == DialogResult.OK)
             {
                 Log("Agent 操作已更新，手机将在下一次连接检查时自动同步。", Success);
+            }
+        };
+        resetLanTokenButton.Click += async (_, _) =>
+        {
+            var confirm = MessageBox.Show(
+                this,
+                "重置通信密钥后，将立即撤销现有所有手机的 Wi-Fi 授权。\n手机下次连接需先用 USB 接入一次以同步新密钥。\n\n确定要撤销并重置吗？",
+                "重置 PhoneDeck 通信密钥",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+            try
+            {
+                var tokenPath = Path.Combine(DataDirectory, "lan-token.txt");
+                var newSecret = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+                File.WriteAllText(tokenPath, newSecret);
+                Log("通信密钥已重置，正在重新启动接收端…", Warning);
+                await RestartServerAsync();
+                await RefreshStatusAsync();
+                Log("通信密钥已更新生效。请用 USB 重新接入手机一次完成配对。", Success);
+            }
+            catch (Exception ex)
+            {
+                Log("重置密钥失败：" + ex.Message, Danger);
             }
         };
     }
@@ -523,6 +572,13 @@ internal sealed class ControlCenterForm : Form
 
             if (health is null)
             {
+                if (expectedRunning && (DateTime.Now - lastAutoRestartTime).TotalSeconds > 10)
+                {
+                    lastAutoRestartTime = DateTime.Now;
+                    Log("检测到服务端离线，正在自动重启...", Danger);
+                    _ = EnsureServerAsync();
+                }
+
                 receiverValue.Text = "未运行";
                 receiverDetail.Text = "点击“启动接收端”";
                 receiverValue.ForeColor = Danger;

@@ -134,6 +134,7 @@ public final class MainActivity extends Activity {
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
+    private AgentSyncManager agentSyncManager;
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
             new ConcurrentHashMap<>();
@@ -184,6 +185,10 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
+        agentSyncManager = new AgentSyncManager(configRepository, () -> {
+            refreshShortcutGrid();
+            showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
+        });
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
@@ -1132,6 +1137,10 @@ public final class MainActivity extends Activity {
             return;
         }
         applyStoredTarget();
+        PhoneDeckEndpoint prewarmEndpoint = endpointForActiveTarget();
+        if (prewarmEndpoint != null) {
+            voiceExecutor.execute(() -> PhoneDeckHttp.prewarm(prewarmEndpoint));
+        }
         String channel = isLanTargetOnline()
                 ? "Wi-Fi" : isUsbTargetOnline() ? "USB" : "蓝牙快捷键";
         showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
@@ -1560,17 +1569,8 @@ public final class MainActivity extends Activity {
     }
 
     private void syncAgentShortcuts(PhoneDeckEndpoint endpoint) {
-        try {
-            JSONObject remote = PhoneDeckHttp.getJson(
-                    endpoint, "/api/config/agent-shortcuts", 700, 1000);
-            if (configRepository.applyAgentOverrides(remote)) {
-                mainHandler.post(() -> {
-                    refreshShortcutGrid();
-                    showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
-                });
-            }
-        } catch (Exception ignored) {
-            // 旧电脑端没有该接口时继续使用手机本地配置。
+        if (agentSyncManager != null) {
+            agentSyncManager.sync(endpoint);
         }
     }
 
@@ -2185,7 +2185,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateMicrophoneLevel(int percent) {
-        if (!audioStreamer.isStreaming()) {
+        if (!audioStreamer.isRunning()) {
             return;
         }
         if (audioStreamer.isPaused()) {
@@ -2377,7 +2377,23 @@ public final class MainActivity extends Activity {
 
     private String foregroundSuffix() {
         String app = activeForegroundApp();
-        return app == null ? "" : " · " + app;
+        if (app == null || app.isBlank()) {
+            return "";
+        }
+        String lower = app.toLowerCase(java.util.Locale.ROOT);
+        String tag;
+        if (lower.contains("code") || lower.contains("devenv") || lower.contains("idea") || lower.contains("cursor")) {
+            tag = "IDE (" + app + ")";
+        } else if (lower.contains("chrome") || lower.contains("edge") || lower.contains("firefox") || lower.contains("brave")) {
+            tag = "浏览器 (" + app + ")";
+        } else if (lower.contains("word") || lower.contains("excel") || lower.contains("powerpnt") || lower.contains("notepad") || lower.contains("wps")) {
+            tag = "文档 (" + app + ")";
+        } else if (lower.contains("terminal") || lower.contains("powershell") || lower.contains("cmd")) {
+            tag = "终端 (" + app + ")";
+        } else {
+            tag = app;
+        }
+        return " · " + tag;
     }
 
     private void updateConnectionDisplay() {
@@ -2519,6 +2535,9 @@ public final class MainActivity extends Activity {
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
+        if (agentSyncManager != null) {
+            agentSyncManager.shutdown();
+        }
         super.onDestroy();
     }
 

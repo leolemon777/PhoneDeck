@@ -23,7 +23,7 @@ internal interface ITypelessController
 
 internal sealed class WindowsTypelessController : ITypelessController
 {
-    private const int MinimumToggleGapMilliseconds = 400;
+    private const int MinimumToggleGapMilliseconds = 180;
     private long lastToggleMilliseconds;
 
     public bool UsesVirtualCable => KeyboardInput.TypelessUsesVirtualCable;

@@ -56,28 +56,40 @@ internal sealed class LanIdentity : IDisposable
             .Where(network => network.OperationalStatus == OperationalStatus.Up
                 && network.NetworkInterfaceType is not NetworkInterfaceType.Loopback
                 && network.NetworkInterfaceType is not NetworkInterfaceType.Tunnel)
-            .SelectMany(network => network
-                .GetIPProperties().UnicastAddresses
-                .Where(address => address.Address.AddressFamily == AddressFamily.InterNetwork
-                    && !IPAddress.IsLoopback(address.Address)
-                    && !IsExcludedAddress(address.Address))
-                .Select(address => new AddressCandidate(
-                    address.Address,
-                    network.GetIPProperties().GatewayAddresses.Count > 0,
-                    network.NetworkInterfaceType))));
+            .SelectMany(network =>
+            {
+                var isVirtual = IsVirtualInterface(network);
+                var hasGateway = network.GetIPProperties().GatewayAddresses.Count > 0;
+                return network
+                    .GetIPProperties().UnicastAddresses
+                    .Where(address => address.Address.AddressFamily == AddressFamily.InterNetwork
+                        && !IPAddress.IsLoopback(address.Address)
+                        && !IsExcludedAddress(address.Address))
+                    .Select(address => new AddressCandidate(
+                        address.Address,
+                        hasGateway,
+                        network.NetworkInterfaceType,
+                        network.Name,
+                        network.Description,
+                        isVirtual));
+            }));
 
     internal readonly record struct AddressCandidate(
         IPAddress Address,
         bool InterfaceHasGateway,
-        NetworkInterfaceType InterfaceType);
+        NetworkInterfaceType InterfaceType,
+        string? InterfaceName = null,
+        string? InterfaceDescription = null,
+        bool IsVirtual = false);
 
-    /// <summary>按“有网关的真实接口优先”排序，并排除回环、APIPA 和
+    /// <summary>按“物理接口优先、有网关的真实接口优先”排序，并排除回环、APIPA、
     /// 198.18.0.0/15 基准/TUN 网段；独立成纯函数以便单元测试。</summary>
     internal static string[] SelectCandidateAddresses(
         IEnumerable<AddressCandidate> candidates) =>
         candidates
             .Where(candidate => !IsExcludedAddress(candidate.Address))
-            .OrderByDescending(candidate => candidate.InterfaceHasGateway)
+            .OrderBy(candidate => candidate.IsVirtual ? 1 : 0)
+            .ThenByDescending(candidate => candidate.InterfaceHasGateway)
             .ThenBy(candidate => InterfaceTypeRank(candidate.InterfaceType))
             .Select(candidate => candidate.Address.ToString())
             .Distinct(StringComparer.Ordinal)
@@ -97,10 +109,36 @@ internal sealed class LanIdentity : IDisposable
             || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19));
     }
 
+    private static bool IsVirtualInterface(NetworkInterface network)
+    {
+        var name = network.Name;
+        var desc = network.Description;
+        return name.Contains("vEthernet", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("WSL", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("VMware", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Docker", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("ZeroTier", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("WireGuard", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("TAP", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("VMware", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("ZeroTier", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("TAP-Windows", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase)
+            || desc.Contains("Npcap", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static int InterfaceTypeRank(NetworkInterfaceType type) => type switch
     {
-        NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211 => 0,
-        _ => 1
+        NetworkInterfaceType.Wireless80211 => 0,
+        NetworkInterfaceType.Ethernet => 1,
+        _ => 2
     };
 
     private static string ReadOrCreateSecret(string path, int byteCount)

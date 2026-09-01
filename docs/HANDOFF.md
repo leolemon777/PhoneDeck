@@ -137,8 +137,8 @@ TEMP 指向 `work\tools\temp`。本机 adb 偶发卡死时 `taskkill /IM adb.exe
    ADB reverse 或拔掉 USB。
 5. 对第二、第三台电脑重复一次；之后三台接收端同时运行，手机切换目标即可。
 
-控制台运行包通过 `PHONEDECK_DATA_DIR` 把当前配对凭据保存在相邻 `data` 文件夹；未设置
-该环境变量的传统接收端仍回退 `%LOCALAPPDATA%\PhoneDeck`。凭据不得提交到 Git。电脑
+桌面控制台默认与接收端共用 `%LOCALAPPDATA%\PhoneDeck` 中的当前配对凭据；启动控制台
+时会显式把 `PHONEDECK_DATA_DIR` 指向该目录，避免控制台发布目录生成另一套令牌。凭据不得提交到 Git。电脑
 IP 变化后，手机会先使用受限 UDP 发现刷新候选地址；受限网络禁用广播时，重新连接 USB
 仍可刷新无线配对资料。后续标准 mDNS/Bonjour 可作为补充发现方式。
 

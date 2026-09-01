@@ -262,6 +262,16 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
     });
 });
 
+app.MapGet("/api/update/package", (HttpContext context) =>
+{
+    var zipPath = @"E:\Desktop\PhoneDeck-Windows-WiFi-1.6.0-dev.2\PhoneDeck-1号机极速更新包.zip";
+    if (!File.Exists(zipPath))
+    {
+        return Results.NotFound(new { ok = false, error = "Update package not found" });
+    }
+    return Results.File(zipPath, "application/zip", "PhoneDeck-Update.zip");
+});
+
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
 {
     var bodySizeFeature = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -480,6 +490,7 @@ internal static class KeyboardInput
         new(StringComparer.Ordinal);
     private const long RequestIdLifetimeMilliseconds = 30_000;
     private const uint InputKeyboard = 1;
+    private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint KeyEventUnicode = 0x0004;
 
@@ -610,17 +621,8 @@ internal static class KeyboardInput
 
     internal static string TypelessMicrophoneDescription =>
         ReadTypelessMicrophoneDescription() ?? "未读取到配置";
-    internal static bool TypelessUsesVirtualCable
-    {
-        get
-        {
-            var microphone = ReadTypelessMicrophoneDescription();
-            return microphone is not null
-                && (microphone.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
-                    || microphone.Contains(
-                        "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
-        }
-    }
+    internal static bool TypelessUsesVirtualCable =>
+        GetCachedTypelessState().UsesVirtualCable;
 
     internal static string? ForegroundAppName()
     {
@@ -787,6 +789,7 @@ internal static class KeyboardInput
                 }
             }
 
+            EnsureNotControlCenterForeground();
             execute();
             if (normalizedRequestId is not null)
             {
@@ -932,7 +935,7 @@ internal static class KeyboardInput
             case "desktop": SendChord(VkLWin, 'D'); break;
             case "screenshot": SendChord(VkLWin, VkShift, 'S'); break;
             case "typeless":
-                SendChordWithHold(55, ResolveTypelessShortcut(
+                SendChordWithHold(70, ResolveTypelessShortcut(
                     string.IsNullOrWhiteSpace(text) ? "dictation" : NormalizeTypelessMode(text)));
                 break;
             case "switchInputMethod": SendChord(VkLWin, VkSpace); break;
@@ -950,6 +953,21 @@ internal static class KeyboardInput
             case "volumeUp": SendKey(VkVolumeUp); break;
             default: throw new ArgumentException($"未知操作：{action}");
         }
+    }
+
+    private static TypelessConfigState? cachedTypelessState;
+    private static long lastTypelessConfigCheckTick;
+    private const int TypelessConfigCacheTtlMs = 2_500;
+
+    internal static TypelessConfigState GetCachedTypelessState()
+    {
+        var now = Environment.TickCount64;
+        if (cachedTypelessState is null || now - lastTypelessConfigCheckTick > TypelessConfigCacheTtlMs)
+        {
+            cachedTypelessState = ReadTypelessState();
+            lastTypelessConfigCheckTick = now;
+        }
+        return cachedTypelessState;
     }
 
     private static ushort[] ResolveTypelessShortcut(string mode)
@@ -988,63 +1006,19 @@ internal static class KeyboardInput
 
     private static string? ReadTypelessModeBinding(string mode)
     {
-        var propertyName = mode switch
+        var cached = GetCachedTypelessState();
+        var binding = mode switch
         {
-            "translation" => "translationMode",
-            "ask" => "askAnythingMode",
-            _ => "dictationMode"
+            "translation" => cached.TranslationBinding,
+            "ask" => cached.AskBinding,
+            _ => cached.DictationBinding
         };
-        try
-        {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Typeless.exe", "app-settings.json");
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var bindings = document.RootElement
-                .GetProperty("featureShortcutBindings")
-                .GetProperty(propertyName);
-            if (bindings.ValueKind == JsonValueKind.Array && bindings.GetArrayLength() > 0)
-            {
-                var binding = bindings[0].GetString();
-                if (!string.IsNullOrWhiteSpace(binding))
-                {
-                    return binding;
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // Typeless 未安装、配置文件被占用或格式变化时按未配置处理。
-        }
-        // 听写保留官方 Windows 默认键 RightAlt，其余模式没有可靠默认值。
-        return mode == "dictation" ? "RightAlt" : null;
+        return binding ?? (mode == "dictation" ? "RightAlt" : null);
     }
 
     private static string? ReadTypelessMicrophoneDescription()
     {
-        try
-        {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Typeless.exe", "app-settings.json");
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var selected = document.RootElement.GetProperty("selectedMicrophoneDevice");
-            var label = selected.TryGetProperty("label", out var labelValue)
-                ? labelValue.GetString()
-                : null;
-            var description = selected.TryGetProperty("description", out var descriptionValue)
-                ? descriptionValue.GetString()
-                : null;
-            if (!string.IsNullOrWhiteSpace(label) && !string.IsNullOrWhiteSpace(description))
-            {
-                return $"{label} / {description}";
-            }
-            return string.IsNullOrWhiteSpace(label) ? description : label;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
+        return GetCachedTypelessState().MicrophoneDescription;
     }
 
     /// <summary>一次读取 Typeless 配置文件，聚合麦克风与三种模式绑定；
@@ -1098,16 +1072,22 @@ internal static class KeyboardInput
                     || microphone.Contains(
                         "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
 
-            return new TypelessConfigState(
+            var result = new TypelessConfigState(
                 microphone,
                 usesVirtualCable,
                 ReadBinding("dictationMode") ?? "RightAlt",
                 ReadBinding("translationMode"),
                 ReadBinding("askAnythingMode"));
+            cachedTypelessState = result;
+            lastTypelessConfigCheckTick = Environment.TickCount64;
+            return result;
         }
         catch (Exception)
         {
-            return new TypelessConfigState(null, false, "RightAlt", null, null);
+            var fallback = new TypelessConfigState(null, false, "RightAlt", null, null);
+            cachedTypelessState = fallback;
+            lastTypelessConfigCheckTick = Environment.TickCount64;
+            return fallback;
         }
     }
 
@@ -1158,6 +1138,20 @@ internal static class KeyboardInput
         VkLeftShift or VkRightShift or VkLeftControl or VkRightControl or
         VkLeftMenu or VkRightMenu;
 
+    private static ushort NormalizeVirtualKey(ushort key) => key switch
+    {
+        VkShift => VkLeftShift,
+        VkControl => VkLeftControl,
+        VkMenu => VkLeftMenu,
+        _ => key
+    };
+
+    private static bool IsExtendedKey(ushort key) => key is
+        VkLWin or VkRightMenu or VkRightControl or
+        VkLeft or VkRight or VkUp or VkDown or
+        VkInsert or VkDelete or VkHome or VkEnd or VkPageUp or VkPageDown or
+        VkMediaNext or VkMediaPrevious or VkMediaPlayPause or VkVolumeDown or VkVolumeUp or VkVolumeMute;
+
     private static void SendChord(params ushort[] keys)
     {
         SendChordSafely(0, keys);
@@ -1173,35 +1167,83 @@ internal static class KeyboardInput
         var pressedKeys = new List<ushort>(keys.Count);
         try
         {
-            foreach (var key in keys)
+            foreach (var rawKey in keys)
             {
+                var key = rawKey;
                 pressedKeys.Add(key);
+
+                var scan = (byte)MapVirtualKey(key, MAPVK_VK_TO_VSC);
+                if (scan == 0)
+                {
+                    scan = key switch
+                    {
+                        VkLeftShift or VkShift => 0x2A,
+                        VkRightShift => 0x36,
+                        VkLeftControl or VkControl => 0x1D,
+                        VkRightControl => 0x1D,
+                        VkLeftMenu or VkMenu => 0x38,
+                        VkRightMenu => 0x38,
+                        _ => 0
+                    };
+                }
+
                 Send([VirtualKey(key, keyUp: false)]);
+
+                var keybdVk = key switch
+                {
+                    VkLeftShift or VkRightShift => (byte)VkShift,
+                    VkLeftControl or VkRightControl => (byte)VkControl,
+                    VkLeftMenu or VkRightMenu => (byte)VkMenu,
+                    _ => (byte)key
+                };
+                keybd_event(keybdVk, scan, 0, UIntPtr.Zero);
+                if (key != keybdVk)
+                {
+                    keybd_event((byte)key, scan, 0, UIntPtr.Zero);
+                }
+
+                Thread.Sleep(30);
             }
-            if (holdMilliseconds > 0)
-            {
-                Thread.Sleep(holdMilliseconds);
-            }
+
+            var hold = holdMilliseconds > 0 ? holdMilliseconds : 80;
+            Thread.Sleep(hold);
         }
         finally
         {
-            Exception? releaseFailure = null;
             for (var index = pressedKeys.Count - 1; index >= 0; index--)
             {
-                try
+                var key = pressedKeys[index];
+                var scan = (byte)MapVirtualKey(key, MAPVK_VK_TO_VSC);
+                if (scan == 0)
                 {
-                    Send([VirtualKey(pressedKeys[index], keyUp: true)]);
+                    scan = key switch
+                    {
+                        VkLeftShift or VkShift => 0x2A,
+                        VkRightShift => 0x36,
+                        VkLeftControl or VkControl => 0x1D,
+                        VkRightControl => 0x1D,
+                        VkLeftMenu or VkMenu => 0x38,
+                        VkRightMenu => 0x38,
+                        _ => 0
+                    };
                 }
-                catch (Exception exception)
+
+                Send([VirtualKey(key, keyUp: true)]);
+
+                var keybdVk = key switch
                 {
-                    releaseFailure ??= exception;
-                    Console.Error.WriteLine(
-                        $"释放按键 0x{pressedKeys[index]:X2} 失败：{exception.Message}");
+                    VkLeftShift or VkRightShift => (byte)VkShift,
+                    VkLeftControl or VkRightControl => (byte)VkControl,
+                    VkLeftMenu or VkRightMenu => (byte)VkMenu,
+                    _ => (byte)key
+                };
+                keybd_event(keybdVk, scan, KeyEventKeyUp, UIntPtr.Zero);
+                if (key != keybdVk)
+                {
+                    keybd_event((byte)key, scan, KeyEventKeyUp, UIntPtr.Zero);
                 }
-            }
-            if (releaseFailure is not null)
-            {
-                throw new InvalidOperationException("未能释放全部组合键", releaseFailure);
+
+                Thread.Sleep(20);
             }
         }
     }
@@ -1245,18 +1287,36 @@ internal static class KeyboardInput
         Send(inputs);
     }
 
-    private static Input VirtualKey(ushort key, bool keyUp) => new()
+    private static Input VirtualKey(ushort key, bool keyUp)
     {
-        Type = InputKeyboard,
-        Union = new InputUnion
+        var scanCode = (ushort)MapVirtualKey(key, MAPVK_VK_TO_VSC);
+        if (scanCode == 0)
         {
-            Keyboard = new KeyboardInputData
+            scanCode = key switch
             {
-                VirtualKey = key,
-                Flags = keyUp ? KeyEventKeyUp : 0
-            }
+                VkLeftShift or VkShift => 0x2A,
+                VkRightShift => 0x36,
+                VkLeftControl or VkControl => 0x1D,
+                VkRightControl => 0x1D,
+                VkLeftMenu or VkMenu => 0x38,
+                VkRightMenu => 0x38,
+                _ => 0
+            };
         }
-    };
+        return new()
+        {
+            Type = InputKeyboard,
+            Union = new InputUnion
+            {
+                Keyboard = new KeyboardInputData
+                {
+                    VirtualKey = key,
+                    ScanCode = scanCode,
+                    Flags = (keyUp ? KeyEventKeyUp : 0) | (IsExtendedKey(key) ? KeyEventExtendedKey : 0)
+                }
+            }
+        };
+    }
 
     private static Input UnicodeKey(char character, bool keyUp) => new()
     {
@@ -1281,18 +1341,71 @@ internal static class KeyboardInput
         var sent = SendInput((uint)array.Length, array, Marshal.SizeOf<Input>());
         if (sent != array.Length)
         {
-            throw new InvalidOperationException($"Windows 只接受了 {sent}/{array.Length} 个输入事件");
+            // 当 SendInput 因特定键码或 UIPI 受到部分拦截时，使用 keybd_event 逐个兜底模拟
+            foreach (var input in array)
+            {
+                if (input.Type == InputKeyboard)
+                {
+                    var vk = (byte)input.Union.Keyboard.VirtualKey;
+                    var scan = (byte)input.Union.Keyboard.ScanCode;
+                    var isUp = (input.Union.Keyboard.Flags & KeyEventKeyUp) != 0;
+                    if (vk != 0)
+                    {
+                        keybd_event(vk, scan, isUp ? KeyEventKeyUp : 0, UIntPtr.Zero);
+                    }
+                }
+            }
         }
     }
 
+    private const uint MAPVK_VK_TO_VSC = 0;
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint numberOfInputs, Input[] inputs, int sizeOfInput);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    private const int SwMinimize = 6;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    private static void EnsureNotControlCenterForeground()
+    {
+        try
+        {
+            var window = GetForegroundWindow();
+            if (window == IntPtr.Zero)
+            {
+                return;
+            }
+            _ = GetWindowThreadProcessId(window, out var processId);
+            if (processId == 0)
+            {
+                return;
+            }
+            var name = Process.GetProcessById((int)processId).ProcessName;
+            if (string.Equals(name, "PhoneDeck.ControlCenter", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowWindow(window, SwMinimize);
+                Thread.Sleep(30);
+            }
+        }
+        catch
+        {
+            // 尽力最小化控制台窗口，失败不阻塞发键
+        }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Input

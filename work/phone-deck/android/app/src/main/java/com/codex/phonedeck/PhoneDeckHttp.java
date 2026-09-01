@@ -38,7 +38,24 @@ final class PhoneDeckHttp {
     private static final HostnameVerifier PINNED_HOSTNAME_VERIFIER =
             (hostname, session) -> true;
 
+    static {
+        // 开启系统 HTTP/TLS 连接池并保持活跃连接数，使得多电脑切换和首段音频直连 0ms 复用
+        System.setProperty("http.keepAlive", "true");
+        System.setProperty("http.maxConnections", "16");
+    }
+
     private PhoneDeckHttp() {
+    }
+
+    static void prewarm(PhoneDeckEndpoint endpoint) {
+        if (endpoint == null) {
+            return;
+        }
+        try {
+            getJson(endpoint, "/api/health", 600, 800);
+        } catch (Exception ignored) {
+            // 预热仅建立底层 TCP/TLS 握手，失败静默跳过
+        }
     }
 
     static HttpURLConnection open(

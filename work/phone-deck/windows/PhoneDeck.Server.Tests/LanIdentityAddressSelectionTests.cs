@@ -77,4 +77,36 @@ public sealed class LanIdentityAddressSelectionTests
 
         Assert.AreEqual(0, selected.Length);
     }
+
+    [TestMethod]
+    public void PhysicalWifiOutranksVirtualSwitchEvenWithGateway()
+    {
+        var selected = LanIdentity.SelectCandidateAddresses(new[]
+        {
+            new LanIdentity.AddressCandidate(
+                IPAddress.Parse("172.28.0.1"),
+                InterfaceHasGateway: true,
+                NetworkInterfaceType.Ethernet,
+                InterfaceName: "vEthernet (WSL)",
+                InterfaceDescription: "Hyper-V Virtual Ethernet Adapter",
+                IsVirtual: true),
+            new LanIdentity.AddressCandidate(
+                IPAddress.Parse("192.168.0.7"),
+                InterfaceHasGateway: true,
+                NetworkInterfaceType.Wireless80211,
+                InterfaceName: "Wi-Fi",
+                InterfaceDescription: "Intel(R) Wi-Fi 6 AX201",
+                IsVirtual: false),
+            new LanIdentity.AddressCandidate(
+                IPAddress.Parse("10.0.0.10"),
+                InterfaceHasGateway: true,
+                NetworkInterfaceType.Ethernet,
+                InterfaceName: "Ethernet",
+                InterfaceDescription: "Realtek Gaming 2.5GbE Family Controller",
+                IsVirtual: false)
+        });
+
+        CollectionAssert.AreEqual(
+            new[] { "192.168.0.7", "10.0.0.10", "172.28.0.1" }, selected);
+    }
 }
