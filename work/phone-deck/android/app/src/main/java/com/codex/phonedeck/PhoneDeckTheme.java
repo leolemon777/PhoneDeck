@@ -14,15 +14,17 @@ import android.widget.FrameLayout;
 final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";
-    static final String OCEAN = "ocean";
-    static final String OLED = "oled";
-    static final String PAPER = "paper";
     static final String FROST = "frost";
-    static final String INK_LIGHT = "inklight";
-    static final String INK_DARK = "inkdark";
-    static final String GOLD_BLUE = "goldblue";
-    static final String GOLD_AMBER = "goldamber";
-    static final String GOLD_FOREST = "goldforest";
+
+    // 仅供文件内历史调色板工厂保持源码兼容；all()/byId()/load() 均不会返回这些主题。
+    private static final String OCEAN = "ocean";
+    private static final String OLED = "oled";
+    private static final String PAPER = "paper";
+    private static final String INK_LIGHT = "inklight";
+    private static final String INK_DARK = "inkdark";
+    private static final String GOLD_BLUE = "goldblue";
+    private static final String GOLD_AMBER = "goldamber";
+    private static final String GOLD_FOREST = "goldforest";
 
     final String id;
     final String name;
@@ -84,48 +86,28 @@ final class PhoneDeckTheme {
 
     static PhoneDeckTheme load(Context context) {
         SharedPreferences preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return byId(preferences.getString(PREF_THEME_ID, FROST));
+        String storedId = preferences.getString(PREF_THEME_ID, FROST);
+        if (!FROST.equals(storedId)) {
+            preferences.edit().putString(PREF_THEME_ID, FROST).apply();
+        }
+        return frost();
     }
 
     static void save(Context context, String themeId) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putString(PREF_THEME_ID, byId(themeId).id)
+                .putString(PREF_THEME_ID, FROST)
                 .apply();
     }
 
     static PhoneDeckTheme[] all() {
-        return new PhoneDeckTheme[]{
-                frost(), inkLight(), inkDark(), goldBlue(), goldAmber(), goldForest(),
-                ocean(), oled(), paper()};
+        return new PhoneDeckTheme[]{frost()};
     }
 
     static PhoneDeckTheme byId(String id) {
-        if (FROST.equals(id)) {
-            return frost();
-        }
-        if (OLED.equals(id)) {
-            return oled();
-        }
-        if (PAPER.equals(id)) {
-            return paper();
-        }
-        if (INK_LIGHT.equals(id)) {
-            return inkLight();
-        }
-        if (INK_DARK.equals(id)) {
-            return inkDark();
-        }
-        if (GOLD_BLUE.equals(id)) {
-            return goldBlue();
-        }
-        if (GOLD_AMBER.equals(id)) {
-            return goldAmber();
-        }
-        if (GOLD_FOREST.equals(id)) {
-            return goldForest();
-        }
-        return ocean();
+        // 旧版本可能仍保存 ocean/oled/paper/ink/gold 等主题 ID。
+        // 单主题版统一回退到冰川玻璃，并在下次保存时持久化 frost。
+        return frost();
     }
 
     boolean isFrost() {

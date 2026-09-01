@@ -77,7 +77,7 @@ public final class SettingsActivity extends Activity {
 
         TextView appearanceHeading = text("外观主题", 17, theme.text, Typeface.BOLD);
         page.addView(appearanceHeading, topMargin(dp(24)));
-        TextView appearanceHint = text("主题会应用到主界面、语音区和所有编辑页面。",
+        TextView appearanceHint = text("统一使用冰川玻璃，应用到主界面、语音区和所有编辑页面。",
                 12, theme.muted, Typeface.NORMAL);
         page.addView(appearanceHint, topMargin(dp(4)));
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {

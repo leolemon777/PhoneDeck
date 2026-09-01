@@ -59,7 +59,11 @@ public final class MainActivity extends Activity {
     private static final String MODE_TAP = "tap";
     private static final String MODE_HOLD = "hold";
     private static final long HEALTH_CHECK_INTERVAL_MS = 2_000;
+    private static final long VOICE_START_WATCHDOG_MS = 6_000;
+    private static final int REMOTE_STOP_CONFIRMATIONS_REQUIRED = 1;
     private final ExecutorService actionExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService voiceExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService voiceRecoveryExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService connectionExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private PhoneDeckTheme theme;
@@ -81,6 +85,7 @@ public final class MainActivity extends Activity {
     private boolean holdGestureActive;
     private boolean holdReleasePending;
     private String voiceBusyLabel;
+    private Runnable voiceStartWatchdog;
     private String voiceMode = MODE_TAP;
     private String currentSessionId;
     private boolean currentSessionManaged;
@@ -94,6 +99,9 @@ public final class MainActivity extends Activity {
     private volatile String[] usbTypelessModes = new String[]{"dictation"};
     private String selectedTypelessMode = "dictation";
     private String currentSessionMode;
+    private String remoteStopCandidateSessionId;
+    private int remoteStopConfirmations;
+    private boolean remoteVoiceWasObservedHealthy;
     private LinearLayout typelessModeRow;
     private WifiManager.WifiLock wifiLock;
     private boolean keepConnectionAlive = true;
@@ -101,8 +109,10 @@ public final class MainActivity extends Activity {
     private int lastFeedbackColor;
 
     private static final long REPEAT_INTERVAL_MS = 150;
+    private enum PostAttemptResult { SUCCESS, RETRYABLE_FAILURE, REJECTED }
+
     private static final java.util.Set<String> REPEATABLE_KEYS = new java.util.HashSet<>(
-            java.util.Arrays.asList("BACKSPACE", "DELETE", "LEFT", "RIGHT", "UP", "DOWN"));
+            java.util.Arrays.asList("DELETE", "LEFT", "RIGHT", "UP", "DOWN"));
     private Runnable repeatRunnable;
     private ShortcutButtonConfig repeatConfig;
     private ShortcutKeyView repeatSource;
@@ -356,7 +366,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(18), dp(18), landscape ? dp(24) : dp(286));
+        page.setPadding(dp(18), dp(18), dp(18), landscape ? dp(24) : dp(362));
         scrollView.addView(page, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
@@ -424,7 +434,7 @@ public final class MainActivity extends Activity {
 
         shortcutHintText = text(gridEditMode
                 ? "点击按钮编辑 · 长按拖动调换位置"
-                : "退格/方向键长按连发 · 点右上「编辑」自定义", 12,
+                : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义", 12,
                 theme.muted, Typeface.NORMAL);
         page.addView(shortcutHintText, marginTop(dp(3)));
 
@@ -489,9 +499,14 @@ public final class MainActivity extends Activity {
         voiceEditRow.setGravity(Gravity.CENTER);
 
         Button backspaceButton = voiceEditButton("退格");
-        backspaceButton.setContentDescription("删除电脑光标前一个字符");
+        backspaceButton.setContentDescription("退格。点按删除一个字符，长按全部删除");
         backspaceButton.setOnClickListener(view -> triggerVoiceEditAction(
                 backspaceButton, "退格", "BACKSPACE", "backspace"));
+        backspaceButton.setOnLongClickListener(view -> {
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            triggerDeleteAll(backspaceButton);
+            return true;
+        });
         installTouchFeedback(backspaceButton);
         voiceEditRow.addView(backspaceButton, new LinearLayout.LayoutParams(
                 0, dp(46), 1f));
@@ -613,10 +628,13 @@ public final class MainActivity extends Activity {
 
     private void addKey(GridLayout grid, ShortcutButtonConfig config) {
         ShortcutKeyView button = new ShortcutKeyView(this, theme, config);
+        boolean deleteAllOnLongPress = isBackspaceKey(config);
         boolean repeatable = isRepeatableKey(config);
         button.setTag(config.id);
         button.setContentDescription(config.label + "，" + config.subtitle()
-                + (repeatable ? "。点按发送一次，长按连续发送" : ""));
+                + (deleteAllOnLongPress
+                ? "。点按删除一个字符，长按全部删除"
+                : repeatable ? "。点按发送一次，长按连续发送" : ""));
         button.setOnClickListener(view -> {
             if (gridEditMode) {
                 openButtonEditor(config.id);
@@ -629,6 +647,11 @@ public final class MainActivity extends Activity {
                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                 ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
                 view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
+                return true;
+            }
+            if (deleteAllOnLongPress) {
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                triggerDeleteAll(button);
                 return true;
             }
             if (repeatable) {
@@ -662,7 +685,7 @@ public final class MainActivity extends Activity {
         if (shortcutHintText != null) {
             shortcutHintText.setText(gridEditMode
                     ? "点击按钮编辑 · 长按拖动调换位置"
-                    : "退格/方向键长按连发 · 点右上「编辑」自定义");
+                    : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义");
         }
         if (shortcutGrid != null) {
             for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
@@ -741,6 +764,14 @@ public final class MainActivity extends Activity {
             return false;
         }
         return REPEATABLE_KEYS.contains(config.keys.get(0));
+    }
+
+    private boolean isBackspaceKey(ShortcutButtonConfig config) {
+        return !config.isTextAction()
+                && !config.isMacroAction()
+                && config.keys != null
+                && config.keys.size() == 1
+                && "BACKSPACE".equals(config.keys.get(0));
     }
 
     private void startKeyRepeat(ShortcutKeyView source, ShortcutButtonConfig config) {
@@ -825,6 +856,97 @@ public final class MainActivity extends Activity {
             case "UP": return "up";
             case "DOWN": return "down";
             default: return null;
+        }
+    }
+
+    /// 退格长按只执行一次“全选 + 退格”，避免旧的 150ms 连发产生大量请求。
+    /// v2 使用单个受控宏，保证两步固定发送到同一目标；旧协议仍按顺序发送
+    /// 两个既有白名单动作，保留 1.4.0 兼容性。
+    private void triggerDeleteAll(View source) {
+        final JSONObject firstBody = new JSONObject();
+        JSONObject fallbackSecondBody = null;
+        try {
+            if (serverProtocolVersion >= 2 && targetComputerId != null
+                    && !targetComputerId.isBlank()) {
+                firstBody.put("requestId", UUID.randomUUID().toString());
+                firstBody.put("protocolVersion", 2);
+                firstBody.put("sessionId", clientSessionId);
+                firstBody.put("targetComputerId", targetComputerId);
+                firstBody.put("action", "macro");
+
+                org.json.JSONArray steps = new org.json.JSONArray();
+                JSONObject selectAll = new JSONObject();
+                selectAll.put("type", "keyChord");
+                selectAll.put("delayBeforeMs", 0);
+                selectAll.put("holdMs", 45);
+                selectAll.put("keys", new org.json.JSONArray()
+                        .put("CTRL").put("A"));
+                steps.put(selectAll);
+
+                JSONObject backspace = new JSONObject();
+                backspace.put("type", "keyChord");
+                backspace.put("delayBeforeMs", 40);
+                backspace.put("holdMs", 45);
+                backspace.put("keys", new org.json.JSONArray().put("BACKSPACE"));
+                steps.put(backspace);
+                firstBody.put("steps", steps);
+            } else {
+                firstBody.put("requestId", UUID.randomUUID().toString());
+                firstBody.put("action", "selectAll");
+                fallbackSecondBody = new JSONObject();
+                fallbackSecondBody.put("requestId", UUID.randomUUID().toString());
+                fallbackSecondBody.put("action", "backspace");
+            }
+        } catch (Exception exception) {
+            showShortcutFailure(source);
+            showActionFeedback("✕  全部删除指令生成失败", theme.danger);
+            return;
+        }
+
+        final JSONObject secondBody = fallbackSecondBody;
+        showShortcutSending(source);
+        showActionFeedback("●  正在全选并删除…", theme.warning);
+        actionExecutor.execute(() -> {
+            try {
+                String transport = sendCommand(firstBody);
+                if (secondBody != null) {
+                    Thread.sleep(40);
+                    transport = sendCommand(secondBody);
+                }
+                String confirmedTransport = transport;
+                mainHandler.post(() -> {
+                    showConnection(confirmedTransport + " 已连接", theme.success);
+                    showActionFeedback("✓  已全部删除 · " + confirmedTransport,
+                            theme.success);
+                    performResultHaptic(source, true);
+                    showShortcutSuccess(source);
+                });
+            } catch (Exception exception) {
+                mainHandler.post(() -> {
+                    showConnection("发送失败，请连接 USB 或蓝牙", theme.danger);
+                    showActionFeedback("✕  电脑未确认全部删除", theme.danger);
+                    performResultHaptic(source, false);
+                    showShortcutFailure(source);
+                });
+            }
+        });
+    }
+
+    private void showShortcutSending(View source) {
+        if (source instanceof ShortcutKeyView) {
+            ((ShortcutKeyView) source).showSending();
+        }
+    }
+
+    private void showShortcutSuccess(View source) {
+        if (source instanceof ShortcutKeyView) {
+            ((ShortcutKeyView) source).showSuccess();
+        }
+    }
+
+    private void showShortcutFailure(View source) {
+        if (source instanceof ShortcutKeyView) {
+            ((ShortcutKeyView) source).showFailure();
         }
     }
 
@@ -1267,6 +1389,8 @@ public final class MainActivity extends Activity {
                     phoneAudioAvailable = audio != null
                             && audio.optBoolean("available", false);
                     JSONObject typeless = health.optJSONObject("typeless");
+                    RemoteVoiceState remoteVoiceState =
+                            RemoteVoiceState.fromHealth(health);
                     typelessVirtualCableSelected = typeless != null
                             && typeless.optBoolean("virtualCableSelected", false);
                     String healthForegroundApp = health.optString("foregroundApp", null);
@@ -1311,6 +1435,10 @@ public final class MainActivity extends Activity {
                                 healthDisplayName,
                                 healthPlatform);
                         applyStoredTarget();
+                        reconcileRemoteVoiceState(
+                                PhoneDeckEndpoint.USB,
+                                healthComputerId,
+                                remoteVoiceState);
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
@@ -1402,6 +1530,8 @@ public final class MainActivity extends Activity {
                     }
                     JSONObject audio = health.optJSONObject("audio");
                     JSONObject typeless = health.optJSONObject("typeless");
+                    RemoteVoiceState remoteVoiceState =
+                            RemoteVoiceState.fromHealth(health);
                     String lanForegroundApp = health.optString("foregroundApp", null);
                     next.put(device.computerId, new LanTargetStatus(
                             result.endpoint,
@@ -1413,6 +1543,10 @@ public final class MainActivity extends Activity {
                             parseTypelessModes(typeless),
                             lanForegroundApp == null || lanForegroundApp.isBlank()
                                     ? null : lanForegroundApp));
+                    PhoneDeckEndpoint healthEndpoint = result.endpoint;
+                    String healthComputerId = device.computerId;
+                    mainHandler.post(() -> reconcileRemoteVoiceState(
+                            healthEndpoint, healthComputerId, remoteVoiceState));
                 }
                 lanCheckFailStreak = anyPaired && !anySuccess
                         ? lanCheckFailStreak + 1 : 0;
@@ -1438,6 +1572,91 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
             // 旧电脑端没有该接口时继续使用手机本地配置。
         }
+    }
+
+    /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动 Typeless
+    /// 不会触发手机录音；但当前会话已由电脑完成时，可靠健康快照会让手机
+    /// 停止 AudioRecord、关闭 PCM 流并清理本地按钮状态。
+    private void reconcileRemoteVoiceState(
+            PhoneDeckEndpoint observedEndpoint,
+            String observedComputerId,
+            RemoteVoiceState remote) {
+        if (!dictationActive || typelessInFlight || !currentSessionManaged
+                || currentSessionId == null || currentSessionTargetComputerId == null
+                || currentSessionEndpoint == null) {
+            resetRemoteStopConfirmation();
+            return;
+        }
+
+        // USB 与 LAN 健康检查会并行回调。与当前会话无关的观察结果只能忽略，
+        // 不能清空当前传输链路已经积累的停止确认。
+        if (remote == null || !remote.reliable
+                || !sameComputer(currentSessionTargetComputerId, observedComputerId)
+                || !sameSessionTransport(currentSessionEndpoint, observedEndpoint)) {
+            return;
+        }
+
+        boolean sameRemoteSession = remote.dictationActive
+                && currentSessionId.equals(remote.sessionId);
+        if (sameRemoteSession && remote.typelessCapturing) {
+            remoteVoiceWasObservedHealthy = true;
+            resetRemoteStopConfirmation();
+            return;
+        }
+
+        // 启动初期 Typeless 状态快照可能比 start 响应晚一轮。只有亲眼观察到
+        // 当前会话正常采集后，才把后续的 false 当作电脑端手动完成。
+        if (!remoteVoiceWasObservedHealthy) {
+            return;
+        }
+
+        if (!currentSessionId.equals(remoteStopCandidateSessionId)) {
+            remoteStopCandidateSessionId = currentSessionId;
+            remoteStopConfirmations = 0;
+        }
+        remoteStopConfirmations++;
+        Log.i("PhoneDeckVoice", currentSessionId
+                + " remoteStopObserved confirmations=" + remoteStopConfirmations
+                + " remoteSessionActive=" + remote.dictationActive
+                + " remoteCapturing=" + remote.typelessCapturing);
+        if (remoteStopConfirmations < REMOTE_STOP_CONFIRMATIONS_REQUIRED) {
+            return;
+        }
+
+        String sessionId = currentSessionId;
+        String sessionTargetComputerId = currentSessionTargetComputerId;
+        PhoneDeckEndpoint sessionEndpoint = currentSessionEndpoint;
+        intentionalAudioStopSessionId = sessionId;
+        if (audioStreamer != null) {
+            audioStreamer.stop();
+        }
+        clearVoiceSessionState();
+        microphoneLevel.setText("手机麦克风  ○ 已停止");
+        microphoneLevel.setTextColor(theme.muted);
+        if (voiceMeter != null) {
+            voiceMeter.setVoiceState(VoiceLevelView.IDLE);
+        }
+        showActionFeedback("✓  电脑端已完成，手机已同步停止", theme.success);
+        performResultHaptic(typelessButton, true);
+        flashResult(typelessButton, theme.success);
+        bestEffortStopManagedDictation(
+                sessionId, sessionTargetComputerId, sessionEndpoint);
+    }
+
+    private static boolean sameSessionTransport(
+            PhoneDeckEndpoint expected, PhoneDeckEndpoint observed) {
+        if (expected == null || observed == null) {
+            return false;
+        }
+        if (expected == PhoneDeckEndpoint.USB || observed == PhoneDeckEndpoint.USB) {
+            return expected == PhoneDeckEndpoint.USB && observed == PhoneDeckEndpoint.USB;
+        }
+        return expected.isLan() && observed.isLan();
+    }
+
+    private void resetRemoteStopConfirmation() {
+        remoteStopCandidateSessionId = null;
+        remoteStopConfirmations = 0;
     }
 
     /// UDP 广播发现（10 秒冷却）。发现结果只并入候选地址；
@@ -1543,7 +1762,7 @@ public final class MainActivity extends Activity {
             String sessionId,
             String sessionTargetComputerId,
             PhoneDeckEndpoint sessionEndpoint) {
-        actionExecutor.execute(() -> {
+        voiceRecoveryExecutor.execute(() -> {
             try {
                 JSONObject body = new JSONObject();
                 body.put("protocolVersion", 2);
@@ -1760,6 +1979,15 @@ public final class MainActivity extends Activity {
                 currentSessionEndpoint)) {
             clearVoiceSessionState();
             showActionFeedback("✕  上一个手机音频会话仍在收尾，请稍后重试", theme.danger);
+            return;
+        }
+        if (currentSessionManaged) {
+            // 协议 v2 接收端会在 start 内等待同一 sessionId 的音频会话，
+            // 因此无需先等 HTTPS 音频通道完成。录音、TLS/WASAPI 与
+            // Typeless 唤醒并行进行，首段 PCM 由手机和服务端 pre-roll 保留。
+            setTypelessBusy("正在快速唤醒 Typeless…");
+            showActionFeedback("●  正在并行启动麦克风与 Typeless…", theme.warning);
+            sendTypelessToggle(true);
         }
     }
 
@@ -1784,6 +2012,10 @@ public final class MainActivity extends Activity {
             return;
         }
         audioStartPending = false;
+        if (currentSessionManaged) {
+            showActionFeedback("●  手机麦克风已连接，正在等待 Typeless 确认…", theme.warning);
+            return;
+        }
         showActionFeedback("●  手机麦克风已连接，正在唤醒 Typeless…", theme.warning);
         setTypelessBusy("正在唤醒 Typeless…");
         sendTypelessToggle(true);
@@ -1799,7 +2031,17 @@ public final class MainActivity extends Activity {
         final boolean managed = currentSessionManaged;
         final String sessionTargetComputerId = currentSessionTargetComputerId;
         final PhoneDeckEndpoint sessionEndpoint = currentSessionEndpoint;
-        actionExecutor.execute(() -> {
+        final long queuedAt = SystemClock.elapsedRealtime();
+        if (starting) {
+            armVoiceStartWatchdog(
+                    sessionId, managed, sessionTargetComputerId, sessionEndpoint);
+        } else {
+            disarmVoiceStartWatchdog();
+        }
+        Log.i("PhoneDeckVoice", sessionId + " commandQueued starting=" + starting);
+        voiceExecutor.execute(() -> {
+            Log.i("PhoneDeckVoice", sessionId + " commandStarted +"
+                    + (SystemClock.elapsedRealtime() - queuedAt) + "ms");
             try {
                 String transport;
                 if (managed) {
@@ -1817,10 +2059,14 @@ public final class MainActivity extends Activity {
                     }
                     audioStreamer.stop();
                 }
+                Log.i("PhoneDeckVoice", sessionId + " commandConfirmed starting="
+                        + starting + " +"
+                        + (SystemClock.elapsedRealtime() - queuedAt) + "ms");
                 mainHandler.post(() -> {
                     if (!sessionId.equals(currentSessionId)) {
                         return;
                     }
+                    disarmVoiceStartWatchdog();
                     dictationActive = starting;
                     if (starting) {
                         dictationPaused = false;
@@ -1844,12 +2090,16 @@ public final class MainActivity extends Activity {
                     }
                 });
             } catch (Exception exception) {
+                Log.w("PhoneDeckVoice", sessionId + " commandFailed starting="
+                        + starting + " +"
+                        + (SystemClock.elapsedRealtime() - queuedAt) + "ms", exception);
                 intentionalAudioStopSessionId = sessionId;
                 audioStreamer.stop();
                 mainHandler.post(() -> {
                     if (!sessionId.equals(currentSessionId)) {
                         return;
                     }
+                    disarmVoiceStartWatchdog();
                     holdReleasePending = false;
                     clearVoiceSessionState();
                     showConnection("Typeless 指令发送失败", theme.danger);
@@ -1860,6 +2110,47 @@ public final class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void armVoiceStartWatchdog(
+            String sessionId,
+            boolean managed,
+            String sessionTargetComputerId,
+            PhoneDeckEndpoint sessionEndpoint) {
+        disarmVoiceStartWatchdog();
+        voiceStartWatchdog = () -> {
+            if (!sessionId.equals(currentSessionId)
+                    || dictationActive || !isVoiceStarting()) {
+                return;
+            }
+            Log.w("PhoneDeckVoice", sessionId + " startWatchdogTimeout +"
+                    + VOICE_START_WATCHDOG_MS + "ms");
+            intentionalAudioStopSessionId = sessionId;
+            if (audioStreamer != null) {
+                audioStreamer.stop();
+            }
+            clearVoiceSessionState();
+            microphoneLevel.setText("手机麦克风  ✕ 启动超时");
+            microphoneLevel.setTextColor(theme.danger);
+            showConnection("Typeless 启动超时", theme.danger);
+            showActionFeedback("✕  Typeless 长时间没有确认，已自动取消，请重试",
+                    theme.danger);
+            performResultHaptic(typelessButton, false);
+            flashResult(typelessButton, theme.danger);
+            if (managed && sessionTargetComputerId != null && sessionEndpoint != null) {
+                bestEffortStopManagedDictation(
+                        sessionId, sessionTargetComputerId, sessionEndpoint);
+            }
+        };
+        mainHandler.postDelayed(voiceStartWatchdog, VOICE_START_WATCHDOG_MS);
+    }
+
+    private void disarmVoiceStartWatchdog() {
+        if (voiceStartWatchdog == null) {
+            return;
+        }
+        mainHandler.removeCallbacks(voiceStartWatchdog);
+        voiceStartWatchdog = null;
     }
 
     private String sendManagedDictationCommand(
@@ -1945,7 +2236,7 @@ public final class MainActivity extends Activity {
     }
 
     private void bestEffortStopLegacyTypeless() {
-        actionExecutor.execute(() -> {
+        voiceRecoveryExecutor.execute(() -> {
             try {
                 JSONObject body = new JSONObject();
                 body.put("action", "typeless");
@@ -1958,6 +2249,9 @@ public final class MainActivity extends Activity {
     }
 
     private void clearVoiceSessionState() {
+        disarmVoiceStartWatchdog();
+        resetRemoteStopConfirmation();
+        remoteVoiceWasObservedHealthy = false;
         audioStartPending = false;
         dictationActive = false;
         dictationPaused = false;
@@ -2024,8 +2318,16 @@ public final class MainActivity extends Activity {
             return false;
         }
         for (int attempt = 0; attempt < attempts; attempt++) {
-            if (postEndpoint(connectionEndpoint, endpoint, body)) {
+            PostAttemptResult result = postEndpoint(connectionEndpoint, endpoint, body);
+            if (result == PostAttemptResult.SUCCESS) {
                 return true;
+            }
+            // A valid HTTP error means the receiver processed and rejected the
+            // request. Retrying the same requestId cannot repair the state and,
+            // for Typeless toggles, can turn a recovered failure into a second
+            // misleading failure. Only transport errors are retryable.
+            if (result == PostAttemptResult.REJECTED) {
+                return false;
             }
             if (attempt + 1 < attempts) {
                 try {
@@ -2039,15 +2341,28 @@ public final class MainActivity extends Activity {
         return false;
     }
 
-    private boolean postEndpoint(
+    private PostAttemptResult postEndpoint(
             PhoneDeckEndpoint connectionEndpoint,
             String endpoint,
             JSONObject body) {
+        long startedAt = SystemClock.elapsedRealtime();
+        int readTimeout = endpoint.startsWith("/api/dictation/") ? 7_000 : 1_800;
         try {
-            PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, 1800);
-            return true;
+            PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, readTimeout);
+            return PostAttemptResult.SUCCESS;
+        } catch (PhoneDeckHttp.ResponseException exception) {
+            Log.w("PhoneDeckNet", endpoint + " rejected via "
+                    + connectionEndpoint.label + " +"
+                    + (SystemClock.elapsedRealtime() - startedAt) + "ms: HTTP "
+                    + exception.status + " " + exception.getMessage());
+            return PostAttemptResult.REJECTED;
         } catch (Exception exception) {
-            return false;
+            Log.w("PhoneDeckNet", endpoint + " failed via "
+                    + connectionEndpoint.label + " +"
+                    + (SystemClock.elapsedRealtime() - startedAt) + "ms: "
+                    + exception.getClass().getSimpleName() + ": "
+                    + exception.getMessage());
+            return PostAttemptResult.RETRYABLE_FAILURE;
         }
     }
 
@@ -2114,6 +2429,7 @@ public final class MainActivity extends Activity {
         if (!guarded) {
             return;
         }
+        disarmVoiceStartWatchdog();
         typelessInFlight = false;
         voiceBusyLabel = null;
         updateVoiceControls();
@@ -2200,6 +2516,8 @@ public final class MainActivity extends Activity {
         clearVoiceSessionState();
         lanProbePool.shutdownNow();
         actionExecutor.shutdownNow();
+        voiceExecutor.shutdownNow();
+        voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
         super.onDestroy();
     }
@@ -2302,6 +2620,41 @@ public final class MainActivity extends Activity {
             this.typelessModes = typelessModes;
             this.foregroundApp = foregroundApp;
             this.lastOnlineAt = android.os.SystemClock.elapsedRealtime();
+        }
+    }
+
+    private static final class RemoteVoiceState {
+        final boolean reliable;
+        final boolean dictationActive;
+        final String sessionId;
+        final boolean typelessCapturing;
+
+        RemoteVoiceState(
+                boolean reliable,
+                boolean dictationActive,
+                String sessionId,
+                boolean typelessCapturing) {
+            this.reliable = reliable;
+            this.dictationActive = dictationActive;
+            this.sessionId = sessionId;
+            this.typelessCapturing = typelessCapturing;
+        }
+
+        static RemoteVoiceState fromHealth(JSONObject health) {
+            JSONObject dictation = health == null
+                    ? null : health.optJSONObject("dictation");
+            JSONObject typeless = health == null
+                    ? null : health.optJSONObject("typeless");
+            boolean reliable = dictation != null
+                    && typeless != null
+                    && dictation.has("active")
+                    && typeless.has("capturing")
+                    && !typeless.optBoolean("stale", false);
+            return new RemoteVoiceState(
+                    reliable,
+                    dictation != null && dictation.optBoolean("active", false),
+                    dictation == null ? null : dictation.optString("sessionId", null),
+                    typeless != null && typeless.optBoolean("capturing", false));
         }
     }
 

@@ -2,8 +2,17 @@ using System.Diagnostics;
 
 internal sealed class DictationSessionManager : IDisposable
 {
-    private const int AudioSessionReadyTimeoutMilliseconds = 1_200;
-    private const int TypelessStateTimeoutMilliseconds = 1_200;
+    // WASAPI cold start on the second receiver occasionally exceeds 1.2s even
+    // though the phone audio request is already connected. These are maximum
+    // failure budgets only; successful starts still return immediately.
+    private const int AudioSessionReadyTimeoutMilliseconds = 3_000;
+    private const int TypelessStateTimeoutMilliseconds = 2_000;
+
+    // 手机端已经并行发起 PCM POST。给 VB-CABLE/WASAPI 一个很短的预热窗口，
+    // 避免 Typeless 在二号电脑上先打开尚未唤醒的 CABLE Output，触发约 2–3 秒
+    // 的 Core Audio 冷启动。这里只等 250ms；超时仍立即发送快捷键，不会退回
+    // 旧版“音频完全建立后才唤醒 Typeless”的串行长等待。
+    private const int AudioWarmupGraceMilliseconds = 250;
 
     /// <summary>停止 Typeless 前等待音频流（含 pre-roll 尾部排空）结束的上限。</summary>
     private const int AudioDrainTimeoutMilliseconds = 2_000;
@@ -74,17 +83,16 @@ internal sealed class DictationSessionManager : IDisposable
             {
                 throw new InvalidOperationException("另一个 Typeless 听写会话仍在运行");
             }
-            // Android 在取得音频 POST 的输出流后会立即并发发送 start。
-            // Kestrel/WASAPI 可能还需要几十毫秒才登记 activeSessionId，
-            // 因此等待真实会话就绪，而不是把正常竞态误报成 USB 断线。
-            if (!audioBridge.WaitForSessionActive(
-                    normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
-            {
-                throw new InvalidOperationException("音频会话不存在或已断开");
-            }
-
             var startTimestamp = Stopwatch.GetTimestamp();
             activeMode = normalizedMode;
+
+            var audioWarmed = audioBridge.WaitForSessionActive(
+                normalizedSessionId, AudioWarmupGraceMilliseconds);
+            Console.WriteLine(
+                $"[dictation:{normalizedSessionId}] audioWarmup=" +
+                $"{(audioWarmed ? "ready" : "timeout")} " +
+                $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
+
             var duplicate = typeless.ToggleOnce(normalizedRequestId, normalizedMode);
             Console.WriteLine(
                 $"[dictation:{normalizedSessionId}] typelessStartRequested=" +
@@ -112,6 +120,16 @@ internal sealed class DictationSessionManager : IDisposable
             Console.WriteLine(
                 $"[dictation:{normalizedSessionId}] typelessCapturing=" +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
+            // 手机点击后会并行启动录音、音频 POST 和本 start 请求。
+            // 短预热后已立即唤醒 Typeless；这里再用完整失败预算复核对应
+            // 音频会话仍然有效。若音频连接失败，ResetFailedStart 会把
+            // 已唤醒的 Typeless 自动复位，不留下孤立录音会话。
+            if (!audioBridge.WaitForSessionActive(
+                    normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
+            {
+                ResetFailedStart(normalizedSessionId);
+                throw new InvalidOperationException("音频会话不存在或已断开");
+            }
             // Typeless 已真实采集：放行 pre-roll，把点击后最先到达的音频
             // 按原顺序送入 CABLE，保证第一音节不丢。
             audioBridge.BeginPlayback(normalizedSessionId);

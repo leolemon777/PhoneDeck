@@ -24,6 +24,15 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
 final class PhoneDeckHttp {
+    static final class ResponseException extends IllegalStateException {
+        final int status;
+
+        ResponseException(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+    }
+
     private static final ConcurrentHashMap<String, SSLSocketFactory> PINNED_FACTORIES =
             new ConcurrentHashMap<>();
     private static final HostnameVerifier PINNED_HOSTNAME_VERIFIER =
@@ -112,7 +121,8 @@ final class PhoneDeckHttp {
                 ? connection.getInputStream() : connection.getErrorStream();
         JSONObject result = response == null ? new JSONObject() : readJson(response);
         if (status < 200 || status >= 300 || !result.optBoolean("ok", false)) {
-            throw new IllegalStateException(result.optString("error", "HTTP " + status));
+            throw new ResponseException(
+                    status, result.optString("error", "HTTP " + status));
         }
         return result;
     }
