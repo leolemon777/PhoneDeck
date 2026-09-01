@@ -4,9 +4,22 @@
 当前分支：`agent/macos-receiver-2.0`
 当前源码：Android/Windows 1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步，以及低延迟语音启动、跨设备停止同步、自动发现、首音节优化与实验宏）；macOS 接收端预览 2.0.0-dev.1
 上一实机稳定基线：PhoneDeck 1.4.0
-规格基线：v0.3
+规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-08-31 规格升级 v0.4 与 Windows/Android 完善
+
+- **规格文档全面升级至 v0.4**：`spec plan.markdown` 全量载入 ControlCenter 控制台、便携数据架构、Agent 增量同步、并行低延迟语音启动、Core Audio 双向状态核对与冷启动预算修复等全部技术规格；功能状态总表（F-01~F-30）完成同步。
+- **Windows 服务端与控制台健壮性增强**：
+  - Kestrel 服务启动增加 `SocketException` / `IOException` 异常捕获与诊断高亮，防端口冲突崩溃；
+  - `TypelessStateProbe` 增加 250ms 最大耗时熔断保护，防止声卡驱动异常卡死；
+  - `PhoneDeck.ControlCenter` 新增系统托盘 `NotifyIcon` 与右键菜单，关闭窗口默认最小化常驻后台。
+- **Android 客户端模块化重构**：
+  - 新增 `AgentSyncManager.java` 独立管理 Agent 按钮的增量网络同步与合并；
+  - 新增 `VoiceSessionCoordinator.java` 集中管理会话 ID、目标电脑校验与看门狗；
+  - 精简 `MainActivity.java`，所有 UI 视觉、长按退格全选删除、固定底部面板交互 100% 保持兼容。
+- **自动化验证**：Windows 测试 45/45 通过、macOS 测试 10/10 通过、ControlCenter Release 构建成功、Android `assembleDebug` 与 `lintDebug` 全部通过。
 
 ## 2026-08-31 macOS 2.0.0-dev.1 预览
 

@@ -49,3 +49,9 @@ work/phone-deck/signing/
 
 # Keep the Gradle bootstrap binary in source control
 !**/gradle/wrapper/gradle-wrapper.jar
+
+# Historical comparison and review folders
+PhoneDeck-Windows-WiFi-*/
+PhoneDeck-pr*/
+
+work/phone-deck/windows/publish/

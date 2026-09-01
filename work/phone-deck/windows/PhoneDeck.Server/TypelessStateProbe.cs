@@ -4,8 +4,11 @@ using NAudio.CoreAudioApi.Interfaces;
 
 internal static class TypelessStateProbe
 {
+    private const int MaxProbeDurationMs = 250;
+
     internal static bool? IsCapturing()
     {
+        var startTick = Environment.TickCount64;
         try
         {
             using var enumerator = new MMDeviceEnumerator();
@@ -16,6 +19,10 @@ internal static class TypelessStateProbe
             {
                 foreach (var device in devices)
                 {
+                    if (Environment.TickCount64 - startTick > MaxProbeDurationMs)
+                    {
+                        break;
+                    }
                     var manager = device.AudioSessionManager;
                     manager.RefreshSessions();
                     for (var index = 0; index < manager.Sessions.Count; index++)
@@ -78,7 +85,7 @@ internal static class TypelessStateProbe
                     return true;
                 }
             }
-            Thread.Sleep(60);
+            Thread.Sleep(50);
         }
         while (Environment.TickCount64 < deadline);
         return observed ? false : null;

@@ -52,6 +52,8 @@ internal sealed class ControlCenterForm : Form
     private readonly Button saveButton;
     private readonly Button agentSettingsButton;
     private bool loadingSettings;
+    private readonly NotifyIcon trayIcon = new();
+    private bool isExiting;
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
@@ -80,6 +82,63 @@ internal sealed class ControlCenterForm : Form
         Controls.Add(BuildLayout());
         WireEvents();
         LoadSettings();
+        InitTrayIcon();
+    }
+
+    private void InitTrayIcon()
+    {
+        try
+        {
+            trayIcon.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+        }
+        catch
+        {
+            trayIcon.Icon = SystemIcons.Application;
+        }
+        trayIcon.Text = "PhoneDeck 电脑控制台";
+        var menu = new ContextMenuStrip();
+        var openItem = new ToolStripMenuItem("打开控制台", null, (_, _) => RestoreFromTray())
+        {
+            Font = new Font(menu.Font, FontStyle.Bold)
+        };
+        menu.Items.Add(openItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("启动接收端", null, async (_, _) =>
+        {
+            await EnsureServerAsync();
+            await RefreshStatusAsync();
+        }));
+        menu.Items.Add(new ToolStripMenuItem("重新启动", null, async (_, _) =>
+        {
+            await RestartServerAsync();
+            await RefreshStatusAsync();
+        }));
+        menu.Items.Add(new ToolStripMenuItem("停止接收端", null, async (_, _) =>
+        {
+            await StopServersAsync();
+            await RefreshStatusAsync();
+        }));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("退出", null, (_, _) => ExitApplication()));
+        trayIcon.ContextMenuStrip = menu;
+        trayIcon.DoubleClick += (_, _) => RestoreFromTray();
+        trayIcon.Visible = true;
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        BringToFront();
+        Activate();
+    }
+
+    private void ExitApplication()
+    {
+        isExiting = true;
+        trayIcon.Visible = false;
+        Close();
+        Application.Exit();
     }
 
     private Control BuildLayout()
@@ -340,11 +399,25 @@ internal sealed class ControlCenterForm : Form
             await RefreshStatusAsync();
             refreshTimer.Start();
         };
+        FormClosing += (_, e) =>
+        {
+            if (!isExiting && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+                trayIcon.ShowBalloonTip(
+                    1500,
+                    "PhoneDeck 已最小化到托盘",
+                    "接收端与 USB 看门狗在后台继续运行。双击托盘图标可重新打开控制台。",
+                    ToolTipIcon.Info);
+            }
+        };
         FormClosed += (_, _) =>
         {
             refreshTimer.Stop();
             http.Dispose();
             refreshGate.Dispose();
+            trayIcon.Dispose();
         };
         refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         startButton.Click += async (_, _) =>

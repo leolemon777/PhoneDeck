@@ -134,6 +134,7 @@ public final class MainActivity extends Activity {
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
+    private AgentSyncManager agentSyncManager;
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
             new ConcurrentHashMap<>();
@@ -184,6 +185,10 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
+        agentSyncManager = new AgentSyncManager(configRepository, () -> {
+            refreshShortcutGrid();
+            showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
+        });
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
@@ -1560,17 +1565,8 @@ public final class MainActivity extends Activity {
     }
 
     private void syncAgentShortcuts(PhoneDeckEndpoint endpoint) {
-        try {
-            JSONObject remote = PhoneDeckHttp.getJson(
-                    endpoint, "/api/config/agent-shortcuts", 700, 1000);
-            if (configRepository.applyAgentOverrides(remote)) {
-                mainHandler.post(() -> {
-                    refreshShortcutGrid();
-                    showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
-                });
-            }
-        } catch (Exception ignored) {
-            // 旧电脑端没有该接口时继续使用手机本地配置。
+        if (agentSyncManager != null) {
+            agentSyncManager.sync(endpoint);
         }
     }
 
@@ -2519,6 +2515,9 @@ public final class MainActivity extends Activity {
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
+        if (agentSyncManager != null) {
+            agentSyncManager.shutdown();
+        }
         super.onDestroy();
     }
 

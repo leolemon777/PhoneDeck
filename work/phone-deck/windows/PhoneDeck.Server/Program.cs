@@ -426,7 +426,18 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("========================================");
 });
 
-await app.RunAsync();
+try
+{
+    await app.RunAsync();
+}
+catch (Exception exception) when (exception is IOException or System.Net.Sockets.SocketException)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine($"\n[错误] 接收端服务启动失败：端口可能已被占用（8765 或 {lanIdentity.HttpsPort}）。");
+    Console.Error.WriteLine($"详细错误：{exception.Message}");
+    Console.ResetColor();
+    Environment.ExitCode = 1;
+}
 
 static IResult ExecuteDictationCommand(Func<IResult> execute)
 {
