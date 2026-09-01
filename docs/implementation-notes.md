@@ -51,3 +51,15 @@
 2. **音频通道握手异步解耦 (Non-blocking Start Response)**：
    - 将 `WaitForSessionActive` 与 `BeginPlayback` 移至后台任务执行，HTTP `/api/dictation/start` 在发键唤醒后立即响应（30ms 级）；
    - 实测手机端从点击说话到确认启动的端到端耗时由 **2,238ms 断崖式压降至 152ms**（**加速 15 倍**），停止耗时 **28ms**，彻底达成“点击即秒连”的目标。
+
+## 6. 2号语音输入 / 翻译模式未触发 Typeless 根因分析与彻底修复
+
+1. **问题排查与根因定位**：
+   - **双重按键注入导致瞬间 Toggle 抵消**：此前在 `SendChordSafely` 中，在调用 `Send(inputs)`（底层已包含 `SendInput`）后，又无条件立即调用了 `keybd_event`。对于组合键（如 `LeftShift + X` 或 `LeftShift + Z`），导致字符键（如 `X` / `Z`）在 30ms 内被连续下发两次，Typeless 捕获到第一次开启后立刻被第二次关闭，进而导致 `TypelessStateProbe.WaitForCapturing` 在 2000ms 超时并返回 `false`，服务端抛出 HTTP 409 `Typeless 未确认开始听写`。
+   - **键位映射扩展**：补充扩展键位映射（包含反引号、减号、等号、方括号、反斜杠、单引号等常见 Electron 快捷键符号），保障各类自定义按键模式均能正确识别解析。
+   - **探针检测加速与 Android 动态反馈**：将 `TypelessStateProbe.WaitForCapturing` 的轮询时延由 60ms 压缩至 20ms；Android 端在切换目标电脑时自动校验模式有效性并动态适配“正在使用手机麦克风翻译/提问/听写”的精准状态提示。
+
+2. **验证结果**：
+   - Windows 单元测试：`PhoneDeck.Server.Tests` **47/47 测试全数通过**（含新增各种复杂绑定与修饰键顺序的单元测试）。
+   - 服务端与控制台二进制已全量重新 Release 编译并更新至根目录与各部署包中。
+

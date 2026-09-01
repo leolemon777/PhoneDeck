@@ -74,4 +74,23 @@ public sealed class KeyboardInputMacroTests
         Assert.ThrowsExactly<ArgumentException>(() =>
             KeyboardInput.ValidateMacroSteps(steps));
     }
+
+    [TestMethod]
+    public void TypelessModeKeyNamesParsesVariousBindings()
+    {
+        var dictationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding("LeftShift+Z");
+        CollectionAssert.AreEqual(new[] { "SHIFT", "Z" }, dictationKeys);
+
+        var translationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding("X+LeftShift");
+        CollectionAssert.AreEqual(new[] { "SHIFT", "X" }, translationKeys);
+
+        var askKeys = KeyboardInput.TypelessModeKeyNamesFromBinding("LeftShift+C");
+        CollectionAssert.AreEqual(new[] { "SHIFT", "C" }, askKeys);
+
+        var altKeys = KeyboardInput.TypelessModeKeyNamesFromBinding("RightAlt");
+        CollectionAssert.AreEqual(new[] { "RightAlt" }, altKeys);
+
+        var multiKeys = KeyboardInput.TypelessModeKeyNamesFromBinding("LeftCtrl+RightShift+V");
+        CollectionAssert.AreEqual(new[] { "CTRL", "SHIFT", "V" }, multiKeys);
+    }
 }

@@ -1291,6 +1291,9 @@ public final class MainActivity extends Activity {
             return;
         }
         String[] modes = activeTypelessModes();
+        if (modes.length > 0 && !java.util.Arrays.asList(modes).contains(selectedTypelessMode)) {
+            selectedTypelessMode = modes[0];
+        }
         boolean usable = activeManagedDictationSupported() && modes.length > 1;
         typelessModeRow.setVisibility(usable ? View.VISIBLE : View.GONE);
         if (!usable) {
@@ -2072,8 +2075,9 @@ public final class MainActivity extends Activity {
                         dictationPaused = false;
                     }
                     showConnection(transport + " 已连接", theme.success);
+                    String modeAction = typelessModeLabel(currentSessionMode);
                     showActionFeedback(starting
-                                    ? "✓  Typeless 正在使用手机麦克风听写 · " + transport
+                                    ? "✓  Typeless 正在使用手机麦克风" + modeAction + " · " + transport
                                     : "✓  Typeless 已停止并正在输入文字 · " + transport,
                             theme.success);
                     performResultHaptic(typelessButton, true);

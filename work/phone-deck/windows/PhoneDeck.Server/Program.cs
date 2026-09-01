@@ -1129,6 +1129,13 @@ internal static class KeyboardInput
             "comma" or "," => 0xBC,
             "period" or "." => 0xBE,
             "slash" or "/" => 0xBF,
+            "backquote" or "backtick" or "`" or "~" => 0xC0,
+            "minus" or "-" => 0xBD,
+            "equal" or "=" => 0xBB,
+            "bracketleft" or "[" => 0xDB,
+            "bracketright" or "]" => 0xDD,
+            "backslash" or "\\" => 0xDC,
+            "quote" or "'" => 0xDE,
             _ => null
         };
     }
@@ -1167,41 +1174,10 @@ internal static class KeyboardInput
         var pressedKeys = new List<ushort>(keys.Count);
         try
         {
-            foreach (var rawKey in keys)
+            foreach (var key in keys)
             {
-                var key = rawKey;
                 pressedKeys.Add(key);
-
-                var scan = (byte)MapVirtualKey(key, MAPVK_VK_TO_VSC);
-                if (scan == 0)
-                {
-                    scan = key switch
-                    {
-                        VkLeftShift or VkShift => 0x2A,
-                        VkRightShift => 0x36,
-                        VkLeftControl or VkControl => 0x1D,
-                        VkRightControl => 0x1D,
-                        VkLeftMenu or VkMenu => 0x38,
-                        VkRightMenu => 0x38,
-                        _ => 0
-                    };
-                }
-
                 Send([VirtualKey(key, keyUp: false)]);
-
-                var keybdVk = key switch
-                {
-                    VkLeftShift or VkRightShift => (byte)VkShift,
-                    VkLeftControl or VkRightControl => (byte)VkControl,
-                    VkLeftMenu or VkRightMenu => (byte)VkMenu,
-                    _ => (byte)key
-                };
-                keybd_event(keybdVk, scan, 0, UIntPtr.Zero);
-                if (key != keybdVk)
-                {
-                    keybd_event((byte)key, scan, 0, UIntPtr.Zero);
-                }
-
                 Thread.Sleep(30);
             }
 
@@ -1213,36 +1189,7 @@ internal static class KeyboardInput
             for (var index = pressedKeys.Count - 1; index >= 0; index--)
             {
                 var key = pressedKeys[index];
-                var scan = (byte)MapVirtualKey(key, MAPVK_VK_TO_VSC);
-                if (scan == 0)
-                {
-                    scan = key switch
-                    {
-                        VkLeftShift or VkShift => 0x2A,
-                        VkRightShift => 0x36,
-                        VkLeftControl or VkControl => 0x1D,
-                        VkRightControl => 0x1D,
-                        VkLeftMenu or VkMenu => 0x38,
-                        VkRightMenu => 0x38,
-                        _ => 0
-                    };
-                }
-
                 Send([VirtualKey(key, keyUp: true)]);
-
-                var keybdVk = key switch
-                {
-                    VkLeftShift or VkRightShift => (byte)VkShift,
-                    VkLeftControl or VkRightControl => (byte)VkControl,
-                    VkLeftMenu or VkRightMenu => (byte)VkMenu,
-                    _ => (byte)key
-                };
-                keybd_event(keybdVk, scan, KeyEventKeyUp, UIntPtr.Zero);
-                if (key != keybdVk)
-                {
-                    keybd_event((byte)key, scan, KeyEventKeyUp, UIntPtr.Zero);
-                }
-
                 Thread.Sleep(20);
             }
         }
@@ -1349,9 +1296,11 @@ internal static class KeyboardInput
                     var vk = (byte)input.Union.Keyboard.VirtualKey;
                     var scan = (byte)input.Union.Keyboard.ScanCode;
                     var isUp = (input.Union.Keyboard.Flags & KeyEventKeyUp) != 0;
+                    var isExtended = (input.Union.Keyboard.Flags & KeyEventExtendedKey) != 0;
+                    var flags = (isUp ? KeyEventKeyUp : 0) | (isExtended ? KeyEventExtendedKey : 0);
                     if (vk != 0)
                     {
-                        keybd_event(vk, scan, isUp ? KeyEventKeyUp : 0, UIntPtr.Zero);
+                        keybd_event(vk, scan, flags, UIntPtr.Zero);
                     }
                 }
             }

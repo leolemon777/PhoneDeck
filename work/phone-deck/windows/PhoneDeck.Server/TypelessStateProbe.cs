@@ -78,7 +78,7 @@ internal static class TypelessStateProbe
                     return true;
                 }
             }
-            Thread.Sleep(60);
+            Thread.Sleep(20);
         }
         while (Environment.TickCount64 < deadline);
         return observed ? false : null;
