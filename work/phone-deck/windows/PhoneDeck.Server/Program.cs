@@ -6,12 +6,58 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+// 诊断日志双写：[audio]/[dictation] 等控制台输出同步落到 server-console.log，
+// 用于语音链路问题的事后取证（时间线精确到毫秒）。
+Console.SetOut(new ConsoleTeeWriter(
+    Path.Combine(PhoneDeckDataDirectory.Get(), "server-console.log")));
+Console.SetError(new ConsoleTeeWriter(
+    Path.Combine(PhoneDeckDataDirectory.Get(), "server-console.log")));
 
 using var singleInstance = new Mutex(initiallyOwned: true, "PhoneDeck.Server.Singleton", out var isFirstInstance);
 if (!isFirstInstance)
 {
     Console.WriteLine("手机键盘电脑端已经在运行。");
     return;
+}
+
+var eventLogPath = Path.Combine(PhoneDeckDataDirectory.Get(), "server-events.log");
+AppendServerEvent(eventLogPath, "started pid=" + Environment.ProcessId);
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+{
+    AppendServerEvent(eventLogPath, "fatal UnhandledException: " + eventArgs.ExceptionObject);
+};
+TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+{
+    AppendServerEvent(eventLogPath, "unobserved task exception: " + eventArgs.Exception);
+    eventArgs.SetObserved();
+};
+AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+{
+    AppendServerEvent(eventLogPath, "exited pid=" + Environment.ProcessId);
+};
+
+static void AppendServerEvent(string logPath, string message)
+{
+    try
+    {
+        var directory = Path.GetDirectoryName(logPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+        const long maxLogBytes = 512 * 1024;
+        if (File.Exists(logPath) && new FileInfo(logPath).Length >= maxLogBytes)
+        {
+            File.WriteAllText(logPath, string.Empty);
+        }
+        File.AppendAllText(
+            logPath,
+            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + message + Environment.NewLine);
+    }
+    catch
+    {
+        // 事件日志只用于事后追溯，任何写入失败都不能影响接收端运行。
+    }
 }
 
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
@@ -37,6 +83,8 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 var serverSettings = ServerSettings.LoadOrCreate();
 using var audioBridge = new PhoneAudioBridge();
+// 后台预热 CABLE 设备选择缓存：避免首条语音流被慢设备的友好名查询拖 1-2 秒。
+audioBridge.Prewarm();
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -264,7 +312,12 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
 
 app.MapGet("/api/update/package", (HttpContext context) =>
 {
-    var zipPath = @"E:\Desktop\PhoneDeck-Windows-WiFi-1.6.0-dev.2\PhoneDeck-1号机极速更新包.zip";
+    var configured = Environment.GetEnvironmentVariable("PHONEDECK_UPDATE_PACKAGE");
+    if (string.IsNullOrWhiteSpace(configured))
+    {
+        return Results.NotFound(new { ok = false, error = "Update package not configured (set PHONEDECK_UPDATE_PACKAGE)" });
+    }
+    var zipPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured.Trim()));
     if (!File.Exists(zipPath))
     {
         return Results.NotFound(new { ok = false, error = "Update package not found" });
@@ -1111,14 +1164,10 @@ internal static class KeyboardInput
 
         return normalized switch
         {
-            "shift" => VkShift,
-            "leftshift" => VkLeftShift,
-            "rightshift" => VkRightShift,
-            "ctrl" or "control" => VkControl,
-            "leftctrl" or "leftcontrol" => VkLeftControl,
-            "rightctrl" or "rightcontrol" => VkRightControl,
-            "alt" or "menu" => VkMenu,
-            "leftalt" => VkLeftMenu,
+            "shift" or "leftshift" or "rightshift" => VkShift,
+            "ctrl" or "control" or "leftctrl" or "leftcontrol"
+                or "rightctrl" or "rightcontrol" => VkControl,
+            "alt" or "menu" or "leftalt" => VkMenu,
             "rightalt" => VkRightMenu,
             "win" or "windows" => VkLWin,
             "space" or "spacebar" => VkSpace,
@@ -1147,9 +1196,9 @@ internal static class KeyboardInput
 
     private static ushort NormalizeVirtualKey(ushort key) => key switch
     {
-        VkShift => VkLeftShift,
-        VkControl => VkLeftControl,
-        VkMenu => VkLeftMenu,
+        VkLeftShift or VkRightShift => VkShift,
+        VkLeftControl or VkRightControl => VkControl,
+        VkLeftMenu => VkMenu,
         _ => key
     };
 
@@ -1250,6 +1299,13 @@ internal static class KeyboardInput
                 _ => 0
             };
         }
+        var vk = key switch
+        {
+            VkLeftShift or VkRightShift => VkShift,
+            VkLeftControl or VkRightControl => VkControl,
+            VkLeftMenu => VkMenu,
+            _ => key
+        };
         return new()
         {
             Type = InputKeyboard,
@@ -1257,7 +1313,7 @@ internal static class KeyboardInput
             {
                 Keyboard = new KeyboardInputData
                 {
-                    VirtualKey = key,
+                    VirtualKey = vk,
                     ScanCode = scanCode,
                     Flags = (keyUp ? KeyEventKeyUp : 0) | (IsExtendedKey(key) ? KeyEventExtendedKey : 0)
                 }

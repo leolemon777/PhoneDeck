@@ -59,10 +59,22 @@ internal sealed class ControlCenterForm : Form
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
     // 控制台与 PhoneDeck.Server 共用同一份用户级配对/身份数据；
-    // 不能使用控制台发布目录下的 data，否则启动控制台会生成另一套令牌。
-    private static string DataDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PhoneDeck");
+    // 优先沿用外部 PHONEDECK_DATA_DIR（与接收端 PhoneDeckDataDirectory 的解析一致），
+    // 否则使用 %LOCALAPPDATA%\PhoneDeck。
+    private static string DataDirectory
+    {
+        get
+        {
+            var configured = Environment.GetEnvironmentVariable("PHONEDECK_DATA_DIR");
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured.Trim()));
+            }
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PhoneDeck");
+        }
+    }
     private static string SettingsPath => Path.Combine(DataDirectory, "server-settings.json");
     private static string BundledAdbPath => Path.Combine(AppDirectory, "platform-tools", "adb.exe");
 
@@ -407,7 +419,7 @@ internal sealed class ControlCenterForm : Form
             }
             try
             {
-                var tokenPath = Path.Combine(DataDirectory, "lan-token.txt");
+                var tokenPath = Path.Combine(DataDirectory, "lan-access-token.txt");
                 var newSecret = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
                 File.WriteAllText(tokenPath, newSecret);
                 Log("通信密钥已重置，正在重新启动接收端…", Warning);

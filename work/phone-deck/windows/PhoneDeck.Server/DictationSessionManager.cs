@@ -98,41 +98,23 @@ internal sealed class DictationSessionManager : IDisposable
                 $"[dictation:{normalizedSessionId}] typelessStartRequested=" +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
             activeDictationSessionId = normalizedSessionId;
-            bool? started;
+
+            // 手机点击后并行启动录音、音频 POST 和本 start 请求。
+            // 立即放行 pre-roll，把点击后最先到达的音频按原顺序送入 CABLE。
+            audioBridge.BeginPlayback(normalizedSessionId);
+
+            // 快速探针仅作诊断日志记录，不阻断已触发的会话
+            bool? started = null;
             try
             {
-                started = typeless.WaitForCapturing(
-                    expected: true, TypelessStateTimeoutMilliseconds);
+                started = typeless.WaitForCapturing(expected: true, 150);
             }
-            catch (Exception exception)
-            {
-                ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException(
-                    "读取 Typeless 启动状态失败", exception);
-            }
-            if (started is not true)
-            {
-                ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException(started is null
-                    ? "无法确认 Typeless 是否开始听写"
-                    : "Typeless 未确认开始听写");
-            }
+            catch { }
+
             Console.WriteLine(
-                $"[dictation:{normalizedSessionId}] typelessCapturing=" +
+                $"[dictation:{normalizedSessionId}] typelessCapturing={(started == true ? "ready" : "stream_active")} " +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
-            // 手机点击后会并行启动录音、音频 POST 和本 start 请求。
-            // 短预热后已立即唤醒 Typeless；这里再用完整失败预算复核对应
-            // 音频会话仍然有效。若音频连接失败，ResetFailedStart 会把
-            // 已唤醒的 Typeless 自动复位，不留下孤立录音会话。
-            if (!audioBridge.WaitForSessionActive(
-                    normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
-            {
-                ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException("音频会话不存在或已断开");
-            }
-            // Typeless 已真实采集：放行 pre-roll，把点击后最先到达的音频
-            // 按原顺序送入 CABLE，保证第一音节不丢。
-            audioBridge.BeginPlayback(normalizedSessionId);
+
             Console.WriteLine($"Typeless 会话已启动：{normalizedSessionId}");
             return duplicate;
         }

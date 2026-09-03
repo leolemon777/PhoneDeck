@@ -181,6 +181,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             cancellationToken);
         MMDevice? selected = null;
         List<MMDevice>? devices = null;
+        WasapiOut? output = null;
+        long totalBytes = 0;
         var stream = new ActiveStream
         {
             Preroll = new PreRollBuffer(PreRollHoldBytes),
@@ -196,25 +198,32 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         };
         try
         {
+            // 分段计时：定位 WASAPI 启动慢在哪个阶段（枚举/选设备/初始化/启动）。
+            var enumerateAt = Environment.TickCount64;
             using var enumerator = new MMDeviceEnumerator();
             devices = enumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
                 .ToList();
+            var selectAt = Environment.TickCount64;
             selected = SelectDevice(devices);
+            var initAt = Environment.TickCount64;
             if (selected is null)
             {
                 throw new InvalidOperationException("未找到 VB-Audio Virtual Cable 播放端");
             }
 
-            using var output = new WasapiOut(
+            output = new WasapiOut(
                 selected,
                 AudioClientShareMode.Shared,
                 useEventSync: true,
                 latency: 30);
             output.Init(stream.Provider);
+            var playAt = Environment.TickCount64;
             output.Play();
             Console.WriteLine(
-                $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms");
+                $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms " +
+                $"enumerate={selectAt - enumerateAt}ms select={initAt - selectAt}ms " +
+                $"init={playAt - initAt}ms play={Environment.TickCount64 - playAt}ms");
 
             // 只有虚拟音频设备已找到且 WASAPI 真正启动后，
             // 才允许听写管理器唤醒 Typeless。
@@ -227,7 +236,6 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
             var bytes = new byte[16 * 1024];
             var carry = 0;
-            long totalBytes = 0;
             var firstBytesLogged = false;
             while (true)
             {
@@ -292,33 +300,53 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                     }
                 }
             }
-
-            // 尾部排空：把已放行的音频完整送入 CABLE 后再停 WASAPI，
-            // 否则 pre-roll 突发灌入的尾部会被提前截断。
-            var drainDeadline = Environment.TickCount64 + DrainMaxMs;
-            while (stream.Provider.BufferedBytes > 0
-                && Environment.TickCount64 < drainDeadline)
-            {
-                await Task.Delay(40, CancellationToken.None);
-            }
-            if (stream.Provider.BufferedBytes > 0)
-            {
-                Console.Error.WriteLine(
-                    $"[audio:{sessionId}] drainTimeoutBytes={stream.Provider.BufferedBytes}");
-            }
-            else
-            {
-                Console.WriteLine(
-                    $"[audio:{sessionId}] drained=+{ElapsedMs(stream.StartedAt)}ms");
-            }
-            output.Stop();
-            Console.WriteLine(
-                $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
-                $"bytes={totalBytes}");
             return totalBytes;
         }
         finally
         {
+            // 尾部排空必须在 finally 且先于 Ended.Set/sessionEnded：
+            // 手机断流（RST/异常）也不能跳过，否则 WASAPI 启动慢造成的
+            // 积压音频永远不会播进 CABLE，Typeless 停止键一响，
+            // 落在积压里的最后几秒语音整体丢失。
+            try
+            {
+                var drainStartedAt = Environment.TickCount64;
+                var drainDeadline = drainStartedAt + DrainMaxMs;
+                while (stream.Provider.BufferedBytes > 0
+                    && Environment.TickCount64 < drainDeadline)
+                {
+                    await Task.Delay(40, CancellationToken.None);
+                }
+                if (stream.Provider.BufferedBytes > 0)
+                {
+                    Console.Error.WriteLine(
+                        $"[audio:{sessionId}] drainTimeoutBytes={stream.Provider.BufferedBytes}");
+                }
+                else
+                {
+                    Console.WriteLine(
+                        $"[audio:{sessionId}] drained=+{ElapsedMs(stream.StartedAt)}ms " +
+                        $"bufferedWait={Environment.TickCount64 - drainStartedAt}ms");
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"[audio:{sessionId}] drainFailed: {exception.Message}");
+            }
+            try
+            {
+                output?.Stop();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"[audio:{sessionId}] outputStopFailed: {exception.Message}");
+            }
+            output?.Dispose();
+            Console.WriteLine(
+                $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
+                $"bytes={totalBytes}");
             lock (sessionSync)
             {
                 if (ReferenceEquals(activeCancellation, sessionCancellation))
@@ -365,13 +393,82 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             $"reason={reason} preRollBytes={preRollAudio.Length}");
     }
 
-    private static MMDevice? SelectDevice(IEnumerable<MMDevice> devices) =>
-        devices
-            .Where(device => device.FriendlyName.Contains(
-                "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(device => device.FriendlyName.Contains(
-                "16", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
-            .FirstOrDefault();
+    /// <summary>
+    /// 缓存 CABLE 播放端的设备 ID。FriendlyName 是 COM 属性读取，
+    /// 慢/僵尸设备（蓝牙 A2DP 等）单个调用可阻塞 1-2 秒，是 WASAPI
+    /// 启动慢与音频积压的元凶；ID 比较不触发属性读取。
+    /// </summary>
+    private static string? cachedCableDeviceId;
+
+    private static MMDevice? SelectDevice(IEnumerable<MMDevice> devices)
+    {
+        var cached = cachedCableDeviceId;
+        if (cached is not null)
+        {
+            var byId = devices.FirstOrDefault(device => device.ID == cached);
+            if (byId is not null)
+            {
+                return byId;
+            }
+            // 缓存的设备已移除：清空后回退到名字匹配。
+            cachedCableDeviceId = null;
+        }
+        MMDevice? selected = null;
+        bool prefer16 = false;
+        foreach (var device in devices)
+        {
+            string name;
+            try
+            {
+                name = device.FriendlyName;
+            }
+            catch
+            {
+                // 僵尸设备：读取友好名失败不影响其他候选。
+                continue;
+            }
+            if (!name.Contains("VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var is16 = name.Contains("16", StringComparison.OrdinalIgnoreCase);
+            if (selected is null || (is16 && !prefer16))
+            {
+                selected = device;
+                prefer16 = is16;
+            }
+        }
+        if (selected is not null)
+        {
+            cachedCableDeviceId = selected.ID;
+        }
+        return selected;
+    }
+
+    /// <summary>启动时后台预热设备选择缓存，避免首条音频流付 1-2 秒设备名查询。</summary>
+    public void Prewarm()
+    {
+        Task.Run(() =>
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var devices = enumerator
+                    .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
+                    .ToList();
+                var startedAt = Environment.TickCount64;
+                var selected = SelectDevice(devices);
+                Console.WriteLine(
+                    $"[prewarm] devices={devices.Count} " +
+                    $"cable={(selected is not null ? "cached" : "not-found")} " +
+                    $"selectMs={Environment.TickCount64 - startedAt}");
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"[prewarm] failed: {exception.Message}");
+            }
+        });
+    }
 
     public void Dispose()
     {

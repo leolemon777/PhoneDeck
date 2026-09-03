@@ -95,8 +95,9 @@ internal sealed class LanIdentity : IDisposable
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-    /// <summary>排除回环 127.0.0.0/8、APIPA 169.254.0.0/16 与
-    /// RFC 2544 基准网段 198.18.0.0/15（Meta/Clash 等 TUN 虚拟网卡常用）。</summary>
+    /// <summary>排除回环 127.0.0.0/8、APIPA 169.254.0.0/16、
+    /// RFC 2544 基准网段 198.18.0.0/15（Meta/Clash 等 TUN 虚拟网卡常用）
+    /// 与 RFC 6598 CGNAT / Tailscale 网段 100.64.0.0/10。</summary>
     internal static bool IsExcludedAddress(IPAddress address)
     {
         var bytes = address.GetAddressBytes();
@@ -106,7 +107,8 @@ internal sealed class LanIdentity : IDisposable
         }
         return bytes[0] == 127
             || (bytes[0] == 169 && bytes[1] == 254)
-            || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19));
+            || (bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19))
+            || (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127);
     }
 
     private static bool IsVirtualInterface(NetworkInterface network)
