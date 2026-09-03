@@ -2,7 +2,7 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前源码版本是 **PhoneDeck 1.5.0 候选版**，上一版完整实机稳定基线是
+当前源码版本是 **PhoneDeck 1.6.0-dev.4**，上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
@@ -13,7 +13,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 
 1. 闲置 Android 手机长期作为辅助键盘和手机麦克风使用。
 2. 手机一键唤醒或停止电脑端 Typeless。
-3. 点击模式用同一个主按钮开始/停止，并提供暂停/继续；按住模式仍是按下开始、松开停止。
+3. 点击模式用同一个主按钮开始/停止；按住模式仍是按下开始、松开停止。
 4. 快捷键按钮可由用户修改，例如把“截屏”改为 F1，或配置 Ctrl+C、Ctrl+Shift+S。
 5. 加入 `/goal`、`/plan`、`/compact` 等文本命令，并为 Codex、Claude Code、ZCode、Cursor 提供语义化预设。
 6. 一台手机管理两至四台 Windows / macOS 电脑；切换当前电脑后，语音和快捷键只进入目标电脑。
@@ -31,34 +31,76 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。
 - Windows 通过 NAudio/WASAPI 将音频写入 `CABLE Input (VB-Audio Virtual Cable)`。
 - Typeless 从 `CABLE Output` 读取手机音频。
 - 自动读取 Typeless 的主听写快捷键，读取失败时退回 RightAlt。
-- 点击模式的大号主按钮依状态切换“开始说话 / 取消启动 / 停止说话”，下方只保留暂停/继续；按住模式支持按下说话、松开停止。
+- 点击模式的大号主按钮依状态切换“开始说话 / 取消启动 / 停止说话”；按住模式支持按下说话、松开停止。
+- 输入目标编号放在固定语音面板右下方，可单手切换在线电脑。
 - 手机端音量条、震动、等待、成功和失败反馈。
 - 使用蓝紫渐变麦克风作为 Android 启动图标，项目内保留 1024 px 母版和标准密度切图。
 - 3 列动态快捷键网格，底部语音区保持固定。
-- 四套可切换外观主题：冰川玻璃、深海蓝、OLED 黑和柔和浅色；冰川玻璃包含柔光背景、玻璃卡片、渐变语音按钮与连续麦克风波形。
+- 外观统一为冰川玻璃：柔光背景、玻璃卡片、渐变语音按钮与连续麦克风波形；设置页不再提供其他主题。
 - 快捷键点击显示发送中、成功和失败状态；连接卡片显示当前电脑、通道与重新检测入口。
+- 1.6.0-dev.4 将手机录音、音频 HTTPS/WASAPI 建连和 Typeless 唤醒并行启动；语音浮窗
+  不再串行等待音频通道，连接失败时接收端会自动复位 Typeless。
+- 语音控制使用独立于普通快捷键的后台队列；启动超过 6 秒仍未确认时，手机会自动停止
+  录音、恢复主按钮并提示重试，不再永久停留在“正在唤醒 Typeless”。
+- Windows 为 Typeless 与 WASAPI 冷启动保留独立就绪预算，Android 只重试网络传输失败，
+  不再把接收端明确拒绝误判成可重试故障；正常启动路径就绪后仍立即确认。
+- 退格键短按删除一个字符，长按执行一次受控的“全选并删除”；方向键与 Delete 继续支持
+  长按连发。
+- 语音面板在主语音按钮下固定提供左侧“退格”、右侧“回车”两个快捷按钮，不受上方快捷键网格的
+  隐藏、排序或自定义影响；固定退格同样支持短按删除一个、长按全部删除。
+- 手机发起的听写会话会持续核对当前电脑的真实 Typeless 状态；确认当前会话曾稳定采集后，
+  如果用户在电脑端完成听写，下一次可靠健康快照会自动停止麦克风和 PCM 流并恢复为空闲。
+- 1.6.0-dev.3 支持通过 USB 自动交换 Wi-Fi 配对资料，随后使用证书固定的 HTTPS 在同一
+  Wi-Fi 内传输快捷键、听写控制和手机 PCM 音频；USB/蓝牙继续作为备用。
+- 手机通过受限 UDP 广播发现已配对接收端；发现结果仍必须通过 HTTPS、访问密钥、证书
+  固定和 `computerId` 校验后才能使用，并缓存最近成功地址。
+- 音频使用 20 ms PCM 分块和最多 1 秒的手机端 pre-roll，降低首字被 TLS 建连吞掉的概率。
 - 手机本地 `schemaVersion=1` 快捷键配置和损坏回退。
 - 新增、编辑、隐藏、删除自定义按钮和拖动/上下移动排序。
 - 单键与最多 4 键的安全组合键选择器。
-- 名称、预设颜色、内置图标/Emoji、测试动作和恢复默认。
+- 纯文字快捷卡片，支持名称、预设颜色、测试动作和恢复默认。
+- 默认第一排提供 Agent 指令：规划 `/plan`、目标 `/goal`、压缩上下文 `/compact`；点击后输入并回车执行。
+- Windows“电脑控制台”可查看接收端、Wi-Fi、手机音频和 USB 状态，启动/停止/重启
+  接收端，并配置自动发现、USB 看门狗、开机启动和 ADB 路径。
+- 电脑控制台可替换规划、目标、压缩上下文和新会话四个 Agent 按钮的名称、发送内容、
+  自动回车与显示状态；手机连接当前电脑后自动同步，普通快捷键与宏不受影响。
+- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；桌面控制台默认与接收端共用
+  `%LOCALAPPDATA%\\PhoneDeck` 中的电脑身份、LAN 证书、配对令牌和设置。
+- 新增文本指令时默认开启自动回车；实验性多步宏支持 1–8 个受控按键/文本步骤及有限延迟。
 - 协议 v2、稳定电脑 ID、目标电脑校验和安全键位白名单。
 - 蓝牙 RFCOMM 快捷键备用通道；蓝牙暂不传输音频。
 - 请求 ID、确认、有限重试和电脑端去重。
 - 显式音频 `sessionId`、幂等 Typeless 开始/停止和断流自动清理。
-- 暂停时停止手机麦克风采集并用静音数据保持会话；停止时先立即关闭本地录音，再完成电脑端收尾。
+- 停止时先立即关闭本地录音，再完成电脑端收尾。
 - 启动前同时验证 VB-CABLE 和 Typeless 当前麦克风；任一未配置时拒绝启动，避免 Typeless 误用电脑自带麦克风。
 - Windows 通过真实录音会话检查 Typeless 是否已停止；停止键未被 Typeless 处理时只在确认仍在录音后重试一次。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
 ## 当前尚未实现
 
-- 配置导入导出和跨设备备份（计划 1.5.x）。
-- 多配置、宏、快速文字和 AI 工具命令预设。
-- 多电脑设备列表、局域网配对和手机内目标切换。
+- 完整的跨设备配置同步；当前只有四个 Agent 文本按钮支持从当前电脑自动同步，其他按钮
+  仍通过手机编辑或手动导入导出。
+- 多配置、前台软件自动切换和更完整的 Codex / Claude Code / Cursor / ZCode 工具专属指令集。
+- 三台真实电脑同时在线的完整验收；当前版本已完成 Windows Wi-Fi 通道、USB 自动配对和
+  受限 UDP 自动发现，但仍需逐台安装接收端并完成三机实测。
 - macOS 接收端、Core Audio 和 macOS 输入注入。
 - 正式的跨电脑配置同步。
 
 不要把规划文档中的功能误认为已完成代码。
+
+## Wi-Fi 使用方式（Windows MVP）
+
+1. 手机和电脑连接同一个 Wi-Fi，手机不需要开热点，也不消耗移动数据流量。
+2. 每台电脑以管理员身份运行一次 `scripts/windows/Enable-PhoneDeckLan.ps1`，然后启动 Windows 接收端。
+3. 首次配对该电脑时用 USB 连接手机并建立 `adb reverse tcp:8765 tcp:8765`。
+4. 等手机顶部显示“Wi-Fi 在线”后即可拔掉 USB；第二、第三台电脑各配对一次。
+5. 之后只要这些电脑的接收端同时运行，就可在手机的电脑编号条上切换输入目标。
+
+Windows 端也提供 `PhoneDeck.ControlCenter.exe` 桌面控制台，可双击打开后查看接收端、
+Wi-Fi、手机音频和 USB 状态，并手动启动、停止或重启接收端；“登录后打开控制台”可选。
+
+当前首次信任建立仍使用 USB，日常操作可完全无线。电脑 IP 变化后，手机会尝试 UDP
+发现并更新地址；受限网络禁用广播时，重新连接一次 USB 仍可刷新配对地址。
 
 ## 代码位置
 
@@ -70,11 +112,13 @@ PhoneDeck/
 ├─ docs/
 │  ├─ HANDOFF.md               # 当前状态与 Agent 接力说明
 │  ├─ SETUP.md                 # 新电脑搭建、构建和运行
+│  ├─ WINDOWS_WIFI_DEPLOY.md   # 第二/第三台 Windows 无线部署
 │  └─ ARCHITECTURE.md          # 当前与目标架构
 ├─ scripts/windows/            # 发行包辅助脚本模板
 └─ work/phone-deck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
+   ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
 ```
@@ -99,6 +143,9 @@ dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Test
 
 dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj `
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
 ## 接下来的开发顺序
@@ -109,7 +156,7 @@ dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj 
 4. PhoneDeck 1.6.0：Windows 多电脑切换中心、安全配对和本地无线连接。
 5. 实测正规的四电脑 USB 共享切换器，保留无局域网硬件模式。
 6. PhoneDeck 1.7.0：多配置与前台软件自动切换。
-7. PhoneDeck 1.8.0：宏、快速文字和 AI 编程工具命令。
+7. PhoneDeck 1.8.0：完善实验性宏、快速文字和 AI 编程工具命令。
 8. PhoneDeck 2.0：macOS 接收端和 Windows/macOS 混合多电脑切换。
 
 ## 关键安全边界

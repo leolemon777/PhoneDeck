@@ -9,6 +9,8 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+/// 中性卡面 + 发丝线描边；分类色只出现在标题前的小圆点上，
+/// 层级靠卡面灰阶与描边表达，不使用阴影或渐变。
 final class ShortcutKeyView extends FrameLayout {
     private final PhoneDeckTheme theme;
     private final TextView stateBadge;
@@ -26,65 +28,48 @@ final class ShortcutKeyView extends FrameLayout {
         setPadding(dp(10), dp(8), dp(10), dp(8));
         setBackground(theme.pressable(
                 context,
-                theme.shortcutColor(config.color),
-                theme.shortcutPressedColor(config.color),
-                17));
-        setElevation(dp(theme.isFrost() ? 5 : theme.light ? 1 : 2));
+                theme.surface,
+                theme.surfaceRaised,
+                14));
 
         content = new LinearLayout(context);
-        content.setOrientation(theme.isFrost() ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        String iconValue = config.icon.isEmpty() ? "·" : config.icon;
-        TextView icon = label(iconValue,
-                config.icon.isEmpty() ? 12
-                        : theme.isFrost() && iconValue.length() > 2 ? 12
-                        : theme.isFrost() ? 21 : 19,
-                config.icon.isEmpty() ? theme.muted
-                        : theme.isFrost() ? theme.shortcutAccent(config.color) : theme.text,
-                Typeface.BOLD);
-        icon.setGravity(Gravity.CENTER);
-        icon.setMaxLines(1);
-        if (theme.isFrost()) {
-            icon.setBackground(theme.shape(context,
-                    theme.feedbackSurface(theme.shortcutAccent(config.color)), 13,
-                    1, theme.outline));
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(34), dp(46));
-            iconParams.rightMargin = dp(6);
-            content.addView(icon, iconParams);
-        } else {
-            content.addView(icon, new LinearLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, dp(25)));
-        }
+        LinearLayout titleRow = new LinearLayout(context);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        View dot = new View(context);
+        dot.setBackground(categoryDot(config.color));
+        dot.setContentDescription(config.label + "，分类色：" + config.color);
+        titleRow.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
 
-        LinearLayout copy = theme.isFrost() ? new LinearLayout(context) : content;
-        if (theme.isFrost()) {
-            copy.setOrientation(LinearLayout.VERTICAL);
-            copy.setGravity(Gravity.CENTER_VERTICAL);
-            content.addView(copy, new LinearLayout.LayoutParams(
-                    0, LayoutParams.MATCH_PARENT, 1f));
-        }
-
-        TextView title = label(config.label, theme.isFrost() ? 12 : 13,
+        TextView title = label(config.label, 14,
                 theme.text, Typeface.BOLD);
-        title.setGravity(theme.isFrost() ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
+        title.setGravity(Gravity.CENTER_VERTICAL);
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        copy.addView(title, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(22)));
+        title.setMaxWidth(dp(110));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        titleParams.leftMargin = dp(6);
+        titleRow.addView(title, titleParams);
+        content.addView(titleRow, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, dp(25)));
 
-        TextView chord = label(config.subtitle(), 10, theme.muted, Typeface.BOLD);
+        TextView chord = label(config.subtitle(), config.isTextAction() ? 11 : 10,
+                config.isTextAction() ? theme.shortcutAccent(config.color) : theme.muted,
+                Typeface.BOLD);
         chord.setGravity(Gravity.CENTER);
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
         chord.setPadding(dp(6), 0, dp(6), 0);
-        chord.setBackground(theme.shape(context, theme.surface, 9));
+        chord.setBackground(theme.shape(context, theme.surfaceRaised, 9));
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(19));
-        chordParams.topMargin = dp(3);
-        copy.addView(chord, chordParams);
+        chordParams.topMargin = dp(5);
+        content.addView(chord, chordParams);
 
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);
         stateBadge.setGravity(Gravity.CENTER);
@@ -93,6 +78,14 @@ final class ShortcutKeyView extends FrameLayout {
                 Gravity.TOP | Gravity.END);
         stateParams.setMargins(0, dp(-3), dp(-3), 0);
         addView(stateBadge, stateParams);
+    }
+
+    private android.graphics.drawable.GradientDrawable categoryDot(String color) {
+        android.graphics.drawable.GradientDrawable dot = new android.graphics.drawable.GradientDrawable();
+        dot.setColor(theme.shortcutAccent(color));
+        dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        dot.setSize(dp(7), dp(7));
+        return dot;
     }
 
     void showSending() {

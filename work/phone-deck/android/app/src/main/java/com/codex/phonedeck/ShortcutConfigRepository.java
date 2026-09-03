@@ -1,6 +1,7 @@
 package com.codex.phonedeck;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.util.AtomicFile;
 
 import org.json.JSONArray;
@@ -23,11 +24,15 @@ import java.util.UUID;
 final class ShortcutConfigRepository {
     private static final int SCHEMA_VERSION = 1;
     private static final int MAX_BUTTONS = 100;
+    private static final String SYNC_PREFS = "phonedeck_shortcut_sync";
+    private static final String AGENT_SYNC_REVISION = "agent_sync_revision";
     private final AtomicFile atomicFile;
+    private final SharedPreferences syncPreferences;
     private String recoveryNotice;
 
     ShortcutConfigRepository(Context context) {
         atomicFile = new AtomicFile(new File(context.getFilesDir(), "shortcut-config.json"));
+        syncPreferences = context.getSharedPreferences(SYNC_PREFS, Context.MODE_PRIVATE);
     }
 
     synchronized ArrayList<ShortcutButtonConfig> load() {
@@ -58,6 +63,9 @@ final class ShortcutConfigRepository {
             }
             values.sort(Comparator.comparingInt(value -> value.sortIndex));
             validateAndNormalize(values);
+            if (mergeAgentDefaults(values)) {
+                save(values);
+            }
             return values;
         } catch (Exception exception) {
             backupCorruptFile();
@@ -95,6 +103,67 @@ final class ShortcutConfigRepository {
         save(defaults());
     }
 
+    /// 应用当前电脑控制台发布的 Agent 文本指令。revision 未变化时零写入；
+    /// 普通快捷键、宏和手机本地布局不受影响。
+    synchronized boolean applyAgentOverrides(JSONObject root) {
+        try {
+            if (root.optInt("schemaVersion", 0) != 1) {
+                return false;
+            }
+            long revision = root.optLong("updatedAt", 0);
+            if (revision <= syncPreferences.getLong(AGENT_SYNC_REVISION, 0)) {
+                return false;
+            }
+            JSONArray overrides = root.getJSONArray("buttons");
+            if (overrides.length() == 0 || overrides.length() > 16) {
+                return false;
+            }
+            ArrayList<ShortcutButtonConfig> current = load();
+            Set<String> supportedIds = new HashSet<>(Arrays.asList(
+                    "agentPlan", "agentGoal", "agentCompact", "agentClear"));
+            Set<String> seenIds = new HashSet<>();
+            for (int index = 0; index < overrides.length(); index++) {
+                JSONObject override = overrides.getJSONObject(index);
+                String id = override.getString("id");
+                String label = override.getString("label").trim();
+                String text = override.getString("text").trim();
+                if (!supportedIds.contains(id) || !seenIds.add(id)
+                        || label.isEmpty() || label.length() > 24
+                        || text.isEmpty() || text.length() > 512
+                        || text.contains("\r") || text.contains("\n")) {
+                    return false;
+                }
+                ShortcutButtonConfig target = null;
+                for (ShortcutButtonConfig candidate : current) {
+                    if (candidate.id.equals(id)) {
+                        target = candidate;
+                        break;
+                    }
+                }
+                if (target == null) {
+                    return false;
+                }
+                target.label = label;
+                target.actionType = ShortcutButtonConfig.ACTION_TEXT;
+                target.text = text;
+                target.submitText = override.optBoolean("submit", true);
+                target.visible = override.optBoolean("visible", true);
+                target.keys = new ArrayList<>();
+                target.steps = new ArrayList<>();
+                target.holdMs = 45;
+                target.updatedAt = revision;
+            }
+            if (seenIds.size() != supportedIds.size()) {
+                return false;
+            }
+            save(current);
+            syncPreferences.edit().putLong(AGENT_SYNC_REVISION, revision).apply();
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
     synchronized String consumeRecoveryNotice() {
         String notice = recoveryNotice;
         recoveryNotice = null;
@@ -114,7 +183,7 @@ final class ShortcutConfigRepository {
         ArrayList<ShortcutButtonConfig> current = load();
         int sortIndex = current.stream().mapToInt(value -> value.sortIndex).max().orElse(-1) + 1;
         return new ShortcutButtonConfig(
-                "custom-" + UUID.randomUUID(), "新按钮", "✨", "blue", true,
+                "custom-" + UUID.randomUUID(), "新按钮", "", "blue", true,
                 sortIndex, false, Arrays.asList("F1"), 45, System.currentTimeMillis());
     }
 
@@ -150,16 +219,47 @@ final class ShortcutConfigRepository {
             if (value.label.isEmpty() || value.label.length() > 24) {
                 throw new IllegalArgumentException("按钮名称必须为 1–24 个字符");
             }
-            value.icon = value.icon == null ? "" : value.icon.trim();
-            if (value.icon.length() > 8) {
-                throw new IllegalArgumentException("图标或 Emoji 不能超过 8 个字符");
-            }
+            value.icon = "";
             if (!KeyCatalog.COLORS.contains(value.color)) {
                 value.color = "blue";
             }
-            value.keys = KeyCatalog.normalizeChord(value.keys);
-            if (value.holdMs < 20 || value.holdMs > 500) {
-                throw new IllegalArgumentException("按键持续时间超出安全范围");
+            if (value.isTextAction()) {
+                value.text = value.text == null ? "" : value.text.trim();
+                if (value.text.isEmpty() || value.text.length() > 512
+                        || value.text.contains("\r") || value.text.contains("\n")) {
+                    throw new IllegalArgumentException("文本指令必须为 1–512 个字符的单行文本");
+                }
+                value.keys = new ArrayList<>();
+                value.holdMs = 45;
+            } else if (value.isMacroAction()) {
+                if (value.steps == null || value.steps.isEmpty()
+                        || value.steps.size() > 8) {
+                    throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
+                }
+                for (ShortcutButtonConfig.MacroStep step : value.steps) {
+                    step.delayBeforeMs = Math.max(0, Math.min(2000, step.delayBeforeMs));
+                    if (step.isText()) {
+                        step.text = step.text == null ? "" : step.text.trim();
+                        if (step.text.isEmpty() || step.text.length() > 512
+                                || step.text.contains("\r") || step.text.contains("\n")) {
+                            throw new IllegalArgumentException("宏的文本步骤必须为 1–512 个字符的单行文本");
+                        }
+                    } else {
+                        step.type = ShortcutButtonConfig.ACTION_KEY_CHORD;
+                        step.keys = KeyCatalog.normalizeChord(step.keys);
+                        if (step.holdMs < 20 || step.holdMs > 500) {
+                            throw new IllegalArgumentException("宏步骤按键持续时间超出安全范围");
+                        }
+                    }
+                }
+                value.keys = new ArrayList<>();
+                value.text = "";
+            } else {
+                value.actionType = ShortcutButtonConfig.ACTION_KEY_CHORD;
+                value.keys = KeyCatalog.normalizeChord(value.keys);
+                if (value.holdMs < 20 || value.holdMs > 500) {
+                    throw new IllegalArgumentException("按键持续时间超出安全范围");
+                }
             }
             value.sortIndex = index;
         }
@@ -204,36 +304,113 @@ final class ShortcutConfigRepository {
 
     private static ArrayList<ShortcutButtonConfig> defaults() {
         ArrayList<ShortcutButtonConfig> values = new ArrayList<>();
-        addDefault(values, "copy", "复制", "📋", "blue", "CTRL", "C");
-        addDefault(values, "paste", "粘贴", "📥", "green", "CTRL", "V");
-        addDefault(values, "cut", "剪切", "✂", "orange", "CTRL", "X");
-        addDefault(values, "undo", "撤销", "↶", "slate", "CTRL", "Z");
-        addDefault(values, "redo", "重做", "↷", "slate", "CTRL", "Y");
-        addDefault(values, "selectAll", "全选", "☑", "purple", "CTRL", "A");
-        addDefault(values, "save", "保存", "💾", "green", "CTRL", "S");
-        addDefault(values, "altTab", "切换窗口", "▣", "purple", "ALT", "TAB");
-        addDefault(values, "screenshot", "截图", "▧", "blue", "WIN", "SHIFT", "S");
-        addDefault(values, "enter", "回车", "↵", "green", "ENTER");
-        addDefault(values, "backspace", "退格", "⌫", "slate", "BACKSPACE");
-        addDefault(values, "escape", "退出", "Esc", "red", "ESC");
-        addDefault(values, "switchInputMethod", "切换输入法", "文", "purple", "WIN", "SPACE");
-        addDefault(values, "volumeDown", "音量 −", "🔉", "slate", "VOLUMEDOWN");
-        addDefault(values, "volumeMute", "静音", "🔇", "orange", "VOLUMEMUTE");
-        addDefault(values, "volumeUp", "音量 +", "🔊", "blue", "VOLUMEUP");
-        addDefault(values, "left", "向左", "←", "slate", "LEFT");
-        addDefault(values, "right", "向右", "→", "slate", "RIGHT");
+        addAgentDefaults(values);
+        addDefault(values, "copy", "复制", "blue", "CTRL", "C");
+        addDefault(values, "paste", "粘贴", "green", "CTRL", "V");
+        addDefault(values, "cut", "剪切", "orange", "CTRL", "X");
+        addDefault(values, "undo", "撤销", "slate", "CTRL", "Z");
+        addDefault(values, "redo", "重做", "slate", "CTRL", "Y");
+        addDefault(values, "selectAll", "全选", "purple", "CTRL", "A");
+        addDefault(values, "save", "保存", "green", "CTRL", "S");
+        addDefault(values, "altTab", "切换窗口", "purple", "ALT", "TAB");
+        addDefault(values, "screenshot", "截图", "blue", "WIN", "SHIFT", "S");
+        addDefault(values, "enter", "回车", "green", "ENTER");
+        addDefault(values, "backspace", "退格", "slate", "BACKSPACE");
+        addDefault(values, "escape", "退出", "red", "ESC");
+        addDefault(values, "switchInputMethod", "切换输入法", "purple", "WIN", "SPACE");
+        addDefault(values, "volumeDown", "音量 −", "slate", "VOLUMEDOWN");
+        addDefault(values, "volumeMute", "静音", "orange", "VOLUMEMUTE");
+        addDefault(values, "volumeUp", "音量 +", "blue", "VOLUMEUP");
+        addDefault(values, "left", "向左", "slate", "LEFT");
+        addDefault(values, "right", "向右", "slate", "RIGHT");
         return values;
+    }
+
+    private static boolean mergeAgentDefaults(ArrayList<ShortcutButtonConfig> values) {
+        ArrayList<ShortcutButtonConfig> agentDefaults = new ArrayList<>();
+        addAgentDefaults(agentDefaults);
+        Set<String> existingIds = new HashSet<>();
+        for (ShortcutButtonConfig value : values) {
+            existingIds.add(value.id);
+        }
+        boolean changed = false;
+        for (int index = agentDefaults.size() - 1; index >= 0; index--) {
+            ShortcutButtonConfig value = agentDefaults.get(index);
+            if (existingIds.add(value.id)) {
+                values.add(0, value);
+                changed = true;
+            }
+        }
+        if (changed) {
+            validateAndNormalize(values);
+        }
+        return changed;
+    }
+
+    private static void addAgentDefaults(ArrayList<ShortcutButtonConfig> target) {
+        addDefault(target, "agentInterrupt", "打断", "red", "ESC");
+        addTextDefault(target, "agentPlan", "规划", "purple", "/plan");
+        addTextDefault(target, "agentGoal", "目标", "blue", "/goal");
+        addTextDefault(target, "agentCompact", "压缩上下文", "green", "/compact");
+        addTextDefault(target, "agentClear", "新会话", "orange", "/clear");
+        addDefault(target, "agentAcceptAll", "接受全部", "green", "CTRL", "ENTER");
+        addDefault(target, "agentRejectAll", "拒绝全部", "red", "CTRL", "BACKSPACE");
+    }
+
+    /// 导出当前配置文件的原始 JSON；文件尚不存在时返回 null。
+    synchronized String exportJson() {
+        try (InputStream input = atomicFile.openRead()) {
+            return readUtf8(input);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    /// 导入并替换当前配置。任何一步解析或校验失败都返回 false 且不改动现有文件。
+    synchronized boolean importJson(String json) {
+        try {
+            JSONObject root = new JSONObject(json);
+            int schemaVersion = root.getInt("schemaVersion");
+            if (schemaVersion != SCHEMA_VERSION) {
+                return false;
+            }
+            JSONArray profiles = root.getJSONArray("profiles");
+            if (profiles.length() == 0) {
+                return false;
+            }
+            JSONArray buttons = profiles.getJSONObject(0).getJSONArray("buttons");
+            if (buttons.length() == 0 || buttons.length() > MAX_BUTTONS) {
+                return false;
+            }
+            ArrayList<ShortcutButtonConfig> values = new ArrayList<>();
+            for (int index = 0; index < buttons.length(); index++) {
+                values.add(ShortcutButtonConfig.fromJson(buttons.getJSONObject(index)));
+            }
+            save(values);
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private static void addDefault(
             ArrayList<ShortcutButtonConfig> target,
             String id,
             String label,
-            String icon,
             String color,
             String... keys) {
         target.add(new ShortcutButtonConfig(
-                id, label, icon, color, true, target.size(), true,
+                id, label, "", color, true, target.size(), true,
                 Arrays.asList(keys), 45, 0));
+    }
+
+    private static void addTextDefault(
+            ArrayList<ShortcutButtonConfig> target,
+            String id,
+            String label,
+            String color,
+            String text) {
+        target.add(ShortcutButtonConfig.textAction(
+                id, label, color, true, target.size(), true, text, true, 0));
     }
 }

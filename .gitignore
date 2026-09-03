@@ -24,10 +24,12 @@ Desktop.ini
 
 # Local release/output trees and bundled toolchains
 outputs/
+artifacts/
 work/tools/
 work/drivers/
 work/phone-deck/artifacts/
 work/phone-deck/dist/
+work/phone-deck/windows/publish-*/
 
 # Signing material and credentials
 work/phone-deck/signing/

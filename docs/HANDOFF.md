@@ -1,28 +1,214 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-08-27
-当前分支：`agent/ui-themes-1.5.0`
-当前源码：PhoneDeck 1.5.0 候选版
+更新时间：2026-09-01
+当前分支：`agent/multi-pc-1.6.0`
+当前源码：PhoneDeck 1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步，以及低延迟语音启动、自动发现、首音节优化与实验宏）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.3
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
 
+## 2026-09-01 2号机可靠性加固与缺陷修复
+
+- 现场问题：2号机接收端进程中途退出，且该机无任何自启动/守护，语音整链路不可用；
+  Typeless、VB-CABLE、防火墙与配对身份均正常。
+- 修复内容（详见 `docs/implementation-notes.md` 第 8 节）：
+  1. 接收端新增 `server-events.log` 事件日志（启动/退出/未处理异常），便于事后定位；
+  2. `/api/update/package` 去硬编码，改读 `PHONEDECK_UPDATE_PACKAGE` 环境变量；
+  3. ControlCenter「重置通信密钥」改写正确的 `lan-access-token.txt`；
+  4. ControlCenter 数据目录优先读取 `PHONEDECK_DATA_DIR`；
+  5. 2号机注册 ControlCenter 登录自启动并保持其常驻监管；旧二进制备份于
+     `rollback/2026-09-01-pre-optimize/`。
+- 验证：Server 测试 39/39、ControlCenter Release 构建通过；新版双程序已在 2号机运行，
+  `/api/health` 全绿、computerId 保持 `0c24d2de-…`、更新端点 404、事件日志与
+  UDP 8767 发现应答均正常。语音真机回归未执行。
+- 代码改动与此前未提交的修饰键/CGNAT 修复同在工作区，均未提交。
+
+## 2026-08-31 dev.4 新增与验证
+
+- 新增 .NET 8 WinForms `PhoneDeck.ControlCenter`：显示接收端、Wi-Fi、VB-CABLE/Typeless、
+  USB 状态，支持启动/停止/重启、LAN 发现、USB 看门狗、开机启动和 ADB 路径设置。
+- 新增 Agent 操作编辑器，可替换 `agentPlan`、`agentGoal`、`agentCompact`、`agentClear`
+  的名称、文本、自动回车和显示状态；接收端通过 `/api/config/agent-shortcuts` 发布，手机
+  只从当前选中的电脑增量同步这四项，不覆盖普通按键和宏。
+- 接收端增加 `PHONEDECK_DATA_DIR`：本机运行包与配对数据已迁到
+  `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台`，原
+  `%LOCALAPPDATA%\PhoneDeck` 已移除，电脑身份、证书和令牌保持不变。
+- Windows 测试 42/42、ControlCenter Release 构建、Android `assembleDebug` 与
+  `lintDebug` 通过；`1.6.0-dev.4` 接收端、Agent 配置接口和 UDP 8767 已在本机验证。
+- 新 APK 已生成到控制台运行目录，但 Samsung 当前未出现在 ADB 列表，仍需覆盖安装一次
+  才能在手机端启用 Agent 自动同步。
+
 ## 给下一台电脑和下一位 Agent 的一句话
 
-1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成；下一步
-不是继续扩大功能，而是补齐快捷键编辑、真实输入、VB-CABLE、Typeless、连续断线和
-蓝牙验收，修复实机问题后再发布。
+1.5.0 的源码、长期签名、Samsung 安装和一轮真实 ADB 服务断开/恢复已经完成。本轮
+1.6.0-dev.2 已把目标电脑 ID 贯穿到听写、PCM 音频和快捷键，加入手机端设备切换条，并
+完成独立 HTTPS Wi-Fi 通道。2026-08-30 的 dev.3 在此基础上加入候选地址并行探测、受限
+UDP 自动发现、音频 pre-roll 和实验性多步宏；dev.4 再将手机录音、音频建连与 Typeless
+唤醒改为并行启动，缩短按下语音键到浮窗出现的时间。2026-08-28 会话还完成：Typeless 三模式（听写/
+翻译/问答）、USB 看门狗常连、Wi-Fi 保活、统一冰川玻璃主题、横竖屏
+双栏、主界面编辑模式与退格连发、AI 黄金位预设、前台应用回传和配置
+导入导出，均已在 Samsung SM-G9880 真机验证。下一步仍是把接收端装到另外两台电脑、
+逐台 USB 自动配对，再做三机语音联合验收。
+
+## 2026-08-30 dev.4 低延迟语音启动
+
+- Android 升级为 `versionCode=10` / `versionName=1.6.0-dev.4`。
+- 协议 v2 点击语音后立即并行启动 AudioRecord、音频 HTTPS/WASAPI 和 Typeless 快捷键，
+  不再先等音频输出流建立后才发送听写开始请求。
+- Windows 先请求 Typeless 浮窗并确认采集，再等待同一 `sessionId` 的音频会话；音频未能
+  建立时自动关闭已唤醒的 Typeless，手机端与服务端 pre-roll 继续保护首音节。
+- 退格键从 150ms 连发中分离：短按仍发送单次 `BACKSPACE`，长按则发送受控的
+  `Ctrl+A` → 40ms → `BACKSPACE` 宏；方向键与 Delete 的连发行为不变。
+- 语音面板主按钮下恢复固定“退格 / 回车”双按钮（回车在右）；它们不进入可编辑快捷键网格，退格仍为
+  短按删除一个、长按执行一次全选删除。
+- Android 健康轮询现在反向核对当前 managedDictation 的 `sessionId`、`dictation.active`
+  和 `typeless.capturing`；确认会话曾稳定采集后，电脑端手动完成会在下一次可靠快照中让手机自动停止录音/PCM、清理会话并
+  显示“电脑端已完成，手机已同步停止”。电脑独立启动 Typeless 不会反向触发手机录音。
+- 2026-08-31 现场复现手机长期停在“正在唤醒 Typeless”：日志证明 AudioRecord 与音频流
+  已在约 0.1 秒建立，但 Typeless 确认任务没有完成回调。Android 现将语音控制从普通
+  快捷键单线程队列中分离，并加入 6 秒启动看门狗；超时会停止录音、清空本地会话、提示
+  重试并尽力复位电脑端会话。新增 `PhoneDeckVoice` 队列/执行/确认/失败/看门狗时序日志
+  与 `PhoneDeckNet` 端点失败耗时日志。
+- 真机时序进一步定位到 Windows 冷启动竞态：第一次请求在约 1.6 秒后返回“音频会话不
+  存在或已断开”，Android 又用同一请求 ID 重试，随后得到“Typeless 未确认开始听写”。
+  Windows 的 Typeless 确认预算已由 1.2 秒增至 2 秒，音频会话预算由 1.2 秒增至 3 秒；
+  正常路径一旦就绪仍立即返回，不额外等待。Android 对听写端点使用 7 秒读取预算，并且
+  仅对网络传输失败重试，不再重发接收端已经明确拒绝的请求。
+- 竞态修复已通过 Windows 测试 41/41、Android Debug/Release 构建和 Lint；长期签名
+  Release 在保留 `firstInstallTime` 的情况下覆盖安装到 Samsung，二号 Windows 接收端也
+  已替换并健康运行。修复后首轮真实“开始 → 停止”通过：启动确认约 319 ms，停止确认约
+  239 ms，结束时手机录音、服务端音频、听写和 Typeless 采集均无残留。
+- 随后由 ADB 从真实手机界面连续触发二号三轮，三轮均完成启动、停止并恢复空闲：首轮
+  冷启动确认 2659 ms，后两轮分别为 1309 ms、1209 ms，停止确认为 276 ms、253 ms、
+  271 ms；没有出现永久“正在唤醒”。再切换一号完成一轮，启动确认 443 ms、停止确认
+  177 ms，最后已把手机默认目标恢复为二号。该结果证明当前手机可对两台在线电脑切换并
+  完成语音启停；一号尚未替换本轮 Windows 冷启动预算修复，若要让两端二进制完全一致，
+  仍需在一号部署 `artifacts/PhoneDeck-Windows-WiFi-1.6.0-dev.4`。
+
+## 2026-08-30 dev.3 新增与验证
+
+- Android 升级为 `versionCode=9` / `versionName=1.6.0-dev.3`。
+- LAN 候选地址并行探测、最近成功地址缓存、网络恢复回调、离线宽限与退避；缓存地址全部
+  失败时使用 UDP 8767 发现同一 `computerId` 的接收端，再通过原 HTTPS 密钥和证书固定验证。
+- 音频改用 20 ms PCM 分块，TLS 建连期间最多缓存 1 秒 pre-roll，并记录点击、首帧、建连、
+  灌入和停止时序，降低首音节丢失风险。
+- 快捷按钮编辑器增加文本/按键/多步宏动作类型；宏限制 1–8 个受控步骤和 0–2000 ms
+  单步前置延迟。新建 Agent 文本指令默认开启自动回车，用户可关闭。
+- Android `assembleDebug`、`assembleRelease`、`lintDebug` 全部通过；Windows 接收端测试
+  38/38 通过。Samsung SM-G9880 已覆盖安装并验证纯文字 Agent 卡片、自定义文本指令入口。
+- 本机完成 4 秒真实按住说话验证：期间 `audio.streaming`、`dictation.active`、
+  `typeless.capturing` 均为 true，松开后三项均复位为 false；未核对最终识别文本。
+
+## 2026-08-28 会话新增（均已真机验证）
+
+- **Typeless 三模式**：电脑端从 `app-settings.json` 动态读 `dictationMode` /
+  `translationMode` / `askAnythingMode` 快捷键，经 `/api/health.typeless.shortcuts`
+  上报；手机语音面板显示 模式：听写/翻译/问答 chips，`/api/dictation/start|stop`
+  增加可选 `mode` 字段，停止沿用启动时的模式键。旧接收端自动只显示听写。
+- **USB 看门狗**（`UsbWatchdog.cs`，默认开启）：每 2 秒检测 adb reverse，丢失自动
+  重建并唤醒 App；`%LOCALAPPDATA%\PhoneDeck\server-settings.json` 可配 `usbWatchdog`
+  与 `adbPath`；health 上报 `usbWatchdog` 状态。真实验证 `adb kill-server` 后自动恢复。
+- **手机 Wi-Fi 保活**：设置新增开关（默认开），持 `WIFI_MODE_FULL_LOW_LATENCY` 锁。
+- **主题系统（2026-09-02 现状）**：已重构为**品牌 × 深浅两级结构**——设置页先选
+  深浅模式（跟随系统 / 浅色 / 深色 三态），再选品牌族（共 7 个）：冰川玻璃（原版，
+  仅浅色）、ChatGPT、Claude、Grok、Gemini、Hermes（Nous 官方 skins 的 daylight/
+  slate 双面：纸感底冷蓝 / 石墨底暖橙）、豆包（字节风：白底靛蓝 / 深灰蓝底亮靛蓝）。
+  不再有"×浅色/×深色"独立选项；跟随系统跟随的是深浅，品牌保持不变。存储为
+  `theme_brand` + `theme_mode` 双键（旧 `theme_id` 自动迁移）；实例 id（gptlight
+  等）仍唯一，`appliedThemeId` 逻辑未动。Grok 族分类色走灰阶；frost 为代码级回退
+  默认；视觉体系沿用中性灰阶表面+发丝线（glass 除外）。
+- **语音尾音丢失修复（2026-09-02）**：停止听写时 `AudioStreamer` 改为优雅收尾——
+  追加 500ms 静音垫层 + 正常结束 chunked 流（不再立即 disconnect 丢弃 TCP 缓冲尾音），
+  电脑端既有"等流结束→排干→停 Typeless"逻辑直接受益，结尾几个字不再被截断；
+  代价是停止到出字慢约 0.5-0.8s。详见 implementation-notes.md 4.6 节，待项目所有者
+  实测确认。
+- **主题与 UX 优化史（2026-09-01）**：先按 M3 色彩角色 + Apple HIG 语义色完成
+  去"AI 味"重构（中性灰阶表面+1dp 发丝线+分类色点+扁平电平条+红色仅录音语义），
+  同日第二轮落地 8 项体验优化（语音坞瘦身约 60dp、底部留白动态化、反馈 4 秒淡出、
+  设置页滚动保持、快捷提示 6 次后收起、状态点呼吸动画、跟随系统深色、原生
+  RippleDrawable）。细节见 implementation-notes.md 4.2/4.3 节。
+- **横竖屏**：主界面横屏双栏（网格 6 列 + 右侧语音面板），旋转不重建 Activity，
+  听写中旋转会话不断；编辑页/键位选择器旋转保留草稿与选择。
+- **主界面编辑模式**：右上角 编辑/完成 切换；编辑模式点击改按钮、长按拖动换位
+  （持久化），平时长按退格/Delete/方向键连续发送（约 150ms/次），单击发一次。
+- **说完自动回车（已下线）**：曾作为设置开关（默认开）在停止听写约 0.8 秒后
+  补发 Enter，2026-08-28 按用户要求整体移除（`scheduleAutoEnter`、
+  `auto_enter_after_dictation` 及设置项 UI 均已删除），听写停止后不再自动回车，
+  需要回车时用网格里的 回车 按钮。
+- **AI 黄金位预设**：合并新增 打断(Esc)、新会话(/clear+回车)、接受全部(Ctrl+Enter)、
+  拒绝全部(Ctrl+Backspace)。
+- **前台应用回传**：health 新增 `foregroundApp`（仅进程名，不读窗口标题），手机
+  连接卡显示目标电脑当前前台应用。
+- **配置导入导出**：设置页 SAF 导出/导入 `phonedeck-shortcuts.json`；导入前完整
+  校验，失败不改现有配置。真机完成导出→导入闭环。
+- **FocusSink**：无操作自动关闭延长到 10 分钟，便于人工验证。
+
+## 待办（下一步严格顺序不变）
+
+1. 拔 USB 后真实 Wi-Fi 语音文字核对（本轮已验会话启停，识别文字质量待用户实测）。
+2. 第二、第三台 Windows 安装接收端并逐台配对。
+3. 标准 mDNS/Bonjour、凭据撤销/重配；自定义 UDP 地址发现已完成。
+4. 快捷键回归（编辑/隐藏/排序/重启持久化）。
+5. 调研报告 `outputs/PhoneDeck开发工具调研-2026-08-28.md`：第一档四项已完成；
+   第二档中的受限多步宏已进入实验实现；焦点保障、按前台应用自动切配置、分页仍待完成。
+
+## 构建环境注意（本机）
+
+`E:\Android\...` 路径在本机不存在；构建用项目自带工具链：
+`work\tools\java\jdk-17.0.20.1+1`、`work\tools\android-sdk`、`work\tools\gradle-cache`，
+TEMP 指向 `work\tools\temp`。本机 adb 偶发卡死时 `taskkill /IM adb.exe /F` 后重启即可。
+
+
+## Wi-Fi MVP 使用方式
+
+1. 手机和电脑连接同一个 Wi-Fi；音频只在局域网内传输，不消耗手机流量。
+2. 每台 Windows 以管理员身份运行一次 `scripts/windows/Enable-PhoneDeckLan.ps1`。
+3. 每台电脑运行匹配的 1.6.0-dev.4 接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
+4. App 自动读取该电脑的证书指纹、随机密钥和 LAN 地址；顶部出现“Wi-Fi 在线”后可移除
+   ADB reverse 或拔掉 USB。
+5. 对第二、第三台电脑重复一次；之后三台接收端同时运行，手机切换目标即可。
+
+桌面控制台默认与接收端共用 `%LOCALAPPDATA%\PhoneDeck` 中的当前配对凭据；启动控制台
+时会显式把 `PHONEDECK_DATA_DIR` 指向该目录，避免控制台发布目录生成另一套令牌。凭据不得提交到 Git。电脑
+IP 变化后，手机会先使用受限 UDP 发现刷新候选地址；受限网络禁用广播时，重新连接 USB
+仍可刷新无线配对资料。后续标准 mDNS/Bonjour 可作为补充发现方式。
+
+## 本轮方案审核结论
+
+- USB 只能连当前一台主机；普通 Hub/Y 线不可能提供三台主机并联。
+- 当前蓝牙只保持一个 RFCOMM 电脑连接，且不传语音，所以不能承诺蓝牙三机语音。
+- 手机端设备列表现在只把健康检查或蓝牙 `hello` 确认过的电脑记为已知设备；离线设备不可
+  误选，蓝牙-only 目标会明确提示语音需要 USB 或后续局域网通道。
+- 局域网必须使用独立端口、配对、消息认证和心跳，不能把 localhost 无鉴权 API 直接暴露。
+
+## 1.6.0-dev.1 本轮代码变更
+
+- `TargetEnvelopeValidator.cs` 统一校验 protocol v2 的 request/session/target，快捷键和
+  听写入口共用同一规则；PCM 流通过 `X-PhoneDeck-Protocol` 与
+  `X-PhoneDeck-Computer-Id` 请求头校验。
+- Android `AudioStreamer`、听写 start/stop 均携带会话目标 ID；同一听写会话不会因目标
+  状态变化而把停止命令发给另一台电脑。
+- `TargetDeviceManager.java` 持久化已确认电脑的编号、名称、平台和最近在线时间；主界面
+  增加目标切换条。切换只允许在线 USB/蓝牙设备，语音对蓝牙-only 目标会明确提示尚需
+  USB 或局域网通道。
+- 蓝牙 hello 现在回传电脑显示名，便于手机建立可读的设备卡片。
+
+验证：Windows Release build、11 项单元测试、Android `assembleDebug` 和 `lintDebug`
+均通过；尚未进行真实多电脑或局域网验收。
 
 ## 本轮完成的代码
 
 ### UI、UX 与多主题
 
-- 新增冰川玻璃、深海蓝、OLED 黑和柔和浅色四套持久化主题；冰川玻璃成为未设置主题时的默认值。
+- 2026-09-01 起为多主题（见上方“主题系统”条目）：冰川玻璃默认 + 4 套全新设计
+  （莫兰迪浅雾/森林晨白/日落暖沙/赛博霓虹）+ 主题感知环境光背景 + 设置页主题卡片
+  按压缩放反馈；深色主题在 `applyWindow` 预刷窗口底色避免启动闪白。
 - 冰川玻璃使用原生 Canvas 绘制静态柔光背景，并以半透明渐变、白色描边和轻量阴影构成玻璃卡片；不依赖在线资源或实时模糊。
 - 主界面连接卡片增加当前电脑、USB/蓝牙状态、重新检测提示和设置入口。
-- 快捷键在冰川主题下使用“图标块 + 名称 + 组合键”布局，并保留发送中、成功和失败的卡片级反馈。
-- 底部语音区加入原生麦克风图形、渐变主按钮和连续波形；空闲时隐藏不可用的暂停按钮，听写开始后再显示。
+- 快捷卡片已改为“名称 + 组合键/文本指令”纯文字布局，移除图标块与 Emoji，保留发送中、成功和失败反馈。
+- 默认第一排新增“规划 `/plan`、目标 `/goal`、压缩上下文 `/compact`”，使用已鉴权 `text` 动作并默认回车执行。
+- 底部语音区加入原生麦克风图形、渐变主按钮和连续波形；输入目标编号改到面板右下方。
 - 设置、快捷键管理、按钮编辑和组合键选择页统一使用主题背景与玻璃表面。
 - 组合键选择器改为分组键盘网格，主动限制最多 3 个修饰键加 1 个基础键。
 - 颜色选择触控面积提高到 48 dp 并加入内容描述；排序图标点击可选择上移/下移，继续保留长按拖动。
@@ -39,9 +225,7 @@ Android 配置版本：`schemaVersion=1`
 - 新增幂等 `/api/dictation/start` 与 `/api/dictation/stop`。
 - 音频异常断流时，Windows 对本会话执行一次尽力而为的 Typeless 复位。
 - 服务器退出时也会尝试清理当前 PhoneDeck Typeless 会话。
-- 点击说话模式已改为单主按钮交互：同一个大按钮在空闲、启动中和听写中分别显示“开始说话”、“取消启动”和“停止说话”；下方只保留“暂停/继续”。
-- 暂停会立即停止 Android `AudioRecord`，同时按 PCM 实时速率发送静音维持同一音频和
-  Typeless 会话；继续时恢复手机麦克风采集，不需要重新建立会话。
+- 点击说话模式已改为单主按钮交互：同一个大按钮在空闲、启动中和听写中分别显示“开始说话”、“取消启动”和“停止说话”；用户确认移除独立“暂停/继续”。
 - 停止会先立即停止手机录音，再异步等待电脑端完成 Typeless 和文字收尾。
 
 对应提交：
@@ -66,7 +250,7 @@ Android 配置版本：`schemaVersion=1`
 - 主界面改为由手机本地配置动态渲染的 3 列快捷键网格；底部语音区保持固定。
 - 支持编辑和新增按钮、隐藏内置按钮、删除自定义按钮。
 - 支持长按拖动排序，并提供“上移/下移”无障碍替代操作。
-- 支持修改名称、预设颜色、内置图标或 Emoji。
+- 支持修改名称、预设颜色、组合键或 Agent 文本指令；快捷卡片不再提供图标编辑入口。
 - 支持 A–Z、0–9、F1–F24、修饰键、导航键、系统键和媒体键。
 - 组合键最多 4 键，且只能包含 1 个普通键；测试动作不会自动保存。
 - 支持单按钮恢复和二次确认后的全部恢复；全部恢复不修改语音模式。
@@ -86,6 +270,22 @@ Android 配置版本：`schemaVersion=1`
 ## 本轮实际执行的验证
 
 ### 已验证
+
+1.6.0-dev.2 安全 Wi-Fi MVP：
+
+- Windows Release 构建成功，0 个警告、0 个错误；单元测试 14/14 通过，
+  包括 LAN 密钥缺失、错误和正确三种情况。
+- Android `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功；当前 Release
+  因修复工作树无 `signing.properties` 而未签名。
+- Samsung `SM-G9880` 已安装 `com.codex.phonedeck` 1.6.0-dev.2 Debug。
+- 底部目标切换改版的 `assembleDebug` 与 `lintDebug` 成功，已覆盖安装并完成截图核对：“1号/2号”位于语音面板右下方，顶部旧目标区与暂停按钮均已移除。
+- Agent 快捷操作改版的 `assembleDebug` 与 `lintDebug` 成功，已覆盖安装并完成真机截图核对：已有 18 个按键自动迁移为纯文字，三个 Agent 指令置顶，配置中非空 `icon` 数量为 0。
+- 已通过 USB loopback 自动配对；移除 `adb reverse tcp:8765` 后，手机界面仍显示
+  `DESKTOP-74F6FT5 · Wi-Fi 在线`。
+- 实际 HTTPS 健康检查已确认：不带配对密钥返回 401，携带正确密钥返回
+  1.6.0-dev.2 和稳定电脑 ID。
+- 本机防火墙已启用仅限 `LocalSubnet` 的 TCP 8766 入站规则，当前接收端
+  同时监听 loopback HTTP 8765 与 HTTPS 8766。
 
 UI 主题（Samsung SM-G9880 / Android 12，独立 Preview 包）：
 
@@ -174,7 +374,7 @@ Samsung 真机：
   reverse 后，手机自动回到“USB 已连接”；
 - 用同一长期签名再次执行 `adb install -r` 成功，`firstInstallTime` 保持不变，证明
   后续同签名 APK 可以覆盖升级。
-- 语音灵敏度改进版已用同一签名覆盖安装；原独立“停止”控制已合并到大号语音主按钮，“暂停/继续”仍为辅助控制。
+- 历史版本曾把原独立“停止”控制合并到大号语音主按钮，并保留“暂停/继续”；当前版已按用户决定移除该辅助入口。
 - 单主按钮版的 `assembleDebug`、`assembleRelease` 和 `lintDebug` 全部成功，并已用同一长期签名 Release 覆盖安装到该 Samsung 手机。
 - 上述“开始 → 停止”真机试验只证明 Android 录音已停和服务内部标志已清，不能证明 Typeless 真实停止。项目所有者随后实测发现 Typeless 仍在电脑端录音，该结论已撤回。
 - 根因已确认：当前 Windows 没有 VB-CABLE，Typeless 还选择 `Auto-detect (麦克风阵列)`；旧服务在 WASAPI 初始化完成前提前公布会话，导致 Typeless 启动后又立即收到停止切换键，Electron 可能漏处理第二次按键。
@@ -195,10 +395,13 @@ Samsung 真机：
 
 ### 尚未验证，不得写成 PASS
 
+- 尚未在拔掉 USB 后执行真实 Wi-Fi 语音启动/停止并核对 Typeless 文字。
+- 尚未在第二、第三台 Windows 电脑进行同时在线与语音目标切换验收。
+- 已实现受限 UDP 地址发现；尚未实现标准 mDNS/Bonjour、手动撤销/重配凭据和 macOS 接收端。
 - 未在真实手机上验证动态网格、编辑页、长按不误触、拖动排序和字体放大。
 - 因 1.4.0 原签名私钥遗失，本次只能一次性清除旧版数据，不能声称旧版配置迁移通过。
 - 同签名重复安装已确认不重新安装包，但尚未用自定义配置证明文件级持久化。
-- 当前电脑已经安装并启用 VB-CABLE，Typeless 也已选中 `CABLE Output`；真实链路的暂停/继续状态已验证，但尚未由用户对着手机说一段固定文本并核对最终识别文字和长时间静音保活效果。
+- 当前电脑已经安装并启用 VB-CABLE，Typeless 也已选中 `CABLE Output`；历史版的暂停/继续状态曾通过验证，但尚未由用户对着手机说一段固定文本并核对最终识别文字。
 - 未进行连续 20 次 USB 拔插/切换；本轮只完成 1 次听写中 ADB 通道中断与恢复。
 - 未验证断线发生在“音频已连接但 Typeless 尚未确认”等竞态点。
 - 未验证蓝牙 v2 `hello`、自定义快捷键和 ACK 的真实连接。
@@ -207,21 +410,20 @@ Samsung 真机：
 
 ## 下一步严格顺序
 
-1. 把 `E:\Desktop\PhoneDeck-Signing-Backup` 加密复制到另一个可靠介质，不上传 GitHub。
-2. 在 FocusSink 或普通文本框验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
-3. 验证编辑、隐藏、排序、新增、删除、单按钮恢复、全部恢复和重启持久化。
-4. 使用长期签名属性构建并覆盖安装 Android 修复版，验收“USB 已恢复”反馈。
-5. 由用户说一段固定文本，核对暂停前后和最终 Typeless 识别结果。
-6. 在听写的启动中和停止中分别断开 USB，确认三端都能复位。
-7. 连续 USB 断开/恢复 20 次并保存日志、视频和失败步骤。
-8. 验证 USB 与蓝牙发送同一自定义组合键。
-9. 修复实机问题并重跑构建/lint。
-10. 全部通过后再执行 Windows publish、发布包替换、打标签和 GitHub Release。
+1. 拔掉 USB，由用户说一段固定文本，验收 Wi-Fi 音频、单键开始/停止和最终 Typeless 文字。
+2. 在听写启动中、正在听写和停止中分别断开 Wi-Fi，确认三端都能复位。
+3. 在第二、第三台 Windows 重复安装、防火墙开启和 USB 自动配对。
+4. 验收三台接收端同时在线、手机切换和音频只进入当前目标。
+5. 增加标准 mDNS/Bonjour、凭据撤销/重配和设备删除交互。
+6. 回归快捷键编辑、隐藏、排序、新增、删除和重启持久化。
+7. 在 FocusSink 验证 F1、Ctrl+C、Ctrl+Shift+S、Win+D、Alt+Tab。
+8. 使用长期签名属性构建并覆盖安装正式候选版。
 
 ## 安全和范围边界
 
 - 不加入任意 PowerShell、CMD、shell 或脚本执行。
 - 不把当前 localhost 无鉴权入口开放到局域网。
 - 不提交签名密钥、ADB 私钥、Typeless 个人配置、录音或发布缓存。
-- 1.6.0 的多电脑发现/配对、1.7.0 多配置和 1.8.0 宏不进入本轮候选版。
+- 标准 mDNS/Bonjour、macOS 和 1.7.0 多配置仍不进入本轮候选版；dev.3 的受限实验宏不得
+  在完成焦点、失败处理和真机输入验收前标记为稳定。
 - 构建通过不能替代真实手机、音频、Typeless、蓝牙和现场验收。

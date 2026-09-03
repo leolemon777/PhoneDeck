@@ -8,9 +8,7 @@ internal sealed record ReceiverIdentity(
 {
     internal static ReceiverIdentity LoadOrCreate()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PhoneDeck");
+        var directory = PhoneDeckDataDirectory.Get();
         var path = Path.Combine(directory, "computer-id.txt");
         string? computerId = null;
         try

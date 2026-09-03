@@ -1,19 +1,20 @@
 # PhoneDeck 架构说明
 
-## 当前 1.5.0 候选版数据流
+## 当前 1.6.0-dev.4 数据流
 
 ```text
 Android MainActivity
   ├─ schemaVersion=1 动态按钮配置 ─┐
-  ├─ protocol v2 keyChord JSON ────┤
+  ├─ protocol v2 keyChord/text/macro JSON ─┤
   └─ AudioRecord PCM 48k mono ─────┤
                                 │ ADB reverse 127.0.0.1:8765
+                                │ 或证书固定 HTTPS Wi-Fi :8766
 Windows PhoneDeck.Server        │
   ├─ /api/input ◀──────────────────┘
   │    ├─ 旧固定动作兼容
   │    └─ v2 信封/目标/键位白名单 → SendInput → 当前前台窗口
   ├─ /api/audio/stream
-  │    └─ sessionId → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
+  │    └─ sessionId + targetComputerId header → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
   ├─ /api/dictation/start|stop
   │    └─ 幂等会话 → Typeless；断流时尽力复位
   └─ BluetoothReceiver
@@ -22,14 +23,19 @@ Windows PhoneDeck.Server        │
 
 ### Android 主要组件
 
-- `MainActivity.java`：动态主界面、开始/取消/暂停/继续/停止语音状态、连接选择、动作发送和反馈。
-- `SettingsActivity.java`：设置入口和点击/按住语音模式；点击模式使用同一主按钮开始/停止，另保留暂停/继续辅助控制。
+- `MainActivity.java`：动态主界面、开始/取消/停止语音状态、连接选择、动作发送和反馈。
+- `SettingsActivity.java`：设置入口和点击/按住语音模式；点击模式使用同一主按钮开始/停止。
 - `ShortcutConfigRepository.java`：原子保存、版本检查、损坏备份和默认配置。
 - `ShortcutSettingsActivity.java` / `ShortcutEditActivity.java`：列表、排序、编辑、测试和恢复。
 - `KeyPickerActivity.java` / `KeyCatalog.java`：受控键位选择、规范化和显示。
-- `AudioStreamer.java`：AudioRecord、PCM 音量计算和 HTTP chunked 音频流；暂停时停止
-  AudioRecord，并按实时速率发送 PCM 静音保持同一 HTTP/Typeless 会话，继续时恢复采集。
+- `AudioStreamer.java`：AudioRecord、20 ms PCM 分块、音量计算和 HTTP chunked 音频流；
+  TLS 建连期间最多缓存 1 秒 pre-roll，降低首音节丢失概率。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
+- `TargetDeviceManager.java`：保存已确认电脑的 ID、显示名、平台、手机端编号、候选 LAN
+  地址、最近成功地址、访问密钥和证书指纹；IP 只作为可替换缓存。
+- `PhoneDeckHttp.java` / `PhoneDeckLanClient.java` / `LanDiscoveryClient.java`：并行探测候选
+  地址并通过受限 UDP 广播发现接收端；任何发现结果仍需 HTTPS、密钥、证书固定与目标 ID
+  校验后才可用于控制和音频。
 - `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
@@ -37,19 +43,23 @@ Windows PhoneDeck.Server        │
 - `Program.cs`：Kestrel、本地 API、Typeless 快捷键读取、SendInput 和请求去重。
 - `InputCommandProcessor.cs`：协议 v2 信封、目标电脑和动作验证。
 - `ReceiverIdentity.cs`：首次启动生成并持久化稳定电脑 ID。
+- `LanIdentity.cs`：生成并持久化局域网 TLS 证书和随机访问密钥；配对资料只允许从 USB
+  loopback 端口读取。Wi-Fi 端口独立监听 8766，未携带正确密钥返回 401。
+- `LanDiscoveryResponder.cs`：在 UDP 8767 回应不含密钥的最小身份信息，供已配对手机更新
+  候选 IP；不会绕过 HTTPS 鉴权。
 - `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；只有虚拟音频输出真正启动后才公布会话。
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
 
-## 当前单电脑限制
+## 当前单电脑/传输限制
 
 1. Android USB 服务器地址仍为 `http://127.0.0.1:8765`。
 2. ADB reverse 只能指向当前 USB 主机。
 3. Android 蓝牙传输只保存一个 socket。
-4. 已有单机稳定 `computerId` 和请求目标字段，但尚无设备列表、发现或配对模型。
-5. Windows 服务没有配对鉴权，因为 localhost USB 隧道不需要局域网暴露。
-6. 音频/Typeless 已有显式会话清理，但真实 USB 切换和外部 Typeless 状态仍待硬件验收。
+4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
+5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
+6. 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -80,6 +90,11 @@ Android UI / Profiles / Actions
   "keys": ["PRIMARY", "C"]
 }
 ```
+
+听写会话也必须绑定同一目标。JSON 端点使用 `protocolVersion`、`sessionId`、
+`targetComputerId`；PCM 流使用 `X-PhoneDeck-Protocol: 2`、
+`X-PhoneDeck-Session` 和 `X-PhoneDeck-Computer-Id` 请求头。服务端在进入音频或
+Typeless 状态机前校验目标，不匹配直接返回 400。
 
 `PRIMARY` 在 Windows 映射为 Ctrl，在 macOS 映射为 Command。
 
@@ -117,5 +132,9 @@ Android UI / Profiles / Actions
 - 手机目标选择；
 - 语音交接；
 - USB 共享切换器验证。
+
+当前 `1.6.0-dev.4` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
+自动发现和当前目标的快捷键/听写/PCM 路由。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
+macOS 接收端和三台电脑联合实测。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。

@@ -9,6 +9,8 @@ import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.view.View;
 
+/// 原版冰川玻璃的柔光背景：浅蓝渐变 + 环境光晕 + 斜向高光带。
+/// 仅 glass 主题使用，其他主题保持纯色中性底。
 final class FrostedBackdropView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 

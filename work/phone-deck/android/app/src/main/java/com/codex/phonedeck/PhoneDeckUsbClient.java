@@ -1,5 +1,7 @@
 package com.codex.phonedeck;
 
+import android.content.Context;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -52,6 +54,7 @@ final class PhoneDeckUsbClient {
     }
 
     static String sendKeyChord(
+            Context context,
             List<String> keys,
             int holdMs,
             BluetoothTransport bluetoothTransport) throws Exception {
@@ -59,6 +62,27 @@ final class PhoneDeckUsbClient {
         for (String key : KeyCatalog.normalizeChord(keys)) {
             keyArray.put(key);
         }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> createKeyChordBody(
+                        keyArray, holdMs, requestId, sessionId, computerId));
+    }
+
+    static String sendText(
+            Context context,
+            String text,
+            BluetoothTransport bluetoothTransport) throws Exception {
+        if (text == null || text.isEmpty() || text.length() > 513) {
+            throw new IllegalArgumentException("文本指令长度无效");
+        }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> createTextBody(
+                        text, requestId, sessionId, computerId));
+    }
+
+    private static String sendAction(
+            Context context,
+            BluetoothTransport bluetoothTransport,
+            BodyFactory bodyFactory) throws Exception {
         String requestId = UUID.randomUUID().toString();
         String sessionId = UUID.randomUUID().toString();
 
@@ -71,11 +95,36 @@ final class PhoneDeckUsbClient {
             usbFailure = exception;
         }
 
+        TargetDeviceManager deviceManager = new TargetDeviceManager(context);
+        String activeComputerId = deviceManager.getActiveComputerId();
+        if (activeComputerId == null || activeComputerId.isBlank()) {
+            if (usbServer != null && !usbServer.computerId.isEmpty()) {
+                activeComputerId = usbServer.computerId;
+            } else if (canUseBluetooth(bluetoothTransport)) {
+                activeComputerId = bluetoothTransport.getComputerId();
+            }
+        }
+
+        TargetDeviceManager.Device activeDevice = deviceManager.find(activeComputerId);
+        PhoneDeckLanClient.ProbeResult lanResult = PhoneDeckLanClient.probe(activeDevice);
+        if (lanResult != null) {
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, activeComputerId);
+            try {
+                JSONObject result = PhoneDeckHttp.postJson(
+                        lanResult.endpoint, "/api/input", body, 1800);
+                return result.optString("message", "电脑已确认") + " · Wi-Fi";
+            } catch (Exception ignored) {
+                // 使用同一 requestId 尝试同一目标电脑的 USB/蓝牙备用通道。
+            }
+        }
+
         if (usbServer != null
                 && usbServer.protocolVersion >= 2
-                && !usbServer.computerId.isEmpty()) {
-            JSONObject body = createKeyChordBody(
-                    keyArray, holdMs, requestId, sessionId, usbServer.computerId);
+                && !usbServer.computerId.isEmpty()
+                && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, usbServer.computerId);
             try {
                 return post("/api/input", body) + " · USB";
             } catch (Exception exception) {
@@ -90,18 +139,15 @@ final class PhoneDeckUsbClient {
                 throw exception;
             }
         }
-        if (usbServer != null) {
+        if (usbServer != null && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
             usbFailure = new IllegalStateException(
                     "USB 电脑端需要升级到 PhoneDeck 1.5.0");
         }
 
-        if (canUseBluetooth(bluetoothTransport)) {
-            JSONObject body = createKeyChordBody(
-                    keyArray,
-                    holdMs,
-                    requestId,
-                    sessionId,
-                    bluetoothTransport.getComputerId());
+        if (canUseBluetooth(bluetoothTransport)
+                && bluetoothTransport.getComputerId().equalsIgnoreCase(activeComputerId)) {
+            JSONObject body = bodyFactory.create(
+                    requestId, sessionId, bluetoothTransport.getComputerId());
             if (bluetoothTransport.sendAndWaitForAck(body, 1400)) {
                 return "电脑已确认 · 蓝牙";
             }
@@ -109,9 +155,14 @@ final class PhoneDeckUsbClient {
         }
         throw new IllegalStateException(
                 usbFailure == null || usbFailure.getMessage() == null
-                        ? "没有可用的 USB 或蓝牙连接"
+                        ? "当前目标电脑没有可用的 Wi-Fi、USB 或蓝牙连接"
                         : usbFailure.getMessage(),
                 usbFailure);
+    }
+
+    private interface BodyFactory {
+        JSONObject create(String requestId, String sessionId, String computerId)
+                throws Exception;
     }
 
     private static boolean canUseBluetooth(BluetoothTransport transport) {
@@ -136,6 +187,45 @@ final class PhoneDeckUsbClient {
         body.put("action", "keyChord");
         body.put("keys", keys);
         body.put("holdMs", holdMs);
+        return body;
+    }
+
+    static String sendMacro(
+            Context context,
+            List<ShortcutButtonConfig.MacroStep> steps,
+            BluetoothTransport bluetoothTransport) throws Exception {
+        if (steps == null || steps.isEmpty() || steps.size() > 8) {
+            throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
+        }
+        JSONArray stepArray = new JSONArray();
+        for (ShortcutButtonConfig.MacroStep step : steps) {
+            stepArray.put(step.toJson());
+        }
+        return sendAction(context, bluetoothTransport,
+                (requestId, sessionId, computerId) -> {
+                    JSONObject body = new JSONObject();
+                    body.put("protocolVersion", 2);
+                    body.put("requestId", requestId);
+                    body.put("sessionId", sessionId);
+                    body.put("targetComputerId", computerId);
+                    body.put("action", "macro");
+                    body.put("steps", stepArray);
+                    return body;
+                });
+    }
+
+    private static JSONObject createTextBody(
+            String text,
+            String requestId,
+            String sessionId,
+            String computerId) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("protocolVersion", 2);
+        body.put("requestId", requestId);
+        body.put("sessionId", sessionId);
+        body.put("targetComputerId", computerId);
+        body.put("action", "text");
+        body.put("text", text);
         return body;
     }
 

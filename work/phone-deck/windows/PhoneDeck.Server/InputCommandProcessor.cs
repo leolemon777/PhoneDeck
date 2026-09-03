@@ -13,14 +13,12 @@ internal static class InputCommandProcessor
             throw new ArgumentException("输入数据过大");
         }
 
-        if (command.ProtocolVersion is > 2)
-        {
-            throw new ArgumentException("不支持的 protocolVersion");
-        }
-        if (command.ProtocolVersion == 2)
-        {
-            ValidateV2Envelope(command, computerId);
-        }
+        TargetEnvelopeValidator.Validate(
+            command.ProtocolVersion,
+            command.RequestId,
+            command.SessionId,
+            command.TargetComputerId,
+            computerId);
 
         if (string.Equals(command.Action, "keyChord", StringComparison.Ordinal))
         {
@@ -36,6 +34,19 @@ internal static class InputCommandProcessor
             return new InputExecutionResult(duplicate, $"已发送 {description}");
         }
 
+        if (string.Equals(command.Action, "macro", StringComparison.Ordinal))
+        {
+            if (command.ProtocolVersion != 2)
+            {
+                throw new ArgumentException("macro 必须使用协议 v2");
+            }
+            var macroDuplicate = KeyboardInput.ExecuteMacroOnce(
+                command.Steps,
+                command.RequestId,
+                out var macroDescription);
+            return new InputExecutionResult(macroDuplicate, $"已执行宏：{macroDescription}");
+        }
+
         var fixedDuplicate = KeyboardInput.ExecuteOnce(
             command.Action,
             command.Text,
@@ -43,27 +54,4 @@ internal static class InputCommandProcessor
         return new InputExecutionResult(fixedDuplicate, $"已执行 {command.Action}");
     }
 
-    private static void ValidateV2Envelope(InputCommand command, string computerId)
-    {
-        if (string.IsNullOrWhiteSpace(command.RequestId)
-            || command.RequestId.Trim().Length > 128)
-        {
-            throw new ArgumentException("无效的 requestId");
-        }
-        if (string.IsNullOrWhiteSpace(command.SessionId)
-            || command.SessionId.Trim().Length > 128
-            || !Guid.TryParse(command.SessionId, out _))
-        {
-            throw new ArgumentException("无效的 sessionId");
-        }
-        if (string.IsNullOrWhiteSpace(command.TargetComputerId))
-        {
-            throw new ArgumentException("缺少 targetComputerId");
-        }
-        if (!string.Equals(command.TargetComputerId.Trim(), computerId,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("请求目标不是当前电脑");
-        }
-    }
 }
