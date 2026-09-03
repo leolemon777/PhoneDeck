@@ -35,6 +35,14 @@ final class AudioStreamer implements AutoCloseable {
     private static final int PAUSE_SILENCE_BYTES =
             SAMPLE_RATE * 2 * PAUSE_KEEPALIVE_INTERVAL_MS / 1_000;
 
+    /// 停止时追加的尾部静音时长：把真实尾音推过 网络→WASAPI→CABLE→Typeless
+    /// 整条管道，避免停止键到达时尾音还躺在缓冲里未被识别。
+    private static final int TAIL_SILENCE_MS = 500;
+    private static final int TAIL_SILENCE_BYTES = SAMPLE_RATE * 2 * TAIL_SILENCE_MS / 1_000;
+    /// 关流后的沉降等待：让 chunked 终止块和尾部数据完成发送、服务器有机会
+    /// 读完流并进入排空，再断开连接（过早 disconnect 的 RST 会打断服务器排空）。
+    private static final int TAIL_SETTLE_MS = 400;
+
     private final Context context;
     private final Listener listener;
     private final Object syncRoot = new Object();
@@ -125,6 +133,8 @@ final class AudioStreamer implements AutoCloseable {
     }
 
     void stop() {
+        Log.i(LOG_TAG, "stopRequested streaming=" + streaming
+                + " running=" + isRunning());
         shouldRun = false;
         paused = false;
         recorderNeedsRestart = false;
@@ -136,10 +146,10 @@ final class AudioStreamer implements AutoCloseable {
                 // 录音尚未完全启动或已经停止。
             }
         }
-        HttpURLConnection connection = activeConnection;
-        if (connection != null) {
-            connection.disconnect();
-        }
+        // 不在这里 disconnect：立即断开会丢弃 TCP 缓冲里尚未送达的尾音
+        // （接收端可能收到 RST 直接清掉未读 PCM）。优雅收尾
+        // （尾部静音 + 正常结束 chunked 流）由工作线程的 finishLinkTail 完成；
+        // 工作线程异常退出时也由其 finally 兜底断开。
     }
 
     /// 点击后最前面的 PCM 暂存环：只保留最近 PRE_ROLL_BYTES，
@@ -292,9 +302,6 @@ final class AudioStreamer implements AutoCloseable {
                     lastLevelUpdate = now;
                 }
             }
-            if (linkOutput != null) {
-                linkOutput.flush();
-            }
         } catch (Exception exception) {
             if (shouldRun) {
                 stoppedReason = exception.getMessage();
@@ -303,6 +310,9 @@ final class AudioStreamer implements AutoCloseable {
                 }
             }
         } finally {
+            // 优雅收尾必须无论正常退出还是异常都执行：垫尾部静音并正常
+            // 结束 chunked 流，让接收端读到干净 EOS 后按既有排空逻辑收尾。
+            finishLinkTail();
             shouldRun = false;
             streaming = false;
             paused = false;
@@ -328,6 +338,37 @@ final class AudioStreamer implements AutoCloseable {
                 worker = null;
             }
             listener.onStopped(sessionId, stoppedReason);
+        }
+    }
+
+    /// 尾垫：停止采集后追加约 500ms 静音并正常结束 chunked 流。
+    /// 这段静音把真实尾音推过 网络→WASAPI→CABLE→Typeless 整条管道；
+    /// 接收端读到干净 EOS 后按既有排空逻辑收尾，再停 Typeless，
+    /// 结尾几个字不再因缓冲未排空而被截断。链路已断时失败静默。
+    private void finishLinkTail() {
+        OutputStream output = linkOutput;
+        if (output == null) {
+            Log.w(LOG_TAG, "tail skipped: link not established");
+            return;
+        }
+        try {
+            output.write(new byte[TAIL_SILENCE_BYTES]);
+            output.flush();
+            Log.i(LOG_TAG, "tail padded bytes=" + TAIL_SILENCE_BYTES);
+        } catch (Exception exception) {
+            Log.w(LOG_TAG, "tail write failed: " + exception);
+        }
+        try {
+            output.close();
+            Log.i(LOG_TAG, "tail closed");
+        } catch (Exception exception) {
+            Log.w(LOG_TAG, "tail close failed: " + exception);
+        }
+        try {
+            Thread.sleep(TAIL_SETTLE_MS);
+        } catch (InterruptedException exception) {
+            Log.w(LOG_TAG, "tail settle interrupted");
+            Thread.currentThread().interrupt();
         }
     }
 

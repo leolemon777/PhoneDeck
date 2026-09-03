@@ -488,7 +488,7 @@ public final class ShortcutEditActivity extends Activity {
             View swatch = new View(this);
             int size = dp(48);
             boolean isSelected = c.equals(color);
-            swatch.setBackground(theme.shape(this, theme.shortcutColor(c), size / 2, isSelected ? 3 : 0, theme.text));
+            swatch.setBackground(theme.shape(this, theme.shortcutAccent(c), size / 2, isSelected ? 3 : 0, theme.text));
             swatch.setContentDescription("选择" + colorName(c) + "按钮颜色"
                     + (isSelected ? "，当前已选择" : ""));
             swatch.setOnClickListener(v -> {

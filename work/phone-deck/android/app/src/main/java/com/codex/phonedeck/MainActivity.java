@@ -70,6 +70,7 @@ public final class MainActivity extends Activity {
     private String appliedThemeId;
     private TextView statusText;
     private View statusDot;
+    private android.animation.ObjectAnimator statusDotPulse;
     private TextView actionFeedback;
     private TextView microphoneLevel;
     private TextView voiceModeText;
@@ -291,6 +292,12 @@ public final class MainActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        // 跟随系统主题时，系统昼夜切换可能伴随配置变化；解析结果变了就整体重建。
+        PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
+        if (!latestTheme.id.equals(appliedThemeId)) {
+            recreate();
+            return;
+        }
         // 旋转不重建 Activity：语音会话、连接状态都在字段里，只重建视图。
         setContentView(createInterface());
         applyUiState();
@@ -308,17 +315,13 @@ public final class MainActivity extends Activity {
         }
         if (microphoneLevel != null) {
             if (audioStreamer != null && audioStreamer.isPaused()) {
-                microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
-                microphoneLevel.setTextColor(theme.warning);
+                setMicStatus("手机麦克风 · 已暂停（未采集声音）", theme.warning, false);
             } else if (dictationActive) {
-                microphoneLevel.setText("手机麦克风  ·  使用中");
-                microphoneLevel.setTextColor(theme.muted);
+                setMicStatus("手机麦克风 · 使用中", theme.muted, false);
             } else if (audioStartPending) {
-                microphoneLevel.setText("手机麦克风  ◌ 正在连接");
-                microphoneLevel.setTextColor(theme.warning);
+                setMicStatus("手机麦克风 · 正在连接", theme.warning, false);
             } else {
-                microphoneLevel.setText("手机麦克风  ○ 已停止");
-                microphoneLevel.setTextColor(theme.muted);
+                setMicStatus("手机麦克风 · 已停止", theme.muted, true);
             }
         }
         updateVoiceControls();
@@ -355,7 +358,7 @@ public final class MainActivity extends Activity {
     private View createInterface() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
-        if (theme.isFrost()) {
+        if (theme.isGlass()) {
             root.addView(new FrostedBackdropView(this), new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT));
@@ -376,24 +379,18 @@ public final class MainActivity extends Activity {
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
 
-        TextView eyebrow = text("PHONE DECK  ·  PERSONAL CONSOLE", 11,
-                theme.primary, Typeface.BOLD);
-        eyebrow.setLetterSpacing(0.12f);
-        page.addView(eyebrow);
-
-        TextView title = text("PhoneDeck 手机控制台", 27, theme.text, Typeface.BOLD);
-        page.addView(title, marginTop(dp(4)));
+        TextView title = text("PhoneDeck 手机控制台", 26, theme.text, Typeface.BOLD);
+        page.addView(title, marginTop(dp(2)));
 
         TextView subtitle = text("语音优先 · 快捷操作 · 本地连接", 13,
                 theme.muted, Typeface.NORMAL);
-        page.addView(subtitle, marginTop(dp(2)));
+        page.addView(subtitle, marginTop(dp(3)));
 
         LinearLayout connection = new LinearLayout(this);
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
         connection.setPadding(dp(16), dp(12), dp(12), dp(12));
-        connection.setBackground(theme.shape(this, theme.surface, 18, 1, theme.outline));
-        connection.setElevation(dp(theme.isFrost() ? 5 : 0));
+        connection.setBackground(theme.shape(this, theme.surface, 16, 1, theme.outline));
         connection.setOnClickListener(view -> {
             startBluetoothTransport();
             testConnection();
@@ -437,11 +434,9 @@ public final class MainActivity extends Activity {
         shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(66), dp(36)));
         page.addView(shortcutHeader, marginTop(dp(2)));
 
-        shortcutHintText = text(gridEditMode
-                ? "点击按钮编辑 · 长按拖动调换位置"
-                : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义", 12,
-                theme.muted, Typeface.NORMAL);
+        shortcutHintText = text("", 12, theme.muted, Typeface.NORMAL);
         page.addView(shortcutHintText, marginTop(dp(3)));
+        updateShortcutHint();
 
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(landscape ? 6 : 3);
@@ -454,22 +449,7 @@ public final class MainActivity extends Activity {
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
         voiceDock.setPadding(dp(12), dp(10), dp(12), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 24, 1, theme.outline));
-        voiceDock.setElevation(dp(theme.isFrost() ? 18 : 14));
-
-        LinearLayout dockHeader = new LinearLayout(this);
-        dockHeader.setOrientation(LinearLayout.HORIZONTAL);
-        dockHeader.setGravity(Gravity.CENTER_VERTICAL);
-        voiceDock.addView(dockHeader, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        TextView voiceTitle = text("语音输入", 15, theme.text, Typeface.BOLD);
-        dockHeader.addView(voiceTitle, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        voiceModeText = text("点击说话模式", 11, theme.primary, Typeface.BOLD);
-        voiceModeText.setGravity(Gravity.END);
-        dockHeader.addView(voiceModeText);
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 22, 1, theme.outline));
 
         typelessModeRow = new LinearLayout(this);
         typelessModeRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -491,8 +471,7 @@ public final class MainActivity extends Activity {
         typelessButton.setCompoundDrawablePadding(dp(12));
         typelessButton.setPadding(dp(12), 0, dp(12), 0);
         typelessButton.setBackground(pressableRoundRect(
-                theme.primary, theme.primaryPressed, 22));
-        typelessButton.setElevation(dp(theme.isFrost() ? 8 : 0));
+                theme.primary, theme.primaryPressed, 18));
         typelessButton.setStateListAnimator(null);
         typelessButton.setContentDescription("Typeless 语音输入");
         installVoiceGesture();
@@ -529,21 +508,37 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        // 模式标签与电平条合并为一行，缩短语音坞。
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        voiceModeText = text("点击说话模式", 12, theme.primary, Typeface.BOLD);
+        statusRow.addView(voiceModeText, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
         voiceMeter = new VoiceLevelView(this, theme);
-        voiceDock.addView(voiceMeter, margins(dp(8), dp(5), dp(8), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
+        LinearLayout.LayoutParams meterParams = new LinearLayout.LayoutParams(
+                0, dp(30), 1f);
+        meterParams.leftMargin = dp(10);
+        statusRow.addView(voiceMeter, meterParams);
+        voiceDock.addView(statusRow, margins(dp(8), dp(5), dp(8), dp(0),
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        actionFeedback = text("●  准备就绪 · 操作状态会显示在这里",
+        actionFeedback = text("准备就绪 · 操作状态会显示在这里",
                 12, theme.muted, Typeface.BOLD);
         actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
+        actionFeedback.setMaxLines(2);
+        actionFeedback.setEllipsize(TextUtils.TruncateAt.END);
         actionFeedback.setPadding(dp(15), dp(12), dp(15), dp(12));
         actionFeedback.setBackground(roundRect(theme.surface, 14));
         voiceDock.addView(actionFeedback, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        microphoneLevel = text("手机麦克风  ·  未启动", 12, theme.muted, Typeface.BOLD);
+        microphoneLevel = text("手机麦克风 · 未启动", 12, theme.muted, Typeface.BOLD);
         microphoneLevel.setPadding(dp(15), dp(7), dp(15), dp(7));
+        microphoneLevel.setVisibility(View.GONE);
         voiceDock.addView(microphoneLevel, margins(dp(0), dp(2), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -602,12 +597,41 @@ public final class MainActivity extends Activity {
                     Gravity.BOTTOM);
             dockParams.setMargins(dp(12), dp(0), dp(12), dp(10));
             root.addView(voiceDock, dockParams);
+            // 底部留白跟随语音坞实际高度（反馈换行两行时不再盖住网格）；
+            // 362dp 只是首帧防闪跳的保守初值。
+            final LinearLayout pageRef = page;
+            Runnable syncBottomPadding = () -> pageRef.setPadding(
+                    dp(18), dp(18), dp(18), voiceDock.getHeight() + dp(10) + dp(14));
+            voiceDock.post(syncBottomPadding);
+            voiceDock.addOnLayoutChangeListener((view, left, top, right, bottom,
+                    oldLeft, oldTop, oldRight, oldBottom) -> syncBottomPadding.run());
         }
 
         page.setFocusableInTouchMode(true);
         page.requestFocus();
         scrollView.post(() -> scrollView.scrollTo(0, 0));
         return root;
+    }
+
+    /// 快捷操作提示：编辑模式提示始终显示；日常提示累计展示 6 次后自动收起。
+    private void updateShortcutHint() {
+        if (shortcutHintText == null) {
+            return;
+        }
+        if (gridEditMode) {
+            shortcutHintText.setText("点击按钮编辑 · 长按拖动调换位置");
+            shortcutHintText.setVisibility(View.VISIBLE);
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        int views = preferences.getInt("shortcut_hint_views", 0) + 1;
+        preferences.edit().putInt("shortcut_hint_views", views).apply();
+        if (views > 6) {
+            shortcutHintText.setVisibility(View.GONE);
+            return;
+        }
+        shortcutHintText.setText("退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义");
+        shortcutHintText.setVisibility(View.VISIBLE);
     }
 
     private void refreshShortcutGrid() {
@@ -687,11 +711,7 @@ public final class MainActivity extends Activity {
             gridEditButton.setText(gridEditMode ? "完成" : "编辑");
             performResultHaptic(gridEditButton, true);
         }
-        if (shortcutHintText != null) {
-            shortcutHintText.setText(gridEditMode
-                    ? "点击按钮编辑 · 长按拖动调换位置"
-                    : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义");
-        }
+        updateShortcutHint();
         if (shortcutGrid != null) {
             for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
                 View child = shortcutGrid.getChildAt(i);
@@ -1454,8 +1474,7 @@ public final class MainActivity extends Activity {
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
-                            microphoneLevel.setText("手机麦克风  ○ 已停止");
-                            microphoneLevel.setTextColor(theme.muted);
+                            setMicStatus("手机麦克风 · 已停止", theme.muted, true);
                         }
                     });
                 } else {
@@ -1634,8 +1653,7 @@ public final class MainActivity extends Activity {
             audioStreamer.stop();
         }
         clearVoiceSessionState();
-        microphoneLevel.setText("手机麦克风  ○ 已停止");
-        microphoneLevel.setTextColor(theme.muted);
+        setMicStatus("手机麦克风 · 已停止", theme.muted, true);
         if (voiceMeter != null) {
             voiceMeter.setVoiceState(VoiceLevelView.IDLE);
         }
@@ -1713,8 +1731,7 @@ public final class MainActivity extends Activity {
             audioStreamer.stop();
         }
         clearVoiceSessionState();
-        microphoneLevel.setText("手机麦克风  ✕ USB 已断开");
-        microphoneLevel.setTextColor(theme.danger);
+        setMicStatus("手机麦克风 · USB 已断开", theme.danger, false);
         showActionFeedback("✕  USB 已断开；电脑端会自动尝试复位 Typeless",
                 theme.danger);
     }
@@ -1751,8 +1768,7 @@ public final class MainActivity extends Activity {
             audioStreamer.stop();
         }
         clearVoiceSessionState();
-        microphoneLevel.setText("手机麦克风  ○ 已取消");
-        microphoneLevel.setTextColor(theme.muted);
+        setMicStatus("手机麦克风 · 已取消", theme.muted, true);
         showActionFeedback("✓  已立即取消语音启动", theme.muted);
         performResultHaptic(typelessButton, true);
         if (managed && sessionId != null) {
@@ -1879,18 +1895,13 @@ public final class MainActivity extends Activity {
                     ? VoiceLevelView.CONNECTING
                     : VoiceLevelView.IDLE);
         }
-        boolean monoVoice = theme.isMonochrome();
-        int stopFill = monoVoice ? theme.primary
-                : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-        int stopInk = monoVoice ? theme.onPrimary : theme.text;
+        // 语义色规则（HIG）：红色只表示录音/停止状态，其余时刻按钮用点缀色。
         typelessButton.setBackground(stopState
-                ? pressableRoundRect(
-                        stopFill,
-                        monoVoice ? theme.primaryPressed : theme.danger, 22)
-                : pressableRoundRect(theme.primary, theme.primaryPressed, 22));
-        typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
+                ? pressableRoundRect(theme.danger, theme.danger, 18)
+                : pressableRoundRect(theme.primary, theme.primaryPressed, 18));
+        typelessButton.setTextColor(theme.onPrimary);
         if (voiceIcon != null) {
-            voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
+            voiceIcon.setColor(theme.onPrimary);
         }
         typelessButton.setContentDescription(holdMode
                 ? "按住开始手机语音输入，松开停止"
@@ -1930,16 +1941,14 @@ public final class MainActivity extends Activity {
         if (!activePhoneAudioAvailable()) {
             showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
             showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动 Typeless", theme.danger);
-            microphoneLevel.setText("手机麦克风  ○ 未启动");
-            microphoneLevel.setTextColor(theme.muted);
+            setMicStatus("手机麦克风 · 未启动", theme.muted, true);
             testConnection();
             return;
         }
         if (!activeTypelessVirtualCableSelected()) {
             showConnection(targetDisplayName + " · Typeless 麦克风未配置", theme.warning);
             showActionFeedback("✕  请先在 Typeless 中选择 CABLE Output", theme.danger);
-            microphoneLevel.setText("手机麦克风  ○ 未启动");
-            microphoneLevel.setTextColor(theme.muted);
+            setMicStatus("手机麦克风 · 未启动", theme.muted, true);
             testConnection();
             return;
         }
@@ -1974,8 +1983,7 @@ public final class MainActivity extends Activity {
         intentionalAudioStopSessionId = null;
         setTypelessBusy("正在连接手机麦克风…");
         showActionFeedback("●  正在建立 " + endpoint.label + " 音频通道…", theme.warning);
-        microphoneLevel.setText("手机麦克风  ◌ 正在连接");
-        microphoneLevel.setTextColor(theme.warning);
+        setMicStatus("手机麦克风 · 正在连接", theme.warning, false);
         if (!audioStreamer.start(
                 currentSessionId,
                 currentSessionTargetComputerId,
@@ -2089,8 +2097,7 @@ public final class MainActivity extends Activity {
                     }
                     if (!starting) {
                         clearVoiceSessionState();
-                        microphoneLevel.setText("手机麦克风  ○ 已停止");
-                        microphoneLevel.setTextColor(theme.muted);
+                        setMicStatus("手机麦克风 · 已停止", theme.muted, true);
                     }
                 });
             } catch (Exception exception) {
@@ -2134,8 +2141,7 @@ public final class MainActivity extends Activity {
                 audioStreamer.stop();
             }
             clearVoiceSessionState();
-            microphoneLevel.setText("手机麦克风  ✕ 启动超时");
-            microphoneLevel.setTextColor(theme.danger);
+            setMicStatus("手机麦克风 · 启动超时", theme.danger, false);
             showConnection("Typeless 启动超时", theme.danger);
             showActionFeedback("✕  Typeless 长时间没有确认，已自动取消，请重试",
                     theme.danger);
@@ -2193,8 +2199,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (audioStreamer.isPaused()) {
-            microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
-            microphoneLevel.setTextColor(theme.warning);
+            setMicStatus("手机麦克风 · 已暂停（未采集声音）", theme.warning, false);
             if (voiceMeter != null) {
                 voiceMeter.setVoiceState(VoiceLevelView.PAUSED);
             }
@@ -2204,8 +2209,8 @@ public final class MainActivity extends Activity {
             voiceMeter.setVoiceState(VoiceLevelView.ACTIVE);
             voiceMeter.setLevel(percent);
         }
-        microphoneLevel.setText("手机麦克风  ·  " + percent + "%");
-        microphoneLevel.setTextColor(percent > 0 ? theme.success : theme.muted);
+        setMicStatus("手机麦克风 · " + percent + "%",
+                percent > 0 ? theme.success : theme.muted, false);
     }
 
     private void onAudioStopped(String sessionId, String reason) {
@@ -2227,8 +2232,7 @@ public final class MainActivity extends Activity {
         boolean wasManaged = currentSessionManaged;
         audioStartPending = false;
         clearVoiceSessionState();
-        microphoneLevel.setText("手机麦克风  ✕ 音频中断");
-        microphoneLevel.setTextColor(theme.danger);
+        setMicStatus("手机麦克风 · 音频中断", theme.danger, false);
         if (voiceMeter != null) {
             voiceMeter.setVoiceState(VoiceLevelView.ERROR);
         }
@@ -2432,18 +2436,66 @@ public final class MainActivity extends Activity {
         statusText.setText(title);
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
+        // 检测中/离线/告警时呼吸闪烁；成功时静止，一眼区分状态。
+        if (color == theme.muted || color == theme.warning) {
+            if (statusDotPulse == null) {
+                statusDotPulse = android.animation.ObjectAnimator.ofFloat(
+                        statusDot, View.ALPHA, 1f, 0.35f);
+                statusDotPulse.setDuration(900);
+                statusDotPulse.setRepeatCount(
+                        android.animation.ValueAnimator.INFINITE);
+                statusDotPulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+            }
+            // 状态点会随 setContentView 重建，动画目标需要跟随最新实例。
+            statusDotPulse.setTarget(statusDot);
+            if (!statusDotPulse.isStarted()) {
+                statusDotPulse.start();
+            }
+        } else if (statusDotPulse != null) {
+            statusDotPulse.cancel();
+            statusDot.setAlpha(1f);
+        }
+    }
+
+    /// 麦克风状态行：空闲（已停止/未启动/已取消）隐藏，活动与异常状态显示。
+    private void setMicStatus(String status, int color, boolean idle) {
+        if (microphoneLevel == null) {
+            return;
+        }
+        microphoneLevel.setText(status);
+        microphoneLevel.setTextColor(color);
+        microphoneLevel.setVisibility(idle ? View.GONE : View.VISIBLE);
     }
 
     private void showActionFeedback(String message, int color) {
-        lastFeedbackMessage = message;
+        // 去掉调用方传入的前缀符号（●/✓/✕ 等），反馈行只保留文字与语义色。
+        String clean = message.replaceFirst("^[●✓✕■◌Ⅱ✎#]+\\s*", "");
+        lastFeedbackMessage = clean;
         lastFeedbackColor = color;
-        actionFeedback.setText(message);
+        actionFeedback.setText(clean);
         actionFeedback.setTextColor(color);
         actionFeedback.setBackground(theme.shape(
                 this, theme.feedbackSurface(color), 14, 1,
                 theme.mix(theme.outline, color, 0.35f)));
-        actionFeedback.announceForAccessibility(message);
+        actionFeedback.announceForAccessibility(clean);
+        // 成功/中性消息 4 秒后淡回"准备就绪"；warning/danger（会话中、故障）
+        // 保留到下一条，避免状态中途被覆盖。
+        mainHandler.removeCallbacks(feedbackReset);
+        if (color == theme.success || color == theme.muted) {
+            mainHandler.postDelayed(feedbackReset, 4_000);
+        }
     }
+
+    private final Runnable feedbackReset = () -> {
+        if (actionFeedback == null) {
+            return;
+        }
+        actionFeedback.setText("准备就绪");
+        actionFeedback.setTextColor(theme.muted);
+        actionFeedback.setBackground(theme.shape(
+                this, theme.feedbackSurface(theme.muted), 14, 1,
+                theme.mix(theme.outline, theme.muted, 0.35f)));
+    };
 
     private void finishGuardedAction(Button source, boolean guarded) {
         if (!guarded) {
@@ -2523,6 +2575,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         mainHandler.removeCallbacks(periodicHealthCheck);
+        mainHandler.removeCallbacks(feedbackReset);
         stopKeyRepeat();
         releaseWifiLock();
         unregisterNetworkCallbacks();
@@ -2597,7 +2650,7 @@ public final class MainActivity extends Activity {
         return theme.shape(this, color, radiusDp);
     }
 
-    private StateListDrawable pressableRoundRect(int normalColor, int pressedColor, int radiusDp) {
+    private android.graphics.drawable.Drawable pressableRoundRect(int normalColor, int pressedColor, int radiusDp) {
         return theme.pressable(this, normalColor, pressedColor, radiusDp);
     }
 
