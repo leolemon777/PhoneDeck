@@ -219,6 +219,8 @@ public final class PhoneAudioService extends Service {
         probeInFlight = true;
         probeExecutor.execute(() -> {
             try {
+                // 主界面可能刚刚删除设备或刷新了配对令牌；每轮探测前重读磁盘。
+                deviceManager.reload();
                 Map<String, SharedAudioBroadcaster.Target> targets = new HashMap<>();
                 Map<String, String> states = new HashMap<>();
                 java.util.List<TargetDeviceManager.Device> devices = deviceManager.list();
@@ -232,8 +234,10 @@ public final class PhoneAudioService extends Service {
                     if (!device.hasLanPairing()) {
                         continue;
                     }
-                    PhoneDeckLanClient.ProbeResult result =
+                    PhoneDeckLanClient.ProbeOutcome outcome =
                             PhoneDeckLanClient.probe(device, probePool);
+                    PhoneDeckLanClient.ProbeResult result = outcome.result;
+                    boolean pairingRejected = outcome.pairingRejected;
                     if (result == null) {
                         if (discovered == null) {
                             discovered = LanDiscoveryClient.discover(this, 650);
@@ -245,11 +249,19 @@ public final class PhoneAudioService extends Service {
                                     device.computerId, found.hostAddress);
                             TargetDeviceManager.Device updated =
                                     deviceManager.find(device.computerId);
-                            result = updated == null ? null
-                                    : PhoneDeckLanClient.probe(updated, probePool);
+                            if (updated != null) {
+                                PhoneDeckLanClient.ProbeOutcome retry =
+                                        PhoneDeckLanClient.probe(updated, probePool);
+                                result = retry.result;
+                                pairingRejected |= retry.pairingRejected;
+                            }
                         }
                     }
                     if (result == null) {
+                        if (pairingRejected) {
+                            // 地址可达但令牌/证书被拒：插一次 USB 自动重新配对即可恢复。
+                            states.put(device.computerId, "需要重新配对");
+                        }
                         continue;
                     }
                     reachable++;

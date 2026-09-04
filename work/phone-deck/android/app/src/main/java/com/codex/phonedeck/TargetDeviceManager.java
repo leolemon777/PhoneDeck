@@ -231,6 +231,28 @@ final class TargetDeviceManager {
         return true;
     }
 
+    /// 删除一台已配对电脑（目标切换器长按触发）。删除当前目标时
+    /// 自动切到剩余列表的第一台；被 USB 重新发现的电脑会再次自动配对。
+    synchronized boolean remove(String computerId) {
+        Device device = find(computerId);
+        if (device == null) {
+            return false;
+        }
+        devices.remove(device);
+        if (device.computerId.equalsIgnoreCase(activeComputerId)) {
+            activeComputerId = devices.isEmpty() ? null : devices.get(0).computerId;
+        }
+        save();
+        return true;
+    }
+
+    /// 主界面与共享麦克风服务各持有一份实例；任一方更新配对或删除设备后，
+    /// 另一方在下一轮探测前调用 reload() 刷新自己的视图。
+    synchronized void reload() {
+        devices.clear();
+        load();
+    }
+
     private int nextSlot() {
         for (int slot = 1; slot <= MAX_DEVICES; slot++) {
             final int candidate = slot;

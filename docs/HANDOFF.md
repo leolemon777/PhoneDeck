@@ -2,11 +2,43 @@
 
 更新时间：2026-09-04
 当前分支：`agent/macos-receiver-2.0`
-当前源码：Android/Windows 1.6.0-dev.6（手机控制听写 + 共享麦克风双模式，共享支持电脑端联动开关）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android/Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-04 dev.7：配对失效可视化、USB 自愈与设备删除
+
+- 背景：实机排查"共享麦克风只有 1号电脑能用"。根因是 2号电脑（往里走的COMPUTE）
+  的配对令牌与服务端不一致（手机侧令牌被 401 拒绝或健康检查不过关），而旧 UI 把
+  401 与"网络不通"都显示成"离线"，用户无从知道"插一次 USB 即可自动重新配对"。
+- `PhoneDeckLanClient.probe` 改为返回 `ProbeOutcome`（在线结果 + `pairingRejected`
+  标志）：任一候选地址返回 401/403，或证书指纹校验失败（含被 SSL 包装的
+  `CertificateException`），即判定"需要重新配对"；新增纯逻辑单测
+  `LanPairingRejectionTest`。
+- 展示层：共享麦克风服务的设备状态新增"需要重新配对"；主界面 managed 模式下
+  目标切换芯片显示"N号 · 需重新配对"，无障碍文案带修复指引；点击被拒设备与
+  managed 听写入口的失败提示都区分"配对已失效（插 USB 自动修复）"与"当前未连接"。
+- USB 自愈（既有机制，本轮确认有效）：手机 USB 直连某电脑且该电脑不在 LAN 在线
+  集合时，健康轮询自动调用 `/api/lan/pair` 原位刷新令牌/证书/地址（槽位不变）。
+  手机插入 2号电脑一次即可自动修复令牌失配，无需手动操作。
+- 设备删除：目标切换芯片支持长按删除（确认对话框；共享麦克风运行中或语音进行中
+  拒绝删除），`TargetDeviceManager.remove` 原位移除并在删除当前目标时自动切换；
+  新增 `reload()`，共享麦克风服务每轮探测前重读磁盘，主界面删除/重新配对立即生效。
+- 版本：`1.6.0-dev.7`（versionCode 13），debug 签名覆盖安装。
+- 验证：`assembleDebug`/`lintDebug` 通过，单测 5/5（扇出策略 2 + 配对判定 3）；
+  真机（Samsung SM-G9880）实测：3号幽灵槽位芯片显示"需重新配对"+ 无障碍修复指引，
+  1号回归正常；经本机 `/api/shared/request` 联动开启共享后 1号
+  `audio.streaming=true mode=shared`（LAN 双连接含音频流），关闭后约 3 秒停止。
+- 遗留待办：① 2号电脑仍收不到共享音频——其健康探测通过但未建音频 sink，指向
+  该机接收端版本过旧（无 `sharedMicrophone` 能力）或缺 VB-CABLE，需在该机控制台
+  确认并升级到 dev.6+ 后复测；② 2号（192.168.0.103）上部署的接收端行为与仓库
+  源码不一致（同一令牌手机可达、本机 curl 401，证书指纹却匹配手机配对记录），
+  需要在该机上核对实际部署版本与 data 目录；③ 3号幽灵条目（本机旧 computerId
+  82f731d3 的重复配对）可在手机上长按其芯片删除；④ 共享期间用户同时开 managed
+  听写会在电脑端 409 单流闸门上互抢，属已知设计边界（单手机单流），后续多手机
+  并发供音需重设计 `PhoneAudioBridge.streamGate`。
 
 ## 2026-09-04 共享麦克风电脑端联动（dev.6）+ 控制台圆角
 

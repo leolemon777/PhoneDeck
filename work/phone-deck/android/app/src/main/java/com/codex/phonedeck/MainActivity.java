@@ -2,6 +2,7 @@ package com.codex.phonedeck;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.Context;
@@ -150,6 +151,10 @@ public final class MainActivity extends Activity {
     private AgentSyncManager agentSyncManager;
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
+            new ConcurrentHashMap<>();
+    /// 地址可达但配对令牌/证书被拒（401/403/指纹不一致）的电脑集合；
+    /// 与“离线”区分展示，提示用户插一次 USB 即可自动重新配对。
+    private final ConcurrentHashMap<String, Boolean> lanPairingRejected =
             new ConcurrentHashMap<>();
     /// 并行探测所有候选地址；死地址短超时快速失败，不互相排队。
     private final ExecutorService lanProbePool = Executors.newFixedThreadPool(6);
@@ -1171,12 +1176,16 @@ public final class MainActivity extends Activity {
         for (TargetDeviceManager.Device device : devices) {
             boolean selected = sameComputer(device.computerId, activeComputerId);
             boolean online = isDeviceOnline(device.computerId);
+            boolean pairingRejected = Boolean.TRUE.equals(
+                    lanPairingRejected.get(device.computerId));
             String sharedState = WORK_SHARED.equals(voiceWorkMode)
                     ? PhoneAudioService.getSnapshot().receiverStates.get(device.computerId)
                     : null;
             String chipLabel = device.slot + "号";
             if (sharedState != null) {
                 chipLabel += " · " + sharedState.replace("正在", "").replace("电脑端", "");
+            } else if (pairingRejected) {
+                chipLabel += " · 需重新配对";
             }
             Button chip = smallButton(chipLabel);
             chip.setAllCaps(false);
@@ -1192,8 +1201,14 @@ public final class MainActivity extends Activity {
             chip.setEnabled(online);
             chip.setContentDescription(device.slot + "号电脑 " + device.displayName
                     + (sharedState == null ? "" : "，共享状态" + sharedState)
-                    + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线"));
+                    + (pairingRejected ? "，配对已失效，用 USB 连接该电脑一次可自动修复" : "")
+                    + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线")
+                    + "，长按删除这台电脑");
             chip.setOnClickListener(view -> selectTargetDevice(device, chip));
+            chip.setOnLongClickListener(view -> {
+                confirmDeleteTargetDevice(device);
+                return true;
+            });
             installTouchFeedback(chip);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
@@ -1210,7 +1225,12 @@ public final class MainActivity extends Activity {
             return;
         }
         if (!isDeviceOnline(device.computerId)) {
-            showActionFeedback("✕  " + device.displayName + " 当前未连接", theme.danger);
+            if (Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))) {
+                showActionFeedback("✕  " + device.displayName
+                        + " 的配对已失效；用 USB 连接该电脑一次即可自动修复", theme.warning);
+            } else {
+                showActionFeedback("✕  " + device.displayName + " 当前未连接", theme.danger);
+            }
             performResultHaptic(source, false);
             return;
         }
@@ -1225,6 +1245,43 @@ public final class MainActivity extends Activity {
         showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
                 + device.displayName + " · " + channel, theme.success);
         performResultHaptic(source, true);
+    }
+
+    /// 长按目标切换芯片：解除与一台电脑的配对。
+    /// 被删电脑再用 USB 连接时会重新自动配对，所以误删可以低成本恢复。
+    private void confirmDeleteTargetDevice(TargetDeviceManager.Device device) {
+        if (WORK_SHARED.equals(voiceWorkMode)
+                && PhoneAudioService.getSnapshot().running) {
+            showActionFeedback("✕  请先关闭共享麦克风，再删除电脑", theme.warning);
+            return;
+        }
+        if (isVoiceStarting() || dictationActive || typelessInFlight
+                || (audioStreamer != null && audioStreamer.isRunning())) {
+            showActionFeedback("✕  请先停止当前语音，再删除电脑", theme.warning);
+            return;
+        }
+        String message = "解除与「" + device.displayName + "」的配对？\n"
+                + "之后用 USB 线连接该电脑时会重新自动配对。";
+        if (Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))) {
+            message = "「" + device.displayName + "」的配对已失效。\n" + message;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("删除 " + device.slot + "号电脑")
+                .setMessage(message)
+                .setPositiveButton("删除", (dialog, which) -> deleteTargetDevice(device))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteTargetDevice(TargetDeviceManager.Device device) {
+        if (!targetDeviceManager.remove(device.computerId)) {
+            return;
+        }
+        lanTargets.remove(device.computerId);
+        lanPairingRejected.remove(device.computerId);
+        applyStoredTarget();
+        showActionFeedback("✓  已删除 " + device.slot + "号电脑 · " + device.displayName,
+                theme.success);
     }
 
     private void applyStoredTarget() {
@@ -1585,19 +1642,24 @@ public final class MainActivity extends Activity {
                 }
                 boolean anyPaired = false;
                 boolean anySuccess = false;
+                ConcurrentHashMap<String, Boolean> rejectedNext = new ConcurrentHashMap<>();
                 for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
                     if (!device.hasLanPairing()) {
                         continue;
                     }
                     anyPaired = true;
-                    PhoneDeckLanClient.ProbeResult result =
+                    PhoneDeckLanClient.ProbeOutcome outcome =
                             PhoneDeckLanClient.probe(device, lanProbePool);
+                    PhoneDeckLanClient.ProbeResult result = outcome.result;
                     if (result == null) {
                         // 缓存地址全部失败：触发一次 UDP 自动发现（带冷却），
                         // 把新地址并入候选后重试；全程不需要重新插 USB。
                         result = probeWithDiscovery(device);
                     }
                     if (result == null) {
+                        if (outcome.pairingRejected) {
+                            rejectedNext.put(device.computerId, Boolean.TRUE);
+                        }
                         continue;
                     }
                     anySuccess = true;
@@ -1648,6 +1710,8 @@ public final class MainActivity extends Activity {
                         ? lanCheckFailStreak + 1 : 0;
                 lanTargets.clear();
                 lanTargets.putAll(next);
+                lanPairingRejected.clear();
+                lanPairingRejected.putAll(rejectedNext);
                 mainHandler.post(this::applyStoredTarget);
             } finally {
                 lanCheckInFlight = false;
@@ -1768,7 +1832,7 @@ public final class MainActivity extends Activity {
                 + device.displayName + " → " + discovered.hostAddress);
         TargetDeviceManager.Device updated = targetDeviceManager.find(device.computerId);
         return updated == null
-                ? null : PhoneDeckLanClient.probe(updated, lanProbePool);
+                ? null : PhoneDeckLanClient.probe(updated, lanProbePool).result;
     }
 
     private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
@@ -2190,7 +2254,12 @@ public final class MainActivity extends Activity {
         }
         PhoneDeckEndpoint endpoint = endpointForActiveTarget();
         if (endpoint == null) {
-            if (isBluetoothTargetOnline()) {
+            if (targetComputerId != null && Boolean.TRUE.equals(
+                    lanPairingRejected.get(targetComputerId))) {
+                showConnection(targetDisplayName + " · 需要重新配对", theme.warning);
+                showActionFeedback("✕  配对已失效；用 USB 连接 " + targetDisplayName
+                        + " 一次即可自动修复", theme.danger);
+            } else if (isBluetoothTargetOnline()) {
                 showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
                 showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；请连接 Wi-Fi 或 USB",
                         theme.danger);
