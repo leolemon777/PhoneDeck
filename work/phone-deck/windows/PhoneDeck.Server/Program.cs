@@ -112,7 +112,7 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.5",
+        version = "1.6.0-dev.6",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -164,6 +164,10 @@ app.MapGet("/api/health", () =>
             ageMs,
             lastError = snapshot.LastError,
             stale
+        },
+        shared = new
+        {
+            requested = serverSettings.SharedRequested
         }
     });
 });
@@ -184,6 +188,38 @@ app.MapGet("/api/config/agent-shortcuts", () =>
             submit = button.Submit,
             visible = button.Visible
         })
+    });
+});
+
+// 共享麦克风联动开关：控制台界面或 Ctrl+Alt+M 热键从 loopback 调用；
+// 局域网调用仍需令牌。手机轮询 /api/health 里的 shared.requested 自动跟随，
+// 持久化到 server-settings.json，电脑重启后手机会重新自动开启。
+void PersistServerSettings()
+{
+    try
+    {
+        var settingsPath = Path.Combine(PhoneDeckDataDirectory.Get(), "server-settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        File.WriteAllText(settingsPath, JsonSerializer.Serialize(serverSettings,
+            new JsonSerializerOptions { WriteIndented = true }));
+    }
+    catch (Exception exception)
+    {
+        Console.WriteLine("写入 server-settings.json 失败：" + exception.Message);
+    }
+}
+
+app.MapPost("/api/shared/request", (SharedMicrophoneRequest command) =>
+{
+    serverSettings.SharedRequested = command.Requested;
+    PersistServerSettings();
+    Console.WriteLine(command.Requested
+        ? "已请求手机开启共享麦克风（联动）。"
+        : "已取消共享麦克风联动请求。");
+    return Results.Ok(new
+    {
+        ok = true,
+        requested = serverSettings.SharedRequested
     });
 });
 
@@ -514,6 +550,7 @@ internal sealed record DictationCommand(
     string? RequestId,
     string? TargetComputerId,
     string? Mode);
+internal sealed record SharedMicrophoneRequest(bool Requested);
 
 internal static class KeyboardInput
 {

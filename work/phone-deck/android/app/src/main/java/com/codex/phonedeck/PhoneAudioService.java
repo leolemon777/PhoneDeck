@@ -32,6 +32,7 @@ public final class PhoneAudioService extends Service {
     static final String ACTION_START = "com.codex.phonedeck.action.START_SHARED_AUDIO";
     static final String ACTION_STOP = "com.codex.phonedeck.action.STOP_SHARED_AUDIO";
     static final String ACTION_STATUS = "com.codex.phonedeck.action.SHARED_AUDIO_STATUS";
+    static final String EXTRA_LINKED = "linked";
     static final String EXTRA_RUNNING = "running";
     static final String EXTRA_CONNECTED = "connected";
     static final String EXTRA_TOTAL = "total";
@@ -77,6 +78,9 @@ public final class PhoneAudioService extends Service {
     private WifiManager.WifiLock wifiLock;
     private PowerManager.WakeLock wakeLock;
     private volatile boolean desiredRunning;
+    /// 本次共享是由电脑 shared.requested 联动开启（而不是用户在手机上手动开启）；
+    /// 只有联动开启的会话才会在电脑全部取消请求后自动停止。
+    private volatile boolean startedByLinkage;
     private volatile boolean probeInFlight;
     private volatile int knownTotal;
     private volatile int connectedCount;
@@ -150,6 +154,7 @@ public final class PhoneAudioService extends Service {
             return START_NOT_STICKY;
         }
         if (ACTION_START.equals(action)) {
+            startedByLinkage = intent != null && intent.getBooleanExtra(EXTRA_LINKED, false);
             startShared();
         }
         return START_NOT_STICKY;
@@ -192,6 +197,7 @@ public final class PhoneAudioService extends Service {
 
     private void stopShared() {
         desiredRunning = false;
+        startedByLinkage = false;
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
             broadcaster.stop();
@@ -219,6 +225,8 @@ public final class PhoneAudioService extends Service {
                 knownTotal = devices.size();
                 Map<String, LanDiscoveryClient.DiscoveredComputer> discovered = null;
                 int incompatible = 0;
+                int reachable = 0;
+                boolean anyRequested = false;
                 for (TargetDeviceManager.Device device : devices) {
                     states.put(device.computerId, "离线");
                     if (!device.hasLanPairing()) {
@@ -244,6 +252,10 @@ public final class PhoneAudioService extends Service {
                     if (result == null) {
                         continue;
                     }
+                    reachable++;
+                    if (isSharedRequested(result.health)) {
+                        anyRequested = true;
+                    }
                     deviceManager.recordLastGoodAddress(device.computerId, result.hostAddress);
                     if (isSharedAudioReady(result.health)) {
                         targets.put(device.computerId, new SharedAudioBroadcaster.Target(
@@ -262,6 +274,12 @@ public final class PhoneAudioService extends Service {
                     JSONObject health = PhoneDeckHttp.getJson(
                             PhoneDeckEndpoint.USB, "/api/health", 600, 800);
                     String computerId = health.optString("computerId", "").trim();
+                    if (!computerId.isEmpty()) {
+                        reachable++;
+                        if (isSharedRequested(health)) {
+                            anyRequested = true;
+                        }
+                    }
                     if (!computerId.isEmpty() && !targets.containsKey(computerId)
                             && isSharedAudioReady(health)) {
                         if (!states.containsKey(computerId)) {
@@ -286,6 +304,14 @@ public final class PhoneAudioService extends Service {
                 receiverStates.clear();
                 receiverStates.putAll(states);
                 broadcaster.updateTargets(targets);
+                if (startedByLinkage && reachable > 0 && !anyRequested) {
+                    // 联动开启的共享：所有在线电脑都已取消请求，自动停止。
+                    // 全部电脑离线时保持等待，网络恢复后再判定。
+                    statusDetail = "电脑已关闭共享，自动停止";
+                    publishStatus();
+                    handler.post(this::stopShared);
+                    return;
+                }
                 if (targets.isEmpty()) {
                     statusDetail = incompatible > 0
                             ? "在线电脑需要更新接收端或配置虚拟麦克风"
@@ -316,6 +342,11 @@ public final class PhoneAudioService extends Service {
         }
         JSONObject audio = health.optJSONObject("audio");
         return supported && audio != null && audio.optBoolean("available", false);
+    }
+
+    private static boolean isSharedRequested(JSONObject health) {
+        JSONObject shared = health.optJSONObject("shared");
+        return shared != null && shared.optBoolean("requested", false);
     }
 
     private static boolean hasSharedCapability(JSONObject health) {

@@ -1,12 +1,33 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-03
+更新时间：2026-09-04
 当前分支：`agent/macos-receiver-2.0`
-当前源码：Android/Windows 1.6.0-dev.5（手机控制听写 + 共享麦克风双模式）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android/Windows 1.6.0-dev.6（手机控制听写 + 共享麦克风双模式，共享支持电脑端联动开关）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-04 共享麦克风电脑端联动（dev.6）+ 控制台圆角
+
+- 电脑成为共享麦克风的主开关：接收端新增 `sharedRequested` 状态并持久化到
+  `server-settings.json`，`/api/health` 上报 `shared.requested`；新端点
+  `POST /api/shared/request` 切换（loopback 8765 免令牌，HTTPS 8766 仍需令牌）。
+  控制台概览页"连接设置"上方新增"共享麦克风联动"开关卡（Checked/Unchecked 事件，
+  兼容 UI 自动化），并注册全局热键 Ctrl+Alt+M（暂不可改键）。
+- Android `MainActivity` 在 USB/LAN 健康轮询里观察到任一已配对电脑 `shared.requested=true`
+  即自动走共享启动路径（沿用权限检查；managed 听写进行中跳过、下轮重试）；手机上手动停止
+  会抑制联动自动重启，直到电脑取消请求后解除。
+- `PhoneAudioService` 通过 `EXTRA_LINKED` 区分联动/手动开启；只有联动开启的会话在所有
+  在线电脑都取消请求后自动停止（"电脑已关闭共享，自动停止"），全部电脑离线时保持等待，
+  手动开启的会话绝不被联动停止。
+- WPF 控制台主窗口与 Agent 编辑器窗口四角改为 20px 圆角（透明窗口 + 圆角 Border + 裁剪，
+  最大化自动收回圆角与边框）。
+- 验证：Windows 测试 48/48、ControlCenter 与 Android assembleDebug/lint 全部通过；dev.6
+  已部署本机运行目录并覆盖安装 Samsung（versionCode 12）。真机闭环：API / 控制台开关 /
+  Ctrl+Alt+M 三个入口开启后约 3 秒 `audio.streaming=true, mode=shared`（前台服务+通知在录），
+  关闭后约 3 秒停止且 `PhoneAudioService` 销毁；`server-settings.json` 已持久化该开关
+  （跨重启自动恢复逻辑未实测）。已知边界：联动只在手机 App 存活时生效（熄屏可能延迟数秒）。
 
 ## 2026-09-03 双语音模式与“一发三收”
 

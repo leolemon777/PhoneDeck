@@ -4,14 +4,15 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="配置 Agent 操作" Width="860" Height="600" MinWidth="760" MinHeight="520"
         WindowStartupLocation="CenterOwner" WindowStyle="None"
-        Background="{DynamicResource BrushPearl}"
+        Background="Transparent"
         FontFamily="{StaticResource FontFamilyBody}"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="54" CornerRadius="0" GlassFrameThickness="0" ResizeBorderThickness="6" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
-    <Grid Background="{DynamicResource BrushPearl}">
+    <Border x:Name="WindowRoot" Background="{DynamicResource BrushPearl}" BorderBrush="{DynamicResource BrushHairline}" BorderThickness="1" CornerRadius="20">
+        <Grid>
         <Rectangle Height="340" VerticalAlignment="Top" Fill="{DynamicResource BrushAuroraGlow}" IsHitTestVisible="False" />
         <Grid Margin="28,16,28,26">
             <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="86"/><RowDefinition Height="*"/><RowDefinition Height="70"/></Grid.RowDefinitions>
@@ -68,5 +69,6 @@
                 </StackPanel>
             </Grid>
         </Grid>
-    </Grid>
+        </Grid>
+    </Border>
 </Window>

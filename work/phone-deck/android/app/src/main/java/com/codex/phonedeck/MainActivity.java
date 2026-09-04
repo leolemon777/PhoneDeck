@@ -164,10 +164,25 @@ public final class MainActivity extends Activity {
     private static final long DISCOVERY_COOLDOWN_MS = 10_000;
     private ConnectivityManager.NetworkCallback networkCallback;
 
+    /// 电脑联动：当前仍在请求共享麦克风的电脑集合；空 = 没有任何电脑请求。
+    private final java.util.Set<String> sharedRequestedComputerIds = new java.util.HashSet<>();
+    /// 用户在手机上手动停止后抑制联动自动重启，直到所有电脑取消请求再重新允许。
+    private boolean sharedLinkageSuppressed;
+    private boolean sharedStatusWasRunning;
+
     private final BroadcastReceiver sharedStatusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction())) {
+                boolean nowRunning = intent.getBooleanExtra(
+                        PhoneAudioService.EXTRA_RUNNING, false);
+                if (sharedStatusWasRunning && !nowRunning
+                        && !sharedRequestedComputerIds.isEmpty()) {
+                    // 运行中停止且电脑仍在请求：视为用户手动停止，暂时抑制联动，
+                    // 下一次轮询观察到电脑取消请求后自动解除抑制。
+                    sharedLinkageSuppressed = true;
+                }
+                sharedStatusWasRunning = nowRunning;
                 renderSharedAudioStatus(PhoneAudioService.getSnapshot());
             }
         }
@@ -1516,6 +1531,7 @@ public final class MainActivity extends Activity {
                                 PhoneDeckEndpoint.USB,
                                 healthComputerId,
                                 remoteVoiceState);
+                        maybeFollowSharedRequest(healthComputerId, health);
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
@@ -1622,8 +1638,11 @@ public final class MainActivity extends Activity {
                                     ? null : lanForegroundApp));
                     PhoneDeckEndpoint healthEndpoint = result.endpoint;
                     String healthComputerId = device.computerId;
-                    mainHandler.post(() -> reconcileRemoteVoiceState(
-                            healthEndpoint, healthComputerId, remoteVoiceState));
+                    mainHandler.post(() -> {
+                        reconcileRemoteVoiceState(
+                                healthEndpoint, healthComputerId, remoteVoiceState);
+                        maybeFollowSharedRequest(healthComputerId, health);
+                    });
                 }
                 lanCheckFailStreak = anyPaired && !anySuccess
                         ? lanCheckFailStreak + 1 : 0;
@@ -2021,6 +2040,46 @@ public final class MainActivity extends Activity {
     private void setControlEnabled(Button button, boolean enabled) {
         button.setEnabled(enabled);
         button.setAlpha(enabled ? 1f : 0.45f);
+    }
+
+    /// 电脑端联动：健康轮询观察到 shared.requested 后自动开启共享麦克风。
+    /// 手机正忙（managed 听写等）时本轮跳过，下一轮轮询会重试；
+    /// 手动停止后的抑制由本方法在观察到电脑取消请求时解除。
+    private void maybeFollowSharedRequest(String computerId, JSONObject health) {
+        if (computerId == null || computerId.isBlank() || health == null) {
+            return;
+        }
+        JSONObject shared = health.optJSONObject("shared");
+        boolean requested = shared != null && shared.optBoolean("requested", false);
+        if (!requested) {
+            sharedRequestedComputerIds.remove(computerId);
+            if (sharedRequestedComputerIds.isEmpty()) {
+                sharedLinkageSuppressed = false;
+            }
+            return;
+        }
+        sharedRequestedComputerIds.add(computerId);
+        PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
+        if (state.running || sharedStartPending || sharedLinkageSuppressed
+                || isVoiceStarting() || dictationActive || typelessInFlight
+                || (audioStreamer != null && audioStreamer.isRunning())) {
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            // 缺权限时保持安静；手动开启共享按钮会发起权限请求。
+            return;
+        }
+        Log.i("PhoneDeckShared", "电脑请求共享麦克风，自动开启：" + computerId);
+        showActionFeedback("●  电脑请求共享麦克风，正在开启…", theme.muted);
+        Intent start = new Intent(this, PhoneAudioService.class)
+                .setAction(PhoneAudioService.ACTION_START)
+                .putExtra(PhoneAudioService.EXTRA_LINKED, true);
+        try {
+            startForegroundService(start);
+        } catch (Exception exception) {
+            Log.w("PhoneDeckShared", "联动启动共享失败：" + exception.getMessage());
+        }
     }
 
     private void toggleSharedMicrophone() {

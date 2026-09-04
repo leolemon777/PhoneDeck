@@ -7,6 +7,10 @@ internal sealed class ServerSettings
     /// <summary>局域网 UDP 发现应答（端口 8767，仅 LocalSubnet 应答，不含令牌）。</summary>
     public bool LanDiscovery { get; init; } = true;
 
+    /// <summary>本电脑请求手机开启共享麦克风的联动开关；手机轮询健康时自动跟随。
+    /// 持久化后电脑重启仍然有效，由 /api/shared/request 与控制台/热键维护。</summary>
+    public bool SharedRequested { get; set; }
+
     /// <summary>可选：手动指定 adb.exe 完整路径；留空则依次查找
     /// 程序目录 platform-tools 与 PATH。</summary>
     public string? AdbPath { get; init; }
@@ -48,6 +52,8 @@ internal sealed class ServerSettings
                     + "  \"usbWatchdog\": true,\n"
                     + "  // lanDiscovery：UDP 8767 局域网发现应答；只回电脑 ID/名称/端口，不包含令牌。\n"
                     + "  \"lanDiscovery\": true,\n"
+                    + "  // sharedRequested：请求手机开启共享麦克风的联动开关；控制台或 Ctrl+Alt+M 切换。\n"
+                    + "  \"sharedRequested\": false,\n"
                     + "  // adbPath：adb.exe 完整路径；留空则自动查找程序旁 platform-tools 和 PATH。\n"
                     + "  \"adbPath\": null\n"
                     + "}\n");

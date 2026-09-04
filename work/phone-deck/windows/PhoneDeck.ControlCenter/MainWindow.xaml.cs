@@ -7,12 +7,15 @@ using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -45,6 +48,22 @@ public partial class MainWindow : Window
     private bool loadingSettings;
     private bool isExiting;
     private string currentComputerId = string.Empty;
+    private bool lastSharedRequested;
+    private bool applyingSharedLink;
+    private HwndSource? sourceHandle;
+
+    private const int WmHotKey = 0x0312;
+    private const int SharedHotKeyId = 0x504D;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModNoRepeat = 0x4000;
+    private const uint VkM = 0x4D;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
@@ -68,6 +87,85 @@ public partial class MainWindow : Window
         Closed += MainWindow_Closed;
         refreshTimer.Tick += RefreshTimer_Tick;
         SystemEvents.UserPreferenceChanged += SystemTheme_UserPreferenceChanged;
+        SizeChanged += (_, _) => UpdateWindowCorners();
+        StateChanged += (_, _) => UpdateWindowCorners();
+        UpdateWindowCorners();
+    }
+
+    private void UpdateWindowCorners()
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            WindowRoot.CornerRadius = new CornerRadius(0);
+            WindowRoot.BorderThickness = new Thickness(0);
+            WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight));
+            return;
+        }
+
+        const double radius = 20;
+        WindowRoot.CornerRadius = new CornerRadius(radius);
+        WindowRoot.BorderThickness = new Thickness(1);
+        WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight), radius, radius);
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var handle = new WindowInteropHelper(this).Handle;
+        sourceHandle = HwndSource.FromHwnd(handle);
+        sourceHandle?.AddHook(SharedHotkeyHook);
+        if (!RegisterHotKey(handle, SharedHotKeyId, ModControl | ModAlt | ModNoRepeat, VkM))
+        {
+            Log("注册 Ctrl+Alt+M 热键失败：可能被其他程序占用，仍可用界面开关。", ResourceBrush("BrushWarning"));
+        }
+    }
+
+    private IntPtr SharedHotkeyHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message == WmHotKey && wParam.ToInt32() == SharedHotKeyId)
+        {
+            _ = Dispatcher.InvokeAsync(() => _ = ToggleSharedLinkAsync());
+            handled = true;
+        }
+        return IntPtr.Zero;
+    }
+
+    private async Task ToggleSharedLinkAsync() => await SetSharedLinkAsync(!lastSharedRequested, fromHotkey: true);
+
+    private async Task SetSharedLinkAsync(bool requested, bool fromHotkey)
+    {
+        try
+        {
+            using var content = new StringContent(
+                JsonSerializer.Serialize(new { requested }), Encoding.UTF8, "application/json");
+            using var response = await http.PostAsync(
+                "http://127.0.0.1:8765/api/shared/request", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                Log("切换共享麦克风联动失败：HTTP " + (int)response.StatusCode,
+                    ResourceBrush("BrushDanger"));
+                await RefreshStatusAsync();
+                return;
+            }
+            lastSharedRequested = requested;
+            Log((requested ? "已请求手机开启共享麦克风" : "已关闭共享麦克风联动")
+                    + (fromHotkey ? "（Ctrl+Alt+M）" : string.Empty) + "。",
+                requested ? ResourceBrush("BrushSuccess") : ResourceBrush("BrushMist"));
+        }
+        catch (Exception)
+        {
+            Log("接收端未运行，无法切换共享麦克风联动。", ResourceBrush("BrushDanger"));
+        }
+        await RefreshStatusAsync();
+    }
+
+    private async void SharedMicLink_Changed(object sender, RoutedEventArgs e)
+    {
+        if (applyingSharedLink)
+        {
+            return;
+        }
+        await SetSharedLinkAsync(SharedMicLinkCheck.IsChecked == true, fromHotkey: false);
     }
 
     private Brush ResourceBrush(string key) => (Brush)FindResource(key);
@@ -102,6 +200,12 @@ public partial class MainWindow : Window
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         SystemEvents.UserPreferenceChanged -= SystemTheme_UserPreferenceChanged;
+        if (sourceHandle != null)
+        {
+            UnregisterHotKey(new WindowInteropHelper(this).Handle, SharedHotKeyId);
+            sourceHandle.RemoveHook(SharedHotkeyHook);
+            sourceHandle = null;
+        }
         refreshTimer.Stop();
         http.Dispose();
         refreshGate.Dispose();
@@ -420,6 +524,7 @@ public partial class MainWindow : Window
             {
                 LanDiscovery = LanDiscoveryCheck.IsChecked == true,
                 UsbWatchdog = UsbWatchdogCheck.IsChecked == true,
+                SharedRequested = lastSharedRequested,
                 AdbPath = AdbPathBox.Text.Trim()
             };
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
@@ -544,6 +649,7 @@ public partial class MainWindow : Window
             {
                 SetStatus(ReceiverValue, ReceiverDot, "未运行", "点击“启动接收端”", danger, ReceiverDetail);
                 SetStatus(AudioValue, AudioDot, "不可用", "接收端未运行", muted, AudioDetail);
+                SharedMicDetail.Text = "接收端未运行";
                 OverallText.Text = "需要启动";
                 OverallText.Foreground = danger;
                 OverallDot.Fill = danger;
@@ -579,6 +685,19 @@ public partial class MainWindow : Window
                             : "请安装或检查 VB-CABLE",
                         available ? success : warning,
                         AudioDetail);
+
+                    var sharedRequested = root.TryGetProperty("shared", out var sharedNode)
+                        && sharedNode.TryGetProperty("requested", out var requestedNode)
+                        && requestedNode.GetBoolean();
+                    lastSharedRequested = sharedRequested;
+                    applyingSharedLink = true;
+                    SharedMicLinkCheck.IsChecked = sharedRequested;
+                    applyingSharedLink = false;
+                    SharedMicDetail.Text = !sharedRequested
+                        ? "关闭 · 开关或 Ctrl+Alt+M 让手机开麦"
+                        : streaming && mode == "shared"
+                            ? "手机供音中 · Ctrl+Alt+M 关闭"
+                            : "已请求 · 等待手机开始供音";
 
                     OverallText.Text = network.Address is null ? "等待 Wi-Fi" : "可以连接手机";
                     OverallText.Foreground = network.Address is null ? warning : success;
@@ -717,6 +836,7 @@ public partial class MainWindow : Window
     {
         public bool UsbWatchdog { get; set; } = true;
         public bool LanDiscovery { get; set; } = true;
+        public bool SharedRequested { get; set; }
         public string? AdbPath { get; set; }
     }
 }

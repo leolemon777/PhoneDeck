@@ -7,7 +7,7 @@
         Width="1260" Height="900" MinWidth="1100" MinHeight="780"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
-        Background="{DynamicResource BrushPearl}"
+        Background="Transparent"
         FontFamily="{StaticResource FontFamilyBody}"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
@@ -51,7 +51,8 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="{DynamicResource BrushPearl}">
+    <Border x:Name="WindowRoot" Background="{DynamicResource BrushPearl}" BorderBrush="{DynamicResource BrushHairline}" BorderThickness="1" CornerRadius="20">
+        <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="72" />
             <RowDefinition Height="*" />
@@ -204,7 +205,19 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="2" Style="{StaticResource GlassCard}" Padding="20,18">
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Grid.Row="0" Style="{StaticResource GlassCard}" Padding="20,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal"><Border Width="30" Height="30" CornerRadius="15" Background="#102DA44E" Margin="0,0,9,0"><Path Data="{StaticResource IconMic}" Width="15" Height="15" Stretch="Uniform" Stroke="{DynamicResource BrushSuccess}" StrokeThickness="1.7" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="共享麦克风联动" Style="{StaticResource SettingsTitle}" VerticalAlignment="Center"/></StackPanel>
+                                    <TextBlock x:Name="SharedMicDetail" Text="关闭 · 开关或 Ctrl+Alt+M 让手机开麦" Style="{StaticResource SettingsMeta}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox x:Name="SharedMicLinkCheck" Grid.Column="1" Style="{StaticResource SwitchCheckBox}" VerticalAlignment="Center" Checked="SharedMicLink_Changed" Unchecked="SharedMicLink_Changed" AutomationProperties.Name="共享麦克风联动"/>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="2" Style="{StaticResource GlassCard}" Padding="20,18">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <StackPanel><TextBlock Text="连接设置" Style="{StaticResource TextSectionTitle}"/><TextBlock Text="保存后会重启接收端" Style="{StaticResource TextFine}" Margin="0,3,0,0"/></StackPanel>
@@ -219,6 +232,7 @@
                             <Button Grid.Row="2" Content="保存并应用" Style="{StaticResource BlueButton}" HorizontalContentAlignment="Center" Click="SaveSettings_Click"/>
                         </Grid>
                     </Border>
+                    </Grid>
                 </Grid>
 
                 <Border Grid.Row="5" Style="{StaticResource GlassCard}" Padding="18,14">
@@ -290,5 +304,6 @@
                 </StackPanel>
             </ScrollViewer>
         </Grid>
-    </Grid>
+        </Grid>
+    </Border>
 </Window>
