@@ -1,12 +1,62 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-08-31
+更新时间：2026-09-03
 当前分支：`agent/macos-receiver-2.0`
-当前源码：Android/Windows 1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步，以及低延迟语音启动、跨设备停止同步、自动发现、首音节优化与实验宏）；macOS 接收端预览 2.0.0-dev.1
+当前源码：Android/Windows 1.6.0-dev.5（手机控制听写 + 共享麦克风双模式）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-03 双语音模式与“一发三收”
+
+- Android 新增顶层 `managed/shared` 工作方式，默认仍为原来的手机控制听写；共享模式每次
+  App 进程/手机启动后必须手动开启，不持久化运行状态。
+- `PhoneAudioService` 以 `microphone` 前台服务持有单个 48 kHz PCM16 mono
+  `AudioRecord`、Wi-Fi 锁和 CPU 锁；常驻通知与主按钮均可停止，使用 `START_NOT_STICKY`。
+- `SharedAudioBroadcaster` 用同一 UUID `sessionId` 向所有合格电脑扇出。LAN 优先、当前
+  USB 回退、蓝牙不传音频；每台电脑 500 ms 有界队列、丢旧帧、独立线程和 500 ms–30 s
+  重连退避，单台慢速/断开不阻塞其他接收端。
+- Windows `PhoneAudioBridge` 新增 `managed/shared`：managed 保留 pre-roll 与 Typeless
+  状态机；shared 在 WASAPI 就绪后立即供音且不触发、停止或复位 Typeless。健康接口增加
+  `audio.mode`，能力增加 `sharedMicrophone`，旧请求缺省为 managed，冲突返回 409。
+- macOS 2.0.0-dev.2 新增 AUHAL 定向 BlackHole 输出、mono→stereo、有界环形缓冲、
+  Typeless 配置自动查找与显式覆盖、14.2+ `AudioHardwareProcess/isRunningInput` 探针，
+  以及 managed/shared 会话端点。探针不可用时只拒绝 managed，shared 仍可工作。
+- 保留并合并了本工作树原有的 WPF Aether 控制台改动；控制台状态新增当前音频模式。
+- 自动验证：Android assemble/lint 与 2 项扇出策略测试通过；Windows 48/48 测试与 WPF
+  Release build 通过；macOS 20/20 测试与 Release build 通过。尚未执行真实三机、Mac
+  Core Audio、通知锁屏、20 轮切换或两小时压力测试，不能标记为实机稳定版。
+
+### 2026-09-03 Samsung + 单台 Windows 实机验证
+
+- Samsung SM-G9880（Android 12）和本机 Windows 接收端均已升级到 `1.6.0-dev.5`；手机
+  原有设备、快捷键和设置已通过 `run-as` 备份/恢复，电脑沿用原 `data` 目录与 computerId。
+- 手机真实开启 shared 后，Android `PhoneAudioService` 为 microphone 前台服务且
+  `RECORD_AUDIO` 持续 running；Windows 健康状态为 `streaming=true/mode=shared`，同时
+  `dictation.active=false`、`typeless.capturing=false`，证明共享本身不控制 Typeless。
+- 熄屏 12 秒后音频仍保持同一个 sessionId；执行通知使用的 STOP action 后手机录音和
+  Windows 音频流均释放。再次 force-stop/启动 App 后没有自动恢复采音，符合
+  `START_NOT_STICKY` 与运行状态不持久化要求。
+- 在 shared 持续供音期间，经 Windows 本机 SendInput 路径发送当前 Typeless 快捷键后，
+  `typeless.capturing` 可独立变为 true；再次发送后恢复 false，而 shared 的 sessionId
+  始终不变，PhoneDeck managed 状态始终为 false。
+- Windows 实测缺省 `X-PhoneDeck-Audio-Mode` 时健康状态为 managed；shared 占用期间
+  第二条 managed 流返回 409，首流中断后状态清理完成。
+- 本轮未确认最终识别文字，也未在解锁状态点击通知/主按钮做视觉验收；三电脑扇出、真实
+  Mac、20 轮切换与两小时锁屏仍未测试。
+- 部署注意：长期签名的 JKS 仍在，但 `signing.properties` 及独立签名备份缺失。本轮 dev.5
+  APK 使用了与手机原 dev.4 不同的开发签名，因此通过可恢复的数据迁移完成安装；后续正式
+  发布前必须找回长期签名参数，或再次迁移到确定的新正式签名，不能把当前开发签名当正式包。
+
+## 2026-09-03 WPF 控制台重构（Aether）
+
+- 用户决定停止 WinForms 视觉层，改用 `E:\Users\Administrator\Desktop\Web2WPF\05-Aether` 的 Apple 式磨砂玻璃设计系统重建控制台。
+- `PhoneDeck.ControlCenter.csproj` 已启用 WPF；旧 `Program.cs`、`ControlCenterForm.cs` 与 `AgentShortcutEditorForm.cs` 保留作迁移参考但从编译排除。
+- 新增模块化 `Themes/Colors.xaml`、`Fonts.xaml`、`Icons.xaml`、`Styles.xaml`、`Generic.xaml`，以及 `App.xaml`、`MainWindow.xaml` 和 WPF Agent 快捷操作编辑器。
+- WPF 主窗口已实现 Aether 悬浮胶囊导航、磨砂玻璃状态卡、连接拓扑、设置开关、日志页、连接页、设备页、自定义窗口按钮和托盘常驻；原有健康检查、启停/重启、LAN 发现、USB 看门狗、开机启动、ADB 路径及 Agent 配置行为已迁移。
+- Release 构建 0 警告、0 错误，服务端测试 45/45 通过；WPF 自包含发布包及其原生渲染 DLL 已更新到 `PhoneDeck电脑控制台` 并启动核对。导航切换和 Agent 编辑器打开/关闭已通过 UI Automation 验证。
+- 早期 Open Design HTML 原型仍保存在 `design/phonedeck-control-center.html` 作为设计参考，不再作为实际控制台实现。
 
 ## 2026-08-31 规格升级 v0.4 与 Windows/Android 完善
 
@@ -62,8 +112,8 @@ UDP 自动发现、音频 pre-roll 和实验性多步宏；dev.4 再将手机录
 唤醒改为并行启动，缩短按下语音键到浮窗出现的时间。2026-08-28 会话还完成：Typeless 三模式（听写/
 翻译/问答）、USB 看门狗常连、Wi-Fi 保活、统一冰川玻璃主题、横竖屏
 双栏、主界面编辑模式与退格连发、AI 黄金位预设、前台应用回传和配置
-导入导出，均已在 Samsung SM-G9880 真机验证。下一步改为先在第三台 Mac 验收 CGEvent
-接收端，再与两台 Windows 做混合三机切换，随后接入 Mac 手机音频。
+导入导出，均已在 Samsung SM-G9880 真机验证。双语音模式与 Mac 手机音频源码现已接入；
+下一步是在第三台 Mac 验收 CGEvent、AUHAL/BlackHole 与 Typeless，再完成三机共享压力测试。
 
 ## 2026-08-30 dev.4 低延迟语音启动
 
@@ -150,10 +200,11 @@ UDP 自动发现、音频 pre-roll 和实验性多步宏；dev.4 再将手机录
    并确认没有修饰键残留。
 3. 用 Samsung 与 Mac 做 USB 初配、拔线 Wi-Fi 输入、IP 变化恢复和 20 轮目标切换。
 4. 与两台 Windows 做混合三机目标隔离：手机只把文字/快捷键发到当前电脑。
-5. 接入 Core Audio → BlackHole 2ch → Typeless，并完成真实语音开始/停止/断流清理。
-6. 回归 Windows 拔 USB 后真实 Wi-Fi 语音文字、快捷键编辑/隐藏/排序/重启持久化和蓝牙。
-7. 标准 mDNS/Bonjour、凭据撤销/重配；自定义 UDP 地址发现已完成。
-8. 调研报告 `outputs/PhoneDeck开发工具调研-2026-08-28.md`：第一档四项已完成；
+5. 在三台电脑开启共享后锁屏手机，分别/同时触发本机 Typeless，并验证断网、睡眠、重启自动恢复。
+6. 连续切换 managed/shared 20 轮并完成至少两小时锁屏共享，检查会话、线程和缓冲无增长。
+7. 回归 Windows 拔 USB 后真实 Wi-Fi 语音文字、快捷键编辑/隐藏/排序/重启持久化和蓝牙。
+8. 标准 mDNS/Bonjour、凭据撤销/重配；自定义 UDP 地址发现已完成。
+9. 调研报告 `outputs/PhoneDeck开发工具调研-2026-08-28.md`：第一档四项已完成；
    第二档中的受限多步宏已进入实验实现；焦点保障、按前台应用自动切配置、分页仍待完成。
 
 ## 构建环境注意（本机）
@@ -167,7 +218,7 @@ TEMP 指向 `work\tools\temp`。本机 adb 偶发卡死时 `taskkill /IM adb.exe
 
 1. 手机和电脑连接同一个 Wi-Fi；音频只在局域网内传输，不消耗手机流量。
 2. 每台 Windows 以管理员身份运行一次 `scripts/windows/Enable-PhoneDeckLan.ps1`。
-3. 每台电脑运行匹配的 1.6.0-dev.4 接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
+3. 每台电脑运行匹配的 1.6.0-dev.5（Mac 为 2.0.0-dev.2）接收端，首次用 USB 连接手机并建立 `adb reverse tcp:8765`。
 4. App 自动读取该电脑的证书指纹、随机密钥和 LAN 地址；顶部出现“Wi-Fi 在线”后可移除
    ADB reverse 或拔掉 USB。
 5. 对第二、第三台电脑重复一次；之后三台接收端同时运行，手机切换目标即可。

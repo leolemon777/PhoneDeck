@@ -2,11 +2,13 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>PhoneDeck.ControlCenter</AssemblyName>
     <RootNamespace>PhoneDeck.ControlCenter</RootNamespace>
+    <ApplicationIcon>Assets\PhoneDeck.Light.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -14,4 +16,15 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Program.cs" />
+    <Compile Remove="ControlCenterForm.cs" />
+    <Compile Remove="AgentShortcutEditorForm.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\PhoneDeck.Light.ico" />
+    <Resource Include="Assets\PhoneDeck.Dark.ico" />
+    <Resource Include="Assets\PhoneDeck.Light.png" />
+    <Resource Include="Assets\PhoneDeck.Dark.png" />
+  </ItemGroup>
 </Project>

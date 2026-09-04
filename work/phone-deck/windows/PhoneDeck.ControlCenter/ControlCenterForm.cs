@@ -12,14 +12,18 @@ namespace PhoneDeck.ControlCenter;
 internal sealed class ControlCenterForm : Form
 {
     private const string AutoStartValue = "PhoneDeck Control Center";
-    private static readonly Color Canvas = Color.FromArgb(240, 246, 255);
-    private static readonly Color Card = Color.FromArgb(251, 253, 255);
-    private static readonly Color Ink = Color.FromArgb(16, 39, 72);
-    private static readonly Color Muted = Color.FromArgb(91, 115, 151);
-    private static readonly Color Primary = Color.FromArgb(42, 103, 224);
-    private static readonly Color Success = Color.FromArgb(31, 169, 109);
-    private static readonly Color Warning = Color.FromArgb(230, 148, 42);
-    private static readonly Color Danger = Color.FromArgb(215, 70, 84);
+    // Warm, paper-like neutrals keep the console calm and product-oriented.
+    // Saturated color is reserved for connection state and primary actions.
+    private static readonly Color Canvas = Color.FromArgb(246, 246, 248);
+    private static readonly Color Sidebar = Color.FromArgb(251, 251, 253);
+    private static readonly Color Card = Color.FromArgb(255, 255, 255);
+    private static readonly Color CardRaised = Color.FromArgb(245, 245, 247);
+    private static readonly Color Ink = Color.FromArgb(29, 29, 31);
+    private static readonly Color Muted = Color.FromArgb(110, 110, 115);
+    private static readonly Color Primary = Color.FromArgb(0, 113, 227);
+    private static readonly Color Success = Color.FromArgb(45, 164, 78);
+    private static readonly Color Warning = Color.FromArgb(191, 126, 0);
+    private static readonly Color Danger = Color.FromArgb(210, 42, 47);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -67,17 +71,17 @@ internal sealed class ControlCenterForm : Form
         Font = new Font("Microsoft YaHei UI", 10F);
         BackColor = Canvas;
         ForeColor = Ink;
-        MinimumSize = new Size(1040, 800);
-        Size = new Size(1180, 900);
+        MinimumSize = new Size(1080, 760);
+        Size = new Size(1180, 840);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
 
         startButton = ActionButton("启动接收端", Primary);
-        restartButton = ActionButton("重新启动", Color.FromArgb(91, 83, 220));
-        stopButton = ActionButton("停止", Color.FromArgb(112, 132, 160));
+        restartButton = ActionButton("重新启动", CardRaised, secondary: true);
+        stopButton = ActionButton("停止", CardRaised, secondary: true);
         saveButton = ActionButton("保存并应用", Primary);
-        agentSettingsButton = ActionButton("配置 Agent 操作", Color.FromArgb(91, 83, 220));
-        agentSettingsButton.Size = new Size(170, 44);
+        agentSettingsButton = ActionButton("配置 Agent 操作", CardRaised, secondary: true);
+        agentSettingsButton.Size = new Size(170, 36);
 
         Controls.Add(BuildLayout());
         WireEvents();
@@ -143,23 +147,126 @@ internal sealed class ControlCenterForm : Form
 
     private Control BuildLayout()
     {
-        var root = new TableLayoutPanel
+        var content = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(32, 24, 32, 28),
+            Padding = new Padding(28, 22, 28, 24),
             ColumnCount = 1,
             RowCount = 4,
             BackColor = Canvas
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 140));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        root.Controls.Add(BuildHeader(), 0, 0);
-        root.Controls.Add(BuildStatusCards(), 0, 1);
-        root.Controls.Add(BuildMainArea(), 0, 2);
-        root.Controls.Add(BuildFooter(), 0, 3);
-        return root;
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 156));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        content.Controls.Add(BuildHeader(), 0, 0);
+        content.Controls.Add(BuildStatusCards(), 0, 1);
+        content.Controls.Add(BuildMainArea(), 0, 2);
+        content.Controls.Add(BuildFooter(), 0, 3);
+
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Canvas,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 188));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        shell.Controls.Add(BuildSidebar(), 0, 0);
+        shell.Controls.Add(content, 1, 0);
+        return shell;
+    }
+
+    private Control BuildSidebar()
+    {
+        var sidebar = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Sidebar,
+            Padding = new Padding(16, 20, 14, 16),
+            Margin = Padding.Empty
+        };
+
+        var brand = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = Sidebar };
+        brand.Controls.Add(new Label
+        {
+            Text = "PhoneDeck",
+            Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
+            ForeColor = Ink,
+            AutoSize = true,
+            Location = new Point(4, 4)
+        });
+        brand.Controls.Add(new Label
+        {
+            Text = "电脑控制中心",
+            Font = new Font(Font.FontFamily, 7.5F, FontStyle.Bold),
+            AutoSize = true,
+            ForeColor = Muted,
+            Location = new Point(5, 34)
+        });
+        sidebar.Controls.Add(brand);
+
+        var nav = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 270,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = Sidebar,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        nav.Controls.Add(NavButton("概览", "⌂", active: true));
+        nav.Controls.Add(NavButton("连接", "↔"));
+        nav.Controls.Add(NavButton("设备", "▣"));
+        nav.Controls.Add(NavButton("日志", "≡"));
+        nav.Controls.Add(NavButton("设置", "⚙"));
+        sidebar.Controls.Add(nav);
+
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 74, BackColor = Sidebar };
+        footer.Controls.Add(new Label
+        {
+            Text = "PhoneDeck 1.6",
+            Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
+            ForeColor = Ink,
+            AutoSize = true,
+            Location = new Point(4, 4)
+        });
+        footer.Controls.Add(new Label
+        {
+            Text = "本地优先 · Wi‑Fi / USB",
+            Font = new Font(Font.FontFamily, 8F),
+            ForeColor = Muted,
+            AutoSize = true,
+            Location = new Point(4, 30)
+        });
+        sidebar.Controls.Add(footer);
+        return sidebar;
+    }
+
+    private static Button NavButton(string text, string glyph, bool active = false)
+    {
+        var button = new Button
+        {
+            Text = $"  {glyph}   {text}",
+            AutoSize = false,
+            Width = 174,
+            Height = 42,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = active ? Color.FromArgb(237, 243, 252) : Sidebar,
+            ForeColor = active ? Ink : Muted,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 0, 0, 6),
+            Font = new Font("Microsoft YaHei UI", 9.5F, active ? FontStyle.Bold : FontStyle.Regular),
+            Cursor = Cursors.Hand,
+            TabStop = false
+        };
+        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 247, 250);
+        return button;
     }
 
     private Control BuildHeader()
@@ -177,9 +284,9 @@ internal sealed class ControlCenterForm : Form
         var titles = new Panel { Dock = DockStyle.Fill, BackColor = Canvas };
         titles.Controls.Add(new Label
         {
-            Text = "PHONEDECK · WINDOWS CONSOLE",
-            Font = new Font(Font.FontFamily, 9.5F, FontStyle.Bold),
-            ForeColor = Primary,
+            Text = "PHONEDECK  ·  控制中心",
+            Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
+            ForeColor = Muted,
             AutoSize = true,
             Location = new Point(0, 4)
         });
@@ -193,7 +300,7 @@ internal sealed class ControlCenterForm : Form
         });
         titles.Controls.Add(new Label
         {
-            Text = "同一 Wi-Fi 自动连接 · 手机语音直达当前电脑",
+            Text = "管理接收端、连接与设备状态",
             Font = new Font(Font.FontFamily, 10F),
             ForeColor = Muted,
             AutoSize = true,
@@ -203,12 +310,12 @@ internal sealed class ControlCenterForm : Form
         overallBadge.Text = "正在检查…";
         overallBadge.AutoSize = false;
         overallBadge.Dock = DockStyle.Right;
-        overallBadge.Size = new Size(190, 44);
+        overallBadge.Size = new Size(176, 36);
         overallBadge.TextAlign = ContentAlignment.MiddleCenter;
         overallBadge.Font = new Font(Font.FontFamily, 10F, FontStyle.Bold);
         overallBadge.ForeColor = Muted;
-        overallBadge.BackColor = Color.FromArgb(226, 235, 249);
-        overallBadge.Margin = new Padding(0, 20, 0, 25);
+        overallBadge.BackColor = Color.FromArgb(245, 245, 247);
+        overallBadge.Margin = new Padding(0, 24, 0, 30);
 
         header.Controls.Add(titles, 0, 0);
         header.Controls.Add(overallBadge, 1, 0);
@@ -302,8 +409,8 @@ internal sealed class ControlCenterForm : Form
         activityLog.Dock = DockStyle.Fill;
         activityLog.ReadOnly = true;
         activityLog.BorderStyle = BorderStyle.None;
-        activityLog.BackColor = Color.FromArgb(244, 248, 255);
-        activityLog.ForeColor = Muted;
+        activityLog.BackColor = Color.FromArgb(247, 249, 252);
+        activityLog.ForeColor = Ink;
         activityLog.Font = new Font("Cascadia Mono", 9F);
         activityLog.DetectUrls = false;
         layout.Controls.Add(activityLog, 0, 4);
@@ -348,6 +455,7 @@ internal sealed class ControlCenterForm : Form
         adbPathBox.BorderStyle = BorderStyle.FixedSingle;
         adbPathBox.BackColor = Color.White;
         adbPathBox.ForeColor = Ink;
+        adbPathBox.BorderStyle = BorderStyle.FixedSingle;
         adbPathBox.Margin = new Padding(0, 4, 0, 4);
         layout.Controls.Add(adbPathBox, 0, 6);
         layout.Controls.Add(saveButton, 0, 7);
@@ -604,7 +712,7 @@ internal sealed class ControlCenterForm : Form
                 audioValue.ForeColor = Muted;
                 overallBadge.Text = "需要启动";
                 overallBadge.ForeColor = Danger;
-                overallBadge.BackColor = Color.FromArgb(255, 232, 235);
+                overallBadge.BackColor = Color.FromArgb(252, 235, 236);
             }
             else
             {
@@ -627,7 +735,7 @@ internal sealed class ControlCenterForm : Form
                     overallBadge.Text = network.Address is null ? "等待 Wi-Fi" : "可以连接手机";
                     overallBadge.ForeColor = network.Address is null ? Warning : Success;
                     overallBadge.BackColor = network.Address is null
-                        ? Color.FromArgb(255, 244, 224) : Color.FromArgb(225, 247, 238);
+                        ? Color.FromArgb(255, 246, 226) : Color.FromArgb(229, 246, 238);
                 }
             }
 
@@ -730,11 +838,11 @@ internal sealed class ControlCenterForm : Form
 
     private static Control StatusCard(string title, Label value, Label detail)
     {
-        var card = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(6, 0, 6, 0) };
+        var card = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(4, 0, 4, 0) };
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(18, 14, 18, 12),
+            Padding = new Padding(16, 13, 16, 11),
             RowCount = 3,
             BackColor = Color.Transparent
         };
@@ -796,21 +904,25 @@ internal sealed class ControlCenterForm : Form
         };
     }
 
-    private static Button ActionButton(string text, Color color)
+    private static Button ActionButton(string text, Color color, bool secondary = false)
     {
         var button = new Button
         {
             Text = text,
             AutoSize = false,
-            Size = new Size(132, 44),
+            Size = new Size(126, 36),
             FlatStyle = FlatStyle.Flat,
             BackColor = color,
-            ForeColor = Color.White,
+            ForeColor = secondary ? Ink : Color.White,
             Cursor = Cursors.Hand,
-            Margin = new Padding(0, 6, 10, 6),
-            Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold)
+            Margin = new Padding(0, 4, 8, 4),
+            Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold)
         };
-        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.BorderSize = secondary ? 1 : 0;
+        button.FlatAppearance.BorderColor = secondary ? Color.FromArgb(210, 210, 215) : color;
+        button.FlatAppearance.MouseOverBackColor = secondary
+            ? Color.FromArgb(237, 237, 240)
+            : Color.FromArgb(0, 102, 204);
         return button;
     }
 
@@ -833,7 +945,7 @@ internal sealed class ControlCenterForm : Form
         protected override void OnResize(EventArgs eventArgs)
         {
             base.OnResize(eventArgs);
-            using var path = RoundedRectangle(ClientRectangle, 18);
+            using var path = RoundedRectangle(ClientRectangle, 14);
             Region = new Region(path);
         }
 
@@ -844,8 +956,8 @@ internal sealed class ControlCenterForm : Form
             var bounds = ClientRectangle;
             bounds.Width -= 1;
             bounds.Height -= 1;
-            using var path = RoundedRectangle(bounds, 18);
-            using var pen = new Pen(Color.FromArgb(208, 221, 241), 1F);
+            using var path = RoundedRectangle(bounds, 14);
+            using var pen = new Pen(Color.FromArgb(225, 225, 230), 1F);
             eventArgs.Graphics.DrawPath(pen, path);
         }
 

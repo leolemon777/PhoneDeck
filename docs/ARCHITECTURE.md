@@ -1,6 +1,6 @@
 # PhoneDeck 架构说明
 
-## 当前 Windows 1.6.0-dev.4 数据流
+## 当前 Android/Windows 1.6.0-dev.5 数据流
 
 ```text
 Android MainActivity
@@ -30,6 +30,9 @@ Windows PhoneDeck.Server        │
 - `KeyPickerActivity.java` / `KeyCatalog.java`：受控键位选择、规范化和显示。
 - `AudioStreamer.java`：AudioRecord、20 ms PCM 分块、音量计算和 HTTP chunked 音频流；
   TLS 建连期间最多缓存 1 秒 pre-roll，降低首音节丢失概率。
+- `PhoneAudioService.java` / `SharedAudioBroadcaster.java`：共享麦克风的前台服务所有权、
+  Wi-Fi/CPU 锁、在线接收端探测，以及单次 `AudioRecord` 到多台电脑的独立有界队列扇出；
+  单台断流按 500 ms–30 s 退避重连，不阻塞采音和其他接收端。
 - `BluetoothTransport.java`：手机作为 RFCOMM 服务端，当前只保存一个电脑连接。
 - `TargetDeviceManager.java`：保存已确认电脑的 ID、显示名、平台、手机端编号、候选 LAN
   地址、最近成功地址、访问密钥和证书指纹；IP 只作为可替换缓存。
@@ -47,24 +50,31 @@ Windows PhoneDeck.Server        │
   loopback 端口读取。Wi-Fi 端口独立监听 8766，未携带正确密钥返回 401。
 - `LanDiscoveryResponder.cs`：在 UDP 8767 回应不含密钥的最小身份信息，供已配对手机更新
   候选 IP；不会绕过 HTTPS 鉴权。
-- `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；只有虚拟音频输出真正启动后才公布会话。
+- `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；
+  `managed` 保留 pre-roll 与状态机，`shared` 立即持续写入虚拟声卡且绝不操作 Typeless。
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
+- `PhoneDeck.ControlCenter`：.NET 8 WPF 控制台，采用 Web2WPF Aether 主题资源；通过本地健康接口展示接收端、Wi-Fi、音频和 USB 状态，并管理进程、便携设置、Agent 快捷操作与系统托盘。
 
-### macOS 2.0.0-dev.1 预览组件
+### macOS 2.0.0-dev.2 预览组件
 
 - `macos/PhoneDeck.Receiver/Program.cs`：Kestrel 本地 HTTP 8765、安全 HTTPS 8766、健康检查、USB 配对和协议 v2 输入入口。
 - `MacKeyboardInput.cs`：CGEvent 输入后端、macOS 虚拟键码白名单、Unicode 文字、请求去重、宏限制和异常按键释放。
 - `ReceiverIdentity.cs` / `LanIdentity.cs`：在 `~/Library/Application Support/PhoneDeck` 持久化稳定电脑 ID、证书与随机访问令牌；敏感文件限制为当前用户读写。
 - `LanDiscoveryResponder.cs`：复用 UDP 8767 最小发现应答，仍需经过手机已有的证书固定、令牌和 `computerId` 校验。
 - `UsbWatchdog.cs`：在 Mac 检测 `adb` 并恢复 `adb reverse tcp:8765 tcp:8765`。
-- `PhoneDeck.Receiver.Tests`：在不调用 macOS 原生框架的情况下验证平台按键映射、目标校验、去重、文字输入和失败释放路径。
+- `CoreAudioHalOutput.cs` / `MacPhoneAudioBridge.cs`：AUHAL 定向绑定 BlackHole 设备 UID，
+  mono PCM16 复制为 stereo，并以有界实时环形缓冲处理欠载、溢出和断流。
+- `MacTypelessConfiguration.cs` / `MacTypeless.cs`：查找 Typeless 配置、读取或覆盖三种
+  快捷键与麦克风，并通过 macOS 14.2+ Core Audio 进程对象的 `isRunningInput` 核对采集。
+- `MacDictationSessionManager.cs`：复用受控听写的启动、停止、失败复位和断流清理语义。
+- `PhoneDeck.Receiver.Tests`：不调用原生框架即可验证平台按键映射、配置解析、mono→stereo、
+  环形缓冲、managed pre-roll、shared 立即输出、冲突和会话复位。
 
-当前 Mac 预览只声明 `fixedAction/keyChord/text/macro/secureLan/macInput` 能力，不声明
-`phoneAudio` 或 `managedDictation`。因此 Android 可以把快捷键和文字发送到 Mac，但会阻止
-手机语音入口误用尚未接入的 Core Audio 链路。此源码已在 Windows 上跨平台编译并通过测试，
-尚未在真实 Mac 上验证 CGEvent、TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
+Mac 现在声明 `phoneAudio/sharedMicrophone/managedDictation`；`audio.available` 仍以实际找到
+BlackHole 为准。源码已跨平台编译并通过测试，但尚未在真实 Mac 上验证 AUHAL、CGEvent、
+TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
 
 ## 当前单电脑/传输限制
 
@@ -74,7 +84,7 @@ Windows PhoneDeck.Server        │
 4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
 5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
 6. Windows 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
-7. macOS 快捷键接收端已有预览源码；Core Audio / BlackHole / Typeless 会话、蓝牙和正式签名尚未接入。
+7. macOS 双语音模式已有预览源码；真实 BlackHole/Typeless、蓝牙和正式签名仍待验收或接入。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -90,8 +100,7 @@ Android UI / Profiles / Actions
        Receiver Core
       ┌──────┴──────────┐
  Windows backend     macOS backend
- SendInput/WASAPI    CGEvent（预览已实现）
-                     Core Audio（待实现）
+ SendInput/WASAPI    CGEvent + AUHAL/BlackHole
 ```
 
 业务动作只描述语义：
@@ -109,11 +118,12 @@ Android UI / Profiles / Actions
 
 听写会话也必须绑定同一目标。JSON 端点使用 `protocolVersion`、`sessionId`、
 `targetComputerId`；PCM 流使用 `X-PhoneDeck-Protocol: 2`、
-`X-PhoneDeck-Session` 和 `X-PhoneDeck-Computer-Id` 请求头。服务端在进入音频或
+`X-PhoneDeck-Session`、`X-PhoneDeck-Computer-Id` 和可选
+`X-PhoneDeck-Audio-Mode: managed|shared` 请求头；缺省模式为 `managed`。服务端在进入音频或
 Typeless 状态机前校验目标，不匹配直接返回 400。
 
 `PRIMARY` 在 Windows 映射为 Ctrl，在 macOS 映射为 Command。当前 Android 编辑器仍保存
-Windows 风格的 `CTRL/WIN/ALT`；2.0.0-dev.1 Mac 后端为默认布局提供兼容映射，并对截图、
+Windows 风格的 `CTRL/WIN/ALT`；2.0.0-dev.2 Mac 后端为默认布局提供兼容映射，并对截图、
 窗口切换和输入法切换做专用转换。后续 Android 编辑器需要显式区分跨平台“主键”与真实
 Control / Option / Command，消除自定义组合的歧义。
 
@@ -121,8 +131,9 @@ Control / Option / Command，消除自定义组合的歧义。
 
 - 每个接收端生成稳定电脑 ID 和配对身份。
 - IP 地址、USB transport ID 和蓝牙地址是连接信息，不是产品身份。
-- 一台手机可以保持多个已配对电脑状态，但默认只有一个当前动作/语音目标。
-- 语音切换是受控会话交接，不是把同一麦克风流广播三份。
+- 一台手机可以保持多个已配对电脑状态；当前电脑只控制快捷键、文字、宏与 managed 听写目标。
+- `managed` 是单目标受控会话；`shared` 例外地把同一个 `sessionId` 的手机麦克风流扇出到
+  所有合格接收端，接收端只供音，由各电脑本机 Typeless 快捷键决定是否转写。
 - USB 共享切换器模式中只有当前物理端口在线；手机根据新主机健康响应自动更新目标。
 - 局域网模式必须使用独立的已鉴权入口，不能把当前 localhost API 原样开放。
 
@@ -152,9 +163,9 @@ Control / Option / Command，消除自定义组合的歧义。
 - 语音交接；
 - USB 共享切换器验证。
 
-当前 `1.6.0-dev.4` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
-自动发现和当前目标的快捷键/听写/PCM 路由。macOS `2.0.0-dev.1` 已新增兼容相同安全
-传输的 CGEvent 快捷键接收端预览。仍缺凭据撤销/重配、标准 mDNS/Bonjour、Mac 音频、
-真实 Mac 权限/网络验收和 Windows/macOS 三机联合实测。
+当前 `1.6.0-dev.5` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
+自动发现、单目标听写和共享麦克风扇出。macOS `2.0.0-dev.2` 已新增兼容相同安全传输的
+CGEvent、AUHAL/BlackHole 和 Typeless 会话预览。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
+真实 Mac 权限/音频验收和 Windows/macOS 三机联合压力测试。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。

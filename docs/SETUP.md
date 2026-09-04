@@ -122,6 +122,16 @@ adb shell am start -n com.codex.phonedeck/.MainActivity
 9. 听写中同一主按钮会变为“停止说话”，点击它完成本次文字；下方“暂停”会停止手机麦克风采集但保持会话，“继续”恢复采集。
 
 如果手机显示“USB 已连接 · 缺少 VB-CABLE”，语音按钮不会启动 Typeless。安装并启用 VB-CABLE 后，还必须在 Typeless 设置中把麦克风选为 `CABLE Output (VB-Audio Virtual Cable)`；保持“Auto-detect / 系统默认麦克风”会被 PhoneDeck 拒绝，以防误录电脑自带麦克风。
+
+### 双语音模式
+
+- “手机控制听写”保持原行为：先选当前电脑，再由手机按钮启动/停止该电脑的 Typeless。
+- “共享麦克风”需每次打开 App 后手动开启；手机向所有在线且音频就绪的电脑供音，
+  Typeless 只由各电脑自己的快捷键控制。不要期待开启共享本身产生文字。
+- 共享运行时 Android 会显示常驻通知；锁屏后应保留通知。通知中的“停止共享”和手机主
+  按钮都会关闭全部流并释放麦克风。App 或手机重启后不会自动采音。
+- Windows 端健康检查需包含 `sharedMicrophone`，且 `audio.available=true`；旧接收端会
+  被跳过并提示需要更新。蓝牙只传快捷键，不参与音频扇出。
 10. 电脑上先把光标放到真正的文字输入框。
 
 服务器健康检查：

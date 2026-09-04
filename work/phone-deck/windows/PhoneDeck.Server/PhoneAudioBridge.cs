@@ -20,6 +20,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private CancellationTokenSource? activeCancellation;
     private ActiveStream? activeStream;
     private string? activeSessionId;
+    private AudioStreamMode? activeMode;
 
     private sealed class ActiveStream
     {
@@ -27,6 +28,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         public required BufferedWaveProvider Provider { get; init; }
         public required object PlaybackGate { get; init; }
         public required ManualResetEventSlim Ended { get; init; }
+        public required AudioStreamMode Mode { get; init; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
         public bool PlaybackReleased;
         public long ReleasedAtMs;
@@ -50,6 +52,17 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             lock (sessionSync)
             {
                 return activeSessionId;
+            }
+        }
+    }
+
+    internal string? ActiveMode
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                return activeMode?.ToWireValue();
             }
         }
     }
@@ -169,12 +182,13 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     internal async Task<long> StreamAsync(
         Stream input,
         string sessionId,
-        Action<string> sessionEnded,
+        AudioStreamMode mode,
+        Action<string, AudioStreamMode> sessionEnded,
         CancellationToken cancellationToken)
     {
         if (!await streamGate.WaitAsync(0, cancellationToken))
         {
-            throw new InvalidOperationException("已有手机麦克风正在传输");
+            throw new AudioStreamConflictException("已有手机麦克风正在传输");
         }
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -186,6 +200,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             Preroll = new PreRollBuffer(PreRollHoldBytes),
             PlaybackGate = new object(),
             Ended = new ManualResetEventSlim(false),
+            Mode = mode,
             Provider = new BufferedWaveProvider(new WaveFormat(SampleRate, 16, 1))
             {
                 // 700ms 实时余量 + pre-roll 突发灌入 + 排空期间的到达数据。
@@ -223,6 +238,13 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 activeSessionId = sessionId;
                 activeCancellation = sessionCancellation;
                 activeStream = stream;
+                activeMode = mode;
+            }
+            if (mode == AudioStreamMode.Shared)
+            {
+                // 共享麦克风长期向虚拟声卡供音，不等待或控制 Typeless。
+                // 每台电脑自己的 Typeless 快捷键决定何时开始采集。
+                ReleasePreRoll(stream, sessionId, "shared");
             }
 
             var bytes = new byte[16 * 1024];
@@ -326,6 +348,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                     activeCancellation = null;
                     activeSessionId = null;
                     activeStream = null;
+                    activeMode = null;
                 }
             }
             // Ended 事件不 Dispose：WaitForSessionEnd 的等待方可能仍持有引用。
@@ -346,7 +369,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 // 否则快速“停止→重新开始”时，旧流的 AudioEnded
                 // 可能等待管理器锁，而新流又在等待旧流释放闸门。
                 streamGate.Release();
-                sessionEnded(sessionId);
+                sessionEnded(sessionId, mode);
             }
         }
     }

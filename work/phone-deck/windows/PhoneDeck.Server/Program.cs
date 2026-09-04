@@ -112,7 +112,7 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.4",
+        version = "1.6.0-dev.5",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -121,7 +121,7 @@ app.MapGet("/api/health", () =>
         capabilities = new[]
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
-            "managedDictation", "secureLan"
+            "managedDictation", "sharedMicrophone", "secureLan"
         },
         audio = new
         {
@@ -129,6 +129,7 @@ app.MapGet("/api/health", () =>
             device = snapshot.VirtualCableDevice,
             streaming = audioBridge.IsStreaming,
             sessionId = audioBridge.ActiveSessionId,
+            mode = audioBridge.ActiveMode,
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
@@ -216,7 +217,8 @@ app.MapGet("/api/diagnostics", async () =>
             available = snapshot.AudioAvailable,
             device = snapshot.VirtualCableDevice,
             streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.ActiveSessionId
+            sessionId = audioBridge.ActiveSessionId,
+            mode = audioBridge.ActiveMode
         },
         lan = new
         {
@@ -307,18 +309,47 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
         return Results.BadRequest(new { ok = false, error = "无效的音频 sessionId" });
     }
 
+    AudioStreamMode audioMode;
+    try
+    {
+        audioMode = AudioStreamModes.Parse(
+            request.Headers["X-PhoneDeck-Audio-Mode"].FirstOrDefault());
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+
     try
     {
         var bytes = await audioBridge.StreamAsync(
             request.Body,
             sessionId,
-            dictationSessions.AudioEnded,
+            audioMode,
+            (endedSessionId, endedMode) =>
+            {
+                if (endedMode.ControlsTypeless())
+                {
+                    dictationSessions.AudioEnded(endedSessionId);
+                }
+            },
             cancellationToken);
-        return Results.Ok(new { ok = true, sessionId, bytes });
+        return Results.Ok(new
+        {
+            ok = true,
+            sessionId,
+            mode = audioMode.ToWireValue(),
+            bytes
+        });
     }
     catch (OperationCanceledException)
     {
         return Results.StatusCode(499);
+    }
+    catch (AudioStreamConflictException exception)
+    {
+        Console.Error.WriteLine($"音频连接冲突：{exception.Message}");
+        return Results.Conflict(new { ok = false, error = exception.Message });
     }
     catch (InvalidOperationException exception)
     {

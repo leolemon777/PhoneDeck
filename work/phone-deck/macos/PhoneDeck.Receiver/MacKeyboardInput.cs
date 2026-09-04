@@ -154,6 +154,25 @@ internal sealed class MacKeyboardInput
     internal bool ExecuteFixedOnce(string action, string? text, string? requestId) =>
         ExecuteOnce(requestId, () => ExecuteFixed(action, text));
 
+    internal void SendTypelessShortcut(string binding)
+    {
+        var tokens = binding.Split(
+            '+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length is < 1 or > 4)
+        {
+            throw new ArgumentException("Typeless 快捷键必须包含 1–4 个键");
+        }
+        var keys = tokens.Select(NormalizeKeyName).Select(MapKeyName)
+            .OrderBy(key => key.IsModifier ? key.ModifierOrder : 10)
+            .ToArray();
+        if (keys.Count(key => !key.IsModifier) > 1
+            || (keys.All(key => key.IsModifier) && keys.Length != 1))
+        {
+            throw new ArgumentException("Typeless 快捷键格式无效");
+        }
+        SendChord(keys, 55);
+    }
+
     internal MacKey[] ParseKeyChord(string[]? keyNames, out string description)
     {
         if (keyNames is null || keyNames.Length is < 1 or > 4)
@@ -239,10 +258,20 @@ internal sealed class MacKeyboardInput
         }
         return name switch
         {
-            "COMMAND" => Modifier(name, 55, 0, MacModifierFlags.Command),
-            "CONTROL" => Modifier(name, 59, 1, MacModifierFlags.Control),
-            "SHIFT" => Modifier(name, 56, 2, MacModifierFlags.Shift),
-            "OPTION" => Modifier(name, 58, 3, MacModifierFlags.Option),
+            "COMMAND" or "CMD" or "META" or "LEFTCOMMAND" or "LEFTMETA"
+                or "RIGHTCOMMAND" or "RIGHTMETA" =>
+                Modifier("COMMAND", name is "RIGHTCOMMAND" or "RIGHTMETA"
+                        ? (ushort)54 : (ushort)55,
+                    0, MacModifierFlags.Command),
+            "CONTROL" or "CTRL" or "LEFTCONTROL" or "RIGHTCONTROL" =>
+                Modifier("CONTROL", name == "RIGHTCONTROL" ? (ushort)62 : (ushort)59,
+                    1, MacModifierFlags.Control),
+            "SHIFT" or "LEFTSHIFT" or "RIGHTSHIFT" =>
+                Modifier("SHIFT", name == "RIGHTSHIFT" ? (ushort)60 : (ushort)56,
+                    2, MacModifierFlags.Shift),
+            "OPTION" or "ALT" or "LEFTOPTION" or "LEFTALT" or "RIGHTOPTION" or "RIGHTALT" =>
+                Modifier("OPTION", name is "RIGHTOPTION" or "RIGHTALT" ? (ushort)61 : (ushort)58,
+                    3, MacModifierFlags.Option),
             "FN" or "FUNCTION" => Modifier("FN", 63, 4, MacModifierFlags.Function),
             "BACKTICK" or "`" => new MacKey("BACKTICK", 50),
             "ENTER" or "RETURN" => new MacKey("ENTER", 36),

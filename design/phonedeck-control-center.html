@@ -1,0 +1,1522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PhoneDeck 电脑控制台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --bg-deep: #efeff1;
+      --sidebar: #fbfbfd;
+      --surface: #ffffff;
+      --surface-2: #f5f5f7;
+      --fg: #1d1d1f;
+      --muted: #6e6e73;
+      --faint: #86868b;
+      --border: #e5e5ea;
+      --border-strong: #d1d1d6;
+      --accent: #0071e3;
+      --accent-hover: #0077ed;
+      --accent-fg: #ffffff;
+      --teal: #218c83;
+      --ok: #2da44e;
+      --warn: #bf7e00;
+      --danger: #d22a2f;
+      --radius: 14px;
+      --shadow: 0 18px 48px rgba(0, 0, 0, 0.10);
+      --font: "IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+      --mono: "IBM Plex Mono", "Cascadia Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: var(--font);
+      color: var(--fg);
+      background: var(--bg-deep);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font-family: inherit; }
+    button {
+      cursor: pointer;
+      background: transparent;
+      color: inherit;
+    }
+    button:disabled { cursor: not-allowed; }
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .stage {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 28px 20px 36px;
+    }
+    .stage-bar {
+      width: 1200px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .stage-label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--faint);
+      font-weight: 600;
+    }
+    .scene-switch {
+      display: flex;
+      gap: 6px;
+      padding: 4px;
+      background: var(--sidebar);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .scene-switch button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 7px 12px;
+      border-radius: 8px;
+    }
+    .scene-switch button:hover { color: var(--fg); background: rgba(0, 113, 227, 0.06); }
+    .scene-switch button.is-on {
+      background: var(--surface-2);
+      color: var(--fg);
+      box-shadow: inset 0 0 0 1px var(--border-strong);
+    }
+
+    .window {
+      width: 1200px;
+      height: 820px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .titlebar {
+      height: 36px;
+      flex: 0 0 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-left: 14px;
+      background: var(--sidebar);
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+    }
+    .titlebar-app {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .titlebar-app b { color: var(--fg); font-weight: 600; }
+    .caption { display: flex; align-items: center; height: 100%; padding: 0 14px 0 8px; }
+    .caption button {
+      width: 12px;
+      height: 12px;
+      border: 0;
+      border-radius: 50%;
+      background: #d1d1d6;
+      color: transparent;
+      display: block;
+      padding: 0;
+      margin-left: 6px;
+    }
+    .caption button:first-child { background: #ffbd2e; }
+    .caption button:nth-child(2) { background: #28c840; }
+    .caption button.cap-close { background: #ff5f57; }
+    .caption button:hover { filter: brightness(0.94); }
+    .caption button svg { display: none; }
+
+    .shell {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 188px 1fr;
+    }
+
+    .sidebar {
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px 14px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+    .mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      flex: 0 0 32px;
+    }
+    .brand-name { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; }
+    .brand-sub { font-size: 9.5px; color: var(--faint); margin-top: 1px; letter-spacing: 0.12em; white-space: nowrap; }
+
+    .nav-label {
+      font-size: 10px;
+      color: var(--faint);
+      letter-spacing: 0.14em;
+      font-weight: 600;
+      padding: 0 8px 8px;
+    }
+    .nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      padding: 9px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .nav button svg { flex: 0 0 16px; opacity: 0.85; }
+    .nav button:hover { background: rgba(0, 113, 227, 0.06); color: var(--fg); }
+    .nav button.is-on {
+      background: rgba(0, 113, 227, 0.08);
+      color: var(--fg);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .sidebar-foot {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .sidebar-foot .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 0 4px rgba(45, 164, 78, 0.14);
+    }
+    .foot-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+    .foot-copy { margin: 6px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
+    .foot-ver { margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 18px 14px;
+      gap: 12px;
+    }
+
+    .page { display: none; min-height: 0; flex: 1; flex-direction: column; gap: 12px; }
+    .page.is-on { display: flex; }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 52px;
+    }
+    .kicker {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .topbar h1 {
+      margin: 4px 0 0;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+    .lede { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      padding-top: 2px;
+      max-width: 62%;
+      flex-wrap: nowrap;
+    }
+    .status-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      margin-right: 4px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge .pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--ok);
+    }
+    .badge[data-tone="ok"] { color: var(--ok); border-color: rgba(27, 145, 101, 0.35); }
+    .badge[data-tone="warn"] { color: var(--warn); border-color: rgba(190, 122, 23, 0.4); }
+    .badge[data-tone="danger"] { color: var(--danger); border-color: rgba(190, 61, 67, 0.4); }
+    .badge[data-tone="idle"] { color: var(--muted); }
+    .checked { font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+    .btn {
+      height: 32px;
+      min-height: 32px;
+      padding: 0 12px;
+      border-radius: 9px;
+      border: 1px solid transparent;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      flex-shrink: 0;
+      transition: background 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+    }
+    .btn-primary { background: var(--accent); color: var(--accent-fg); }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--fg);
+      border-color: var(--border-strong);
+    }
+    .btn-secondary:hover:not(:disabled) { border-color: #b8b8be; background: #f0f0f2; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { color: var(--danger); border-color: rgba(210, 42, 47, 0.5); background: rgba(210, 42, 47, 0.08); }
+    .btn:disabled {
+      background: var(--surface-2);
+      color: var(--faint);
+      border-color: var(--border);
+      opacity: 1;
+    }
+    .btn-block { width: 100%; height: 36px; min-height: 36px; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px 11px;
+      min-height: 92px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+    .stat-top { display: flex; justify-content: space-between; align-items: center; }
+    .stat-k { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; }
+    .stat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+    .stat[data-tone="ok"] .stat-dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(45, 164, 78, 0.14); }
+    .stat[data-tone="warn"] .stat-dot { background: var(--warn); box-shadow: 0 0 0 4px rgba(191, 126, 0, 0.14); }
+    .stat[data-tone="danger"] .stat-dot { background: var(--danger); box-shadow: 0 0 0 4px rgba(210, 42, 47, 0.14); }
+    .stat[data-tone="teal"] .stat-dot { background: var(--teal); box-shadow: 0 0 0 4px rgba(33, 140, 131, 0.14); }
+    .stat-v {
+      margin-top: 8px;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+    .stat[data-tone="ok"] .stat-v,
+    .stat[data-tone="teal"] .stat-v { color: var(--ok); }
+    .stat[data-tone="warn"] .stat-v { color: var(--warn); }
+    .stat[data-tone="danger"] .stat-v { color: var(--danger); }
+    .stat[data-tone="idle"] .stat-v { color: var(--muted); }
+    .stat-d { margin-top: 5px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .workspace {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 332px;
+      gap: 10px;
+    }
+    .workspace.is-collapsed { grid-template-columns: minmax(0, 1fr) 44px; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-h {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px 0;
+    }
+    .panel-h h2 { margin: 0; font-size: 13.5px; font-weight: 650; }
+    .panel-h p { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
+    .icon-btn {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      display: grid; place-items: center;
+    }
+    .icon-btn:hover { color: var(--fg); background: var(--surface-2); }
+
+    .topo { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .topo-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 12px;
+      background: #f7f9fc;
+    }
+    body[data-scene="empty"] .topo-banner,
+    body[data-scene="offline"] .topo-banner { display: flex; }
+    .topo-banner b { display: block; font-size: 12.5px; }
+    .topo-banner span { display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 112px 1fr 132px 1fr 112px;
+      align-items: center;
+      gap: 0;
+      min-height: 118px;
+    }
+    .node {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 12px;
+      padding: 10px 8px;
+      text-align: center;
+      min-height: 86px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    .node strong { font-size: 12.5px; font-weight: 650; }
+    .node em { font-style: normal; font-size: 10.5px; color: var(--muted); }
+    .node[data-live="on"] { border-color: rgba(33, 140, 131, 0.45); }
+    .node[data-live="down"] { border-color: rgba(190, 61, 67, 0.4); opacity: 0.72; }
+    .node[data-live="idle"] { opacity: 0.55; border-style: dashed; }
+    .link {
+      height: 2px;
+      margin: 0 6px;
+      background: var(--border-strong);
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+    .link span {
+      position: absolute;
+      top: -18px;
+      font-size: 10px;
+      color: var(--muted);
+      background: var(--surface);
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+    .link i {
+      position: absolute;
+      bottom: -16px;
+      font-style: normal;
+      font-size: 10px;
+      color: var(--faint);
+      font-family: var(--mono);
+    }
+    .link[data-live="on"] { background: var(--teal); }
+    .link[data-live="on"] span { color: var(--teal); }
+    .link[data-live="standby"] { background: transparent; border-top: 2px dashed var(--border-strong); height: 0; }
+    .link[data-live="off"] { opacity: 0.35; }
+
+    .usb-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 4px;
+    }
+    .usb-line .rail {
+      flex: 1;
+      height: 2px;
+      border-radius: 2px;
+      background: transparent;
+      border-top: 2px dashed var(--border-strong);
+      height: 0;
+      align-self: center;
+    }
+    .usb-line[data-live="on"] .rail { background: var(--teal); }
+    .usb-tag {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      font-family: var(--mono);
+    }
+    .usb-line[data-live="on"] .usb-tag { color: var(--teal); }
+
+    .device-strip {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f7f9fc;
+      border: 1px solid var(--border);
+    }
+    .device-strip .id-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .device-strip .id { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      font-size: 10.5px;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+    }
+    button.chip {
+      color: var(--fg);
+      background: var(--surface-2);
+    }
+    button.chip:hover { border-color: var(--border-strong); }
+
+    .settings { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: auto; }
+    .settings > * { flex-shrink: 0; }
+    .workspace.is-collapsed .settings-body { display: none; }
+    .workspace.is-collapsed .settings {
+      padding: 8px 6px;
+      align-items: center;
+    }
+    .rail-label {
+      display: none;
+      writing-mode: vertical-rl;
+      letter-spacing: 0.18em;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 10px;
+    }
+    .workspace.is-collapsed .rail-label { display: block; }
+
+    .switch-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 10px;
+      align-items: center;
+      padding: 6px 8px;
+      border-radius: 10px;
+    }
+    .switch-row:hover { background: rgba(45, 111, 216, 0.05); }
+    .switch-row b { font-size: 12.5px; font-weight: 600; }
+    .switch-row span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+    .switch {
+      width: 36px; height: 20px; border-radius: 999px;
+      border: 0; background: #cbd5e1; position: relative;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--fg);
+      top: 3px; left: 3px;
+      transition: left 140ms ease, background 140ms ease;
+    }
+    .switch[aria-checked="true"] { background: var(--teal); }
+    .switch[aria-checked="true"]::after { left: 19px; background: #ffffff; }
+
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 8px 6px;
+    }
+    .field input[type="text"] {
+      width: 100%;
+      height: 34px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      color: var(--fg);
+      padding: 0 10px;
+      font-size: 11px;
+      font-family: var(--mono);
+      overflow-x: auto;
+      text-overflow: ellipsis;
+    }
+    .field input:hover { border-color: var(--border-strong); }
+    .hint { font-size: 11px; color: var(--faint); line-height: 1.45; padding: 0 8px; }
+
+    .log-panel { flex: 0 0 178px; min-height: 0; }
+    .log-tools { display: flex; align-items: center; gap: 6px; }
+    .seg {
+      display: flex; gap: 2px; padding: 3px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+    }
+    .seg button {
+      border: 0; background: transparent; color: var(--muted);
+      font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;
+    }
+    .seg button.is-on { background: var(--surface-2); color: var(--fg); }
+    .log-stream {
+      flex: 1; min-height: 0; overflow: auto;
+      margin: 8px 10px 10px;
+      padding: 6px 6px;
+      border-radius: 10px;
+      background: #f8fafc;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .log-row { display: grid; grid-template-columns: 64px 44px 1fr; gap: 8px; padding: 2px 6px; border-radius: 6px; }
+    .log-row:hover { background: rgba(45, 111, 216, 0.05); }
+    .log-time { color: var(--faint); }
+    .lvl { font-weight: 500; }
+    .lvl-INFO { color: var(--teal); }
+    .lvl-WARN { color: var(--warn); }
+    .lvl-ERROR { color: var(--danger); }
+    .log-empty { padding: 18px 8px; text-align: center; color: var(--faint); font-family: var(--font); font-size: 12px; }
+
+    .page-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .block { padding: 14px; }
+    .block h2 { margin: 0 0 6px; font-size: 14px; }
+    .block p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+    .kv { margin-top: 12px; display: grid; gap: 8px; }
+    .kv div {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12.5px;
+    }
+    .kv span { color: var(--muted); }
+    .kv b { font-weight: 600; font-family: var(--mono); font-size: 12px; }
+    .steps { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+    .steps li {
+      display: grid; grid-template-columns: 22px 1fr; gap: 8px;
+      font-size: 12.5px; color: var(--muted); line-height: 1.45;
+    }
+    .num {
+      width: 22px; height: 22px; border-radius: 7px;
+      display: grid; place-items: center;
+      background: var(--surface-2); color: var(--fg); font-size: 11px; font-weight: 700;
+    }
+
+    .table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; padding: 8px 8px; border-bottom: 1px solid var(--border); }
+    .table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .table input[type="text"] {
+      width: 100%; height: 30px; border-radius: 8px; border: 1px solid var(--border);
+      background: #ffffff; color: var(--fg); padding: 0 8px; font-size: 12px;
+    }
+    .check {
+      width: 16px; height: 16px; accent-color: var(--teal);
+    }
+
+    .empty-device {
+      border: 1px dashed var(--border-strong);
+      border-radius: var(--radius);
+      padding: 28px 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%) translateY(12px);
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      color: var(--fg);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+      z-index: 50;
+    }
+    .toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    .modal {
+      position: fixed; inset: 0; display: none;
+      place-items: center;
+      background: rgba(31, 41, 55, 0.22);
+      z-index: 40;
+    }
+    .modal.is-on { display: grid; }
+    .dialog {
+      width: 760px;
+      max-width: calc(100vw - 32px);
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px 22px 18px;
+    }
+    .dialog h3 { margin: 0; font-size: 20px; }
+    .dialog .sub { margin: 6px 0 16px; color: var(--muted); font-size: 13px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .err { display: none; color: var(--danger); font-size: 12px; margin-top: 8px; }
+
+    .log-search {
+      height: 32px; width: 220px; border-radius: 9px;
+      border: 1px solid var(--border); background: #ffffff;
+      color: var(--fg); padding: 0 10px; font-size: 12px;
+    }
+
+    .log-stream::-webkit-scrollbar,
+    .page-scroll::-webkit-scrollbar,
+    .settings::-webkit-scrollbar { width: 8px; }
+    .log-stream::-webkit-scrollbar-thumb,
+    .page-scroll::-webkit-scrollbar-thumb,
+    .settings::-webkit-scrollbar-thumb {
+      background: #cbd5e1; border-radius: 8px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body data-scene="online" data-page="overview">
+  <div class="stage">
+    <div class="stage-bar">
+      <div class="stage-label">PhoneDeck · 场景预览</div>
+      <div class="scene-switch" role="tablist" aria-label="视觉状态">
+        <button type="button" data-scene="empty">空状态</button>
+        <button type="button" data-scene="offline">离线</button>
+        <button type="button" data-scene="usb">USB 已连接</button>
+        <button type="button" data-scene="online" class="is-on">无线就绪</button>
+      </div>
+    </div>
+
+    <div class="window" role="application" aria-label="PhoneDeck 电脑控制台">
+      <div class="titlebar">
+        <div class="titlebar-app">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="8" width="16" height="12" rx="3" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M8 8V7a4 4 0 0 1 8 0v1" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+          <span><b>PhoneDeck 电脑控制台</b> · 1.6.0-dev.4</span>
+        </div>
+        <div class="caption">
+          <button type="button" id="btnMin" aria-label="最小化" title="最小化到托盘">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5h8" stroke="currentColor" stroke-width="1.2"/></svg>
+          </button>
+          <button type="button" aria-label="最大化" disabled title="固定 1200×820">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+          </button>
+          <button type="button" class="cap-close" id="btnClose" aria-label="关闭">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" stroke-width="1.2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="mark" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M6 11a6 6 0 0 0 12 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M12 17v3M9 20h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div>
+              <div class="brand-name">PHONEDECK</div>
+              <div class="brand-sub">CONSOLE</div>
+            </div>
+          </div>
+          <div class="nav-label">工作区</div>
+          <nav class="nav" aria-label="主导航">
+            <button type="button" class="is-on" data-page="overview">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="3" width="8" height="5" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="10" width="8" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="13" width="8" height="8" rx="2" stroke="currentColor" stroke-width="1.6"/></svg>
+              概览
+            </button>
+            <button type="button" data-page="connection">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 12h8M7 8a4 4 0 1 0 0 8M17 8a4 4 0 1 1 0 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              连接
+            </button>
+            <button type="button" data-page="devices">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="7" y="3" width="10" height="18" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M11 18h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              设备
+            </button>
+            <button type="button" data-page="logs">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 5h12M6 12h12M6 19h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              日志
+            </button>
+            <button type="button" data-page="settings">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              设置
+            </button>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="foot-row"><span class="dot"></span> 本地优先</div>
+            <p class="foot-copy">配对证书与访问密钥只保存在本机 data 目录，不经过云端转发。</p>
+            <div class="foot-ver">v1.6.0-dev.4</div>
+          </div>
+        </aside>
+
+        <section class="main">
+          <!-- Overview -->
+          <div class="page is-on" id="page-overview">
+            <header class="topbar">
+              <div>
+                <div class="kicker">PHONEDECK / 概览</div>
+                <h1>电脑控制台</h1>
+                <p class="lede" id="overviewLede">同一 Wi-Fi 自动连接 · 手机语音直达当前电脑</p>
+              </div>
+              <div class="top-actions">
+                <div class="status-meta">
+                  <span class="badge" id="overallBadge" data-tone="ok"><span class="pulse"></span><span id="overallText">可以连接手机</span></span>
+                  <span class="checked" id="lastChecked">最后检查 —</span>
+                </div>
+                <button class="btn btn-primary" id="btnStart" type="button">启动接收端</button>
+                <button class="btn btn-secondary" id="btnRestart" type="button">重新启动</button>
+                <button class="btn btn-ghost" id="btnStop" type="button">停止</button>
+              </div>
+            </header>
+
+            <div class="cards" id="statusCards">
+              <article class="stat" data-tone="ok">
+                <div class="stat-top"><span class="stat-k">接收端</span><span class="stat-dot"></span></div>
+                <div class="stat-v" id="vReceiver">运行中</div>
+                <div class="stat-d" id="dReceiver">DESKTOP-74F6FT5 · 1.6.0-dev.4</div>
+              </article>
+              <article class="stat" data-tone="teal">
+                <div class="stat-top"><span class="stat-k">Wi-Fi</span><span class="stat-dot"></span></div>
+                <div class="stat-v" id="vWifi">192.168.0.102</div>
+                <div class="stat-d" id="dWifi">WLAN · 手机需连接同一网络</div>
+              </article>
+              <article class="stat" data-tone="ok">
+                <div class="stat-top"><span class="stat-k">手机音频</span><span class="stat-dot"></span></div>
+                <div class="stat-v" id="vAudio">已就绪</div>
+                <div class="stat-d" id="dAudio">VB-CABLE · Typeless</div>
+              </article>
+              <article class="stat" data-tone="idle">
+                <div class="stat-top"><span class="stat-k">USB 兜底</span><span class="stat-dot"></span></div>
+                <div class="stat-v" id="vUsb">未连接</div>
+                <div class="stat-d" id="dUsb">Wi-Fi 模式无需插线</div>
+              </article>
+            </div>
+
+            <div class="workspace" id="workspace">
+              <article class="panel">
+                <div class="panel-h">
+                  <div>
+                    <h2>连接拓扑</h2>
+                    <p id="topoCaption">当前设备 · 证书固定 HTTPS · 协议 v2</p>
+                  </div>
+                  <span class="chip" id="topoChip">通道正常</span>
+                </div>
+                <div class="topo">
+                  <div class="topo-banner" id="topoBanner">
+                    <div>
+                      <b id="bannerTitle">尚未启动接收端</b>
+                      <span id="bannerCopy">启动后，手机会在同一 Wi-Fi 上发现这台电脑；首次配对仍走 USB。</span>
+                    </div>
+                    <button class="btn btn-primary" type="button" data-start>启动接收端</button>
+                  </div>
+                  <div class="flow">
+                    <div class="node" id="nodePhone" data-live="on">
+                      <strong>Android 手机</strong>
+                      <em id="phoneMeta">已配对 · 待发现</em>
+                    </div>
+                    <div class="link" id="linkWifi" data-live="on">
+                      <span>Wi-Fi HTTPS</span>
+                      <i>:8766</i>
+                    </div>
+                    <div class="node" id="nodeRecv" data-live="on">
+                      <strong>本机接收端</strong>
+                      <em>DESKTOP-74F6FT5</em>
+                    </div>
+                    <div class="link" id="linkAudio" data-live="on">
+                      <span>WASAPI</span>
+                      <i>CABLE In</i>
+                    </div>
+                    <div class="node" id="nodeType" data-live="on">
+                      <strong>Typeless</strong>
+                      <em>听写会话</em>
+                    </div>
+                  </div>
+                  <div class="usb-line" id="usbLine" data-live="standby">
+                    <span class="usb-tag">USB ADB :8765</span>
+                    <div class="rail"></div>
+                    <span class="usb-tag" id="usbLineState">待命</span>
+                  </div>
+                  <div class="device-strip">
+                    <div class="id-row">
+                      <div>
+                        <div style="font-size:12.5px;font-weight:650;">当前电脑 · DESKTOP-74F6FT5</div>
+                        <div class="id" id="computerIdLine" title="31dc403f-dec3-4b42-9c31-8aba34704e6e">31dc403f-dec3-4b42-9c31-8aba34704e6e</div>
+                      </div>
+                      <button class="chip" id="btnCopyId" type="button">复制 ID</button>
+                    </div>
+                    <div class="chips">
+                      <span class="chip">windows x64</span>
+                      <span class="chip">phoneAudio</span>
+                      <span class="chip">secureLan</span>
+                      <span class="chip">managedDictation</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <aside class="panel" id="settingsPanel">
+                <div class="panel-h">
+                  <div class="settings-body">
+                    <h2>连接设置</h2>
+                    <p>保存后会重启接收端</p>
+                  </div>
+                  <button class="icon-btn" id="btnCollapse" type="button" aria-label="折叠设置" title="折叠">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+                <div class="rail-label">设置</div>
+                <div class="settings settings-body">
+                  <div class="switch-row">
+                    <div><b>Wi-Fi 自动发现</b><span>同一局域网内应答 UDP 8767</span></div>
+                    <button class="switch" type="button" role="switch" aria-checked="true" data-key="lanDiscovery" aria-label="Wi-Fi 自动发现"></button>
+                  </div>
+                  <div class="switch-row">
+                    <div><b>USB 自动恢复</b><span>插线时重建 adb reverse</span></div>
+                    <button class="switch" type="button" role="switch" aria-checked="true" data-key="usbWatchdog" aria-label="USB 自动恢复"></button>
+                  </div>
+                  <div class="switch-row">
+                    <div><b>登录后启动</b><span>开机打开接收端与本界面</span></div>
+                    <button class="switch" type="button" role="switch" aria-checked="false" data-key="autoStart" aria-label="登录后启动"></button>
+                  </div>
+                  <button class="btn btn-secondary btn-block" id="btnAgent" type="button">配置 Agent 操作</button>
+                  <div class="field">
+                    <label for="adbPath">ADB 路径（USB 兜底）</label>
+                    <input id="adbPath" type="text" spellcheck="false" title="E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台\platform-tools\adb.exe" value="E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台\platform-tools\adb.exe" />
+                  </div>
+                  <button class="btn btn-primary btn-block" id="btnSave" type="button">保存并应用</button>
+                </div>
+              </aside>
+            </div>
+
+            <article class="panel log-panel">
+              <div class="panel-h">
+                <div>
+                  <h2>运行日志</h2>
+                  <p>仅本机 · 带级别着色</p>
+                </div>
+                <div class="log-tools">
+                  <div class="seg" role="group" aria-label="日志级别">
+                    <button type="button" class="is-on" data-filter="all">全部</button>
+                    <button type="button" data-filter="INFO">信息</button>
+                    <button type="button" data-filter="WARN">警告</button>
+                    <button type="button" data-filter="ERROR">错误</button>
+                  </div>
+                </div>
+              </div>
+              <div class="log-stream" id="logStream" aria-live="polite"></div>
+            </article>
+          </div>
+
+          <!-- Connection -->
+          <div class="page" id="page-connection">
+            <header class="topbar">
+              <div>
+                <div class="kicker">PHONEDECK / 连接</div>
+                <h1>传输通道</h1>
+                <p class="lede">USB 负责首次配对，日常走证书固定的 Wi-Fi；USB 与蓝牙作为兜底。</p>
+              </div>
+            </header>
+            <div class="page-scroll">
+              <div class="split">
+                <article class="panel block">
+                  <h2>端口与发现</h2>
+                  <p>健康检查来自 http://127.0.0.1:8765/api/health，局域网入口独立鉴权。</p>
+                  <div class="kv">
+                    <div><span>USB / 本机 API</span><b>127.0.0.1:8765</b></div>
+                    <div><span>Wi-Fi HTTPS</span><b>:8766 · 访问密钥 + 证书固定</b></div>
+                    <div><span>UDP 发现</span><b>:8767 · 不含令牌</b></div>
+                    <div><span>蓝牙</span><b>RFCOMM 快捷键 · 无音频</b></div>
+                    <div><span>候选地址</span><b id="addrLine">192.168.0.102</b></div>
+                  </div>
+                </article>
+                <article class="panel block">
+                  <h2>配对步骤</h2>
+                  <p>与现网 Windows MVP 一致，不增加二维码或云端中继。</p>
+                  <ol class="steps">
+                    <li><span class="num">1</span><span>电脑与手机连同一 Wi-Fi，不必开热点。</span></li>
+                    <li><span class="num">2</span><span>首次用 USB 建立 adb reverse tcp:8765，交换配对资料。</span></li>
+                    <li><span class="num">3</span><span>手机显示 Wi-Fi 在线后即可拔线，之后走 HTTPS 8766。</span></li>
+                    <li><span class="num">4</span><span>IP 变化时靠 UDP 8767 更新；广播被禁则再插一次 USB。</span></li>
+                  </ol>
+                </article>
+              </div>
+              <article class="panel block">
+                <h2>通道策略</h2>
+                <p>语音与快捷键只进入当前目标电脑。USB 共享切换器下只有当前物理端口在线；局域网发现结果仍须通过 HTTPS、密钥、证书指纹和 computerId 校验。</p>
+              </article>
+            </div>
+          </div>
+
+          <!-- Devices -->
+          <div class="page" id="page-devices">
+            <header class="topbar">
+              <div>
+                <div class="kicker">PHONEDECK / 设备</div>
+                <h1>当前电脑与手机</h1>
+                <p class="lede">身份是稳定 computerId，不是 IP 或 USB 序列号。</p>
+              </div>
+            </header>
+            <div class="page-scroll">
+              <div class="split">
+                <article class="panel block">
+                  <h2>本机接收端</h2>
+                  <div class="kv">
+                    <div><span>显示名</span><b>DESKTOP-74F6FT5</b></div>
+                    <div><span>computerId</span><b>31dc403f-dec3-4b42-9c31-8aba34704e6e</b></div>
+                    <div><span>平台</span><b>windows / x64</b></div>
+                    <div><span>版本</span><b>1.6.0-dev.4 · protocol 2</b></div>
+                    <div><span>能力</span><b>fixedAction keyChord text macro phoneAudio managedDictation secureLan</b></div>
+                  </div>
+                </article>
+                <article class="panel block" id="phoneCard">
+                  <h2>已连接手机</h2>
+                  <div id="phoneBody"></div>
+                </article>
+              </div>
+              <article class="panel block">
+                <h2>Agent 按钮（当前电脑同步）</h2>
+                <p>仅规划 / 目标 / 压缩上下文 / 新会话 四个文本按钮会在手机连上后自动同步，普通快捷键不受影响。</p>
+                <table class="table" style="margin-top:10px">
+                  <thead><tr><th>按钮</th><th>发送内容</th><th>自动回车</th><th>显示</th></tr></thead>
+                  <tbody id="agentPreview"></tbody>
+                </table>
+              </article>
+            </div>
+          </div>
+
+          <!-- Logs -->
+          <div class="page" id="page-logs">
+            <header class="topbar">
+              <div>
+                <div class="kicker">PHONEDECK / 日志</div>
+                <h1>实时运行记录</h1>
+                <p class="lede">控制台本地流水，不上传。</p>
+              </div>
+              <div class="top-actions">
+                <input class="log-search" id="logSearch" type="search" placeholder="筛选消息…" />
+                <button class="btn btn-ghost" id="btnClearLogs" type="button">清空显示</button>
+              </div>
+            </header>
+            <article class="panel" style="flex:1;min-height:0">
+              <div class="panel-h">
+                <div><h2>全部事件</h2><p id="logCount">0 条</p></div>
+                <div class="seg" role="group">
+                  <button type="button" class="is-on" data-filter="all">全部</button>
+                  <button type="button" data-filter="INFO">信息</button>
+                  <button type="button" data-filter="WARN">警告</button>
+                  <button type="button" data-filter="ERROR">错误</button>
+                </div>
+              </div>
+              <div class="log-stream" id="logStreamFull" style="flex:1"></div>
+            </article>
+          </div>
+
+          <!-- Settings -->
+          <div class="page" id="page-settings">
+            <header class="topbar">
+              <div>
+                <div class="kicker">PHONEDECK / 设置</div>
+                <h1>接收端与控制台</h1>
+                <p class="lede">字段与 server-settings.json、登录项、agent-shortcuts.json 对齐。</p>
+              </div>
+              <div class="top-actions">
+                <button class="btn btn-primary" id="btnSave2" type="button">保存并应用</button>
+              </div>
+            </header>
+            <div class="page-scroll">
+              <article class="panel block">
+                <h2>连接选项</h2>
+                <div class="switch-row">
+                  <div><b>Wi-Fi 自动发现</b><span>lanDiscovery · 手机与电脑同一 Wi-Fi 时自动出现</span></div>
+                  <button class="switch" type="button" role="switch" aria-checked="true" data-key="lanDiscovery" aria-label="Wi-Fi 自动发现"></button>
+                </div>
+                <div class="switch-row">
+                  <div><b>USB 自动恢复</b><span>usbWatchdog · 插线时自动重建语音通道</span></div>
+                  <button class="switch" type="button" role="switch" aria-checked="true" data-key="usbWatchdog" aria-label="USB 自动恢复"></button>
+                </div>
+                <div class="switch-row">
+                  <div><b>登录后启动</b><span>HKCU Run · PhoneDeck Control Center</span></div>
+                  <button class="switch" type="button" role="switch" aria-checked="false" data-key="autoStart" aria-label="登录后启动"></button>
+                </div>
+                <div class="field" style="margin-top:8px">
+                  <label for="adbPath2">adbPath</label>
+                  <input id="adbPath2" type="text" spellcheck="false" />
+                </div>
+              </article>
+              <article class="panel block">
+                <h2>Agent 操作</h2>
+                <p>替换手机按钮的名称和斜杠指令；保存后经 Wi-Fi 或 USB 自动同步。</p>
+                <button class="btn btn-secondary" id="btnAgent2" type="button" style="margin-top:12px">配置 Agent 操作</button>
+              </article>
+              <article class="panel block">
+                <h2>数据目录</h2>
+                <p>PHONEDECK_DATA_DIR · 电脑身份、LAN 证书、配对令牌与设置。</p>
+                <p class="hint" style="padding:10px 0 0;font-family:var(--mono);color:var(--muted)">E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台\data</p>
+              </article>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="agentModal" role="dialog" aria-modal="true" aria-labelledby="agentTitle">
+    <div class="dialog">
+      <h3 id="agentTitle">配置 Agent 操作</h3>
+      <p class="sub">名称 1–24 字，发送内容 1–512 字单行。保存后手机下次连接检查时同步。</p>
+      <table class="table">
+        <thead><tr><th>按钮名称</th><th>发送内容</th><th>自动回车</th><th>显示</th></tr></thead>
+        <tbody id="agentRows"></tbody>
+      </table>
+      <div class="err" id="agentErr"></div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="agentCancel" type="button">取消</button>
+        <button class="btn btn-primary" id="agentSave" type="button">保存并同步</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const COMPUTER = {
+      displayName: "DESKTOP-74F6FT5",
+      id: "31dc403f-dec3-4b42-9c31-8aba34704e6e",
+      version: "1.6.0-dev.4",
+      wifi: "192.168.0.102",
+      ssid: "WLAN",
+      usbSerial: "R5CT30P8QKY"
+    };
+
+    const state = {
+      scene: "online",
+      page: "overview",
+      settingsOpen: true,
+      logFilter: "all",
+      logQuery: "",
+      busy: false,
+      lastChannel: "wifi",
+      settings: {
+        lanDiscovery: true,
+        usbWatchdog: true,
+        autoStart: false,
+        adbPath: "E:\\Users\\Administrator\\Desktop\\PhoneDeck开发工作区\\PhoneDeck电脑控制台\\platform-tools\\adb.exe"
+      },
+      agents: [
+        { id: "agentPlan", label: "规划", text: "/plan", submit: true, visible: true },
+        { id: "agentGoal", label: "目标", text: "/goal", submit: true, visible: true },
+        { id: "agentCompact", label: "压缩上下文", text: "/compact", submit: true, visible: true },
+        { id: "agentClear", label: "新会话", text: "/clear", submit: true, visible: true }
+      ],
+      logs: []
+    };
+
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+    function now() {
+      return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    }
+
+    function toast(msg) {
+      const el = $("#toast");
+      el.textContent = msg;
+      el.classList.add("is-on");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove("is-on"), 2200);
+    }
+
+    function log(level, message) {
+      state.logs.unshift({ t: now(), level, message });
+      if (state.logs.length > 80) state.logs.pop();
+      renderLogs();
+    }
+
+    function running() {
+      return state.scene === "online" || state.scene === "usb";
+    }
+
+    function applyScene(scene, { logChange = false } = {}) {
+      state.scene = scene;
+      document.body.dataset.scene = scene;
+      $$(".scene-switch button").forEach((b) => b.classList.toggle("is-on", b.dataset.scene === scene));
+      if (scene === "online") state.lastChannel = "wifi";
+      if (scene === "usb") state.lastChannel = "usb";
+      renderStatus();
+      if (logChange) {
+        if (scene === "online") log("INFO", "健康检查通过 · " + COMPUTER.displayName + " · " + COMPUTER.version);
+        if (scene === "offline") log("WARN", "接收端已停止，快捷键与手机音频不可用。");
+        if (scene === "empty") log("INFO", "控制台空闲，尚未启动接收端。");
+        if (scene === "usb") log("INFO", "检测到 ADB 设备 " + COMPUTER.usbSerial + "，USB 通道已建立。");
+      }
+    }
+
+    function renderStatus() {
+      const scene = state.scene;
+      const map = {
+        empty: {
+          lede: "首次使用：启动接收端，再用 USB 完成配对。",
+          badge: "空闲", tone: "idle",
+          recv: ["未运行", "点击“启动接收端”", "danger"],
+          wifi: ["未连接", "请连接 Wi-Fi", "danger"],
+          audio: ["不可用", "接收端未运行", "idle"],
+          usb: ["未连接", "未找到已授权设备", "idle"],
+          phone: "未配对", phoneLive: "idle",
+          recvLive: "idle", typeLive: "idle",
+          wifiLink: "off", audioLink: "off", usbLink: "off",
+          usbState: "未连接", chip: "等待启动",
+          bannerT: "尚未启动接收端",
+          bannerC: "启动后，手机会在同一 Wi-Fi 上发现这台电脑；首次配对仍走 USB。"
+        },
+        offline: {
+          lede: "接收端已停止。Wi-Fi 仍在，但手机无法接入。",
+          badge: "需要启动", tone: "danger",
+          recv: ["未运行", "点击“启动接收端”", "danger"],
+          wifi: [COMPUTER.wifi, COMPUTER.ssid + " · 手机需连接同一网络", "teal"],
+          audio: ["不可用", "接收端未运行", "idle"],
+          usb: ["未连接", "Wi-Fi 模式无需插线", "idle"],
+          phone: "上次已配对", phoneLive: "idle",
+          recvLive: "down", typeLive: "idle",
+          wifiLink: "off", audioLink: "off", usbLink: "off",
+          usbState: "待命", chip: "离线",
+          bannerT: "接收端已停止",
+          bannerC: "快捷键、听写与手机 PCM 均不可用。启动后将恢复上次通道。"
+        },
+        usb: {
+          lede: "USB 反向隧道在线 · 可作为 Wi-Fi 之外的语音与配对兜底。",
+          badge: "USB 在线", tone: "ok",
+          recv: ["运行中", COMPUTER.displayName + " · " + COMPUTER.version, "ok"],
+          wifi: [COMPUTER.wifi, COMPUTER.ssid + " · 同一 Wi-Fi 可用", "teal"],
+          audio: ["已就绪", "VB-CABLE · Typeless", "ok"],
+          usb: ["已连接", COMPUTER.usbSerial, "teal"],
+          phone: "USB 已连接", phoneLive: "on",
+          recvLive: "on", typeLive: "on",
+          wifiLink: "standby", audioLink: "on", usbLink: "on",
+          usbState: "已连接", chip: "USB 兜底工作中"
+        },
+        online: {
+          lede: "同一 Wi-Fi 自动连接 · 手机语音直达当前电脑",
+          badge: "可以连接手机", tone: "ok",
+          recv: ["运行中", COMPUTER.displayName + " · " + COMPUTER.version, "ok"],
+          wifi: [COMPUTER.wifi, COMPUTER.ssid + " · 手机需连接同一网络", "teal"],
+          audio: ["已就绪", "VB-CABLE · Typeless", "ok"],
+          usb: ["未连接", "Wi-Fi 模式无需插线", "idle"],
+          phone: "已配对 · 可发现", phoneLive: "on",
+          recvLive: "on", typeLive: "on",
+          wifiLink: "on", audioLink: "on", usbLink: "standby",
+          usbState: "待命", chip: "通道正常"
+        }
+      }[scene];
+
+      $("#overviewLede").textContent = map.lede;
+      $("#overallText").textContent = map.badge;
+      $("#overallBadge").dataset.tone = map.tone;
+      $("#lastChecked").textContent = "最后检查 " + now();
+
+      const setCard = (v, d, card, values) => {
+        v.textContent = values[0];
+        d.textContent = values[1];
+        card.dataset.tone = values[2];
+      };
+      const cards = $$("#statusCards .stat");
+      setCard($("#vReceiver"), $("#dReceiver"), cards[0], map.recv);
+      setCard($("#vWifi"), $("#dWifi"), cards[1], map.wifi);
+      setCard($("#vAudio"), $("#dAudio"), cards[2], map.audio);
+      setCard($("#vUsb"), $("#dUsb"), cards[3], map.usb);
+
+      $("#phoneMeta").textContent = map.phone;
+      $("#nodePhone").dataset.live = map.phoneLive;
+      $("#nodeRecv").dataset.live = map.recvLive;
+      $("#nodeType").dataset.live = map.typeLive;
+      $("#linkWifi").dataset.live = map.wifiLink;
+      $("#linkAudio").dataset.live = map.audioLink;
+      $("#usbLine").dataset.live = map.usbLink;
+      $("#usbLineState").textContent = map.usbState;
+      $("#topoChip").textContent = map.chip;
+      if (map.bannerT) {
+        $("#bannerTitle").textContent = map.bannerT;
+        $("#bannerCopy").textContent = map.bannerC;
+      }
+
+      const on = running();
+      $("#btnStart").disabled = on || state.busy;
+      $("#btnRestart").disabled = !on || state.busy;
+      $("#btnStop").disabled = !on || state.busy;
+      $$("[data-start]").forEach((b) => { b.disabled = on || state.busy; });
+
+      $("#addrLine").textContent = scene === "empty" ? "—" : COMPUTER.wifi;
+      renderPhoneCard();
+      renderAgentPreview();
+    }
+
+    function renderPhoneCard() {
+      const el = $("#phoneBody");
+      if (state.scene === "empty") {
+        el.innerHTML = '<div class="empty-device">还没有已连接的手机。<br/>用 USB 完成首次配对后即可拔线，改走 Wi-Fi。</div>';
+        return;
+      }
+      if (state.scene === "offline") {
+        el.innerHTML = '<div class="empty-device">接收端离线，手机无法保持会话。<br/>上次配对身份仍保留在本机。</div>';
+        return;
+      }
+      const via = state.scene === "usb" ? "USB ADB · " + COMPUTER.usbSerial : "Wi-Fi HTTPS · " + COMPUTER.wifi;
+      el.innerHTML = `
+        <div class="kv">
+          <div><span>通道</span><b>${via}</b></div>
+          <div><span>音频</span><b>48 kHz / 16-bit / mono PCM</b></div>
+          <div><span>Typeless</span><b>CABLE Output · 已就绪</b></div>
+          <div><span>目标校验</span><b>computerId 匹配后才放行</b></div>
+        </div>`;
+    }
+
+    function renderAgentPreview() {
+      $("#agentPreview").innerHTML = state.agents.map((a) =>
+        `<tr><td>${a.label}</td><td style="font-family:var(--mono)">${a.text}</td><td>${a.submit ? "是" : "否"}</td><td>${a.visible ? "显示" : "隐藏"}</td></tr>`
+      ).join("");
+    }
+
+    function renderLogs() {
+      const filter = state.logFilter;
+      const q = state.logQuery.trim().toLowerCase();
+      const rows = state.logs.filter((l) => (filter === "all" || l.level === filter) && (!q || l.message.toLowerCase().includes(q)));
+      const html = rows.length
+        ? rows.map((l) => `<div class="log-row"><span class="log-time">${l.t}</span><span class="lvl lvl-${l.level}">${l.level}</span><span>${l.message}</span></div>`).join("")
+        : '<div class="log-empty">暂无符合条件的记录</div>';
+      $("#logStream").innerHTML = html;
+      $("#logStreamFull").innerHTML = html;
+      $("#logCount").textContent = rows.length + " 条";
+    }
+
+    function setPage(page) {
+      state.page = page;
+      document.body.dataset.page = page;
+      $$(".nav button").forEach((b) => b.classList.toggle("is-on", b.dataset.page === page));
+      $$(".page").forEach((p) => p.classList.toggle("is-on", p.id === "page-" + page));
+    }
+
+    function syncSettingsUI() {
+      $$(".switch").forEach((sw) => {
+        sw.setAttribute("aria-checked", String(state.settings[sw.dataset.key]));
+      });
+      $("#adbPath").value = state.settings.adbPath;
+      $("#adbPath2").value = state.settings.adbPath;
+    }
+
+    async function startReceiver() {
+      if (running() || state.busy) return;
+      state.busy = true;
+      renderStatus();
+      log("INFO", "正在启动 PhoneDeck.Server.exe…");
+      toast("正在启动接收端");
+      await wait(500);
+      const next = state.lastChannel === "usb" ? "usb" : "online";
+      state.busy = false;
+      applyScene(next);
+      log("INFO", "接收端已启动。");
+      log("INFO", state.settings.lanDiscovery ? "Wi-Fi 自动发现正在监听 UDP 8767。" : "Wi-Fi 自动发现已关闭。");
+      log("INFO", state.settings.usbWatchdog ? "USB 看门狗已就绪。" : "USB 自动恢复已关闭。");
+      toast("接收端已启动");
+    }
+
+    async function restartReceiver() {
+      if (!running() || state.busy) return;
+      state.busy = true;
+      renderStatus();
+      log("INFO", "正在重新启动接收端…");
+      await wait(400);
+      state.busy = false;
+      applyScene(state.scene);
+      log("INFO", "接收端已重新启动。");
+      toast("接收端已重新启动");
+    }
+
+    async function stopReceiver() {
+      if (!running() || state.busy) return;
+      state.busy = true;
+      renderStatus();
+      log("INFO", "正在停止 PhoneDeck.Server…");
+      await wait(350);
+      state.busy = false;
+      applyScene("offline");
+      log("WARN", "接收端已停止。");
+      toast("接收端已停止");
+    }
+
+    async function saveSettings() {
+      state.settings.adbPath = ($("#adbPath2").value || $("#adbPath").value).trim();
+      $("#adbPath").value = state.settings.adbPath;
+      $("#adbPath2").value = state.settings.adbPath;
+      log("INFO", "设置已保存，正在重新启动接收端…");
+      toast("设置已保存");
+      if (running()) await restartReceiver();
+      else log("INFO", "接收端未运行，设置将在下次启动时生效。");
+    }
+
+    function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+    function openAgent() {
+      $("#agentRows").innerHTML = state.agents.map((a, i) => `
+        <tr>
+          <td><input type="text" data-f="label" data-i="${i}" value="${a.label}" maxlength="24" /></td>
+          <td><input type="text" data-f="text" data-i="${i}" value="${a.text}" maxlength="512" /></td>
+          <td style="text-align:center"><input class="check" type="checkbox" data-f="submit" data-i="${i}" ${a.submit ? "checked" : ""} /></td>
+          <td style="text-align:center"><input class="check" type="checkbox" data-f="visible" data-i="${i}" ${a.visible ? "checked" : ""} /></td>
+        </tr>`).join("");
+      $("#agentErr").style.display = "none";
+      $("#agentModal").classList.add("is-on");
+      $("#agentRows input")?.focus();
+    }
+
+    function saveAgent() {
+      const next = state.agents.map((a) => ({ ...a }));
+      for (const input of $$("#agentRows [data-f]")) {
+        const i = Number(input.dataset.i);
+        const f = input.dataset.f;
+        if (input.type === "checkbox") next[i][f] = input.checked;
+        else next[i][f] = input.value.trim();
+      }
+      for (const row of next) {
+        if (row.label.length < 1 || row.label.length > 24) {
+          $("#agentErr").textContent = "按钮名称必须为 1–24 个字符。";
+          $("#agentErr").style.display = "block";
+          return;
+        }
+        if (row.text.length < 1 || row.text.length > 512 || /[\r\n]/.test(row.text)) {
+          $("#agentErr").textContent = "发送内容必须为 1–512 个字符的单行文本。";
+          $("#agentErr").style.display = "block";
+          return;
+        }
+      }
+      state.agents = next;
+      $("#agentModal").classList.remove("is-on");
+      renderAgentPreview();
+      log("INFO", "Agent 操作已更新，手机将在下一次连接检查时自动同步。");
+      toast("Agent 操作已更新");
+    }
+
+    // Events
+    $$(".nav button").forEach((b) => b.addEventListener("click", () => setPage(b.dataset.page)));
+    $$(".scene-switch button").forEach((b) => b.addEventListener("click", () => applyScene(b.dataset.scene, { logChange: true })));
+    $("#btnStart").addEventListener("click", startReceiver);
+    $("#btnRestart").addEventListener("click", restartReceiver);
+    $("#btnStop").addEventListener("click", stopReceiver);
+    $$("[data-start]").forEach((b) => b.addEventListener("click", startReceiver));
+    $("#btnSave").addEventListener("click", saveSettings);
+    $("#btnSave2").addEventListener("click", saveSettings);
+    $("#btnAgent").addEventListener("click", openAgent);
+    $("#btnAgent2").addEventListener("click", openAgent);
+    $("#agentCancel").addEventListener("click", () => $("#agentModal").classList.remove("is-on"));
+    $("#agentSave").addEventListener("click", saveAgent);
+    $("#agentModal").addEventListener("click", (e) => { if (e.target.id === "agentModal") $("#agentModal").classList.remove("is-on"); });
+    $("#btnCollapse").addEventListener("click", () => {
+      state.settingsOpen = !state.settingsOpen;
+      $("#workspace").classList.toggle("is-collapsed", !state.settingsOpen);
+      $("#btnCollapse").setAttribute("aria-label", state.settingsOpen ? "折叠设置" : "展开设置");
+    });
+    $$(".switch").forEach((sw) => sw.addEventListener("click", () => {
+      const on = sw.getAttribute("aria-checked") !== "true";
+      state.settings[sw.dataset.key] = on;
+      syncSettingsUI();
+    }));
+    $("#adbPath").addEventListener("input", () => { state.settings.adbPath = $("#adbPath").value; $("#adbPath2").value = $("#adbPath").value; });
+    $("#adbPath2").addEventListener("input", () => { state.settings.adbPath = $("#adbPath2").value; $("#adbPath").value = $("#adbPath2").value; });
+    $$("[data-filter]").forEach((b) => b.addEventListener("click", () => {
+      state.logFilter = b.dataset.filter;
+      $$("[data-filter]").forEach((x) => x.classList.toggle("is-on", x.dataset.filter === state.logFilter));
+      renderLogs();
+    }));
+    $("#logSearch").addEventListener("input", () => { state.logQuery = $("#logSearch").value; renderLogs(); });
+    $("#btnClearLogs").addEventListener("click", () => { state.logs = []; renderLogs(); toast("已清空显示"); });
+    $("#btnCopyId").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(COMPUTER.id); toast("已复制 computerId"); }
+      catch { toast(COMPUTER.id); }
+    });
+    $("#btnMin").addEventListener("click", () => toast("已最小化到托盘，接收端继续运行。"));
+    $("#btnClose").addEventListener("click", () => toast("关闭会最小化到托盘。接收端与 USB 看门狗在后台继续运行。"));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") $("#agentModal").classList.remove("is-on");
+    });
+
+    // Seed
+    log("INFO", "控制台已打开，正在检查接收端…");
+    log("INFO", "接收端已启动。");
+    log("INFO", "Wi-Fi 自动发现正在监听 UDP 8767。");
+    log("INFO", "USB 看门狗已就绪。");
+    log("INFO", "VB-CABLE 已就绪 · Typeless 麦克风已指向 CABLE Output。");
+    log("INFO", "健康检查通过 · " + COMPUTER.displayName + " · " + COMPUTER.version);
+    log("WARN", "USB 未连接，当前走 Wi-Fi 通道。");
+    syncSettingsUI();
+    applyScene("online");
+    setInterval(() => { $("#lastChecked").textContent = "最后检查 " + now(); }, 2500);
+  </script>
+</body>
+</html>

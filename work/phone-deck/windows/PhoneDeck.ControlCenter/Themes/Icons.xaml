@@ -1,0 +1,15 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StreamGeometry x:Key="IconLayers">M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12 M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17</StreamGeometry>
+    <StreamGeometry x:Key="IconOverview">M4 4h6v6H4z M14 4h6v4h-6z M14 12h6v8h-6z M4 14h6v6H4z</StreamGeometry>
+    <StreamGeometry x:Key="IconLink">M8 12h8 M7 8a4 4 0 1 0 0 8 M17 8a4 4 0 1 1 0 8</StreamGeometry>
+    <StreamGeometry x:Key="IconPhone">M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M10 18h4</StreamGeometry>
+    <StreamGeometry x:Key="IconLogs">M5 6h14 M5 12h14 M5 18h9</StreamGeometry>
+    <StreamGeometry x:Key="IconSettings">M9.67 4.14a2.34 2.34 0 0 1 4.66 0 2.34 2.34 0 0 0 3.32 1.91 2.34 2.34 0 0 1 2.33 4.03 2.34 2.34 0 0 0 0 3.84 2.34 2.34 0 0 1-2.33 4.03 2.34 2.34 0 0 0-3.32 1.91 2.34 2.34 0 0 1-4.66 0 2.34 2.34 0 0 0-3.32-1.91 2.34 2.34 0 0 1-2.33-4.03 2.34 2.34 0 0 0 0-3.84 2.34 2.34 0 0 1 2.33-4.03 2.34 2.34 0 0 0 3.32-1.91 M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z</StreamGeometry>
+    <StreamGeometry x:Key="IconComputer">M4 5h16v11H4z M8 20h8 M12 16v4</StreamGeometry>
+    <StreamGeometry x:Key="IconMic">M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0z M6 10a6 6 0 0 0 12 0 M12 17v4 M9 21h6</StreamGeometry>
+    <StreamGeometry x:Key="IconCopy">M9 9h10v10H9z M5 15V5h10</StreamGeometry>
+    <StreamGeometry x:Key="IconWindowMinimize">M0,0 L10,0</StreamGeometry>
+    <StreamGeometry x:Key="IconWindowMaximize">M0,0 L9,0 L9,9 L0,9 Z</StreamGeometry>
+    <StreamGeometry x:Key="IconWindowClose">M0,0 L9,9 M9,0 L0,9</StreamGeometry>
+</ResourceDictionary>

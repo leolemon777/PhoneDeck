@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using PhoneDeck.MacReceiver;
 
@@ -7,6 +8,11 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 if (!OperatingSystem.IsMacOS())
 {
     Console.Error.WriteLine("PhoneDeck macOS 接收端只能在 macOS 运行。");
+    return;
+}
+if (!OperatingSystem.IsMacOSVersionAtLeast(14, 2))
+{
+    Console.Error.WriteLine("PhoneDeck 手机音频要求 macOS 14.2 或更高版本。");
     return;
 }
 
@@ -22,12 +28,17 @@ if (!isFirstInstance)
 
 var capabilities = new[]
 {
-    "fixedAction", "keyChord", "text", "macro", "secureLan", "macInput"
+    "fixedAction", "keyChord", "text", "macro", "secureLan", "macInput",
+    "phoneAudio", "sharedMicrophone", "managedDictation"
 };
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
 var settings = MacReceiverSettings.LoadOrCreate();
 var keyboard = new MacKeyboardInput();
+using var audioBridge = new MacPhoneAudioBridge(
+    new CoreAudioHalOutputFactory(settings.AudioDeviceUid));
+var typeless = new MacTypelessController(settings, keyboard);
+using var dictationSessions = new MacDictationSessionManager(audioBridge, typeless);
 var inputProcessor = new InputCommandProcessor(keyboard);
 using var usbWatchdog = new UsbWatchdog(settings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -82,97 +93,126 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/api/health", () => Results.Ok(new
+app.MapGet("/api/health", () =>
 {
-    ok = true,
-    name = "PhoneDeck",
-    version = "2.0.0-dev.1",
-    protocolVersion = 2,
-    computerId = receiverIdentity.ComputerId,
-    displayName = receiverIdentity.DisplayName,
-    platform = receiverIdentity.Platform,
-    architecture = receiverIdentity.Architecture,
-    capabilities,
-    input = new
+    var audio = audioBridge.Probe();
+    var typelessConfig = typeless.Configuration;
+    return Results.Ok(new
     {
-        available = keyboard.IsAccessibilityTrusted,
-        backend = "CGEvent",
-        accessibilityTrusted = keyboard.IsAccessibilityTrusted
-    },
-    audio = new
-    {
-        available = false,
-        device = (string?)null,
-        streaming = false,
-        sessionId = (string?)null,
-        lastError = "macOS Core Audio / BlackHole 语音桥接将在下一阶段接入"
-    },
-    dictation = new
-    {
-        active = false,
-        sessionId = (string?)null
-    },
-    foregroundApp = (string?)null,
-    usbWatchdog = new
-    {
-        enabled = settings.UsbWatchdog,
-        running = usbWatchdog.Running,
-        adbFound = usbWatchdog.AdbPath is not null,
-        restoreCount = usbWatchdog.RestoreCount,
-        lastRestoredAt = usbWatchdog.LastRestoredAt
-    },
-    typeless = new
-    {
-        capturing = (bool?)null,
-        virtualCableSelected = false,
-        microphone = (string?)null,
-        shortcuts = new
+        ok = true,
+        name = "PhoneDeck",
+        version = "2.0.0-dev.2",
+        protocolVersion = 2,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        platform = receiverIdentity.Platform,
+        architecture = receiverIdentity.Architecture,
+        capabilities,
+        input = new
         {
-            dictation = new[] { "FN" },
-            translation = (string[]?)null,
-            ask = (string[]?)null
+            available = keyboard.IsAccessibilityTrusted,
+            backend = "CGEvent",
+            accessibilityTrusted = keyboard.IsAccessibilityTrusted
+        },
+        audio = new
+        {
+            available = audio.Available,
+            device = audio.DeviceName,
+            deviceUid = audio.DeviceUid,
+            streaming = audioBridge.IsStreaming,
+            sessionId = audioBridge.ActiveSessionId,
+            mode = audioBridge.ActiveMode?.ToWireValue(),
+            lastError = audio.Error
+        },
+        dictation = new
+        {
+            active = dictationSessions.IsActive,
+            sessionId = dictationSessions.ActiveSessionId
+        },
+        foregroundApp = (string?)null,
+        usbWatchdog = new
+        {
+            enabled = settings.UsbWatchdog,
+            running = usbWatchdog.Running,
+            adbFound = usbWatchdog.AdbPath is not null,
+            restoreCount = usbWatchdog.RestoreCount,
+            lastRestoredAt = usbWatchdog.LastRestoredAt
+        },
+        typeless = new
+        {
+            capturing = typeless.IsCapturing(),
+            virtualCableSelected = typelessConfig.UsesBlackHole,
+            microphone = typelessConfig.Microphone,
+            settingsPath = typelessConfig.SettingsPath,
+            lastError = typelessConfig.Error,
+            shortcuts = new
+            {
+                dictation = SplitBinding(typelessConfig.DictationBinding),
+                translation = SplitBinding(typelessConfig.TranslationBinding),
+                ask = SplitBinding(typelessConfig.AskBinding)
+            }
         }
-    }
-}));
+    });
+});
 
-app.MapGet("/api/diagnostics", () => Results.Ok(new
+app.MapGet("/api/diagnostics", () =>
 {
-    ok = true,
-    computerId = receiverIdentity.ComputerId,
-    displayName = receiverIdentity.DisplayName,
-    platform = receiverIdentity.Platform,
-    architecture = receiverIdentity.Architecture,
-    input = new
+    var audio = audioBridge.Probe();
+    var typelessConfig = typeless.Configuration;
+    return Results.Ok(new
     {
-        backend = "CGEvent",
-        accessibilityTrusted = keyboard.IsAccessibilityTrusted
-    },
-    audio = new
-    {
-        available = false,
-        backend = "Core Audio（待接入）",
-        recommendedVirtualDevice = "BlackHole 2ch"
-    },
-    lan = new
-    {
-        httpsPort = lanIdentity.HttpsPort,
-        candidateAddresses = lanIdentity.GetCandidateAddresses(),
-        discovery = new
+        ok = true,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        platform = receiverIdentity.Platform,
+        architecture = receiverIdentity.Architecture,
+        input = new
         {
-            enabled = settings.LanDiscovery,
-            portBound = lanDiscovery.PortBound,
-            running = lanDiscovery.Running
+            backend = "CGEvent",
+            accessibilityTrusted = keyboard.IsAccessibilityTrusted
+        },
+        audio = new
+        {
+            available = audio.Available,
+            backend = "Core Audio AUHAL",
+            device = audio.DeviceName,
+            deviceUid = audio.DeviceUid,
+            configuredDeviceUid = settings.AudioDeviceUid,
+            streaming = audioBridge.IsStreaming,
+            sessionId = audioBridge.ActiveSessionId,
+            mode = audioBridge.ActiveMode?.ToWireValue(),
+            lastError = audio.Error,
+            recommendedVirtualDevice = "BlackHole 2ch / 48 kHz"
+        },
+        typeless = new
+        {
+            capturing = typeless.IsCapturing(),
+            microphone = typelessConfig.Microphone,
+            settingsPath = typelessConfig.SettingsPath,
+            usesBlackHole = typelessConfig.UsesBlackHole,
+            lastError = typelessConfig.Error
+        },
+        lan = new
+        {
+            httpsPort = lanIdentity.HttpsPort,
+            candidateAddresses = lanIdentity.GetCandidateAddresses(),
+            discovery = new
+            {
+                enabled = settings.LanDiscovery,
+                portBound = lanDiscovery.PortBound,
+                running = lanDiscovery.Running
+            }
+        },
+        usbWatchdog = new
+        {
+            enabled = settings.UsbWatchdog,
+            running = usbWatchdog.Running,
+            adbFound = usbWatchdog.AdbPath is not null,
+            restoreCount = usbWatchdog.RestoreCount,
+            lastRestoredAt = usbWatchdog.LastRestoredAt
         }
-    },
-    usbWatchdog = new
-    {
-        enabled = settings.UsbWatchdog,
-        running = usbWatchdog.Running,
-        adbFound = usbWatchdog.AdbPath is not null,
-        restoreCount = usbWatchdog.RestoreCount,
-        lastRestoredAt = usbWatchdog.LastRestoredAt
-    }
-}));
+    });
+});
 
 app.MapPost("/api/lan/pair", (HttpContext context) =>
 {
@@ -194,6 +234,128 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
         certificateSha256 = lanIdentity.CertificateSha256,
         accessToken = lanIdentity.AccessToken
     });
+});
+
+app.MapPost("/api/audio/stream", async (HttpContext context) =>
+{
+    try
+    {
+        var protocol = context.Request.Headers["X-PhoneDeck-Protocol"].FirstOrDefault();
+        var sessionId = context.Request.Headers["X-PhoneDeck-Session"].FirstOrDefault()?.Trim();
+        var targetComputerId = context.Request.Headers["X-PhoneDeck-Computer-Id"]
+            .FirstOrDefault()?.Trim();
+        if (!string.Equals(protocol, "2", StringComparison.Ordinal)
+            || !Guid.TryParse(sessionId, out _))
+        {
+            return Results.BadRequest(new { ok = false, error = "无效的音频协议或 sessionId" });
+        }
+        if (!string.Equals(targetComputerId, receiverIdentity.ComputerId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { ok = false, error = "请求目标不是当前电脑" });
+        }
+        var mode = AudioStreamModeParser.Parse(
+            context.Request.Headers["X-PhoneDeck-Audio-Mode"].FirstOrDefault());
+        var probe = audioBridge.Probe();
+        if (!probe.Available)
+        {
+            return Results.Json(new { ok = false, error = probe.Error }, statusCode: 503);
+        }
+        var bodySize = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (bodySize is { IsReadOnly: false })
+        {
+            bodySize.MaxRequestBodySize = null;
+        }
+        await audioBridge.StreamAsync(
+            context.Request.Body,
+            sessionId!,
+            mode,
+            (endedSession, endedMode) =>
+            {
+                if (endedMode == AudioStreamMode.Managed)
+                {
+                    dictationSessions.AudioEnded(endedSession);
+                }
+            },
+            context.RequestAborted);
+        return Results.Ok(new
+        {
+            ok = true,
+            sessionId,
+            mode = mode.ToWireValue()
+        });
+    }
+    catch (AudioStreamConflictException exception)
+    {
+        return Results.Conflict(new { ok = false, error = exception.Message });
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Json(new { ok = false, error = exception.Message }, statusCode: 503);
+    }
+});
+
+app.MapPost("/api/dictation/start", (DictationCommand command) =>
+{
+    try
+    {
+        TargetEnvelopeValidator.Validate(
+            command.ProtocolVersion,
+            command.RequestId,
+            command.SessionId,
+            command.TargetComputerId,
+            receiverIdentity.ComputerId);
+        var duplicate = dictationSessions.Start(
+            command.SessionId, command.RequestId, command.Mode);
+        return Results.Ok(new
+        {
+            ok = true,
+            duplicate,
+            active = dictationSessions.IsActive,
+            sessionId = dictationSessions.ActiveSessionId
+        });
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { ok = false, error = exception.Message });
+    }
+});
+
+app.MapPost("/api/dictation/stop", (DictationCommand command) =>
+{
+    try
+    {
+        TargetEnvelopeValidator.Validate(
+            command.ProtocolVersion,
+            command.RequestId,
+            command.SessionId,
+            command.TargetComputerId,
+            receiverIdentity.ComputerId);
+        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId);
+        return Results.Ok(new
+        {
+            ok = true,
+            duplicate,
+            active = dictationSessions.IsActive,
+            sessionId = dictationSessions.ActiveSessionId
+        });
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { ok = false, error = exception.Message });
+    }
 });
 
 app.MapPost("/api/input", (InputCommand command) =>
@@ -238,8 +400,17 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine(keyboard.IsAccessibilityTrusted
         ? "  辅助功能权限：已授权"
         : "  辅助功能权限：未授权，请在系统设置 → 隐私与安全性 → 辅助功能中启用");
-    Console.WriteLine("  手机语音：下一阶段接入 Core Audio / BlackHole，本版明确禁用");
+    var audio = audioBridge.Probe();
+    Console.WriteLine(audio.Available
+        ? $"  手机语音：Core Audio AUHAL → {audio.DeviceName}"
+        : $"  手机语音：不可用（{audio.Error}）");
     Console.WriteLine("========================================");
 });
 
 await app.RunAsync();
+
+static string[]? SplitBinding(string? binding) =>
+    string.IsNullOrWhiteSpace(binding)
+        ? null
+        : binding.Split('+', StringSplitOptions.TrimEntries
+            | StringSplitOptions.RemoveEmptyEntries);

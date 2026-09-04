@@ -19,11 +19,18 @@ import android.widget.Toast;
 
 public final class SettingsActivity extends Activity {
     private static final String PREFS_NAME = "PhoneDeckSettings";
+    private static final String PREF_VOICE_WORK_MODE = "voice_work_mode";
     private static final String PREF_VOICE_MODE = "voice_mode";
+    private static final String WORK_MANAGED = "managed";
+    private static final String WORK_SHARED = "shared";
     private static final String MODE_TAP = "tap";
     private static final String MODE_HOLD = "hold";
     private SharedPreferences preferences;
     private PhoneDeckTheme theme;
+    private LinearLayout managedOption;
+    private LinearLayout sharedOption;
+    private TextView managedCheck;
+    private TextView sharedCheck;
     private LinearLayout tapOption;
     private LinearLayout holdOption;
     private TextView tapCheck;
@@ -71,7 +78,7 @@ public final class SettingsActivity extends Activity {
         titleParams.leftMargin = dp(13);
         header.addView(headerTitle, titleParams);
 
-        TextView intro = text("语音模式会立即保存；快捷键和布局可单独编辑。",
+        TextView intro = text("两套语音工作方式互斥切换；快捷键和布局可单独编辑。",
                 14, theme.muted, Typeface.NORMAL);
         page.addView(intro, topMargin(dp(22)));
 
@@ -86,6 +93,21 @@ public final class SettingsActivity extends Activity {
 
         TextView voiceHeading = text("语音输入", 17, theme.text, Typeface.BOLD);
         page.addView(voiceHeading, topMargin(dp(28)));
+
+        managedOption = option("手机控制听写",
+                "手机按钮控制当前电脑的 Typeless，保留听写、翻译、问答和点击/按住操作", true);
+        managedCheck = (TextView) managedOption.getChildAt(1);
+        managedOption.setOnClickListener(view -> selectWorkMode(WORK_MANAGED));
+        page.addView(managedOption, fullWidthMargins(dp(18)));
+
+        sharedOption = option("共享麦克风",
+                "手机持续向所有在线电脑供音；在每台电脑上用自己的快捷键触发 Typeless", false);
+        sharedCheck = (TextView) sharedOption.getChildAt(1);
+        sharedOption.setOnClickListener(view -> selectWorkMode(WORK_SHARED));
+        page.addView(sharedOption, fullWidthMargins(dp(12)));
+
+        TextView controlHeading = text("手机控制听写方式", 14, theme.muted, Typeface.BOLD);
+        page.addView(controlHeading, topMargin(dp(24)));
 
         tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
@@ -281,7 +303,44 @@ public final class SettingsActivity extends Activity {
                 ? "已选择按住说话模式" : "已选择点击说话模式");
     }
 
+    private void selectWorkMode(String mode) {
+        String selectedMode = WORK_SHARED.equals(mode) ? WORK_SHARED : WORK_MANAGED;
+        preferences.edit().putString(PREF_VOICE_WORK_MODE, selectedMode).apply();
+        if (WORK_MANAGED.equals(selectedMode)) {
+            stopSharedMicrophone();
+        }
+        refreshSelection();
+        View selected = WORK_SHARED.equals(selectedMode) ? sharedOption : managedOption;
+        selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? HapticFeedbackConstants.CONFIRM
+                : HapticFeedbackConstants.VIRTUAL_KEY);
+        selected.announceForAccessibility(WORK_SHARED.equals(selectedMode)
+                ? "已选择共享麦克风模式，需要返回主界面手动开启"
+                : "已选择手机控制听写模式");
+    }
+
+    private void stopSharedMicrophone() {
+        Intent stop = new Intent(this, PhoneAudioService.class);
+        stop.setAction(PhoneAudioService.ACTION_STOP);
+        startService(stop);
+    }
+
     private void refreshSelection() {
+        boolean sharedSelected = WORK_SHARED.equals(
+                preferences.getString(PREF_VOICE_WORK_MODE, WORK_MANAGED));
+        managedOption.setBackground(roundRect(
+                sharedSelected ? theme.surface : theme.feedbackSurface(theme.primary),
+                18, sharedSelected ? 1 : 2,
+                sharedSelected ? theme.outline : theme.primary));
+        sharedOption.setBackground(roundRect(
+                sharedSelected ? theme.feedbackSurface(theme.warning) : theme.surface,
+                18, sharedSelected ? 2 : 1,
+                sharedSelected ? theme.warning : theme.outline));
+        managedCheck.setText(sharedSelected ? "○" : "✓");
+        managedCheck.setTextColor(sharedSelected ? theme.muted : theme.primary);
+        sharedCheck.setText(sharedSelected ? "✓" : "○");
+        sharedCheck.setTextColor(sharedSelected ? theme.warning : theme.muted);
+
         boolean holdSelected = MODE_HOLD.equals(
                 preferences.getString(PREF_VOICE_MODE, MODE_TAP));
         tapOption.setBackground(roundRect(
@@ -296,6 +355,10 @@ public final class SettingsActivity extends Activity {
         tapCheck.setTextColor(holdSelected ? theme.muted : theme.primary);
         holdCheck.setText(holdSelected ? "✓" : "○");
         holdCheck.setTextColor(holdSelected ? theme.warning : theme.muted);
+        tapOption.setEnabled(!sharedSelected);
+        holdOption.setEnabled(!sharedSelected);
+        tapOption.setAlpha(sharedSelected ? 0.48f : 1f);
+        holdOption.setAlpha(sharedSelected ? 0.48f : 1f);
     }
 
     private View themeOption(PhoneDeckTheme candidate) {

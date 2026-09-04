@@ -2,11 +2,12 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前源码版本是 **PhoneDeck 1.6.0-dev.4**，上一版完整实机稳定基线是
+当前源码版本是 **PhoneDeck 1.6.0-dev.5**，上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
-**2.0.0-dev.1 接收端预览**：源码和 10 项跨平台测试已完成，真实 Mac 验收尚未进行。
+**2.0.0-dev.2 接收端预览**：Core Audio / BlackHole 与双语音模式源码已接入，20 项
+跨平台测试通过；真实 Mac 和三机锁屏共享验收尚未进行。
 
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
 
@@ -17,7 +18,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 3. 点击模式用同一个主按钮开始/停止；按住模式仍是按下开始、松开停止。
 4. 快捷键按钮可由用户修改，例如把“截屏”改为 F1，或配置 Ctrl+C、Ctrl+Shift+S。
 5. 加入 `/goal`、`/plan`、`/compact` 等文本命令，并为 Codex、Claude Code、ZCode、Cursor 提供语义化预设。
-6. 一台手机管理两至四台 Windows / macOS 电脑；切换当前电脑后，语音和快捷键只进入目标电脑。
+6. 一台手机管理两至四台 Windows / macOS 电脑；普通动作进入当前电脑，共享麦克风音频可同时供给全部合格电脑。
 7. 支持直接 USB、USB 共享切换器、本地无线和蓝牙备用，不把产品锁死在一种传输方式上。
 8. 项目可迁移到其他电脑继续开发、构建和发布。
 
@@ -29,6 +30,12 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - Windows x64、.NET 8 自包含接收端。
 - USB ADB 反向隧道，服务仅监听 `127.0.0.1:8765`。
 - 手机麦克风以 48 kHz / 16-bit / 单声道 PCM 传输到电脑。
+- 两套互斥语音工作方式：手机按钮控制当前电脑的听写，或手动开启常驻共享麦克风，
+  由每台电脑自己的 Typeless 快捷键决定是否转写。
+- 共享麦克风用同一个 `sessionId` 向所有已配对、在线、声明 `sharedMicrophone` 且音频
+  就绪的接收端扇出；每台电脑有独立有界队列和重连退避，单台故障不阻塞其余电脑。
+- 共享模式使用 Android 麦克风前台服务，可在后台/锁屏继续；通知和主按钮均可停止，
+  服务采用 `START_NOT_STICKY`，App 或手机重启后不会自动恢复采音。
 - Windows 通过 NAudio/WASAPI 将音频写入 `CABLE Input (VB-Audio Virtual Cable)`。
 - Typeless 从 `CABLE Output` 读取手机音频。
 - 自动读取 Typeless 的主听写快捷键，读取失败时退回 RightAlt。
@@ -61,8 +68,9 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - 单键与最多 4 键的安全组合键选择器。
 - 纯文字快捷卡片，支持名称、预设颜色、测试动作和恢复默认。
 - 默认第一排提供 Agent 指令：规划 `/plan`、目标 `/goal`、压缩上下文 `/compact`；点击后输入并回车执行。
-- Windows“电脑控制台”可查看接收端、Wi-Fi、手机音频和 USB 状态，启动/停止/重启
-  接收端，并配置自动发现、USB 看门狗、开机启动和 ADB 路径。
+- Windows“电脑控制台”已迁移为基于 Web2WPF `05-Aether` 设计系统的原生 WPF 界面，
+  可查看接收端、Wi-Fi、手机音频和 USB 状态，启动/停止/重启接收端，并配置自动发现、
+  USB 看门狗、开机启动和 ADB 路径。
 - 电脑控制台可替换规划、目标、压缩上下文和新会话四个 Agent 按钮的名称、发送内容、
   自动回车与显示状态；手机连接当前电脑后自动同步，普通快捷键与宏不受影响。
 - 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；控制台运行包把电脑身份、LAN 证书、
@@ -77,14 +85,20 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - Windows 通过真实录音会话检查 Typeless 是否已停止；停止键未被 Typeless 处理时只在确认仍在录音后重试一次。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
-## macOS 2.0.0-dev.1 接收端预览
+## macOS 2.0.0-dev.2 接收端预览
 
 - 新增 Apple Silicon / Intel 共用源码的 .NET 8 macOS 接收端和 `.app` 构建脚本。
 - 复用现有 USB 8765、安全 HTTPS 8766、UDP 8767、稳定电脑 ID、证书固定、目标校验和请求去重。
 - 使用 `CGEvent` 注入受控按键与 Unicode 文字；异常时反向释放本次已按下的全部按键。
 - 兼容当前 Android 默认组合：`Ctrl/Win/Alt` 在 Mac 上转换为 `Command/Command/Option`；截图、窗口切换和输入法切换使用 macOS 专用映射。
 - 健康检查明确上报 `platform=macos`、`input.backend=CGEvent` 和辅助功能权限状态。
-- 当前预览尚未在真实 Mac 上验收，也尚未接入 Core Audio、BlackHole、Typeless 会话、蓝牙、Developer ID 签名和公证。
+- 通过 AUHAL 按设备 UID 定向写入 `BlackHole 2ch`，不修改系统默认输出；48 kHz mono
+  PCM 在输出侧复制成双声道，并由实时有界环形缓冲吸收欠载、溢出和断流。
+- 自动查找 Typeless `app-settings.json` 并读取三种快捷键与麦克风；可用
+  `server-settings.json` 显式覆盖路径、设备 UID 和快捷键，不写死 Fn。
+- macOS 14.2+ 通过 Core Audio `AudioHardwareProcess` 对应进程对象核对 Typeless 的
+  `isRunningInput`；探针不可用时拒绝手机控制模式，但共享麦克风仍可使用。
+- 当前预览尚未在真实 Mac 上验收；蓝牙、Developer ID 签名和公证仍未接入。
 
 Mac 构建、权限、配对与验收步骤见 [docs/MACOS_SETUP.md](./docs/MACOS_SETUP.md)。
 
@@ -95,7 +109,8 @@ Mac 构建、权限、配对与验收步骤见 [docs/MACOS_SETUP.md](./docs/MACO
 - 多配置、前台软件自动切换和更完整的 Codex / Claude Code / Cursor / ZCode 工具专属指令集。
 - 三台真实电脑同时在线的完整验收；当前版本已完成 Windows Wi-Fi 通道、USB 自动配对和
   受限 UDP 自动发现，但仍需逐台安装接收端并完成三机实测。
-- macOS Core Audio / BlackHole 手机音频、Typeless 受控会话，以及真实 Mac 输入/网络验收。
+- 真实 Mac 的 Core Audio / BlackHole / Typeless 权限与音频验收，以及 Windows/macOS
+  三机同时转写和两小时锁屏共享压力测试。
 - 正式的跨电脑配置同步。
 
 不要把规划文档中的功能误认为已完成代码。
@@ -131,7 +146,7 @@ PhoneDeck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
    ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
-   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.1）
+   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.2）
    ├─ macos/PhoneDeck.Receiver.Tests # macOS 协议与映射测试
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
@@ -171,10 +186,10 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 接下来的开发顺序
 
-1. 在真实 Mac 构建 2.0.0-dev.1，授予辅助功能/本地网络权限，验证 TextEdit 中的文字、复制、截图和窗口切换。
-2. 用 USB 完成 Mac 首次配对，拔线后验证 Wi-Fi 快捷键，并和两台 Windows 做三机目标隔离验收。
-3. 接入 Core Audio → BlackHole 2ch → Typeless，验证手机 48 kHz PCM 与开始/停止状态。
-4. 回归 Windows Wi-Fi 语音、快捷键编辑、真实输入、连续断线和蓝牙。
+1. 在 macOS 14.2+ 构建 2.0.0-dev.2，安装 BlackHole 2ch 和 Typeless，完成权限与 48 kHz 配置。
+2. 用 USB 完成 Mac 首次配对，拔线后验证 Wi-Fi 快捷键和两套语音模式。
+3. 让两台 Windows 和一台 Mac 同时接收共享音频，分别及同时触发本机 Typeless 做三机验收。
+4. 完成 20 轮模式切换、断网/睡眠/重启恢复和至少两小时锁屏共享测试。
 5. 补齐标准 mDNS/Bonjour、凭据撤销/重配与 USB 共享切换器实测。
 6. 完成 1.7/1.8 的多配置、自动切换和受控自动化后，再完成 macOS Developer ID 签名、公证与安装包。
 
@@ -192,6 +207,6 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 - [VB-CABLE](https://vb-audio.com/Cable/)：Windows 虚拟音频设备，用户自行安装。
 - Android SDK Platform Tools：ADB USB 通道。
 - NAudio 2.2.1：Windows 接收端 NuGet 依赖。
-- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 下一阶段虚拟音频设备，用户自行安装。
+- [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 虚拟音频设备，用户自行安装并配置为 48 kHz。
 
 Typeless、VB-CABLE 和 BlackHole 不属于本仓库，也不会打包其安装文件。

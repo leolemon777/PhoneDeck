@@ -6,6 +6,8 @@
 - 电脑与手机连接同一 Wi-Fi；
 - 手机已安装 PhoneDeck 1.6.0-dev.2；
 - 语音输入需安装 VB-CABLE 和 Typeless，快捷键不需要这两项。
+- 一发三收需部署 1.6.0-dev.5 或更高接收端；`/api/health.capabilities` 应包含
+  `sharedMicrophone`，`audio.available` 应为 true。
 
 ## 首次部署
 
@@ -36,5 +38,8 @@
   `powershell -ExecutionPolicy Bypass -File .\Enable-PhoneDeckLan.ps1`。
 - 手机不出现授权窗口：更换可传数据的 USB 线，并确认已开启 USB 调试。
 - 只能用快捷键、不能语音：检查 VB-CABLE 和 Typeless 的麦克风选择。
+- 共享模式显示“需要更新电脑端”：确认运行的不是旧接收端，并检查健康接口中的
+  `sharedMicrophone` 能力。
+- 共享已连接但本机不出字：这是正常的供音/触发分离；在该电脑按 Typeless 本机快捷键。
 - 电脑换网络后离线：再插一次 USB，重新运行 `Pair-PhoneDeckPhone.ps1`。
 - 公司/酒店 Wi-Fi 无法连接：该网络可能开启了客户端隔离，需使用允许设备互访的路由器。

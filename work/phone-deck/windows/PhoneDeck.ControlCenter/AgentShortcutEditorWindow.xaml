@@ -1,0 +1,72 @@
+<Window x:Class="PhoneDeck.ControlCenter.AgentShortcutEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="配置 Agent 操作" Width="860" Height="600" MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterOwner" WindowStyle="None"
+        Background="{DynamicResource BrushPearl}"
+        FontFamily="{StaticResource FontFamilyBody}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="54" CornerRadius="0" GlassFrameThickness="0" ResizeBorderThickness="6" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Grid Background="{DynamicResource BrushPearl}">
+        <Rectangle Height="340" VerticalAlignment="Top" Fill="{DynamicResource BrushAuroraGlow}" IsHitTestVisible="False" />
+        <Grid Margin="28,16,28,26">
+            <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="86"/><RowDefinition Height="*"/><RowDefinition Height="70"/></Grid.RowDefinitions>
+
+            <Grid Grid.Row="0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="32" Height="32" CornerRadius="16" Background="{DynamicResource BrushGraphite}" Margin="0,0,10,0"><Path Data="{StaticResource IconSettings}" Width="15" Height="15" Stretch="Uniform" Stroke="White" StrokeThickness="1.7" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                    <TextBlock Text="配置 Agent 操作" Style="{StaticResource TextSectionTitle}" FontSize="17" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button HorizontalAlignment="Right" Style="{StaticResource WindowCloseButton}" Click="Cancel_Click" shell:WindowChrome.IsHitTestVisibleInChrome="True"><Path Data="{StaticResource IconWindowClose}" Width="9" Height="9" Stretch="Fill" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"/></Button>
+            </Grid>
+
+            <StackPanel Grid.Row="1" Margin="4,8,0,0">
+                <TextBlock Text="Agent 快捷操作" Style="{StaticResource TextPageTitle}" FontSize="25"/>
+                <TextBlock Text="替换手机按钮的名称和斜杠指令；保存后通过 Wi-Fi 或 USB 自动同步。" Style="{StaticResource TextMuted}" Margin="0,6,0,0"/>
+            </StackPanel>
+
+            <Border Grid.Row="2" Style="{StaticResource GlassCard}" Padding="20,16">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="1.9*"/><ColumnDefinition Width=".65*"/><ColumnDefinition Width=".55*"/></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="36"/><RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <TextBlock Grid.Column="0" Text="按钮名称" Style="{StaticResource TextFine}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="发送内容" Style="{StaticResource TextFine}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                    <TextBlock Grid.Column="2" Text="自动回车" Style="{StaticResource TextFine}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="3" Text="显示" Style="{StaticResource TextFine}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <TextBox x:Name="PlanLabel" Grid.Row="1" Grid.Column="0" Style="{StaticResource GlassTextBox}" Margin="0,6,6,6"/>
+                    <TextBox x:Name="PlanText" Grid.Row="1" Grid.Column="1" Style="{StaticResource GlassTextBox}" Margin="6"/>
+                    <CheckBox x:Name="PlanSubmit" Grid.Row="1" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <CheckBox x:Name="PlanVisible" Grid.Row="1" Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <TextBox x:Name="GoalLabel" Grid.Row="2" Grid.Column="0" Style="{StaticResource GlassTextBox}" Margin="0,6,6,6"/>
+                    <TextBox x:Name="GoalText" Grid.Row="2" Grid.Column="1" Style="{StaticResource GlassTextBox}" Margin="6"/>
+                    <CheckBox x:Name="GoalSubmit" Grid.Row="2" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <CheckBox x:Name="GoalVisible" Grid.Row="2" Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <TextBox x:Name="CompactLabel" Grid.Row="3" Grid.Column="0" Style="{StaticResource GlassTextBox}" Margin="0,6,6,6"/>
+                    <TextBox x:Name="CompactText" Grid.Row="3" Grid.Column="1" Style="{StaticResource GlassTextBox}" Margin="6"/>
+                    <CheckBox x:Name="CompactSubmit" Grid.Row="3" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <CheckBox x:Name="CompactVisible" Grid.Row="3" Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <TextBox x:Name="ClearLabel" Grid.Row="4" Grid.Column="0" Style="{StaticResource GlassTextBox}" Margin="0,6,6,6"/>
+                    <TextBox x:Name="ClearText" Grid.Row="4" Grid.Column="1" Style="{StaticResource GlassTextBox}" Margin="6"/>
+                    <CheckBox x:Name="ClearSubmit" Grid.Row="4" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <CheckBox x:Name="ClearVisible" Grid.Row="4" Grid.Column="3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="4,14,4,0">
+                <TextBlock Text="示例：把“规划”改成“先调研”，发送内容改成 /plan before coding。" Style="{StaticResource TextFine}" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Content="取消" Style="{StaticResource GlassButton}" Margin="0,0,10,0" Click="Cancel_Click"/>
+                    <Button Content="保存并同步" Style="{StaticResource BlueButton}" Click="Save_Click"/>
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

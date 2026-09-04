@@ -2,9 +2,11 @@ package com.codex.phonedeck;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
@@ -46,6 +48,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -53,9 +56,13 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final int REQUEST_BLUETOOTH = 1002;
     private static final int REQUEST_MICROPHONE = 1003;
+    private static final int REQUEST_SHARED_MICROPHONE = 1004;
     private static final String SERVER = "http://127.0.0.1:8765";
     private static final String PREFS_NAME = "PhoneDeckSettings";
+    private static final String PREF_VOICE_WORK_MODE = "voice_work_mode";
     private static final String PREF_VOICE_MODE = "voice_mode";
+    private static final String WORK_MANAGED = "managed";
+    private static final String WORK_SHARED = "shared";
     private static final String MODE_TAP = "tap";
     private static final String MODE_HOLD = "hold";
     private static final long HEALTH_CHECK_INTERVAL_MS = 2_000;
@@ -73,6 +80,7 @@ public final class MainActivity extends Activity {
     private TextView actionFeedback;
     private TextView microphoneLevel;
     private TextView voiceModeText;
+    private TextView targetTitleText;
     private Button typelessButton;
     private MicrophoneGlyphDrawable voiceIcon;
     private VoiceLevelView voiceMeter;
@@ -86,7 +94,12 @@ public final class MainActivity extends Activity {
     private boolean holdReleasePending;
     private String voiceBusyLabel;
     private Runnable voiceStartWatchdog;
+    private String voiceWorkMode = WORK_MANAGED;
     private String voiceMode = MODE_TAP;
+    private boolean sharedStartPending;
+    private boolean sharedStatusReceiverRegistered;
+    private String lastSharedDetail;
+    private Map<String, String> lastSharedReceiverStates = java.util.Collections.emptyMap();
     private String currentSessionId;
     private boolean currentSessionManaged;
     private String currentSessionTargetComputerId;
@@ -151,6 +164,15 @@ public final class MainActivity extends Activity {
     private static final long DISCOVERY_COOLDOWN_MS = 10_000;
     private ConnectivityManager.NetworkCallback networkCallback;
 
+    private final BroadcastReceiver sharedStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction())) {
+                renderSharedAudioStatus(PhoneAudioService.getSnapshot());
+            }
+        }
+    };
+
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
@@ -191,6 +213,7 @@ public final class MainActivity extends Activity {
         });
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
+        registerSharedAudioStatusReceiver();
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
             @Override
             public void onReady(String sessionId) {
@@ -212,6 +235,28 @@ public final class MainActivity extends Activity {
         testConnection();
         testLanConnections();
         mainHandler.postDelayed(periodicHealthCheck, HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private void registerSharedAudioStatusReceiver() {
+        IntentFilter filter = new IntentFilter(PhoneAudioService.ACTION_STATUS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(sharedStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(sharedStatusReceiver, filter);
+        }
+        sharedStatusReceiverRegistered = true;
+    }
+
+    private void reconcileVoiceWorkMode() {
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            if (isVoiceStarting() || dictationActive || typelessInFlight) {
+                stopOrCancelDictation();
+                showActionFeedback("●  已停止手机控制听写；可手动开启共享麦克风", theme.warning);
+            }
+        } else if (PhoneAudioService.getSnapshot().running) {
+            stopSharedMicrophoneService();
+        }
     }
 
     /// Wi-Fi 切换、DHCP 变化、网络恢复时立即重新探测与发现，不需要 USB。
@@ -269,6 +314,10 @@ public final class MainActivity extends Activity {
             return;
         }
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String previousWorkMode = voiceWorkMode;
+        voiceWorkMode = WORK_SHARED.equals(
+                preferences.getString(PREF_VOICE_WORK_MODE, WORK_MANAGED))
+                ? WORK_SHARED : WORK_MANAGED;
         voiceMode = preferences.getString(PREF_VOICE_MODE, MODE_TAP);
         if (!MODE_HOLD.equals(voiceMode)) {
             voiceMode = MODE_TAP;
@@ -277,11 +326,20 @@ public final class MainActivity extends Activity {
         selectedTypelessMode = "translation".equals(storedTypelessMode)
                 || "ask".equals(storedTypelessMode) ? storedTypelessMode : "dictation";
         keepConnectionAlive = preferences.getBoolean("keep_connection_alive", true);
+        if (!previousWorkMode.equals(voiceWorkMode)) {
+            reconcileVoiceWorkMode();
+        } else if (WORK_MANAGED.equals(voiceWorkMode)
+                && PhoneAudioService.getSnapshot().running) {
+            stopSharedMicrophoneService();
+        }
         applyWifiLock();
         requestImmediateLanCheck("App 回到前台");
         if (voiceModeText != null && typelessButton != null) {
             updateVoiceModeInterface();
             refreshTypelessModeChips();
+            if (WORK_SHARED.equals(voiceWorkMode)) {
+                renderSharedAudioStatus(PhoneAudioService.getSnapshot());
+            }
         }
         if (shortcutGrid != null && configRepository != null) {
             refreshShortcutGrid();
@@ -307,7 +365,9 @@ public final class MainActivity extends Activity {
             showActionFeedback(lastFeedbackMessage, lastFeedbackColor);
         }
         if (microphoneLevel != null) {
-            if (audioStreamer != null && audioStreamer.isPaused()) {
+            if (WORK_SHARED.equals(voiceWorkMode)) {
+                renderSharedAudioStatus(PhoneAudioService.getSnapshot());
+            } else if (audioStreamer != null && audioStreamer.isPaused()) {
                 microphoneLevel.setText("手机麦克风  Ⅱ 已暂停（未采集声音）");
                 microphoneLevel.setTextColor(theme.warning);
             } else if (dictationActive) {
@@ -552,8 +612,8 @@ public final class MainActivity extends Activity {
         targetDockRow.setOrientation(LinearLayout.HORIZONTAL);
         targetDockRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView targetTitle = text("输入到", 12, theme.muted, Typeface.BOLD);
-        targetDockRow.addView(targetTitle, new LinearLayout.LayoutParams(
+        targetTitleText = text("输入到", 12, theme.muted, Typeface.BOLD);
+        targetDockRow.addView(targetTitleText, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -1096,7 +1156,14 @@ public final class MainActivity extends Activity {
         for (TargetDeviceManager.Device device : devices) {
             boolean selected = sameComputer(device.computerId, activeComputerId);
             boolean online = isDeviceOnline(device.computerId);
-            Button chip = smallButton(device.slot + "号");
+            String sharedState = WORK_SHARED.equals(voiceWorkMode)
+                    ? PhoneAudioService.getSnapshot().receiverStates.get(device.computerId)
+                    : null;
+            String chipLabel = device.slot + "号";
+            if (sharedState != null) {
+                chipLabel += " · " + sharedState.replace("正在", "").replace("电脑端", "");
+            }
+            Button chip = smallButton(chipLabel);
             chip.setAllCaps(false);
             chip.setSingleLine(true);
             chip.setTextColor(selected ? theme.onPrimary : theme.text);
@@ -1109,7 +1176,8 @@ public final class MainActivity extends Activity {
             chip.setAlpha(online ? 1f : 0.48f);
             chip.setEnabled(online);
             chip.setContentDescription(device.slot + "号电脑 " + device.displayName
-                    + (online ? selected ? "，当前目标" : "，在线" : "，离线"));
+                    + (sharedState == null ? "" : "，共享状态" + sharedState)
+                    + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线"));
             chip.setOnClickListener(view -> selectTargetDevice(device, chip));
             installTouchFeedback(chip);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -1284,6 +1352,10 @@ public final class MainActivity extends Activity {
 
     private void refreshTypelessModeChips() {
         if (typelessModeRow == null) {
+            return;
+        }
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            typelessModeRow.setVisibility(View.GONE);
             return;
         }
         String[] modes = activeTypelessModes();
@@ -1777,7 +1849,9 @@ public final class MainActivity extends Activity {
         typelessButton.setSoundEffectsEnabled(true);
         typelessButton.setHapticFeedbackEnabled(true);
         typelessButton.setOnClickListener(view -> {
-            if (MODE_TAP.equals(voiceMode)) {
+            if (WORK_SHARED.equals(voiceWorkMode)) {
+                toggleSharedMicrophone();
+            } else if (MODE_TAP.equals(voiceMode)) {
                 toggleTypelessWithPhoneMic();
             }
         });
@@ -1790,7 +1864,7 @@ public final class MainActivity extends Activity {
                 view.animate().scaleX(0.965f).scaleY(0.965f).setDuration(55).start();
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 view.playSoundEffect(SoundEffectConstants.CLICK);
-                if (MODE_HOLD.equals(voiceMode)) {
+                if (WORK_MANAGED.equals(voiceWorkMode) && MODE_HOLD.equals(voiceMode)) {
                     holdGestureActive = true;
                     holdReleasePending = false;
                     if (!dictationActive && !audioStartPending && !typelessInFlight) {
@@ -1800,7 +1874,7 @@ public final class MainActivity extends Activity {
                 }
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
-                if (MODE_HOLD.equals(voiceMode)) {
+                if (WORK_MANAGED.equals(voiceWorkMode) && MODE_HOLD.equals(voiceMode)) {
                     boolean wasHolding = holdGestureActive;
                     holdGestureActive = false;
                     if (wasHolding) {
@@ -1820,9 +1894,22 @@ public final class MainActivity extends Activity {
     }
 
     private void updateVoiceModeInterface() {
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            voiceModeText.setText("共享麦克风模式");
+            voiceModeText.setTextColor(theme.warning);
+            if (targetTitleText != null) {
+                targetTitleText.setText("快捷键到");
+            }
+            typelessButton.setContentDescription("开启或关闭共享麦克风");
+            updateVoiceControls();
+            return;
+        }
         boolean holdMode = MODE_HOLD.equals(voiceMode);
         voiceModeText.setText(holdMode ? "按住说话模式" : "点击说话模式");
         voiceModeText.setTextColor(holdMode ? theme.warning : theme.primary);
+        if (targetTitleText != null) {
+            targetTitleText.setText("输入到");
+        }
         typelessButton.setContentDescription(holdMode
                 ? "按住开始 Typeless 语音输入，松开结束"
                 : "点击开始语音输入；再次点击同一按钮停止");
@@ -1830,6 +1917,10 @@ public final class MainActivity extends Activity {
     }
 
     private String voiceButtonLabel() {
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            return PhoneAudioService.getSnapshot().running
+                    ? "关闭共享麦克风" : "开启共享麦克风";
+        }
         if (MODE_HOLD.equals(voiceMode)) {
             if (voiceBusyLabel != null) {
                 return voiceBusyLabel;
@@ -1859,6 +1950,33 @@ public final class MainActivity extends Activity {
         }
         typelessButton.setText(voiceButtonLabel());
         refreshTypelessModeChips();
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
+            boolean stopState = state.running;
+            boolean monoVoice = theme.isMonochrome();
+            int stopFill = monoVoice ? theme.primary
+                    : theme.mix(theme.voiceDock, theme.danger, 0.72f);
+            int stopInk = monoVoice ? theme.onPrimary : theme.text;
+            typelessButton.setBackground(stopState
+                    ? pressableRoundRect(stopFill,
+                            monoVoice ? theme.primaryPressed : theme.danger, 22)
+                    : pressableRoundRect(theme.primary, theme.primaryPressed, 22));
+            typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
+            if (voiceIcon != null) {
+                voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
+            }
+            typelessButton.setContentDescription(stopState
+                    ? "关闭共享麦克风" : "开启共享麦克风");
+            if (voiceMeter != null) {
+                voiceMeter.setVoiceState(stopState
+                        ? VoiceLevelView.ACTIVE : VoiceLevelView.IDLE);
+                voiceMeter.setLevel(stopState ? state.level : 0);
+            }
+            setControlEnabled(typelessButton,
+                    !sharedStartPending && !isVoiceStarting()
+                            && !dictationActive && !typelessInFlight);
+            return;
+        }
         boolean holdMode = MODE_HOLD.equals(voiceMode);
         boolean starting = isVoiceStarting();
         boolean stopping = dictationActive && typelessInFlight;
@@ -1905,7 +2023,112 @@ public final class MainActivity extends Activity {
         button.setAlpha(enabled ? 1f : 0.45f);
     }
 
+    private void toggleSharedMicrophone() {
+        if (!WORK_SHARED.equals(voiceWorkMode)) {
+            return;
+        }
+        PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
+        if (state.running) {
+            stopSharedMicrophoneService();
+            showActionFeedback("■  正在关闭共享麦克风…", theme.warning);
+            return;
+        }
+        if (isVoiceStarting() || dictationActive || typelessInFlight
+                || (audioStreamer != null && audioStreamer.isRunning())) {
+            showActionFeedback("✕  请等待手机控制听写完全结束后再开启共享", theme.warning);
+            return;
+        }
+        java.util.ArrayList<String> missing = new java.util.ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!missing.isEmpty()) {
+            sharedStartPending = true;
+            updateVoiceControls();
+            requestPermissions(missing.toArray(new String[0]), REQUEST_SHARED_MICROPHONE);
+            return;
+        }
+        startSharedMicrophoneService();
+    }
+
+    private void startSharedMicrophoneService() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            sharedStartPending = false;
+            showActionFeedback("✕  未授予麦克风权限，无法开启共享", theme.danger);
+            updateVoiceControls();
+            return;
+        }
+        sharedStartPending = true;
+        showActionFeedback("●  正在开启共享麦克风并查找电脑…", theme.warning);
+        Intent start = new Intent(this, PhoneAudioService.class)
+                .setAction(PhoneAudioService.ACTION_START);
+        try {
+            startForegroundService(start);
+        } catch (Exception exception) {
+            sharedStartPending = false;
+            showActionFeedback("✕  无法开启共享麦克风：" + exception.getMessage(), theme.danger);
+            updateVoiceControls();
+        }
+    }
+
+    private void stopSharedMicrophoneService() {
+        sharedStartPending = false;
+        Intent stop = new Intent(this, PhoneAudioService.class)
+                .setAction(PhoneAudioService.ACTION_STOP);
+        startService(stop);
+        updateVoiceControls();
+        refreshTargetSwitcher();
+    }
+
+    private void renderSharedAudioStatus(PhoneAudioService.Snapshot state) {
+        if (!WORK_SHARED.equals(voiceWorkMode) || state == null) {
+            return;
+        }
+        sharedStartPending = false;
+        boolean receiverStatesChanged = !lastSharedReceiverStates.equals(state.receiverStates);
+        if (receiverStatesChanged) {
+            lastSharedReceiverStates = new java.util.HashMap<>(state.receiverStates);
+        }
+        if (voiceMeter != null) {
+            voiceMeter.setVoiceState(state.running
+                    ? VoiceLevelView.ACTIVE : VoiceLevelView.IDLE);
+            voiceMeter.setLevel(state.running ? state.level : 0);
+        }
+        if (microphoneLevel != null) {
+            if (state.running) {
+                microphoneLevel.setText("手机麦克风  ·  " + state.level + "%  ·  "
+                        + state.connected + "/" + state.total + " 正在供音");
+                microphoneLevel.setTextColor(state.connected > 0
+                        ? theme.success : theme.warning);
+            } else {
+                microphoneLevel.setText("手机麦克风  ○ 共享已关闭");
+                microphoneLevel.setTextColor(theme.muted);
+            }
+        }
+        String detail = state.detail == null ? "" : state.detail;
+        if (!detail.equals(lastSharedDetail)) {
+            lastSharedDetail = detail;
+            showActionFeedback((state.running ? "●  " : "■  ") + detail,
+                    state.running && state.connected == 0 ? theme.warning : theme.muted);
+        }
+        updateVoiceControls();
+        if (receiverStatesChanged) {
+            refreshTargetSwitcher();
+        }
+    }
+
     private void beginPhoneDictation() {
+        if (WORK_SHARED.equals(voiceWorkMode)) {
+            showActionFeedback("✕  当前是共享麦克风模式", theme.warning);
+            return;
+        }
         PhoneDeckEndpoint endpoint = endpointForActiveTarget();
         if (endpoint == null) {
             if (isBluetoothTargetOnline()) {
@@ -2493,12 +2716,25 @@ public final class MainActivity extends Activity {
                 clearVoiceSessionState();
                 showActionFeedback("✕  未授予麦克风权限，无法传输手机声音", theme.danger);
             }
+        } else if (requestCode == REQUEST_SHARED_MICROPHONE) {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED) {
+                startSharedMicrophoneService();
+            } else {
+                sharedStartPending = false;
+                showActionFeedback("✕  未授予麦克风权限，无法开启共享", theme.danger);
+                updateVoiceControls();
+            }
         }
     }
 
     @Override
     protected void onDestroy() {
         mainHandler.removeCallbacks(periodicHealthCheck);
+        if (sharedStatusReceiverRegistered) {
+            unregisterReceiver(sharedStatusReceiver);
+            sharedStatusReceiverRegistered = false;
+        }
         stopKeyRepeat();
         releaseWifiLock();
         unregisterNetworkCallbacks();

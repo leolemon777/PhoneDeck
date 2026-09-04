@@ -7,6 +7,9 @@ internal sealed class MacReceiverSettings
     public bool UsbWatchdog { get; init; } = true;
     public bool LanDiscovery { get; init; } = true;
     public string? AdbPath { get; init; }
+    public string? AudioDeviceUid { get; init; }
+    public string? TypelessSettingsPath { get; init; }
+    public TypelessShortcutOverrides TypelessShortcuts { get; init; } = new();
 
     internal static MacReceiverSettings LoadOrCreate()
     {
@@ -45,7 +48,17 @@ internal sealed class MacReceiverSettings
                     + "  // lanDiscovery：在 UDP 8767 回应已配对手机的发现请求。\n"
                     + "  \"lanDiscovery\": true,\n"
                     + "  // adbPath：可选的 adb 完整路径。\n"
-                    + "  \"adbPath\": null\n"
+                    + "  \"adbPath\": null,\n"
+                    + "  // audioDeviceUid：可选；为空时自动选择 BlackHole 2ch。\n"
+                    + "  \"audioDeviceUid\": null,\n"
+                    + "  // typelessSettingsPath：可选；为空时自动查找 app-settings.json。\n"
+                    + "  \"typelessSettingsPath\": null,\n"
+                    + "  // 显式快捷键覆盖；不要把 Fn 等本机绑定写死在程序中。\n"
+                    + "  \"typelessShortcuts\": {\n"
+                    + "    \"dictation\": null,\n"
+                    + "    \"translation\": null,\n"
+                    + "    \"ask\": null\n"
+                    + "  }\n"
                     + "}\n");
             }
         }
@@ -55,4 +68,11 @@ internal sealed class MacReceiverSettings
         }
         return new MacReceiverSettings();
     }
+}
+
+internal sealed class TypelessShortcutOverrides
+{
+    public string? Dictation { get; init; }
+    public string? Translation { get; init; }
+    public string? Ask { get; init; }
 }

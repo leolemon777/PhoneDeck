@@ -20,8 +20,8 @@ android {
         applicationId "com.codex.phonedeck"
         minSdk 26
         targetSdk 35
-        versionCode 10
-        versionName "1.6.0-dev.4"
+        versionCode 11
+        versionName "1.6.0-dev.5"
     }
 
     compileOptions {
@@ -58,5 +58,32 @@ android {
     lint {
         abortOnError true
         checkReleaseBuilds true
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+}
+
+// Gradle's Windows test worker can lose loose .class directories when the
+// workspace path contains CJK characters. Package them first so local unit
+// tests remain runnable from PhoneDeck's normal Chinese workspace path.
+def debugUnitTestJar = tasks.register("debugUnitTestJar", Jar) {
+    dependsOn("compileDebugUnitTestJavaWithJavac", "compileDebugJavaWithJavac")
+    from(layout.buildDirectory.dir(
+            "intermediates/javac/debugUnitTest/compileDebugUnitTestJavaWithJavac/classes"))
+    from(layout.buildDirectory.dir(
+            "intermediates/javac/debug/compileDebugJavaWithJavac/classes"))
+    archiveFileName = "phonedeck-${rootProject.projectDir.absolutePath.hashCode()}-debug-unit-tests.jar"
+    destinationDirectory = file("${gradle.gradleUserHomeDir}/phonedeck-test-cache")
+}
+
+tasks.withType(Test).configureEach {
+    if (name == "testDebugUnitTest") {
+        dependsOn(debugUnitTestJar)
+        doFirst {
+            def testsJar = debugUnitTestJar.get().archiveFile.get().asFile
+            classpath = files(testsJar) + classpath
+        }
     }
 }
