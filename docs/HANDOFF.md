@@ -2,11 +2,26 @@
 
 更新时间：2026-09-04
 当前分支：`agent/macos-receiver-2.0`
-当前源码：Android/Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android 1.6.0-dev.8（软色纸卡 UI）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-05 dev.8：软色纸卡 UI（2号电脑）
+
+- 应用户提供的参考图（8 屏 soft-neo 风格）整体重做手机端视觉：暖奶油/暖黑双调、
+  纯色大圆角卡片（快捷键 20/连接卡 24/语音坞 28）、胶囊按钮与芯片、柔投影，
+  去除冰川玻璃渐变与 FrostedBackdropView 极光背景；深浅色跟随系统昼夜
+  （象牙浅色 / 浓缩咖啡深色，深色主按钮为白色胶囊+深色图标，同参考图深色 FAB）。
+- PhoneDeckTheme 重写为单 id "soft" 双调色板；快捷键卡片回归白卡，预设色仅用于
+  chord 点缀；设置页"外观"改为跟随系统说明，不再列主题。
+- 版本 versionCode 14 / 1.6.0-dev.8。手机为外部签名(6538…)与 2号机密钥
+  (DF:32…)均不一致，已卸载重装（一次性重置手机端数据），USB 插线即自动
+  重新配对成功（连接卡显示"往里走的COMPUTE · Wi-Fi"）；assembleDebug/
+  lintDebug 通过，真机截图验证浅色/深色两套。
+- 2号机 ControlCenter 小屏三补丁（窗口钳制/数据目录/概览滚动）已提交 main
+  （9e83aae，2026-09-04）。
 
 ## 2026-09-04 dev.7：配对失效可视化、USB 自愈与设备删除
 

@@ -28,8 +28,8 @@ final class ShortcutKeyView extends FrameLayout {
                 context,
                 theme.shortcutColor(config.color),
                 theme.shortcutPressedColor(config.color),
-                17));
-        setElevation(dp(theme.isFrost() ? 5 : theme.light ? 1 : 2));
+                20));
+        setElevation(dp(4));
 
         content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -52,7 +52,7 @@ final class ShortcutKeyView extends FrameLayout {
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
         chord.setPadding(dp(6), 0, dp(6), 0);
-        chord.setBackground(theme.shape(context, theme.surface, 9));
+        chord.setBackground(theme.shape(context, theme.key, 10));
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 LayoutParams.WRAP_CONTENT, dp(19));
         chordParams.topMargin = dp(5);

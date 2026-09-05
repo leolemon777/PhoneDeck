@@ -435,11 +435,6 @@ public final class MainActivity extends Activity {
     private View createInterface() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
-        if (theme.isFrost()) {
-            root.addView(new FrostedBackdropView(this), new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        }
 
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
@@ -472,8 +467,8 @@ public final class MainActivity extends Activity {
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
         connection.setPadding(dp(16), dp(12), dp(12), dp(12));
-        connection.setBackground(theme.shape(this, theme.surface, 18, 1, theme.outline));
-        connection.setElevation(dp(theme.isFrost() ? 5 : 0));
+        connection.setBackground(theme.shape(this, theme.surface, 24));
+        connection.setElevation(dp(4));
         connection.setOnClickListener(view -> {
             startBluetoothTransport();
             testConnection();
@@ -534,8 +529,8 @@ public final class MainActivity extends Activity {
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
         voiceDock.setPadding(dp(12), dp(10), dp(12), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 24, 1, theme.outline));
-        voiceDock.setElevation(dp(theme.isFrost() ? 18 : 14));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 28));
+        voiceDock.setElevation(dp(14));
 
         LinearLayout dockHeader = new LinearLayout(this);
         dockHeader.setOrientation(LinearLayout.HORIZONTAL);
@@ -571,8 +566,8 @@ public final class MainActivity extends Activity {
         typelessButton.setCompoundDrawablePadding(dp(12));
         typelessButton.setPadding(dp(12), 0, dp(12), 0);
         typelessButton.setBackground(pressableRoundRect(
-                theme.primary, theme.primaryPressed, 22));
-        typelessButton.setElevation(dp(theme.isFrost() ? 8 : 0));
+                theme.primary, theme.primaryPressed, 36));
+        typelessButton.setElevation(dp(6));
         typelessButton.setStateListAnimator(null);
         typelessButton.setContentDescription("Typeless 语音输入");
         installVoiceGesture();
@@ -617,7 +612,7 @@ public final class MainActivity extends Activity {
                 12, theme.muted, Typeface.BOLD);
         actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
         actionFeedback.setPadding(dp(15), dp(12), dp(15), dp(12));
-        actionFeedback.setBackground(roundRect(theme.surface, 14));
+        actionFeedback.setBackground(roundRect(theme.surface, 16));
         voiceDock.addView(actionFeedback, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -1194,8 +1189,8 @@ public final class MainActivity extends Activity {
             chip.setBackground(theme.shape(
                     this,
                     selected ? theme.primary : theme.surfaceRaised,
-                    16,
-                    1,
+                    20,
+                    selected ? 0 : 1,
                     selected ? theme.primary : theme.outline));
             chip.setAlpha(online ? 1f : 0.48f);
             chip.setEnabled(online);
@@ -1452,7 +1447,7 @@ public final class MainActivity extends Activity {
                     selected ? theme.primary : theme.surfaceRaised,
                     selected ? theme.primaryPressed
                             : theme.mix(theme.surfaceRaised, theme.primary, 0.15f),
-                    14));
+                    15));
             chip.setEnabled(!dictationActive);
             chip.setAlpha(dictationActive ? 0.55f : 1f);
             chip.setContentDescription("切换语音模式：" + typelessModeLabel(mode));
@@ -2042,8 +2037,8 @@ public final class MainActivity extends Activity {
             int stopInk = monoVoice ? theme.onPrimary : theme.text;
             typelessButton.setBackground(stopState
                     ? pressableRoundRect(stopFill,
-                            monoVoice ? theme.primaryPressed : theme.danger, 22)
-                    : pressableRoundRect(theme.primary, theme.primaryPressed, 22));
+                            monoVoice ? theme.primaryPressed : theme.danger, 36)
+                    : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
                 voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
@@ -2080,8 +2075,8 @@ public final class MainActivity extends Activity {
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
                         stopFill,
-                        monoVoice ? theme.primaryPressed : theme.danger, 22)
-                : pressableRoundRect(theme.primary, theme.primaryPressed, 22));
+                        monoVoice ? theme.primaryPressed : theme.danger, 36)
+                : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
             voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
@@ -2909,7 +2904,7 @@ public final class MainActivity extends Activity {
         button.setAllCaps(false);
         button.setPadding(dp(4), 0, dp(4), 0);
         button.setBackground(theme.pressable(
-                this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 12));
+                this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 19));
         button.setStateListAnimator(null);
         return button;
     }
@@ -2920,7 +2915,7 @@ public final class MainActivity extends Activity {
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setBackground(theme.pressable(
                 this, theme.surface,
-                theme.mix(theme.surface, theme.primary, 0.16f), 14));
+                theme.mix(theme.surface, theme.primary, 0.16f), 23));
         return button;
     }
 
