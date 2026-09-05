@@ -62,3 +62,22 @@
   需重新插线配对一次。
 - `PhoneDeckTheme.byId` 恒返 ivory，若有第三方代码路径直接 byId 渲染将失去
   深色（仓库内无此调用，仅防御性备注）。
+
+
+# 2026-09-05 dev.9 追记：主题选择器全量恢复
+
+用户反馈：原 9 套配色不能丢、参考图 4 配色也要做成可选。dev.8 的单主题
+方向被推翻，改为：
+
+- PhoneDeckTheme 变为主题仓库：`soft`（自动档，跟随系统，默认）+
+  ivory/pearl/espresso/cocoa（参考图 4 配色）+ frost/paper/ocean/oled/
+  inklight/inkdark/goldblue/goldamber/goldforest（历史 9 套，调色板与
+  玻璃/单色/染色专属渲染从 git 0e15bd7 原样恢复）。
+- load()：pref 无记录或 "soft" → 按昼夜解析并包装为 SOFT 身份
+  （softAuto），保证设置页只标选一项；显式选择则存具体 id。
+- 设置页恢复 14 项选择器（themeOption 原组件）；MainActivity onResume
+  id 变化自动 recreate（既有逻辑）。
+- 修复两个真机发现的问题：①自动档对象沿用 ivory id 导致列表双选中；
+  ②isSoft() 未含 SOFT 导致自动档快捷键卡出现彩色染色。
+- versionCode 15 / 1.6.0-dev.9；assembleDebug/lintDebug 过；真机截屏验证
+  自动档白卡、冰川玻璃极光渲染、主题列表标选，Wi-Fi 配对在线。

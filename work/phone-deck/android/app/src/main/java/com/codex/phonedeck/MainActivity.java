@@ -435,6 +435,11 @@ public final class MainActivity extends Activity {
     private View createInterface() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
+        if (theme.isFrost()) {
+            root.addView(new FrostedBackdropView(this), new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+        }
 
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;

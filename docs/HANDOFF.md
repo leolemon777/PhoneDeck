@@ -2,11 +2,25 @@
 
 更新时间：2026-09-04
 当前分支：`agent/macos-receiver-2.0`
-当前源码：Android 1.6.0-dev.8（软色纸卡 UI）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android 1.6.0-dev.9（软色纸卡 + 全量主题选择器）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-05 dev.9：主题选择器全量恢复（2号电脑）
+
+- 用户要求恢复全部历史配色并把参考图 4 配色做成可选主题。PhoneDeckTheme
+  重构为主题仓库：`soft` 自动档（默认，深浅跟随系统）+ 纸卡 4 套
+  （奶油/云白浅色、暖黑/暖灰深色）+ 历史 9 套（冰川玻璃/柔和浅色/深海蓝/
+  OLED 黑/极简墨白/极简纯黑/黄金靛蓝/黄金琥珀/黄金松绿），
+  调色板与专属渲染（玻璃渐变、极光背景、单色映射、染色卡片）从 0e15bd7
+  原样恢复；isFrost()/isMonochrome() 恢复真实语义。
+- 设置页恢复外观主题选择器（14 项，themeOption/selectTheme 原逻辑）；
+  主界面 onResume 主题 id 变化自动 recreate。
+- 真机验证：主题列表正确标选（修复过自动档误显示两个选中与软色主题
+  染色卡片两个 bug）、冰川玻璃切回后极光+玻璃渐变完好、软色纸卡白卡
+  正常、Wi-Fi 配对在线。assembleDebug/lintDebug 通过，versionCode 15。
 
 ## 2026-09-05 dev.8：软色纸卡 UI（2号电脑）
 

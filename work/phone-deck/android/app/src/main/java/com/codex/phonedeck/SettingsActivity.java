@@ -82,12 +82,15 @@ public final class SettingsActivity extends Activity {
                 14, theme.muted, Typeface.NORMAL);
         page.addView(intro, topMargin(dp(22)));
 
-        TextView appearanceHeading = text("外观", 17, theme.text, Typeface.BOLD);
+        TextView appearanceHeading = text("外观主题", 17, theme.text, Typeface.BOLD);
         page.addView(appearanceHeading, topMargin(dp(24)));
-        TextView appearanceHint = text("统一使用软色纸卡风格，深浅色跟随系统昼夜设置，"
-                + "应用到主界面、语音区和所有编辑页面。",
+        TextView appearanceHint = text("「软色纸卡」自动档默认深浅跟随系统；"
+                + "另含参考图纸卡 4 套与历史配色 9 套，应用到所有页面。",
                 12, theme.muted, Typeface.NORMAL);
         page.addView(appearanceHint, topMargin(dp(4)));
+        for (PhoneDeckTheme candidate : PhoneDeckTheme.all(this)) {
+            page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
+        }
 
         TextView voiceHeading = text("语音输入", 17, theme.text, Typeface.BOLD);
         page.addView(voiceHeading, topMargin(dp(28)));
