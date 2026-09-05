@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="PhoneDeck 电脑控制台"
         Icon="Assets/PhoneDeck.Light.ico"
-        Width="1260" Height="900" MinWidth="1100" MinHeight="780"
+        Width="1260" Height="900" MinWidth="640" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         Background="Transparent"
@@ -104,8 +104,9 @@
         </Grid>
 
         <Grid Grid.Row="1">
-            <!-- Overview -->
-            <Grid x:Name="PageOverview" Margin="32,12,32,26">
+            <!-- Overview：小屏（&lt;900px 高）内容超出时允许纵向滚动，避免固定行高互相重叠 -->
+            <ScrollViewer x:Name="PageOverview" VerticalScrollBarVisibility="Auto">
+                <Grid Margin="32,12,32,26">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="84" />
                     <RowDefinition Height="112" />
@@ -241,7 +242,8 @@
                         <RichTextBox x:Name="ActivityLog" Grid.Row="1" Margin="0,8,0,0" Background="#85FFFFFF" BorderThickness="0" IsReadOnly="True" FontFamily="{StaticResource FontFamilyMono}" FontSize="11.5" Foreground="{DynamicResource BrushSlate}" VerticalScrollBarVisibility="Auto" Padding="8,5"/>
                     </Grid>
                 </Border>
-            </Grid>
+                </Grid>
+            </ScrollViewer>
 
             <!-- Connection page -->
             <ScrollViewer x:Name="PageConnection" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">

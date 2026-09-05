@@ -67,7 +67,11 @@ public partial class MainWindow : Window
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
-    private static string DataDirectory => Path.Combine(AppDirectory, "data");
+    private static string DataDirectory =>
+        Environment.GetEnvironmentVariable("PHONEDECK_DATA_DIR") is { } configured
+            && !string.IsNullOrWhiteSpace(configured)
+            ? Environment.ExpandEnvironmentVariables(configured.Trim())
+            : Path.Combine(AppDirectory, "data");
     private static string SettingsPath => Path.Combine(DataDirectory, "server-settings.json");
     private static string BundledAdbPath => Path.Combine(AppDirectory, "platform-tools", "adb.exe");
 
@@ -118,6 +122,24 @@ public partial class MainWindow : Window
         {
             Log("注册 Ctrl+Alt+M 热键失败：可能被其他程序占用，仍可用界面开关。", ResourceBrush("BrushWarning"));
         }
+        FitWindowToWorkArea();
+    }
+
+    // 设计尺寸按 ≥900px 高的屏幕绘制；小屏（如 1280x800）上窗口比屏幕高时，
+    // 自定义标题栏（含关闭按钮）会被居中定位到屏幕外，导致无法关闭。这里在
+    // 建立窗口句柄后把窗口和最小尺寸一起钳制进主屏工作区，并重新居中。
+    private void FitWindowToWorkArea()
+    {
+        var work = SystemParameters.WorkArea;
+        const double Margin = 12;
+        var maxWidth = Math.Max(480, work.Width - Margin * 2);
+        var maxHeight = Math.Max(360, work.Height - Margin * 2);
+        if (MinWidth > maxWidth) MinWidth = maxWidth;
+        if (MinHeight > maxHeight) MinHeight = maxHeight;
+        if (Width > maxWidth) Width = maxWidth;
+        if (Height > maxHeight) Height = maxHeight;
+        Left = work.Left + (work.Width - Width) / 2;
+        Top = work.Top + (work.Height - Height) / 2;
     }
 
     private IntPtr SharedHotkeyHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
