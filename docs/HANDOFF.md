@@ -1,12 +1,31 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-04
+更新时间：2026-09-05
 当前分支：`agent/macos-receiver-2.0`
 当前源码：Android 1.6.0-dev.9（软色纸卡 + 全量主题选择器）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-05 Windows 内存优化：接收端工作站 GC + 控制台托盘裁剪（1号电脑）
+
+- 背景：Server 吃满 Server GC 每核建堆（20 逻辑核实测 Private 提交 515.6MB /
+  60 线程，实际存活对象仅几 MB）；ControlCenter 托盘常驻 WS ~270MB，属
+  WPF+WinForms 框架基线（日志已有 180 条上限，代码无泄漏）。
+- Server csproj 显式 `ServerGarbageCollection=false`；实测 Private 515.6→
+  48.4MB（-91%）。ControlCenter 隐藏到托盘时 `EmptyWorkingSet` 并把状态刷新
+  2.5s→10s（恢复窗口还原，刷新仅更新窗口 UI，不影响热键/托盘菜单）；托盘
+  WS 307→36MB，稳态 50~80MB；任务管理器口径两进程合计 ≈82MB。
+- 验证：`PhoneDeck.Server.Tests` 48/48、Release 构建零警告；实机健康检查 200、
+  computerId 不变（配对身份保留）、VB-CABLE/USB 看门狗正常；托盘恢复路径仅
+  代码走查未界面实测。未在长时间真实 Typeless 会话下复测内存峰值。
+- 部署（1号电脑运行目录）：Server/ControlCenter 新 exe 已上线，回滚包
+  `rollback/20260905-before-gcworkstation/`、`rollback/20260905-cc-tray-trim/`。
+  注意 `control-center-publish/` 内无 Server exe，从那里启动会用空 data 目录
+  重新生成身份，维持“Server 从部署根目录启动、数据走 %LOCALAPPDATA%\PhoneDeck”。
+- 分支 `agent/memory-optimization` → PR #3。Typeless 本体 10 进程 ~1.1GB，
+  为语音链路最大内存项，第三方不可优化。
 
 ## 2026-09-05 dev.9：主题选择器全量恢复（2号电脑）
 
