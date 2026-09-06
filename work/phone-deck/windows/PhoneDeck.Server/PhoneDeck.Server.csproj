@@ -8,6 +8,7 @@
     <RootNamespace>PhoneDeck.Server</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
     <PublishSingleFile>true</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
     <DebugType>none</DebugType>

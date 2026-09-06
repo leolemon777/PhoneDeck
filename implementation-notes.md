@@ -81,3 +81,57 @@
   ②isSoft() 未含 SOFT 导致自动档快捷键卡出现彩色染色。
 - versionCode 15 / 1.6.0-dev.9；assembleDebug/lintDebug 过；真机截屏验证
   自动档白卡、冰川玻璃极光渲染、主题列表标选，Wi-Fi 配对在线。
+
+
+# 2026-09-05 Server 端关闭 Server GC（内存优化）
+
+用户反馈接收端内存占用过大，实测（20 逻辑核机器）旧进程
+Private=515.6MB / 工作集=121MB / 60 线程：典型的 ASP.NET Core
+Server GC 每核建堆特征，实际存活对象远小于提交量。决定先做配置级
+修复，不重写 Rust/Go。
+
+- PhoneDeck.Server.csproj 显式设置 `<ServerGarbageCollection>false</ServerGarbageCollection>`
+  （SDK.Web 默认 true）。无其他代码改动。
+- 验证：dotnet build 零警告；PhoneDeck.Server.Tests 48/48 通过；
+  单文件发布产物内嵌 runtimeconfig 确认 `"System.GC.Server": false`
+  （旧 exe 为 true）。
+- 部署：旧 exe 备份至运行目录 rollback/20260905-before-gcworkstation/；
+  替换部署根 PhoneDeck.Server.exe；数据目录仍走默认
+  %LOCALAPPDATA%\PhoneDeck（computerId/LAN 证书不变），健康检查 200，
+  computerId 一致，VB-CABLE 与 USB 看门狗正常。
+- 实测（启动后约 90 秒）：Private 515.6MB → 26.6MB，工作集
+  121MB → 82MB，线程 60 → 23。回归方式：rollback 目录换回旧 exe 即可。
+
+风险与未验证项：
+
+- 未在真实语音会话（Typeless + VB-CABLE 长时间转写）下复测内存峰值；
+  工作站 GC 理论上高负载时 GC 暂停略多于 Server GC，本场景并发极低，
+  预期无感。
+- 运行目录布局备注：control-center-publish/ 内无 PhoneDeck.Server.exe，
+  控制台从该目录启动接收端会失败，且若复制 exe 过去会以
+  PHONEDECK_DATA_DIR=该目录 data（空）启动，导致重新生成身份、破坏
+  手机配对——维持"接收端从部署根目录直接启动"的现状。
+
+
+# 2026-09-05 ControlCenter 托盘裁剪工作集（内存优化续）
+
+接上节。Server 已降至 Private 26MB 后，剩余大头是 ControlCenter
+（WPF，托盘常驻时 WS ~270MB / Private ~180MB，WPF+WinForms 框架基线，
+代码无泄漏：日志已有 180 条上限，刷新每 2.5s 一次且分配小）。
+
+- MainWindow.xaml.cs 新增 EmptyWorkingSet P/Invoke；点关闭隐藏到托盘时
+  （MainWindow_Closing）裁剪工作集并把刷新间隔从 2.5s 放慢到 10s；
+  RestoreFromTray 恢复 2.5s。RefreshStatusAsync 仅更新界面 UI，隐藏期
+  放慢无副作用；热键/托盘菜单不经刷新路径。
+- 构建：Release 零警告零错误；发布产物与 control-center-publish 布局
+  一致（仅 exe 变化）。旧 exe 备份 rollback/20260905-cc-tray-trim/。
+- 实测（新进程，可见→托盘）：WS 307.5MB → 35.6MB，托盘停留 26 秒后
+  48.8MB；Private 基本不变（~190MB，属框架已提交内存，非物理占用）。
+  双击托盘恢复 2.5s 刷新的路径仅代码走查，未做界面实测。
+
+风险与未验证项：
+
+- EmptyWorkingSet 失败时静默跳过，不影响功能；恢复窗口瞬间会有软缺页
+  （页面换回），首次点亮略慢属预期。
+- Typeless 本体 10 进程合计约 1.1GB，为第三方应用，PhoneDeck 无法优化；
+  这是语音链路里最大的内存项。
