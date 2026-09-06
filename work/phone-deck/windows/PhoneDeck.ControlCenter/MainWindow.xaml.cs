@@ -41,7 +41,9 @@ public partial class MainWindow : Window
         AllowTrailingCommas = true
     };
 
-    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromMilliseconds(2500) };
+    private static readonly TimeSpan ActiveRefreshInterval = TimeSpan.FromMilliseconds(2500);
+    private static readonly TimeSpan HiddenRefreshInterval = TimeSpan.FromSeconds(10);
+    private readonly DispatcherTimer refreshTimer = new() { Interval = ActiveRefreshInterval };
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly Forms.NotifyIcon trayIcon = new();
@@ -64,6 +66,9 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("psapi.dll")]
+    private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
@@ -217,6 +222,8 @@ public partial class MainWindow : Window
             "PhoneDeck 已最小化到托盘",
             "接收端与 USB 看门狗在后台继续运行。双击托盘图标可重新打开控制台。",
             Forms.ToolTipIcon.Info);
+        refreshTimer.Interval = HiddenRefreshInterval;
+        TrimWorkingSet();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -346,11 +353,25 @@ public partial class MainWindow : Window
 
     private void RestoreFromTray()
     {
+        refreshTimer.Interval = ActiveRefreshInterval;
         Show();
         WindowState = WindowState.Normal;
         Activate();
         Topmost = true;
         Topmost = false;
+    }
+
+    private static void TrimWorkingSet()
+    {
+        try
+        {
+            // 窗口隐藏后大部分页面暂时用不到，让系统先移出物理内存，需要时会自动换回。
+            EmptyWorkingSet(System.Diagnostics.Process.GetCurrentProcess().Handle);
+        }
+        catch
+        {
+            // 失败不影响任何功能，占用保持原样。
+        }
     }
 
     private void ExitApplication()
