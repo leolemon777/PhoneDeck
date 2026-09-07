@@ -1,12 +1,32 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-06
+更新时间：2026-09-07
 当前分支：`main`
-当前源码：Android 1.6.0-dev.10（品牌族×深浅主题：冰川玻璃/ChatGPT/Claude/Grok）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android 1.6.0-dev.11（九主题：冰川玻璃/纸卡×4/瑞士黑白/克莱因蓝/工业沙橙/极简单色）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-07 dev.11：主题改为九套——保留冰川玻璃与纸卡，新增四款设计稿风格（1号电脑）
+
+- 应用户提供的四份设计稿（瑞士黑白 / 纯黑终端 / 克莱因蓝 / 包豪斯沙橙）重排
+  主题：保留冰川玻璃（默认）与纸卡系列 4 套，删除 dev.10 的
+  ChatGPT/Claude/Grok 三族，新增四款风格皮肤：
+  - 瑞士黑白：白底黑字、细边近直角（圆角压到 4dp、卡面 1dp 细边）；
+  - 克莱因蓝：蓝白科技底、主按钮深蓝三段渐变（#1E3A8A→#2563EB）、16dp 圆角；
+  - 工业沙橙：暖沙底 + 碳黑细边 + 工业橙（#EA580C）主操作、近直角；
+  - 极简单色：纯黑终端、白色主按钮、分类色统一灰阶、发丝边（12dp 圆角）。
+- 架构回到平铺单级 `theme_id`（dev.10 的 brand×mode 两级废弃）；设置页恢复
+  预览卡列表（9 项）；`save()` 顺手清理 legacy 键防迁移分支反复触发。
+- 迁移：dev.10 品牌（glass→frost；gpt/claude/grok 浅→瑞士黑白、深→极简单色）、
+  dev.8/9 单级 id（纸卡/soft→ivory；浅色系→swiss；深色系→mono；其余→frost）。
+- 保留的渲染资产：冰川玻璃极光背景与玻璃渐变原样；纸卡 shortcutColor→surface
+  逻辑恢复；Ripple pressable、防闪白 applyWindow 保留。
+- 验证：1号机 javac + android-all 35 jar 全量 26 个源文件编译通过；
+  **assembleDebug/lintDebug 与真机验收未执行**（1号机无 Android SDK，待 2 号
+  电脑补做）。versionCode 17 / 1.6.0-dev.11。同日 1号机已留存 dev.9 真机
+  UI 截图集：`PhoneDeck开发工作区/artifacts/ui-screenshots/`。
 
 ## 2026-09-06 dev.10：主题收拢为品牌族×深浅（1号电脑）
 

@@ -159,3 +159,25 @@ Server GC 每核建堆特征，实际存活对象远小于提交量。决定先�
   编译通过（曾抓出上述 pressableRoundRect 类型错误）。
   assembleDebug/lintDebug 与真机验收待 2 号电脑补做。
   versionCode 16 / 1.6.0-dev.10。
+
+
+# 2026-09-07 dev.11 追记：九主题定稿——冰川玻璃+纸卡×4+四款设计稿风格（1号电脑）
+
+用户带来四份 Tailwind 设计稿（瑞士黑白 / 纯黑终端 / 克莱因蓝 / 包豪斯
+沙橙），要求：保留冰川玻璃与纸卡系列四配色，其余主题全部按这四稿替换。
+
+- 架构从 dev.10 的 brand×mode 两级回到平铺单级 `theme_id`（9 项），
+  设置页恢复 dev.9 式预览卡列表；删 ChatGPT/Claude/Grok 三族。
+- 新增风格皮肤不只换色，`shape()` 增加主题质感参数：
+  radiusCapDp（圆角上限，swiss/bauhaus=4、mono=12、klein=16）与
+  cardStrokeDp（卡面细边，swiss/bauhaus/mono=1）；
+  klein 主按钮走 #1E3A8A→#2563EB 三段蓝渐变；mono 分类色灰阶复用
+  isMonochrome；纸卡恢复 shortcutColor→surface。
+- 迁移策略：dev.10 brand（glass→frost；AI 族浅→swiss、深→mono）优先于
+  theme_id 残留；dev.8/9 id 纸卡/soft→ivory、浅色系→swiss、深色系→mono、
+  其余→frost；save() 顺手 remove brand/mode 防迁移反复触发。
+- 已知取舍：设计稿中的布局重构（录音模式/Wi-Fi 保活上提到主界面、
+  底部固定 dock 化、键帽编号）本轮未做，仅落地配色与质感；
+  mono 深色语义色（success #34D399 等）按暗色对比度取值。
+- 验证：javac + android-all 35 全量编译通过；assembleDebug/真机验收
+  待 2 号电脑。versionCode 17 / 1.6.0-dev.11。
