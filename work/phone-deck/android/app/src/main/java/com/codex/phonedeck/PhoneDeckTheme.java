@@ -282,6 +282,10 @@ final class PhoneDeckTheme {
             // 纸卡风格：卡片回归纸面，预设色只留给 chord 点缀。
             return surface;
         }
+        if (isFlatCard()) {
+            // 设计稿风格：素色键帽，分类色只出现在小圆点。
+            return key;
+        }
         int accent = shortcutAccent(color);
         if ("slate".equals(color)) {
             return key;
@@ -451,6 +455,11 @@ final class PhoneDeckTheme {
         return KLEIN.equals(id);
     }
 
+    /// 设计稿风格皮肤：素色键帽 + 圆润卡片，与纸卡共享同一形态语言。
+    private boolean isFlatCard() {
+        return SWISS.equals(id) || KLEIN.equals(id) || BAUHAUS.equals(id);
+    }
+
     /// 卡面判定：风格皮肤的细边只加在表面/键帽/语音坞上。
     private boolean isCardSurface(int fill) {
         return fill == surface || fill == surfaceRaised || fill == key || fill == voiceDock;
@@ -604,12 +613,12 @@ final class PhoneDeckTheme {
                 Color.rgb(45, 42, 37));
     }
 
-    /** 瑞士黑白（设计稿 1）：白纸底、近黑主钮、细边直角卡片。 */
+    /** 瑞士黑白（设计稿 1）：白纸底、近黑主钮、圆润卡片。 */
     private static PhoneDeckTheme swiss() {
         return new PhoneDeckTheme(
                 SWISS,
                 "瑞士黑白",
-                "设计稿 1 · 白底黑字 · 细边近直角 · 克制排版",
+                "设计稿 1 · 白底黑字 · 黑主钮 · 克制排版",
                 true,
                 Color.rgb(255, 255, 255),
                 Color.rgb(250, 250, 250),
@@ -625,7 +634,7 @@ final class PhoneDeckTheme {
                 Color.rgb(185, 28, 28),
                 Color.rgb(212, 212, 212),
                 Color.rgb(250, 250, 250),
-                4, 1);
+                16, 0);
     }
 
     /** 克莱因蓝（设计稿 3）：蓝白科技底、蓝渐变主按钮、柔和圆角。 */
@@ -652,12 +661,12 @@ final class PhoneDeckTheme {
                 16, 0);
     }
 
-    /** 工业沙橙（设计稿 4）：包豪斯暖沙底、碳黑卡片边、橙点缀。 */
+    /** 工业沙橙（设计稿 4）：包豪斯暖沙底、橙色点缀、圆润卡片。 */
     private static PhoneDeckTheme bauhaus() {
         return new PhoneDeckTheme(
                 BAUHAUS,
                 "工业沙橙",
-                "设计稿 4 · 暖沙底 · 碳黑细边 · 工业橙点缀",
+                "设计稿 4 · 暖沙底 · 工业橙点缀 · 柔和卡片",
                 true,
                 Color.rgb(242, 239, 233),
                 Color.rgb(250, 248, 244),
@@ -673,7 +682,7 @@ final class PhoneDeckTheme {
                 Color.rgb(220, 38, 38),
                 Color.rgb(207, 200, 187),
                 Color.rgb(232, 228, 220),
-                4, 1);
+                16, 0);
     }
 
     /** 极简单色（设计稿 2）：纯黑终端、白主钮、发丝边卡片、分类色灰阶。 */
@@ -681,7 +690,7 @@ final class PhoneDeckTheme {
         return new PhoneDeckTheme(
                 MONO,
                 "极简单色",
-                "设计稿 2 · 纯黑终端 · 白主钮 · 分类色灰阶",
+                "设计稿 2 · 纯黑终端 · 白主钮 · 分类色灰阶 · 圆润",
                 false,
                 Color.rgb(0, 0, 0),
                 Color.rgb(13, 13, 13),
@@ -697,6 +706,6 @@ final class PhoneDeckTheme {
                 Color.rgb(248, 113, 113),
                 Color.rgb(41, 41, 41),
                 Color.rgb(12, 12, 12),
-                12, 1);
+                16, 1);
     }
 }
