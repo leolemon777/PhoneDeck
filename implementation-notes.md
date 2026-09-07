@@ -181,3 +181,19 @@ Server GC 每核建堆特征，实际存活对象远小于提交量。决定先�
   mono 深色语义色（success #34D399 等）按暗色对比度取值。
 - 验证：javac + android-all 35 全量编译通过；assembleDebug/真机验收
   待 2 号电脑。versionCode 17 / 1.6.0-dev.11。
+
+
+# 2026-09-07 dev.12 追记：设计稿皮肤圆润化修复（1号电脑）
+
+用户实测 dev.11 反馈"丑、不润、控件直角、四个主题感觉不一致"。
+
+- 根因 1：swiss/bauhaus 照设计稿做了 4dp 近直角 + 1dp 细边，网页稿的
+  brutal 风格在 Android 原生控件上生硬廉价，且违反项目一贯的圆润偏好。
+- 根因 2：圆角/边框做成每主题独立参数，切换时整个 app 形态跳变；
+  快捷卡沿用彩色染色，与稿子素色键帽不符。
+- 修复：四款皮肤统一 radiusCap=16、swiss/bauhaus 去细边（mono 保留
+  1dp 发丝线防纯黑底卡片糊在一起）；新增 isFlatCard()，swiss/klein/
+  bauhaus 快捷卡改素色键帽（分类色只留小圆点），与纸卡共享形态语言。
+- dev.12 APK 已覆盖安装 1号机签名包（数据无损），四主题真机实拍
+  圆润版：artifacts/ui-screenshots/dev12-main-*.png。
+  versionCode 18 / 1.6.0-dev.12。
