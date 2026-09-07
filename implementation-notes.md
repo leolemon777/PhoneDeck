@@ -135,3 +135,27 @@ Server GC 每核建堆特征，实际存活对象远小于提交量。决定先�
   （页面换回），首次点亮略慢属预期。
 - Typeless 本体 10 进程合计约 1.1GB，为第三方应用，PhoneDeck 无法优化；
   这是语音链路里最大的内存项。
+
+
+# 2026-09-06 dev.10 追记：主题收拢为品牌族×深浅（1号电脑）
+
+用户反馈：只要 9 月 2 日做的 ChatGPT / Claude / Grok 风格加冰川玻璃，
+其余（纸卡 4 套、历史配色 9 套、Gemini/Hermes/豆包）全部删除。
+
+- 97cc210（multi-pc 分支，2026-09-02，未合入 main）是品牌族×深浅两级
+  架构；本次以它为骨架合入 main：BRANDS={glass, gpt, claude, grok}，
+  存储 `theme_brand`+`theme_mode`，旧 `theme_id` 一次性迁移
+  （soft→玻璃+auto，深色系→玻璃+dark，gpt/claude/grok 实例→对应族）。
+- 冰川玻璃保持 main 的 frost id 与渲染（MainActivity isFrost() 挂极光背景
+  的路径零改动）；GPT/Claude/Grok 调色板、Grok 灰阶单色皮肤、Ripple
+  pressable、防闪白 applyWindow 均从 97cc210 原样移植；shortcutColor/
+  shortcutPressedColor 保留 main 版计算（去掉纸卡分支）。
+- 设置页：深浅三选 chips + 4 张品牌卡（themeHalf 上浅下深预览），
+  selectBrand/selectAppearanceMode 即存即 recreate。
+- 唯一适配：MainActivity pressableRoundRect 返回类型 StateListDrawable
+  → Drawable（pressable 现返回 RippleDrawable）。
+- 验证：1号机无 Android SDK/gradle 环境，采用 PyCharm JBR javac 17 +
+  robolectric android-all 35 framework jar 对 app 全部 26 个源文件
+  编译通过（曾抓出上述 pressableRoundRect 类型错误）。
+  assembleDebug/lintDebug 与真机验收待 2 号电脑补做。
+  versionCode 16 / 1.6.0-dev.10。

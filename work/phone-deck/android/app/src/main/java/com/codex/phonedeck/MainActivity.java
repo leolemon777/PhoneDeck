@@ -17,8 +17,8 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.wifi.WifiManager;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -2937,7 +2937,7 @@ public final class MainActivity extends Activity {
         return theme.shape(this, color, radiusDp);
     }
 
-    private StateListDrawable pressableRoundRect(int normalColor, int pressedColor, int radiusDp) {
+    private Drawable pressableRoundRect(int normalColor, int pressedColor, int radiusDp) {
         return theme.pressable(this, normalColor, pressedColor, radiusDp);
     }
 

@@ -84,12 +84,12 @@ public final class SettingsActivity extends Activity {
 
         TextView appearanceHeading = text("外观主题", 17, theme.text, Typeface.BOLD);
         page.addView(appearanceHeading, topMargin(dp(24)));
-        TextView appearanceHint = text("「软色纸卡」自动档默认深浅跟随系统；"
-                + "另含参考图纸卡 4 套与历史配色 9 套，应用到所有页面。",
+        TextView appearanceHint = text("先选一套风格，深浅模式单独切换；点按立即生效。",
                 12, theme.muted, Typeface.NORMAL);
         page.addView(appearanceHint, topMargin(dp(4)));
-        for (PhoneDeckTheme candidate : PhoneDeckTheme.all(this)) {
-            page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
+        page.addView(appearanceModeRow(), fullWidthMargins(dp(8)));
+        for (String brand : PhoneDeckTheme.BRANDS) {
+            page.addView(brandCard(brand), fullWidthMargins(dp(10)));
         }
 
         TextView voiceHeading = text("语音输入", 17, theme.text, Typeface.BOLD);
@@ -362,45 +362,67 @@ public final class SettingsActivity extends Activity {
         holdOption.setAlpha(sharedSelected ? 0.48f : 1f);
     }
 
-    private View themeOption(PhoneDeckTheme candidate) {
-        boolean selected = candidate.id.equals(theme.id);
+    /// 深浅模式三选：跟随系统 / 浅色 / 深色，作用于当前选中的风格族。
+    private View appearanceModeRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        String stored = PhoneDeckTheme.storedMode(this);
+        String[][] options = {
+                {PhoneDeckTheme.MODE_AUTO, "跟随系统"},
+                {PhoneDeckTheme.MODE_LIGHT, "浅色"},
+                {PhoneDeckTheme.MODE_DARK, "深色"}};
+        for (String[] option : options) {
+            boolean selected = option[0].equals(stored);
+            Button chip = new Button(this);
+            chip.setText(option[1]);
+            chip.setTextSize(13);
+            chip.setAllCaps(false);
+            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setBackground(theme.pressable(this,
+                    selected ? theme.primary : theme.surface,
+                    selected ? theme.primaryPressed : theme.surfaceRaised, 12));
+            chip.setStateListAnimator(null);
+            chip.setContentDescription("深浅模式：" + option[1]);
+            chip.setOnClickListener(view -> selectAppearanceMode(option[0], chip));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    0, dp(42), 1f);
+            params.rightMargin = dp(8);
+            row.addView(chip, params);
+        }
+        return row;
+    }
+
+    private View brandCard(String brand) {
+        boolean selected = brand.equals(PhoneDeckTheme.storedBrand(this));
+        String summary = PhoneDeckTheme.brandTheme(brand, false).description;
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(12), dp(12), dp(12), dp(12));
         row.setBackground(roundRect(
                 selected ? theme.feedbackSurface(theme.primary) : theme.surface,
                 17, selected ? 2 : 1, selected ? theme.primary : theme.outline));
-        row.setContentDescription(candidate.name + "，" + candidate.description
-                + (selected ? "，当前主题" : ""));
+        row.setContentDescription(PhoneDeckTheme.brandName(brand) + "风格，" + summary
+                + (selected ? "，当前选中" : ""));
 
         LinearLayout preview = new LinearLayout(this);
         preview.setOrientation(LinearLayout.VERTICAL);
-        preview.setPadding(dp(7), dp(7), dp(7), dp(7));
-        preview.setBackground(candidate.shape(this, candidate.background, 12, 1,
-                candidate.outline));
-        View primary = new View(this);
-        primary.setBackground(candidate.shape(this, candidate.primary, 6));
-        preview.addView(primary, new LinearLayout.LayoutParams(dp(46), dp(13)));
-        LinearLayout keys = new LinearLayout(this);
-        LinearLayout.LayoutParams keysParams = new LinearLayout.LayoutParams(dp(46), dp(17));
-        keysParams.topMargin = dp(5);
-        preview.addView(keys, keysParams);
-        for (int index = 0; index < 3; index++) {
-            View key = new View(this);
-            key.setBackground(candidate.shape(this,
-                    index == 1 ? candidate.shortcutColor("green") : candidate.key, 5));
-            LinearLayout.LayoutParams keyParams = new LinearLayout.LayoutParams(0, dp(17), 1f);
-            if (index > 0) {
-                keyParams.leftMargin = dp(3);
-            }
-            keys.addView(key, keyParams);
-        }
+        preview.setPadding(dp(6), dp(6), dp(6), dp(6));
+        preview.setBackground(roundRect(theme.background, 12, 1, theme.outline));
+        preview.addView(themeHalf(brand, false), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        View divider = new View(this);
+        divider.setBackgroundColor(theme.outline);
+        preview.addView(divider, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(2)));
+        preview.addView(themeHalf(brand, true), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         row.addView(preview, new LinearLayout.LayoutParams(dp(60), dp(56)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.addView(text(candidate.name, 15, theme.text, Typeface.BOLD));
-        TextView detail = text(candidate.description, 12, theme.muted, Typeface.NORMAL);
+        copy.addView(text(PhoneDeckTheme.brandName(brand), 15, theme.text, Typeface.BOLD));
+        TextView detail = text(summary, 12, theme.muted, Typeface.NORMAL);
         detail.setMaxLines(2);
         copy.addView(detail, topMargin(dp(3)));
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
@@ -412,20 +434,68 @@ public final class SettingsActivity extends Activity {
                 selected ? theme.primary : theme.muted, Typeface.BOLD);
         check.setGravity(Gravity.CENTER);
         row.addView(check, new LinearLayout.LayoutParams(dp(34), dp(34)));
-        row.setOnClickListener(view -> selectTheme(candidate.id, row));
+        installPressFeedback(row);
+        row.setOnClickListener(view -> selectBrand(brand, row));
         return row;
     }
 
-    private void selectTheme(String themeId, View selected) {
-        if (theme.id.equals(themeId)) {
+    /// 品牌预览的半区：上半浅色、下半深色（玻璃仅浅色，两侧相同）。
+    private View themeHalf(String brand, boolean dark) {
+        PhoneDeckTheme halfTheme = PhoneDeckTheme.brandTheme(brand, dark);
+        LinearLayout half = new LinearLayout(this);
+        half.setOrientation(LinearLayout.VERTICAL);
+        half.setPadding(dp(5), dp(5), dp(5), dp(5));
+        half.setBackground(roundRect(halfTheme.background, 8, 1, halfTheme.outline));
+        View primaryBar = new View(this);
+        primaryBar.setBackground(theme.shape(this, halfTheme.primary, 4));
+        half.addView(primaryBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
+        View surfaceBar = new View(this);
+        surfaceBar.setBackground(theme.shape(this, halfTheme.surfaceRaised, 4));
+        LinearLayout.LayoutParams surfaceParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(5));
+        surfaceParams.topMargin = dp(3);
+        half.addView(surfaceBar, surfaceParams);
+        return half;
+    }
+
+    private void selectBrand(String brand, View selected) {
+        if (brand.equals(PhoneDeckTheme.storedBrand(this))) {
             return;
         }
-        PhoneDeckTheme.save(this, themeId);
+        PhoneDeckTheme.saveSelection(
+                this, brand, PhoneDeckTheme.storedMode(this));
         selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                 ? HapticFeedbackConstants.CONFIRM
                 : HapticFeedbackConstants.VIRTUAL_KEY);
-        selected.announceForAccessibility("主题已切换");
+        selected.announceForAccessibility("风格已切换");
         recreate();
+    }
+
+    private void selectAppearanceMode(String mode, View selected) {
+        if (mode.equals(PhoneDeckTheme.storedMode(this))) {
+            return;
+        }
+        PhoneDeckTheme.saveSelection(this, PhoneDeckTheme.storedBrand(this), mode);
+        selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? HapticFeedbackConstants.CONFIRM
+                : HapticFeedbackConstants.VIRTUAL_KEY);
+        selected.announceForAccessibility("深浅模式已切换");
+        recreate();
+    }
+
+    private void installPressFeedback(View row) {
+        row.setHapticFeedbackEnabled(true);
+        row.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN
+                    && view.isEnabled()) {
+                view.animate().scaleX(0.985f).scaleY(0.985f).setDuration(55).start();
+            } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
+                    || event.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL) {
+                view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
+            }
+            return false;
+        });
     }
 
     private TextView text(String value, int size, int color, int style) {

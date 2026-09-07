@@ -1,12 +1,34 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-05
-当前分支：`agent/macos-receiver-2.0`
-当前源码：Android 1.6.0-dev.9（软色纸卡 + 全量主题选择器）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+更新时间：2026-09-06
+当前分支：`main`
+当前源码：Android 1.6.0-dev.10（品牌族×深浅主题：冰川玻璃/ChatGPT/Claude/Grok）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-06 dev.10：主题收拢为品牌族×深浅（1号电脑）
+
+- 应用户要求收拢主题：只保留冰川玻璃（默认）与 2026-09-02 做的
+  ChatGPT / Claude / Grok 三套 AI 产品风格（原提交 97cc210 在
+  `agent/multi-pc-1.6.0` 分支，一直未合入 main）；删除 dev.8/9 的软色纸卡
+  4 套与历史配色 9 套，以及 Gemini/Hermes/豆包三族。
+- PhoneDeckTheme 重构为"品牌族 × 深浅模式"两级存储
+  （`theme_brand` + `theme_mode`：auto/light/dark）；旧 `theme_id` 首次加载
+  一次性迁移（soft→玻璃+auto、深色系→玻璃+dark、gpt/claude/grok 实例→
+  对应族，其余→玻璃浅色）。
+- 冰川玻璃沿用 main 的 frost 渲染原样（极光背景、玻璃渐变、玻璃语音坞）；
+  GPT/Claude/Grok 调色板与 Grok 灰阶单色皮肤从 97cc210 原样移植；
+  pressable 换回原生 RippleDrawable 手感；深色主题 applyWindow 预刷窗口
+  底色防启动闪白。
+- 设置页外观区改为：深浅三选（跟随系统/浅色/深色）+ 4 张品牌卡
+  （上浅下深双半预览），点按即存即 recreate。
+- 适配：MainActivity `pressableRoundRect` 返回类型放宽为 Drawable。
+- 验证：1号机无 Android SDK，用 PyCharm JBR javac + android-all
+  framework jar 对 app 全部 26 个源文件编译通过；**assembleDebug/lintDebug
+  与真机验收尚未执行**，待 2 号电脑或后续补做。versionCode 16 /
+  1.6.0-dev.10。
 
 ## 2026-09-05 Windows 内存优化：接收端工作站 GC + 控制台托盘裁剪（1号电脑）
 

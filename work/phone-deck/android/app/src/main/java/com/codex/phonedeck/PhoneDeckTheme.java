@@ -6,36 +6,38 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-/**
- * 主题仓库。三个来源共 13+1 套配色：
- * - 软色纸卡 4 套（参考图配色）：奶油/云白浅色、暖黑/暖灰深色；
- * - 「软色纸卡」自动档：深浅跟随系统昼夜，未做过选择时的默认值；
- * - 历史配色 9 套：冰川玻璃、柔和浅色、深海蓝、OLED 黑、极简墨白/纯黑、
- *   黄金靛蓝/琥珀/松绿——调色板与专属渲染（玻璃渐变、单色映射）原样保留。
- */
+/// 主题：品牌族 × 深浅模式两级选择（应用户要求收拢为 4 族）：
+/// 冰川玻璃（默认，唯一玻璃拟态，仅浅色）、ChatGPT、Claude、Grok；
+/// 后三族各带浅/深两套调色板，深浅可跟随系统昼夜或手动锁定。
+/// 每套主题只有一个点缀色（primary），success/warning/danger 只用于状态语义。
 final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";
-    static final String SOFT = "soft";
-    static final String IVORY = "ivory";
-    static final String PEARL = "pearl";
-    static final String ESPRESSO = "espresso";
-    static final String COCOA = "cocoa";
+    static final String PREF_THEME_BRAND = "theme_brand";
+    static final String PREF_THEME_MODE = "theme_mode";
+    /// 品牌族：一族一个选项，深浅由 mode 决定。
+    static final String GLASS = "glass";
+    static final String GPT = "gpt";
+    static final String CLAUDE = "claude";
+    static final String GROK = "grok";
+    static final String[] BRANDS = {GLASS, GPT, CLAUDE, GROK};
+    /// 深浅模式：跟随系统 / 浅色 / 深色。
+    static final String MODE_AUTO = "auto";
+    static final String MODE_LIGHT = "light";
+    static final String MODE_DARK = "dark";
+    // 具体实例 id（brand + mode 解析结果）。
     static final String FROST = "frost";
-    static final String OCEAN = "ocean";
-    static final String OLED = "oled";
-    static final String PAPER = "paper";
-    static final String INK_LIGHT = "inklight";
-    static final String INK_DARK = "inkdark";
-    static final String GOLD_BLUE = "goldblue";
-    static final String GOLD_AMBER = "goldamber";
-    static final String GOLD_FOREST = "goldforest";
+    static final String GPT_LIGHT = "gptlight";
+    static final String GPT_DARK = "gptdark";
+    static final String CLAUDE_LIGHT = "claudelight";
+    static final String CLAUDE_DARK = "claudedark";
+    static final String GROK_LIGHT = "groklight";
+    static final String GROK_DARK = "grokdark";
 
     final String id;
     final String name;
@@ -96,115 +98,189 @@ final class PhoneDeckTheme {
     }
 
     static PhoneDeckTheme load(Context context) {
-        SharedPreferences preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String storedId = preferences.getString(PREF_THEME_ID, null);
-        if (storedId == null || SOFT.equals(storedId)) {
-            return softBySystem(context);
-        }
-        PhoneDeckTheme resolved = byId(context, storedId);
-        if (resolved != null) {
-            return resolved;
-        }
-        // 旧版本或未知 ID：清掉并回到跟随系统。
-        preferences.edit().remove(PREF_THEME_ID).apply();
-        return softBySystem(context);
+        String[] selection = ensureSelection(context);
+        return brandTheme(selection[0], isDarkMode(context, selection[1]));
     }
 
-    static void save(Context context, String themeId) {
+    /// 当前存储的品牌族；设置页选中态判断用。
+    static String storedBrand(Context context) {
+        return ensureSelection(context)[0];
+    }
+
+    /// 当前存储的深浅模式（auto/light/dark）。
+    static String storedMode(Context context) {
+        return ensureSelection(context)[1];
+    }
+
+    static void saveSelection(Context context, String brand, String mode) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
-                .putString(PREF_THEME_ID, themeId)
+                .putString(PREF_THEME_BRAND, validBrand(brand))
+                .putString(PREF_THEME_MODE, validMode(mode))
                 .apply();
     }
 
-    /** 设置页主题清单：自动档 + 软色纸卡 4 套 + 历史配色 9 套。 */
-    static PhoneDeckTheme[] all(Context context) {
-        return new PhoneDeckTheme[]{
-                softBySystem(context),
-                ivory(), pearl(), espresso(), cocoa(),
-                frost(), paper(), ocean(), oled(),
-                inkLight(), inkDark(),
-                goldBlue(), goldAmber(), goldForest()};
-    }
-
-    static PhoneDeckTheme[] all() {
-        return new PhoneDeckTheme[]{
-                ivory(), pearl(), espresso(), cocoa(),
-                frost(), paper(), ocean(), oled(),
-                inkLight(), inkDark(),
-                goldBlue(), goldAmber(), goldForest()};
-    }
-
-    static PhoneDeckTheme byId(Context context, String id) {
-        if (id == null || SOFT.equals(id)) {
-            return SOFT.equals(id) ? softBySystem(context) : null;
-        }
-        switch (id) {
-            case IVORY: return ivory();
-            case PEARL: return pearl();
-            case ESPRESSO: return espresso();
-            case COCOA: return cocoa();
-            case FROST: return frost();
-            case PAPER: return paper();
-            case OCEAN: return ocean();
-            case OLED: return oled();
-            case INK_LIGHT: return inkLight();
-            case INK_DARK: return inkDark();
-            case GOLD_BLUE: return goldBlue();
-            case GOLD_AMBER: return goldAmber();
-            case GOLD_FOREST: return goldForest();
-            default: return null;
+    /// 品牌族显示名。
+    static String brandName(String brand) {
+        switch (validBrand(brand)) {
+            case GPT:
+                return "ChatGPT";
+            case CLAUDE:
+                return "Claude";
+            case GROK:
+                return "Grok";
+            default:
+                return "冰川玻璃";
         }
     }
 
-    /** 旧签名兼容：未知 ID 返回奶油浅色。 */
-    static PhoneDeckTheme byId(String id) {
-        PhoneDeckTheme resolved = byId(null, id);
-        return resolved == null ? ivory() : resolved;
+    /// 品牌 + 深浅 → 具体主题实例；设置页预览也用它取两侧配色。
+    /// 冰川玻璃只有浅色一态，深色模式下仍返回浅色玻璃。
+    static PhoneDeckTheme brandTheme(String brand, boolean dark) {
+        switch (validBrand(brand)) {
+            case GPT:
+                return dark ? gptDark() : gptLight();
+            case CLAUDE:
+                return dark ? claudeDark() : claudeLight();
+            case GROK:
+                return dark ? grokDark() : grokLight();
+            default:
+                return frost();
+        }
     }
 
-    private static PhoneDeckTheme softBySystem(Context context) {
-        int nightMode = context == null ? Configuration.UI_MODE_NIGHT_UNDEFINED
-                : context.getResources().getConfiguration().uiMode
+    private static boolean isDarkMode(Context context, String mode) {
+        if (MODE_DARK.equals(mode)) {
+            return true;
+        }
+        if (MODE_LIGHT.equals(mode)) {
+            return false;
+        }
+        int night = context.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK;
-        return softAuto(nightMode == Configuration.UI_MODE_NIGHT_YES
-                ? espresso() : ivory());
+        return night == Configuration.UI_MODE_NIGHT_YES;
     }
 
-    /** 自动档：用当前昼夜的纸卡调色板，但保留 soft 身份以便设置页正确标选。 */
-    private static PhoneDeckTheme softAuto(PhoneDeckTheme base) {
-        return new PhoneDeckTheme(
-                SOFT,
-                "软色纸卡",
-                "默认档 · 奶油/暖黑，深浅跟随系统昼夜",
-                base.light,
-                base.background,
-                base.surface,
-                base.surfaceRaised,
-                base.key,
-                base.primary,
-                base.primaryPressed,
-                base.onPrimary,
-                base.text,
-                base.muted,
-                base.success,
-                base.warning,
-                base.danger,
-                base.outline,
-                base.voiceDock);
+    /// 读取品牌 + 模式；首次遇到旧版 theme_id 时一次性迁移成两级存储。
+    /// 已下线主题（纸卡 4 套、历史配色 9 套、Gemini/Hermes/豆包）统一回退冰川玻璃，
+    /// 尽量保留用户原先的深浅语义。
+    private static String[] ensureSelection(Context context) {
+        SharedPreferences preferences =
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String brand = preferences.getString(PREF_THEME_BRAND, null);
+        String mode = preferences.getString(PREF_THEME_MODE, null);
+        if (brand != null && mode != null) {
+            return new String[]{validBrand(brand), validMode(mode)};
+        }
+        String legacy = preferences.getString(PREF_THEME_ID, null);
+        String migratedBrand = GLASS;
+        String migratedMode = MODE_AUTO;
+        if (legacy != null) {
+            switch (legacy) {
+                // 品牌族时代的实例 id：回到对应族。
+                case GPT_LIGHT:
+                case CLAUDE_LIGHT:
+                case GROK_LIGHT:
+                    migratedBrand = legacy.replace("light", "");
+                    migratedMode = MODE_LIGHT;
+                    break;
+                case GPT_DARK:
+                case CLAUDE_DARK:
+                case GROK_DARK:
+                    migratedBrand = legacy.replace("dark", "");
+                    migratedMode = MODE_DARK;
+                    break;
+                case GEMINI_LIGHT_LEGACY:
+                case GEMINI_DARK_LEGACY:
+                case HERMES_LIGHT_LEGACY:
+                case HERMES_DARK_LEGACY:
+                case DOUBAO_LIGHT_LEGACY:
+                case DOUBAO_DARK_LEGACY:
+                    migratedBrand = GLASS;
+                    migratedMode = legacy.endsWith("dark") ? MODE_DARK : MODE_LIGHT;
+                    break;
+                // dev.8/9 单级 id：纸卡与历史配色全部回退冰川玻璃。
+                case "frost":
+                    migratedBrand = GLASS;
+                    migratedMode = MODE_LIGHT;
+                    break;
+                case "soft":
+                    migratedBrand = GLASS;
+                    migratedMode = MODE_AUTO;
+                    break;
+                case "ivory": case "pearl": case "paper":
+                case "inklight": case "goldblue":
+                    migratedBrand = GLASS;
+                    migratedMode = MODE_LIGHT;
+                    break;
+                case "espresso": case "cocoa": case "ocean": case "oled":
+                case "inkdark": case "goldamber": case "goldforest":
+                    migratedBrand = GLASS;
+                    migratedMode = MODE_DARK;
+                    break;
+                case MODE_AUTO:
+                    migratedBrand = GPT;
+                    migratedMode = MODE_AUTO;
+                    break;
+                default:
+                    // 更早的已下线 ID：回退冰川玻璃浅色。
+                    migratedBrand = GLASS;
+                    migratedMode = MODE_LIGHT;
+                    break;
+            }
+        }
+        preferences.edit()
+                .putString(PREF_THEME_BRAND, migratedBrand)
+                .putString(PREF_THEME_MODE, migratedMode)
+                .remove(PREF_THEME_ID)
+                .apply();
+        return new String[]{migratedBrand, migratedMode};
     }
 
-    boolean isSoft() {
-        return SOFT.equals(id) || IVORY.equals(id) || PEARL.equals(id)
-                || ESPRESSO.equals(id) || COCOA.equals(id);
+    // 仅供迁移 switch 引用的已下线实例 id。
+    private static final String GEMINI_LIGHT_LEGACY = "geminilight";
+    private static final String GEMINI_DARK_LEGACY = "geminidark";
+    private static final String HERMES_LIGHT_LEGACY = "hermeslight";
+    private static final String HERMES_DARK_LEGACY = "hermesdark";
+    private static final String DOUBAO_LIGHT_LEGACY = "doubaolight";
+    private static final String DOUBAO_DARK_LEGACY = "doubaodark";
+
+    private static String validBrand(String brand) {
+        for (String candidate : BRANDS) {
+            if (candidate.equals(brand)) {
+                return candidate;
+            }
+        }
+        return GLASS;
     }
 
+    private static String validMode(String mode) {
+        return MODE_LIGHT.equals(mode) || MODE_DARK.equals(mode) ? mode : MODE_AUTO;
+    }
+
+    static PhoneDeckTheme byId(String id) {
+        // 兼容入口：按实例 id 查找；未知 id 回退冰川玻璃。
+        if (id != null) {
+            for (String brand : BRANDS) {
+                for (boolean dark : new boolean[]{false, true}) {
+                    PhoneDeckTheme candidate = brandTheme(brand, dark);
+                    if (candidate.id.equals(id)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        return frost();
+    }
+
+    /// 冰川玻璃实例：主界面据此挂载极光磨砂背景。
     boolean isFrost() {
         return FROST.equals(id);
     }
 
+    /// Grok 单色皮肤：分类色统一映射为灰阶，卡片只有深浅差异。
     boolean isMonochrome() {
-        return INK_LIGHT.equals(id) || INK_DARK.equals(id);
+        return GROK_LIGHT.equals(id) || GROK_DARK.equals(id);
     }
 
     int contentBackground() {
@@ -225,6 +301,10 @@ final class PhoneDeckTheme {
     }
 
     void applyWindow(Activity activity) {
+        // XML 主题固定是 Material.Light；深色主题下提前把窗口背景刷成主题底色，
+        // 避免 onCreate 到 setContentView 之间闪一下白底。
+        activity.getWindow().setBackgroundDrawable(
+                new android.graphics.drawable.ColorDrawable(background));
         activity.getWindow().setStatusBarColor(background);
         activity.getWindow().setNavigationBarColor(background);
         int flags = 0;
@@ -237,11 +317,8 @@ final class PhoneDeckTheme {
         activity.getWindow().getDecorView().setSystemUiVisibility(flags);
     }
 
+    /// 快捷卡底色：分类点缀色以低比例混入按键底，保持卡片安静。
     int shortcutColor(String color) {
-        if (isSoft()) {
-            // 纸卡风格：卡片回归纸面，预设色只留给 chord 点缀。
-            return surface;
-        }
         int accent = shortcutAccent(color);
         if ("slate".equals(color)) {
             return key;
@@ -251,42 +328,9 @@ final class PhoneDeckTheme {
         return isFrost() ? withAlpha(result, 214) : result;
     }
 
+    /// 快捷卡的分类色点：只在小面积（圆点、文本动作副标题）出现，承载分类语义。
     int shortcutAccent(String color) {
-        if (isSoft()) {
-            if (light) {
-                switch (color) {
-                    case "purple":
-                        return Color.rgb(122, 90, 240);
-                    case "green":
-                        return Color.rgb(62, 155, 95);
-                    case "orange":
-                        return Color.rgb(224, 138, 69);
-                    case "red":
-                        return Color.rgb(217, 84, 72);
-                    case "slate":
-                        return Color.rgb(107, 103, 95);
-                    default:
-                        return Color.rgb(61, 107, 243);
-                }
-            }
-            switch (color) {
-                case "purple":
-                    return Color.rgb(154, 128, 246);
-                case "green":
-                    return Color.rgb(98, 183, 123);
-                case "orange":
-                    return Color.rgb(233, 162, 102);
-                case "red":
-                    return Color.rgb(232, 122, 110);
-                case "slate":
-                    return Color.rgb(160, 155, 145);
-                default:
-                    return Color.rgb(126, 154, 255);
-            }
-        }
         if (isMonochrome()) {
-            // Grok 式单色皮肤：六个预设色统一映射为柔和灰阶，
-            // 让卡片只有深浅差异，不出现彩色。
             if (light) {
                 switch (color) {
                     case "purple":
@@ -320,29 +364,26 @@ final class PhoneDeckTheme {
         }
         switch (color) {
             case "purple":
-                return light ? Color.rgb(116, 75, 216) : Color.rgb(130, 91, 190);
+                return light ? Color.rgb(108, 92, 186) : Color.rgb(140, 120, 212);
             case "green":
-                return light ? Color.rgb(25, 158, 112) : Color.rgb(50, 147, 111);
+                return light ? Color.rgb(28, 140, 96) : Color.rgb(74, 182, 130);
             case "orange":
-                return light ? Color.rgb(224, 104, 35) : Color.rgb(190, 120, 51);
+                return light ? Color.rgb(198, 108, 28) : Color.rgb(226, 150, 72);
             case "red":
-                return light ? Color.rgb(209, 66, 105) : Color.rgb(183, 75, 96);
+                return light ? Color.rgb(200, 64, 72) : Color.rgb(230, 110, 116);
             case "slate":
-                return isFrost() ? Color.rgb(79, 105, 141) : key;
+                return isFrost() ? Color.rgb(79, 105, 141) : muted;
             default:
                 return primary;
         }
     }
 
     int shortcutPressedColor(String color) {
-        if (isSoft()) {
-            return mix(surface, key, light ? 0.55f : 0.8f);
-        }
         return mix(shortcutColor(color), primary, light ? 0.13f : 0.25f);
     }
 
     int feedbackSurface(int semanticColor) {
-        return mix(surface, semanticColor, light ? 0.08f : 0.16f);
+        return mix(surface, semanticColor, light ? 0.07f : 0.14f);
     }
 
     /// 混色入口：与 blend 一致；保留方法便于各页面统一调用。
@@ -358,6 +399,7 @@ final class PhoneDeckTheme {
             Context context, int fill, int radiusDp, int strokeWidthDp, int strokeColor) {
         GradientDrawable drawable = new GradientDrawable();
         if (isFrost() && isGlassSurface(fill)) {
+            // 玻璃表面：斜向三段渐变 + 白描边。
             int glassAlpha = Color.alpha(fill);
             int endAlpha = fill == voiceDock ? Math.max(246, glassAlpha - 2)
                     : Math.max(165, glassAlpha - 16);
@@ -365,8 +407,7 @@ final class PhoneDeckTheme {
             drawable.setColors(new int[]{
                     withAlpha(Color.WHITE, Math.max(190, glassAlpha)),
                     fill,
-                    withAlpha(Color.rgb(225, 238, 255), endAlpha)
-            });
+                    withAlpha(Color.rgb(225, 238, 255), endAlpha)});
             if (strokeWidthDp == 0) {
                 strokeWidthDp = 1;
                 strokeColor = Color.argb(205, 255, 255, 255);
@@ -391,13 +432,15 @@ final class PhoneDeckTheme {
         return drawable;
     }
 
-    StateListDrawable pressable(
+    /// 原生涟漪反馈：内容仍为纯色 shape，按下时半透明 pressed 色扩散，
+    /// 比整块变色更接近系统应用的手感（minSdk 26，RippleDrawable 可用）。
+    android.graphics.drawable.Drawable pressable(
             Context context, int normalColor, int pressedColor, int radiusDp) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_pressed},
-                shape(context, pressedColor, radiusDp));
-        states.addState(new int[]{}, shape(context, normalColor, radiusDp));
-        return states;
+        GradientDrawable content = shape(context, normalColor, radiusDp);
+        return new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(withAlpha(pressedColor, 170)),
+                content,
+                null);
     }
 
     static int blend(int base, int overlay, float amount) {
@@ -422,99 +465,7 @@ final class PhoneDeckTheme {
         return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }
 
-    /** 软色纸卡 · 奶油：参考图浅色主调——暖奶油底、纯白卡片、蓝色主操作。 */
-    private static PhoneDeckTheme ivory() {
-        return new PhoneDeckTheme(
-                IVORY,
-                "纸卡 · 奶油",
-                "参考图浅色：暖奶油底 · 白卡片 · 柔投影",
-                true,
-                Color.rgb(242, 240, 234),
-                Color.rgb(255, 255, 255),
-                Color.rgb(247, 245, 240),
-                Color.rgb(235, 232, 224),
-                Color.rgb(61, 107, 243),
-                Color.rgb(46, 86, 208),
-                Color.rgb(255, 255, 255),
-                Color.rgb(27, 25, 20),
-                Color.rgb(143, 139, 128),
-                Color.rgb(62, 155, 95),
-                Color.rgb(224, 138, 69),
-                Color.rgb(217, 84, 72),
-                Color.rgb(233, 230, 222),
-                Color.rgb(255, 255, 255));
-    }
-
-    /** 软色纸卡 · 云白：参考图浅色第二调——清亮白底、白卡片、蓝点缀。 */
-    private static PhoneDeckTheme pearl() {
-        return new PhoneDeckTheme(
-                PEARL,
-                "纸卡 · 云白",
-                "参考图浅色：清亮白底 · 白卡片 · 蓝点缀",
-                true,
-                Color.rgb(245, 244, 241),
-                Color.rgb(255, 255, 255),
-                Color.rgb(240, 239, 236),
-                Color.rgb(234, 233, 229),
-                Color.rgb(61, 107, 243),
-                Color.rgb(46, 86, 208),
-                Color.rgb(255, 255, 255),
-                Color.rgb(26, 25, 24),
-                Color.rgb(138, 136, 131),
-                Color.rgb(62, 155, 95),
-                Color.rgb(224, 138, 69),
-                Color.rgb(217, 84, 72),
-                Color.rgb(231, 230, 226),
-                Color.rgb(255, 255, 255));
-    }
-
-    /** 软色纸卡 · 暖黑：参考图深色主调——暖黑底、深咖卡片、白色主按钮。 */
-    private static PhoneDeckTheme espresso() {
-        return new PhoneDeckTheme(
-                ESPRESSO,
-                "纸卡 · 暖黑",
-                "参考图深色：暖黑底 · 深咖卡片 · 白主按钮",
-                false,
-                Color.rgb(22, 20, 17),
-                Color.rgb(38, 35, 31),
-                Color.rgb(45, 42, 37),
-                Color.rgb(29, 27, 24),
-                Color.rgb(241, 238, 230),
-                Color.rgb(214, 210, 200),
-                Color.rgb(25, 23, 19),
-                Color.rgb(241, 238, 230),
-                Color.rgb(151, 146, 135),
-                Color.rgb(98, 183, 123),
-                Color.rgb(233, 162, 102),
-                Color.rgb(232, 122, 110),
-                Color.rgb(51, 47, 42),
-                Color.rgb(38, 35, 31));
-    }
-
-    /** 软色纸卡 · 暖灰：参考图深色第二调——暖深灰底、灰咖卡片。 */
-    private static PhoneDeckTheme cocoa() {
-        return new PhoneDeckTheme(
-                COCOA,
-                "纸卡 · 暖灰",
-                "参考图深色：暖深灰底 · 灰咖卡片 · 白主按钮",
-                false,
-                Color.rgb(30, 27, 24),
-                Color.rgb(45, 42, 37),
-                Color.rgb(53, 49, 44),
-                Color.rgb(39, 36, 32),
-                Color.rgb(241, 238, 230),
-                Color.rgb(214, 210, 200),
-                Color.rgb(25, 23, 19),
-                Color.rgb(241, 238, 230),
-                Color.rgb(158, 152, 142),
-                Color.rgb(98, 183, 123),
-                Color.rgb(233, 162, 102),
-                Color.rgb(232, 122, 110),
-                Color.rgb(58, 54, 48),
-                Color.rgb(45, 42, 37));
-    }
-
-    /** 冰川玻璃（原版）：柔光玻璃渐变、极光背景与玻璃语音坞，原样保留。 */
+    /// 冰川玻璃（原版默认）：柔光玻璃渐变、极光背景与玻璃语音坞。
     private static PhoneDeckTheme frost() {
         return new PhoneDeckTheme(
                 FROST,
@@ -537,179 +488,141 @@ final class PhoneDeckTheme {
                 Color.rgb(250, 253, 255));
     }
 
-    private static PhoneDeckTheme ocean() {
+    /// ChatGPT 浅色：OpenAI App 风格 · 纯白底、近黑主钮、极简灰阶。
+    private static PhoneDeckTheme gptLight() {
         return new PhoneDeckTheme(
-                OCEAN,
-                "深海蓝",
-                "沉稳、清晰，适合日常效率操作",
-                false,
-                Color.rgb(8, 14, 28),
-                Color.rgb(20, 29, 49),
-                Color.rgb(26, 39, 65),
-                Color.rgb(29, 43, 71),
-                Color.rgb(119, 169, 255),
-                Color.rgb(161, 197, 255),
-                Color.rgb(5, 14, 29),
-                Color.rgb(247, 249, 255),
-                Color.rgb(157, 173, 204),
-                Color.rgb(78, 220, 156),
-                Color.rgb(255, 194, 91),
-                Color.rgb(255, 108, 132),
-                Color.rgb(52, 68, 99),
-                Color.rgb(15, 23, 42));
-    }
-
-    private static PhoneDeckTheme oled() {
-        return new PhoneDeckTheme(
-                OLED,
-                "OLED 黑",
-                "纯黑省电，高对比度，适合长期亮屏",
-                false,
-                Color.BLACK,
-                Color.rgb(10, 11, 15),
-                Color.rgb(18, 20, 27),
-                Color.rgb(21, 24, 33),
-                Color.rgb(139, 183, 255),
-                Color.rgb(181, 211, 255),
-                Color.rgb(0, 7, 18),
-                Color.rgb(250, 251, 255),
-                Color.rgb(166, 174, 193),
-                Color.rgb(77, 224, 159),
-                Color.rgb(255, 198, 91),
-                Color.rgb(255, 110, 135),
-                Color.rgb(42, 46, 58),
-                Color.rgb(7, 8, 11));
-    }
-
-    private static PhoneDeckTheme paper() {
-        return new PhoneDeckTheme(
-                PAPER,
-                "柔和浅色",
-                "温暖、低刺激，适合白天和明亮环境",
+                GPT_LIGHT,
+                "ChatGPT",
+                "OpenAI 风格 · 黑白灰阶，主钮深浅反转",
                 true,
-                Color.rgb(246, 243, 236),
                 Color.rgb(255, 255, 255),
-                Color.rgb(237, 234, 226),
-                Color.rgb(232, 237, 246),
-                Color.rgb(49, 94, 168),
-                Color.rgb(38, 78, 143),
+                Color.rgb(249, 249, 249),
+                Color.rgb(240, 240, 240),
+                Color.rgb(244, 244, 244),
+                Color.rgb(13, 13, 13),
+                Color.rgb(47, 47, 47),
                 Color.WHITE,
-                Color.rgb(29, 36, 48),
-                Color.rgb(101, 111, 130),
-                Color.rgb(31, 132, 89),
-                Color.rgb(173, 106, 21),
-                Color.rgb(184, 59, 82),
-                Color.rgb(214, 210, 201),
-                Color.rgb(252, 250, 246));
-    }
-
-    private static PhoneDeckTheme inkLight() {
-        return new PhoneDeckTheme(
-                INK_LIGHT,
-                "极简墨白",
-                "Grok 风格 · 柔和灰阶层叠，安静克制",
-                true,
-                Color.rgb(248, 248, 247),
-                Color.WHITE,
-                Color.rgb(241, 241, 239),
-                Color.WHITE,
-                Color.rgb(16, 16, 18),
-                Color.rgb(46, 46, 48),
-                Color.WHITE,
-                Color.rgb(20, 20, 22),
-                Color.rgb(113, 113, 122),
-                Color.rgb(58, 58, 63),
-                Color.rgb(142, 142, 147),
-                Color.rgb(23, 23, 26),
-                Color.rgb(233, 233, 230),
+                Color.rgb(13, 13, 13),
+                Color.rgb(143, 143, 143),
+                Color.rgb(26, 152, 108),
+                Color.rgb(187, 121, 26),
+                Color.rgb(202, 60, 60),
+                Color.rgb(229, 229, 229),
                 Color.rgb(255, 255, 255));
     }
 
-    private static PhoneDeckTheme inkDark() {
+    /// ChatGPT 深色：炭灰底 + 白主钮（深色模式主按钮反转）。
+    private static PhoneDeckTheme gptDark() {
         return new PhoneDeckTheme(
-                INK_DARK,
-                "极简纯黑",
-                "Grok 风格 · 近黑层叠，低刺激深色",
+                GPT_DARK,
+                "ChatGPT",
+                "OpenAI 风格 · 黑白灰阶，主钮深浅反转",
                 false,
-                Color.rgb(10, 10, 11),
-                Color.rgb(23, 23, 26),
-                Color.rgb(32, 32, 36),
-                Color.rgb(26, 26, 30),
-                Color.rgb(242, 242, 243),
+                Color.rgb(33, 33, 33),
+                Color.rgb(47, 47, 47),
+                Color.rgb(56, 56, 56),
+                Color.rgb(42, 42, 42),
                 Color.rgb(255, 255, 255),
-                Color.rgb(11, 11, 12),
-                Color.rgb(244, 244, 245),
-                Color.rgb(139, 139, 146),
-                Color.rgb(201, 201, 206),
-                Color.rgb(126, 126, 132),
-                Color.rgb(255, 255, 255),
-                Color.rgb(44, 44, 49),
-                Color.rgb(16, 16, 19));
+                Color.rgb(217, 217, 217),
+                Color.rgb(13, 13, 13),
+                Color.rgb(236, 236, 236),
+                Color.rgb(166, 166, 166),
+                Color.rgb(62, 206, 152),
+                Color.rgb(224, 178, 92),
+                Color.rgb(230, 110, 116),
+                Color.rgb(66, 66, 66),
+                Color.rgb(38, 38, 38));
     }
 
-    private static PhoneDeckTheme goldBlue() {
+    /// Claude 浅色：Anthropic App 风格 · 米白纸感底 + 陶土橙点缀。
+    private static PhoneDeckTheme claudeLight() {
         return new PhoneDeckTheme(
-                GOLD_BLUE,
-                "黄金靛蓝",
-                "基准色相 215° · 伙伴色按黄金角 137.5° 取绯红",
+                CLAUDE_LIGHT,
+                "Claude",
+                "Anthropic 风格 · 米白/暖炭底 + 陶土橙",
                 true,
-                Color.rgb(241, 244, 249),
+                Color.rgb(250, 249, 245),
                 Color.rgb(255, 255, 255),
-                Color.rgb(226, 233, 242),
-                Color.rgb(224, 232, 243),
-                Color.rgb(36, 86, 174),
-                Color.rgb(27, 69, 144),
+                Color.rgb(240, 238, 230),
+                Color.rgb(240, 238, 230),
+                Color.rgb(217, 119, 87),
+                Color.rgb(196, 99, 60),
                 Color.WHITE,
-                Color.rgb(22, 35, 58),
-                Color.rgb(92, 112, 137),
-                Color.rgb(46, 125, 91),
-                Color.rgb(168, 114, 31),
-                Color.rgb(178, 58, 71),
-                Color.rgb(203, 216, 232),
-                Color.rgb(250, 251, 253));
+                Color.rgb(38, 38, 36),
+                Color.rgb(138, 133, 124),
+                Color.rgb(44, 140, 96),
+                Color.rgb(180, 128, 44),
+                Color.rgb(196, 84, 76),
+                Color.rgb(222, 217, 207),
+                Color.rgb(250, 249, 245));
     }
 
-    private static PhoneDeckTheme goldAmber() {
+    /// Claude 深色：暖炭底 + 陶土橙（深色下橙色略提亮）。
+    private static PhoneDeckTheme claudeDark() {
         return new PhoneDeckTheme(
-                GOLD_AMBER,
-                "黄金琥珀",
-                "基准色相 32° · 青绿与品红按黄金角配对",
+                CLAUDE_DARK,
+                "Claude",
+                "Anthropic 风格 · 米白/暖炭底 + 陶土橙",
                 false,
-                Color.rgb(22, 18, 16),
-                Color.rgb(33, 27, 21),
-                Color.rgb(44, 36, 27),
-                Color.rgb(45, 37, 28),
-                Color.rgb(227, 154, 69),
-                Color.rgb(239, 172, 95),
-                Color.rgb(32, 21, 5),
-                Color.rgb(243, 236, 226),
-                Color.rgb(166, 152, 138),
-                Color.rgb(63, 174, 150),
-                Color.rgb(224, 195, 104),
-                Color.rgb(194, 94, 126),
-                Color.rgb(58, 48, 38),
-                Color.rgb(26, 21, 17));
+                Color.rgb(38, 38, 36),
+                Color.rgb(48, 48, 46),
+                Color.rgb(58, 58, 56),
+                Color.rgb(46, 46, 44),
+                Color.rgb(217, 119, 87),
+                Color.rgb(224, 139, 109),
+                Color.WHITE,
+                Color.rgb(243, 242, 236),
+                Color.rgb(163, 162, 156),
+                Color.rgb(110, 180, 120),
+                Color.rgb(222, 178, 92),
+                Color.rgb(230, 110, 104),
+                Color.rgb(69, 68, 65),
+                Color.rgb(42, 42, 40));
     }
 
-    private static PhoneDeckTheme goldForest() {
+    /// Grok 浅色：xAI App 风格 · 纯白黑字，分类色走灰阶。
+    private static PhoneDeckTheme grokLight() {
         return new PhoneDeckTheme(
-                GOLD_FOREST,
-                "黄金松绿",
-                "基准色相 152° · 橙与紫红按黄金角配对",
+                GROK_LIGHT,
+                "Grok",
+                "xAI 风格 · 纯黑纯白，分类色灰阶",
+                true,
+                Color.rgb(255, 255, 255),
+                Color.rgb(247, 247, 247),
+                Color.rgb(239, 239, 239),
+                Color.rgb(245, 245, 245),
+                Color.rgb(0, 0, 0),
+                Color.rgb(38, 38, 43),
+                Color.WHITE,
+                Color.rgb(15, 15, 15),
+                Color.rgb(107, 107, 112),
+                Color.rgb(44, 138, 88),
+                Color.rgb(176, 128, 40),
+                Color.rgb(198, 58, 58),
+                Color.rgb(227, 227, 227),
+                Color.rgb(255, 255, 255));
+    }
+
+    /// Grok 深色：纯黑画布 + 白主钮。
+    private static PhoneDeckTheme grokDark() {
+        return new PhoneDeckTheme(
+                GROK_DARK,
+                "Grok",
+                "xAI 风格 · 纯黑纯白，分类色灰阶",
                 false,
-                Color.rgb(11, 19, 16),
-                Color.rgb(18, 32, 26),
-                Color.rgb(26, 44, 36),
-                Color.rgb(27, 45, 37),
-                Color.rgb(78, 200, 148),
-                Color.rgb(99, 214, 166),
-                Color.rgb(6, 19, 12),
-                Color.rgb(234, 244, 238),
-                Color.rgb(134, 160, 147),
-                Color.rgb(143, 224, 182),
-                Color.rgb(206, 155, 78),
-                Color.rgb(196, 88, 107),
-                Color.rgb(34, 53, 41),
-                Color.rgb(14, 24, 19));
+                Color.rgb(0, 0, 0),
+                Color.rgb(18, 18, 19),
+                Color.rgb(28, 28, 30),
+                Color.rgb(22, 22, 23),
+                Color.rgb(255, 255, 255),
+                Color.rgb(212, 212, 216),
+                Color.rgb(0, 0, 0),
+                Color.rgb(237, 237, 239),
+                Color.rgb(143, 143, 148),
+                Color.rgb(98, 190, 138),
+                Color.rgb(222, 178, 92),
+                Color.rgb(232, 106, 106),
+                Color.rgb(38, 38, 43),
+                Color.rgb(10, 10, 11));
     }
 }
