@@ -102,6 +102,19 @@ internal readonly record struct MacKey(
     int ModifierOrder = 10,
     MacModifierFlags Flag = MacModifierFlags.None);
 
+/// <summary>hold 触发按下未释放的按键句柄；由 EngineHoldUp 释放。</summary>
+internal sealed class MacChordHold
+{
+    internal MacChordHold(IReadOnlyList<MacKey> pressed, MacModifierFlags flags)
+    {
+        Pressed = pressed;
+        Flags = flags;
+    }
+
+    internal IReadOnlyList<MacKey> Pressed { get; }
+    internal MacModifierFlags Flags { get; }
+}
+
 internal interface IMacKeyboardSink
 {
     bool IsAccessibilityTrusted { get; }
@@ -154,13 +167,14 @@ internal sealed class MacKeyboardInput
     internal bool ExecuteFixedOnce(string action, string? text, string? requestId) =>
         ExecuteOnce(requestId, () => ExecuteFixed(action, text));
 
-    internal void SendTypelessShortcut(string binding)
+    /// <summary>解析引擎快捷键绑定串（如 "Control+D"、"Fn"）为修饰键在前的按键序列。</summary>
+    internal static MacKey[] ParseEngineBinding(string binding)
     {
         var tokens = binding.Split(
             '+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length is < 1 or > 4)
         {
-            throw new ArgumentException("Typeless 快捷键必须包含 1–4 个键");
+            throw new ArgumentException("引擎快捷键必须包含 1–4 个键");
         }
         var keys = tokens.Select(NormalizeKeyName).Select(MapKeyName)
             .OrderBy(key => key.IsModifier ? key.ModifierOrder : 10)
@@ -168,10 +182,24 @@ internal sealed class MacKeyboardInput
         if (keys.Count(key => !key.IsModifier) > 1
             || (keys.All(key => key.IsModifier) && keys.Length != 1))
         {
-            throw new ArgumentException("Typeless 快捷键格式无效");
+            throw new ArgumentException($"引擎快捷键格式无效：{binding}");
         }
-        SendChord(keys, 55);
+        return keys;
     }
+
+    /// <summary>发送一次完整的切换式触发键（按下 55ms 后释放）。</summary>
+    internal void SendEngineChord(MacKey[] keys) => SendChord(keys, 55);
+
+    /// <summary>按下并保持（hold 引擎开始）；后续必须用 EngineHoldUp 释放。</summary>
+    internal MacChordHold EngineHoldDown(MacKey[] keys)
+    {
+        var (pressed, flags) = SendChordDown(keys);
+        return new MacChordHold(pressed, flags);
+    }
+
+    /// <summary>释放 EngineHoldDown 按住的键；重复调用为安全空操作。</summary>
+    internal void EngineHoldUp(MacChordHold hold) =>
+        ReleaseChord(hold.Pressed, hold.Flags, rethrow: true);
 
     internal MacKey[] ParseKeyChord(string[]? keyNames, out string description)
     {
@@ -307,6 +335,24 @@ internal sealed class MacKeyboardInput
 
     private void SendChord(IReadOnlyList<MacKey> keys, int holdMilliseconds)
     {
+        var (pressed, flags) = SendChordDown(keys);
+        try
+        {
+            if (holdMilliseconds > 0)
+            {
+                Thread.Sleep(holdMilliseconds);
+            }
+        }
+        finally
+        {
+            ReleaseChord(pressed, flags, rethrow: true);
+        }
+    }
+
+    /// <summary>按给定顺序按下全部键；中途失败时先释放已按下键再抛出。</summary>
+    private (List<MacKey> Pressed, MacModifierFlags Flags) SendChordDown(
+        IReadOnlyList<MacKey> keys)
+    {
         EnsureAccessibility();
         var pressed = new List<MacKey>(keys.Count);
         var flags = MacModifierFlags.None;
@@ -321,34 +367,38 @@ internal sealed class MacKeyboardInput
                 pressed.Add(key);
                 sink.PostKey(key.KeyCode, true, flags);
             }
-            if (holdMilliseconds > 0)
+        }
+        catch
+        {
+            ReleaseChord(pressed, flags, rethrow: false);
+            throw;
+        }
+        return (pressed, flags);
+    }
+
+    private void ReleaseChord(
+        IReadOnlyList<MacKey> pressed, MacModifierFlags flags, bool rethrow)
+    {
+        Exception? releaseFailure = null;
+        for (var index = pressed.Count - 1; index >= 0; index--)
+        {
+            var key = pressed[index];
+            try
             {
-                Thread.Sleep(holdMilliseconds);
+                sink.PostKey(key.KeyCode, false, flags);
+            }
+            catch (Exception exception)
+            {
+                releaseFailure ??= exception;
+            }
+            if (key.IsModifier)
+            {
+                flags &= ~key.Flag;
             }
         }
-        finally
+        if (rethrow && releaseFailure is not null)
         {
-            Exception? releaseFailure = null;
-            for (var index = pressed.Count - 1; index >= 0; index--)
-            {
-                var key = pressed[index];
-                try
-                {
-                    sink.PostKey(key.KeyCode, false, flags);
-                }
-                catch (Exception exception)
-                {
-                    releaseFailure ??= exception;
-                }
-                if (key.IsModifier)
-                {
-                    flags &= ~key.Flag;
-                }
-            }
-            if (releaseFailure is not null)
-            {
-                throw new InvalidOperationException("未能释放全部 macOS 组合键", releaseFailure);
-            }
+            throw new InvalidOperationException("未能释放全部 macOS 组合键", releaseFailure);
         }
     }
 
@@ -486,7 +536,33 @@ internal sealed class MacKeyboardInput
             case "taskView": SendNamedChord("CONTROL", "UP"); break;
             case "desktop": SendNamedChord("FN", "F11"); break;
             case "screenshot": SendNamedChord("COMMAND", "SHIFT", "4"); break;
-            case "typeless": SendModifierOnly("FN"); break;
+            case "typeless":
+                {
+                    // 遗留协议：路由到当前激活引擎；无法解析绑定时保留旧版 FN 回退。
+                    var legacyMode = string.IsNullOrWhiteSpace(text)
+                        ? MacVoiceEngines.Active.PrimaryModeId
+                        : MacVoiceEngines.NormalizeMode(text);
+                    var legacyKeys = ParseEngineBinding(
+                        MacVoiceEngines.ResolveBinding(legacyMode) ?? "Fn");
+                    if (string.Equals(MacVoiceEngines.TriggerFor(legacyMode),
+                            MacEngineTriggers.Hold, StringComparison.Ordinal))
+                    {
+                        var hold = EngineHoldDown(legacyKeys);
+                        try
+                        {
+                            Thread.Sleep(55);
+                        }
+                        finally
+                        {
+                            EngineHoldUp(hold);
+                        }
+                    }
+                    else
+                    {
+                        SendEngineChord(legacyKeys);
+                    }
+                    break;
+                }
             case "switchInputMethod": SendNamedChord("CONTROL", "SPACE"); break;
             case "enter": SendNamedChord("ENTER"); break;
             case "backspace": SendNamedChord("BACKSPACE"); break;

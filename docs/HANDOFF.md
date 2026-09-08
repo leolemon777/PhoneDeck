@@ -2,11 +2,47 @@
 
 更新时间：2026-09-07
 当前分支：`main`
-当前源码：Android 1.6.0-dev.11（九主题：冰川玻璃/纸卡×4/瑞士黑白/克莱因蓝/工业沙橙/极简单色）/ Windows 1.6.0-dev.7（手机控制听写 + 共享麦克风双模式 + 配对失效可视化/USB 自愈提示/设备删除）；macOS 接收端预览 2.0.0-dev.2（CGEvent + AUHAL/BlackHole + Typeless 状态机）
+当前源码：Android 1.6.0-dev.13（九主题 + 多语音引擎动态 UI）/ Windows 1.6.0-dev.8（语音引擎档案化 + 控制台引擎设置）；macOS 接收端预览 2.0.0-dev.3（CGEvent + AUHAL/BlackHole + 引擎档案化）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-07 dev.13/Windows dev.8/macOS dev.3：语音引擎档案化——开源多引擎适配（1号电脑）
+
+- 目标：开源发布后用户不一定用 Typeless。把“手机控制听写”链路改为
+  **引擎档案（Engine Profile）驱动**，三端一致：Windows / macOS / Android。
+- **档案系统**（Windows `VoiceEngineProfile/Catalog/Settings`，macOS
+  `MacVoiceEngine*`）：JSON 描述每个语音软件的进程名（录音探测，包含匹配）、
+  各模式快捷键与触发方式；内置 `typeless`（配置自动读取，唯一已验证）、
+  `doubao`（实验，Ctrl+D toggle）、`wetype`（实验，无默认快捷键、必须手动
+  配置、hold 触发）。用户在 data 目录 voice-engines 子目录的 JSON 档案中按 id 覆盖/新增，
+  零代码二开；`voice-engine-settings.json` 选激活引擎 + 最高优先级快捷键覆盖。
+- **hold（按住说话）语义**：微信输入法等按住式引擎，开始=按下保持、结束=释放。
+  Windows `KeyboardInput` 新增 ChordDown/Up 原语（部分失败即释放），控制器
+  `BeginOnce/End` 统一 toggle/hold；任何异常路径（探针失败、断流、退出）都
+  释放按键；重复 End 幂等（重复 keyup 安全空操作）。macOS 对等
+  （`MacChordHold` + `SendChordDown/ReleaseChord`）。
+- **接口重构**：`ITypelessController` → `IVoiceEngineController`
+  （macOS `IMacVoiceEngineController`），`DictationSessionManager` 面向新接口；
+  麦克风虚拟声卡校验三态化（null=无法校验不阻断，仅 typeless 可硬校验）；
+  遗留 `action:"typeless"` 路由到当前激活引擎。
+- **健康协议**：`/api/health` 保留旧 `typeless` 块（从当前引擎映射，旧手机
+  兼容）+ 新增 `voiceEngine` 块（id/displayName/experimental/capturing/
+  virtualCableSelected 可空/modes[]含 trigger 与 configured）。Android 优先
+  读新块、回退旧块；模式 chips 从 `modes[]` 动态渲染（含引擎名标签），prefs
+  `voice_typeless_mode` 迁移为 `voice_engine_mode`。
+- **控制台**：设置页新增“语音引擎”卡片（引擎 chips + 每模式快捷键覆盖，
+  随“保存并应用”一起保存并重启接收端）；新端点 `GET/POST
+  /api/config/voice-engines`；概览拓扑节点与音频状态标签动态显示引擎名。
+- **验证**：Windows 61 项单测全绿（新增档案解析/合并/校验、hold 语义、
+  覆盖优先级 13 项）；macOS 交叉编译通过 + 20 项测试全绿；Android javac
+  全量 26 文件自查通过。**豆包/微信输入法未实装真机验收**（用户决定暂不
+  安装），档案标注 experimental，核对清单见 docs/VOICE_ENGINES.md；
+  Typeless 回归待下次实机使用时观察。共享麦克风（shared）模式零改动。
+- 文档：新增 `docs/VOICE_ENGINES.md`（Schema、示例档案：千问/微信客户端/
+  doubao-murmur、核对清单）；README/SETUP/MACOS_SETUP/ARCHITECTURE/AGENTS
+  措辞引擎无关化。
 
 ## 2026-09-07 dev.11：主题改为九套——保留冰川玻璃与纸卡，新增四款设计稿风格（1号电脑）
 

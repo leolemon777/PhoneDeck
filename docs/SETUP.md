@@ -107,8 +107,8 @@ dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj 
 
 1. 从 VB-Audio 官方渠道安装 VB-CABLE；必要时以管理员身份安装并重启。
 2. 在 Windows 声音设备中确认 `CABLE Input` 和 `CABLE Output` 存在。
-3. 安装并启动 Typeless。
-4. 在 Typeless 中选择 `CABLE Output` 作为麦克风。
+3. 安装并启动语音输入软件（默认 Typeless；豆包、微信输入法等可选，见 [VOICE_ENGINES.md](./VOICE_ENGINES.md)）。
+4. 在该软件中选择 `CABLE Output` 作为麦克风（Typeless 之外无法自动校验的软件，请自行确认）。
 5. 启动 `PhoneDeck.Server.exe`。
 6. 连接并授权 Android 手机。
 7. 建立 ADB 反向转发：
@@ -121,11 +121,11 @@ adb shell am start -n com.codex.phonedeck/.MainActivity
 8. 手机先显示 USB 已连接，再点击大号“开始说话”主按钮。启动阶段同一按钮会变为“取消启动”。
 9. 听写中同一主按钮会变为“停止说话”，点击它完成本次文字；下方“暂停”会停止手机麦克风采集但保持会话，“继续”恢复采集。
 
-如果手机显示“USB 已连接 · 缺少 VB-CABLE”，语音按钮不会启动 Typeless。安装并启用 VB-CABLE 后，还必须在 Typeless 设置中把麦克风选为 `CABLE Output (VB-Audio Virtual Cable)`；保持“Auto-detect / 系统默认麦克风”会被 PhoneDeck 拒绝，以防误录电脑自带麦克风。
+如果手机显示“USB 已连接 · 缺少 VB-CABLE”，语音按钮不会启动语音输入。安装并启用 VB-CABLE 后，还必须在 Typeless 设置中把麦克风选为 `CABLE Output (VB-Audio Virtual Cable)`；保持“Auto-detect / 系统默认麦克风”会被 PhoneDeck 拒绝，以防误录电脑自带麦克风。切换其他引擎或覆盖快捷键见 `data` 目录下 `voice-engine-settings.json` 与 [VOICE_ENGINES.md](./VOICE_ENGINES.md)。
 
 ### 双语音模式
 
-- “手机控制听写”保持原行为：先选当前电脑，再由手机按钮启动/停止该电脑的 Typeless。
+- “手机控制听写”保持原行为：先选当前电脑，再由手机按钮启动/停止该电脑的语音引擎（电脑端配置，默认 Typeless）。
 - “共享麦克风”需每次打开 App 后手动开启；手机向所有在线且音频就绪的电脑供音，
   Typeless 只由各电脑自己的快捷键控制。不要期待开启共享本身产生文字。
 - 共享运行时 Android 会显示常驻通知；锁屏后应保留通知。通知中的“停止共享”和手机主

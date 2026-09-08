@@ -1,12 +1,14 @@
 namespace PhoneDeck.MacReceiver;
 
+/// <summary>受管语音听写会话状态机：面向 IMacVoiceEngineController 编程，
+/// toggle（按一下切换）与 hold（按住说话）引擎的差异由控制器内部消化。</summary>
 internal sealed class MacDictationSessionManager(
     IMacPhoneAudioSessionController audio,
-    IMacTypelessController typeless) : IDisposable
+    IMacVoiceEngineController engine) : IDisposable
 {
     private readonly object syncRoot = new();
     private volatile string? activeSessionId;
-    private string activeMode = "dictation";
+    private string? activeMode;
 
     internal bool IsActive => activeSessionId is not null;
     internal string? ActiveSessionId => activeSessionId;
@@ -24,20 +26,22 @@ internal sealed class MacDictationSessionManager(
             }
             if (activeSessionId is not null)
             {
-                throw new InvalidOperationException("另一个 Typeless 会话仍在运行");
+                throw new InvalidOperationException("另一个语音听写会话仍在运行");
             }
         }
-        var configuration = typeless.Configuration;
-        if (!configuration.UsesBlackHole)
+        if (!engine.IsModeConfigured(normalizedMode))
         {
             throw new InvalidOperationException(
-                "Typeless 麦克风未选择 BlackHole，已拒绝手机控制模式");
+                $"{engine.EngineDisplayName} 未配置该模式的快捷键");
         }
-        if (configuration.BindingFor(normalizedMode) is null)
+        // 引擎无可读配置时（CanVerifyVirtualCable 为 null）跳过麦克风校验，
+        // 由 Core Audio 状态探针确认真实采集。
+        if (engine.CanVerifyVirtualCable == true && !engine.UsesVirtualCable)
         {
-            throw new InvalidOperationException("Typeless 未配置该模式的快捷键");
+            throw new InvalidOperationException(
+                $"{engine.EngineDisplayName} 麦克风未选择 BlackHole，已拒绝手机控制模式");
         }
-        var before = typeless.IsCapturing();
+        var before = engine.IsCapturing();
         if (before is null)
         {
             throw new InvalidOperationException(
@@ -45,14 +49,15 @@ internal sealed class MacDictationSessionManager(
         }
         if (before is true)
         {
-            throw new InvalidOperationException("Typeless 已在采集，请先在电脑端停止");
+            throw new InvalidOperationException(
+                $"{engine.EngineDisplayName} 已在采集，请先在电脑端停止");
         }
 
         lock (syncRoot)
         {
             if (activeSessionId is not null)
             {
-                throw new InvalidOperationException("另一个 Typeless 会话仍在运行");
+                throw new InvalidOperationException("另一个语音听写会话仍在运行");
             }
             if (!audio.WaitForSessionActive(normalizedSession, 3_000))
             {
@@ -60,14 +65,15 @@ internal sealed class MacDictationSessionManager(
             }
             activeSessionId = normalizedSession;
             activeMode = normalizedMode;
-            var toggleSent = false;
+            var beginSent = false;
             try
             {
-                var duplicate = typeless.ToggleOnce(normalizedRequest, normalizedMode);
-                toggleSent = true;
-                if (typeless.WaitForCapturing(true, 2_000) is not true)
+                var duplicate = engine.BeginOnce(normalizedRequest, normalizedMode);
+                beginSent = true;
+                if (engine.WaitForCapturing(true, 2_000) is not true)
                 {
-                    throw new InvalidOperationException("Typeless 未确认开始采集");
+                    throw new InvalidOperationException(
+                        $"{engine.EngineDisplayName} 未确认开始采集");
                 }
                 audio.BeginPlayback(normalizedSession);
                 return duplicate;
@@ -77,15 +83,15 @@ internal sealed class MacDictationSessionManager(
                 activeSessionId = null;
                 try
                 {
-                    if (toggleSent && typeless.IsCapturing() is not false)
+                    if (beginSent)
                     {
-                        typeless.Toggle(normalizedMode);
-                        typeless.WaitForCapturing(false, 2_000);
+                        ResetEngine();
                     }
                 }
                 catch (Exception exception)
                 {
-                    Console.Error.WriteLine("启动失败后复位 Typeless 失败：" + exception.Message);
+                    Console.Error.WriteLine(
+                        $"启动失败后复位 {engine.EngineDisplayName} 失败：{exception.Message}");
                 }
                 audio.StopSession(normalizedSession);
                 throw;
@@ -106,7 +112,7 @@ internal sealed class MacDictationSessionManager(
             }
             if (!string.Equals(activeSessionId, normalizedSession, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("请求的会话不是当前 Typeless 会话");
+                throw new InvalidOperationException("请求的会话不是当前听写会话");
             }
             audio.WaitForSessionEnd(normalizedSession, 2_000);
             var duplicate = false;
@@ -114,8 +120,8 @@ internal sealed class MacDictationSessionManager(
             Exception? failure = null;
             try
             {
-                duplicate = typeless.ToggleOnce(normalizedRequest, activeMode);
-                stopped = typeless.WaitForCapturing(false, 2_000);
+                duplicate = engine.End(activeMode ?? engine.Modes.First(), normalizedRequest);
+                stopped = engine.WaitForCapturing(false, 2_000);
             }
             catch (Exception exception)
             {
@@ -128,12 +134,14 @@ internal sealed class MacDictationSessionManager(
             }
             if (failure is not null)
             {
-                throw new InvalidOperationException("停止 Typeless 时发生错误", failure);
+                throw new InvalidOperationException(
+                    $"停止 {engine.EngineDisplayName} 时发生错误", failure);
             }
             if (stopped is not true)
             {
                 throw new InvalidOperationException(stopped is null
-                    ? "无法确认 Typeless 是否停止" : "Typeless 仍在采集");
+                    ? $"无法确认 {engine.EngineDisplayName} 是否停止"
+                    : $"{engine.EngineDisplayName} 仍在采集");
             }
             return duplicate;
         }
@@ -149,15 +157,15 @@ internal sealed class MacDictationSessionManager(
             }
             try
             {
-                if (typeless.IsCapturing() is true)
+                if (engine.IsCapturing() is true)
                 {
-                    typeless.Toggle(activeMode);
-                    typeless.WaitForCapturing(false, 2_000);
+                    ResetEngine();
                 }
             }
             catch (Exception exception)
             {
-                Console.Error.WriteLine("断流后复位 Typeless 失败：" + exception.Message);
+                Console.Error.WriteLine(
+                    $"断流后复位 {engine.EngineDisplayName} 失败：{exception.Message}");
             }
             finally
             {
@@ -166,14 +174,26 @@ internal sealed class MacDictationSessionManager(
         }
     }
 
+    /// <summary>内部复位：hold 引擎释放按键，toggle 引擎补发一次切换；
+    /// 结束后等待确认停止。</summary>
+    private void ResetEngine()
+    {
+        engine.End(activeMode ?? engine.Modes.First(), null);
+        engine.WaitForCapturing(false, 2_000);
+    }
+
     public void Dispose()
     {
-        var session = activeSessionId;
-        if (session is not null)
+        lock (syncRoot)
         {
-            audio.StopSession(session);
+            var session = activeSessionId;
+            if (session is not null)
+            {
+                audio.StopSession(session);
+            }
+            activeSessionId = null;
         }
-        activeSessionId = null;
+        engine.Dispose();
     }
 
     private static string ValidateId(string? value, string name)
@@ -187,11 +207,15 @@ internal sealed class MacDictationSessionManager(
         return normalized;
     }
 
-    private static string NormalizeMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
+    private string NormalizeMode(string? mode)
     {
-        null or "" or "dictation" => "dictation",
-        "translation" => "translation",
-        "ask" => "ask",
-        _ => throw new ArgumentException("未知的 Typeless 模式")
-    };
+        var normalized = string.IsNullOrWhiteSpace(mode)
+            ? engine.Modes.First()
+            : mode.Trim().ToLowerInvariant();
+        if (!engine.Modes.Contains(normalized))
+        {
+            throw new ArgumentException("未知的语音引擎模式");
+        }
+        return normalized;
+    }
 }

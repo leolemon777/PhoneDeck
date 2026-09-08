@@ -194,7 +194,7 @@
                                 </Border>
                                 <Grid Grid.Column="3" VerticalAlignment="Center"><Rectangle Height="2" Fill="{DynamicResource BrushSuccess}"/><Border Background="#F4F6FA" CornerRadius="8" Padding="6,3" HorizontalAlignment="Center"><TextBlock Text="WASAPI" FontSize="9.5" Foreground="{DynamicResource BrushSuccess}"/></Border></Grid>
                                 <Border Grid.Column="4" Background="#DFFFFFFF" BorderBrush="{DynamicResource BrushHairline}" BorderThickness="1" CornerRadius="15" Padding="12">
-                                    <StackPanel VerticalAlignment="Center"><Border Width="34" Height="34" CornerRadius="17" Background="#102DA44E" HorizontalAlignment="Center" Margin="0,0,0,8"><Path Data="{StaticResource IconMic}" Width="17" Height="17" Stretch="Uniform" Stroke="{DynamicResource BrushSuccess}" StrokeThickness="1.7" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Typeless" Style="{StaticResource NodeTitle}"/><TextBlock Text="听写会话" Style="{StaticResource NodeMeta}"/></StackPanel>
+                                    <StackPanel VerticalAlignment="Center"><Border Width="34" Height="34" CornerRadius="17" Background="#102DA44E" HorizontalAlignment="Center" Margin="0,0,0,8"><Path Data="{StaticResource IconMic}" Width="17" Height="17" Stretch="Uniform" Stroke="{DynamicResource BrushSuccess}" StrokeThickness="1.7" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock x:Name="EngineNodeTitle" Text="Typeless" Style="{StaticResource NodeTitle}"/><TextBlock x:Name="EngineNodeMeta" Text="听写会话" Style="{StaticResource NodeMeta}"/></StackPanel>
                                 </Border>
                             </Grid>
                             <Border Grid.Row="2" Background="#88FFFFFF" BorderBrush="{DynamicResource BrushHairlineSubtle}" BorderThickness="1" CornerRadius="13" Padding="13,10">
@@ -300,6 +300,15 @@
                             <TextBlock Text="ADB 路径（USB 兜底）" Style="{StaticResource TextFine}" Margin="2,0,0,7"/>
                             <TextBox x:Name="AdbPathBoxPage" Style="{StaticResource GlassTextBox}" Margin="0,0,0,18"/>
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Button Content="配置 Agent 操作" Style="{StaticResource GlassButton}" HorizontalAlignment="Left" Click="AgentSettings_Click"/><Button Grid.Column="1" Content="保存并应用" Style="{StaticResource BlueButton}" Click="SaveSettingsPage_Click"/></Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource GlassCard}" Padding="28" Margin="0,22,0,0">
+                        <StackPanel>
+                            <TextBlock Text="语音引擎" Style="{StaticResource TextSectionTitle}"/>
+                            <TextBlock Text="手机语音输入使用的电脑端语音转文字软件；随「保存并应用」一起保存并重启接收端。" Style="{StaticResource TextMuted}" Margin="0,6,0,14" TextWrapping="Wrap"/>
+                            <WrapPanel x:Name="EngineChipsPanel" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="EngineDetailText" Style="{StaticResource TextFine}" TextWrapping="Wrap" Margin="2,2,0,10"/>
+                            <StackPanel x:Name="EngineModePanel"/>
                         </StackPanel>
                     </Border>
                     <TextBlock x:Name="DataDirectoryText" Style="{StaticResource TextFine}" FontFamily="{StaticResource FontFamilyMono}" TextWrapping="Wrap" Margin="8,14,8,0"/>

@@ -8,7 +8,7 @@ public sealed class DictationSessionManagerTests
     public void FailedStartRetryWithSameRequestIdNeverReportsSuccess()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
         const string requestId = "start-request";
@@ -36,7 +36,7 @@ public sealed class DictationSessionManagerTests
     public void StartRejectsUnavailableStateProbeBeforeToggling()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
 
         typeless.IsCapturingResults.Enqueue(null);
@@ -56,7 +56,7 @@ public sealed class DictationSessionManagerTests
         {
             WaitForSessionResult = true
         };
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
 
@@ -73,7 +73,7 @@ public sealed class DictationSessionManagerTests
     public void StartUsesShortAudioWarmupBeforeRequestingTypeless()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
 
@@ -107,7 +107,7 @@ public sealed class DictationSessionManagerTests
         {
             WaitForSessionResult = false
         };
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
 
         typeless.IsCapturingResults.Enqueue(false);
@@ -129,7 +129,7 @@ public sealed class DictationSessionManagerTests
     public void StartRejectsUnconfiguredModeBeforeWaitingForAudio()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         typeless.ConfiguredModes.Remove("translation");
         var manager = new DictationSessionManager(audio, typeless);
 
@@ -147,7 +147,7 @@ public sealed class DictationSessionManagerTests
     public void StopReusesModeFromStart()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
 
@@ -169,7 +169,7 @@ public sealed class DictationSessionManagerTests
     public void StopWithUnavailableProbeReportsFailureButReleasesOwnership()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = StartSuccessfulSession(manager, typeless);
 
@@ -189,7 +189,7 @@ public sealed class DictationSessionManagerTests
     public void AudioEndedFailureCannotPermanentlyLockNextSession()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = StartSuccessfulSession(manager, typeless);
 
@@ -209,7 +209,7 @@ public sealed class DictationSessionManagerTests
     public void StopRechecksStateBeforeSendingSecondToggle()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = StartSuccessfulSession(manager, typeless);
 
@@ -227,7 +227,7 @@ public sealed class DictationSessionManagerTests
 
     private static string StartSuccessfulSession(
         DictationSessionManager manager,
-        FakeTypelessController typeless)
+        FakeVoiceEngineController typeless)
     {
         var sessionId = Guid.NewGuid().ToString();
         typeless.IsCapturingResults.Enqueue(false);
@@ -241,7 +241,7 @@ public sealed class DictationSessionManagerTests
     public void StartReleasesPreRollOnlyAfterTypelessCapturingConfirmed()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
 
@@ -257,7 +257,7 @@ public sealed class DictationSessionManagerTests
     public void FailedStartDoesNotReleasePreRoll()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
 
         typeless.IsCapturingResults.Enqueue(false);
@@ -273,7 +273,7 @@ public sealed class DictationSessionManagerTests
     public void StartUsesColdStartBudgetsForTypelessAndWasapi()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
 
         typeless.IsCapturingResults.Enqueue(false);
@@ -293,7 +293,7 @@ public sealed class DictationSessionManagerTests
     public void IsActiveAndHealthReadsDoNotBlockDuringSlowStart()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController
+        var typeless = new FakeVoiceEngineController
         {
             WaitForCapturingGate = new ManualResetEventSlim(false)
         };
@@ -330,7 +330,7 @@ public sealed class DictationSessionManagerTests
     public void StopWaitsForAudioDrainBeforeTogglingTypeless()
     {
         var audio = new FakeAudioSessionController();
-        var typeless = new FakeTypelessController();
+        var typeless = new FakeVoiceEngineController();
         var manager = new DictationSessionManager(audio, typeless);
         var sessionId = Guid.NewGuid().ToString();
 
@@ -385,7 +385,7 @@ public sealed class DictationSessionManagerTests
         }
     }
 
-    private sealed class FakeTypelessController : ITypelessController
+    private sealed class FakeVoiceEngineController : IVoiceEngineController
     {
         private readonly HashSet<string> requestIds = new(StringComparer.Ordinal);
 
@@ -398,7 +398,14 @@ public sealed class DictationSessionManagerTests
         public bool UsesVirtualCable { get; set; } = true;
         public int LastWaitTimeoutMilliseconds { get; private set; }
 
-        /// <summary>非空时 WaitForCapturing 先阻塞在该闸门上，模拟慢速 Typeless。</summary>
+        public string EngineDisplayName => "Typeless";
+
+        public IReadOnlyCollection<string> Modes =>
+            new[] { "dictation", "translation", "ask" };
+
+        public bool? CanVerifyVirtualCable => true;
+
+        /// <summary>非空时 WaitForCapturing 先阻塞在该闸门上，模拟慢速引擎。</summary>
         public ManualResetEventSlim? WaitForCapturingGate { get; set; }
 
         public bool? IsCapturing() => IsCapturingResults.Count > 0
@@ -414,7 +421,7 @@ public sealed class DictationSessionManagerTests
 
         public bool IsModeConfigured(string mode) => ConfiguredModes.Contains(mode);
 
-        public bool ToggleOnce(string requestId, string mode)
+        public bool BeginOnce(string requestId, string mode)
         {
             if (!requestIds.Add(requestId))
             {
@@ -425,10 +432,19 @@ public sealed class DictationSessionManagerTests
             return false;
         }
 
-        public void Toggle(string mode)
+        public bool End(string mode, string? requestId)
         {
+            if (requestId is not null && !requestIds.Add(requestId))
+            {
+                return true;
+            }
             LastMode = mode;
             ToggleCount++;
+            return false;
+        }
+
+        public void Dispose()
+        {
         }
     }
 }

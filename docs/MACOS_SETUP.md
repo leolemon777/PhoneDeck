@@ -122,6 +122,8 @@ curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
 ```
 
 空值表示自动读取 Typeless 配置。只有自动读取不适配当前 Typeless 版本时才填写覆盖值；
+以上字段仅作用于 Typeless 引擎——切换其他引擎或新增档案见 `voice-engine-settings.json` 与
+[VOICE_ENGINES.md](./VOICE_ENGINES.md)；
 不要假设所有 Mac 都使用 Fn。`managed` 模式要求状态探针、BlackHole 选择和对应快捷键均
 可用；`shared` 模式不操作 Typeless，因此状态探针不可用时仍可持续供音。
 

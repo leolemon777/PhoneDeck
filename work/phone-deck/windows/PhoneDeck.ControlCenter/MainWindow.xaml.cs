@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -53,6 +54,10 @@ public partial class MainWindow : Window
     private bool lastSharedRequested;
     private bool applyingSharedLink;
     private HwndSource? sourceHandle;
+    private string currentEngineDisplayName = "Typeless";
+    private List<EngineOption> engineOptions = new();
+    private Dictionary<string, Dictionary<string, string>> engineOverrides = new();
+    private string selectedEngineId = "typeless";
 
     private const int WmHotKey = 0x0312;
     private const int SharedHotKeyId = 0x504D;
@@ -205,6 +210,7 @@ public partial class MainWindow : Window
         Log("控制台已打开，正在检查接收端…");
         await EnsureServerAsync();
         await RefreshStatusAsync();
+        await LoadEngineConfigAsync();
         refreshTimer.Start();
     }
 
@@ -572,14 +578,193 @@ public partial class MainWindow : Window
             };
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
             SetAutoStart(AutoStartCheck.IsChecked == true);
+            // 语音引擎配置走接收端 API 一起保存（重启后生效）。
+            CollectEngineEdits();
+            await SaveEngineConfigAsync();
             Log("设置已保存，正在重新启动接收端…", ResourceBrush("BrushSystemBlue"));
             await RestartServerAsync();
             await RefreshStatusAsync();
+            await LoadEngineConfigAsync();
         }
         catch (Exception exception)
         {
             Log("保存失败：" + exception.Message, ResourceBrush("BrushDanger"));
             MessageBox.Show(this, exception.Message, "PhoneDeck 设置保存失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task LoadEngineConfigAsync()
+    {
+        try
+        {
+            var json = await http.GetStringAsync("http://127.0.0.1:8765/api/config/voice-engines");
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            selectedEngineId = root.GetProperty("activeEngine").GetString() ?? selectedEngineId;
+            engineOptions = root.GetProperty("engines").EnumerateArray().Select(ReadEngineOption).ToList();
+            // 重建全部引擎的覆盖快照：保存时当前引擎的编辑值覆盖其上，
+            // 其他引擎的既有覆盖原样保留。
+            engineOverrides = engineOptions.ToDictionary(
+                engine => engine.Id,
+                engine => engine.Modes
+                    .Where(mode => !string.IsNullOrWhiteSpace(mode.OverrideKeys))
+                    .ToDictionary(
+                        mode => mode.Id,
+                        mode => mode.OverrideKeys!,
+                        StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+            RenderEngineChips();
+            RenderEngineModeEditors();
+        }
+        catch
+        {
+            EngineDetailText.Text = "接收端未运行，语音引擎配置暂不可用。";
+        }
+    }
+
+    private static EngineOption ReadEngineOption(JsonElement engine) => new(
+        engine.GetProperty("id").GetString() ?? string.Empty,
+        engine.GetProperty("displayName").GetString() ?? string.Empty,
+        engine.TryGetProperty("experimental", out var experimental) && experimental.GetBoolean(),
+        engine.TryGetProperty("verifiesMicrophone", out var verifies) && verifies.GetBoolean(),
+        engine.TryGetProperty("processNames", out var names)
+            ? names.EnumerateArray().Select(name => name.GetString() ?? string.Empty).ToArray()
+            : Array.Empty<string>(),
+        engine.GetProperty("modes").EnumerateArray().Select(mode => new EngineModeOption(
+            mode.GetProperty("id").GetString() ?? string.Empty,
+            mode.GetProperty("label").GetString() ?? string.Empty,
+            mode.TryGetProperty("trigger", out var trigger) ? trigger.GetString() ?? "toggle" : "toggle",
+            mode.TryGetProperty("defaultKeys", out var defaultKeys)
+                && defaultKeys.ValueKind == JsonValueKind.String ? defaultKeys.GetString() : null,
+            mode.TryGetProperty("overrideKeys", out var overrideKeys)
+                && overrideKeys.ValueKind == JsonValueKind.String ? overrideKeys.GetString() : null)).ToArray());
+
+    private void RenderEngineChips()
+    {
+        EngineChipsPanel.Children.Clear();
+        foreach (var engine in engineOptions)
+        {
+            var isActive = string.Equals(engine.Id, selectedEngineId, StringComparison.Ordinal);
+            var chip = new Button
+            {
+                Style = (Style)FindResource(isActive ? "BlueButton" : "GlassButton"),
+                Content = engine.DisplayName + (engine.Experimental ? " · 实验性" : string.Empty),
+                Margin = new Thickness(0, 0, 8, 8),
+                Padding = new Thickness(14, 6, 14, 6),
+                FontSize = 12,
+                Tag = engine.Id
+            };
+            System.Windows.Automation.AutomationProperties.SetName(chip, "选择语音引擎 " + engine.DisplayName);
+            chip.Click += EngineChip_Click;
+            EngineChipsPanel.Children.Add(chip);
+        }
+    }
+
+    private void EngineChip_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string engineId }
+            && !string.Equals(engineId, selectedEngineId, StringComparison.Ordinal))
+        {
+            selectedEngineId = engineId;
+            RenderEngineChips();
+            RenderEngineModeEditors();
+        }
+    }
+
+    private void RenderEngineModeEditors()
+    {
+        EngineModePanel.Children.Clear();
+        var engine = engineOptions.FirstOrDefault(
+            candidate => string.Equals(candidate.Id, selectedEngineId, StringComparison.Ordinal));
+        if (engine is null)
+        {
+            return;
+        }
+        EngineDetailText.Text = engine.VerifiesMicrophone
+            ? $"快捷键与麦克风自动读取 {engine.DisplayName} 的配置，需要时可手动覆盖。"
+              + $"录音探测进程：{string.Join("、", engine.ProcessNames)}"
+            : $"{engine.DisplayName} 无可读配置：请确认其输入设备选择 CABLE Output，并按需填写触发快捷键。"
+              + $"录音探测进程：{string.Join("、", engine.ProcessNames)}";
+        foreach (var mode in engine.Modes)
+        {
+            var triggerLabel = mode.Trigger == "hold" ? "按住式" : "切换式";
+            EngineModePanel.Children.Add(new TextBlock
+            {
+                Text = $"{mode.Label}（{triggerLabel}）",
+                Style = (Style)FindResource("SettingsTitle"),
+                Margin = new Thickness(2, 10, 0, 5)
+            });
+            var box = new TextBox
+            {
+                Style = (Style)FindResource("GlassTextBox"),
+                Text = mode.OverrideKeys ?? string.Empty,
+                Tag = mode.Id,
+                Margin = new Thickness(0, 0, 0, 3)
+            };
+            System.Windows.Automation.AutomationProperties.SetName(box, $"{engine.DisplayName}{mode.Label}快捷键覆盖");
+            EngineModePanel.Children.Add(box);
+            EngineModePanel.Children.Add(new TextBlock
+            {
+                Style = (Style)FindResource("SettingsMeta"),
+                TextWrapping = TextWrapping.Wrap,
+                Text = engine.VerifiesMicrophone
+                    ? "留空自动读取该软件配置的快捷键"
+                    : string.IsNullOrWhiteSpace(mode.DefaultKeys)
+                        ? "该引擎无默认快捷键，必须填写（如 Ctrl+Shift+V）"
+                        : $"留空使用默认：{mode.DefaultKeys}"
+            });
+        }
+    }
+
+    /// <summary>把当前界面上的引擎选择与快捷键覆盖合并进 engineOverrides
+    /// （保留其他引擎此前已保存的覆盖，避免保存时丢失）。</summary>
+    private void CollectEngineEdits()
+    {
+        var engine = engineOptions.FirstOrDefault(
+            candidate => string.Equals(candidate.Id, selectedEngineId, StringComparison.Ordinal));
+        if (engine is null)
+        {
+            return;
+        }
+        var edited = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var box in EngineModePanel.Children.OfType<TextBox>())
+        {
+            if (box.Tag is string modeId)
+            {
+                edited[modeId] = box.Text.Trim();
+            }
+        }
+        var overrides = engineOverrides.ToDictionary(
+            pair => pair.Key,
+            pair => new Dictionary<string, string>(pair.Value, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
+        overrides[engine.Id] = edited;
+        engineOverrides = overrides;
+    }
+
+    private async Task SaveEngineConfigAsync()
+    {
+        if (engineOptions.Count == 0)
+        {
+            return;
+        }
+        try
+        {
+            var payload = JsonSerializer.Serialize(
+                new { activeEngine = selectedEngineId, shortcutOverrides = engineOverrides },
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var response = await http.PostAsync(
+                "http://127.0.0.1:8765/api/config/voice-engines", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                Log("保存语音引擎设置失败：" + body, ResourceBrush("BrushDanger"));
+            }
+        }
+        catch (Exception exception)
+        {
+            Log("保存语音引擎设置失败：" + exception.Message, ResourceBrush("BrushDanger"));
         }
     }
 
@@ -720,11 +905,19 @@ public partial class MainWindow : Window
                     var mode = audio.TryGetProperty("mode", out var modeValue)
                         ? modeValue.GetString()
                         : null;
+                    if (root.TryGetProperty("voiceEngine", out var voiceEngine)
+                        && voiceEngine.TryGetProperty("displayName", out var engineName)
+                        && engineName.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(engineName.GetString()))
+                    {
+                        currentEngineDisplayName = engineName.GetString()!;
+                        EngineNodeTitle.Text = currentEngineDisplayName;
+                    }
                     var modeLabel = mode == "shared" ? "共享麦克风" : "手机控制听写";
                     SetStatus(AudioValue, AudioDot,
                         streaming ? modeLabel : available ? "已就绪" : "未配置",
                         available
-                            ? streaming ? $"VB-CABLE · {modeLabel}" : "VB-CABLE · Typeless"
+                            ? streaming ? $"VB-CABLE · {modeLabel}" : $"VB-CABLE · {currentEngineDisplayName}"
                             : "请安装或检查 VB-CABLE",
                         available ? success : warning,
                         AudioDetail);
@@ -882,4 +1075,19 @@ public partial class MainWindow : Window
         public bool SharedRequested { get; set; }
         public string? AdbPath { get; set; }
     }
+
+    private sealed record EngineOption(
+        string Id,
+        string DisplayName,
+        bool Experimental,
+        bool VerifiesMicrophone,
+        string[] ProcessNames,
+        EngineModeOption[] Modes);
+
+    private sealed record EngineModeOption(
+        string Id,
+        string Label,
+        string Trigger,
+        string? DefaultKeys,
+        string? OverrideKeys);
 }

@@ -37,8 +37,8 @@ var settings = MacReceiverSettings.LoadOrCreate();
 var keyboard = new MacKeyboardInput();
 using var audioBridge = new MacPhoneAudioBridge(
     new CoreAudioHalOutputFactory(settings.AudioDeviceUid));
-var typeless = new MacTypelessController(settings, keyboard);
-using var dictationSessions = new MacDictationSessionManager(audioBridge, typeless);
+using var engineController = new MacVoiceEngineController(keyboard);
+using var dictationSessions = new MacDictationSessionManager(audioBridge, engineController);
 var inputProcessor = new InputCommandProcessor(keyboard);
 using var usbWatchdog = new UsbWatchdog(settings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -96,12 +96,24 @@ app.Use(async (context, next) =>
 app.MapGet("/api/health", () =>
 {
     var audio = audioBridge.Probe();
-    var typelessConfig = typeless.Configuration;
+    var engineProfile = MacVoiceEngines.Active;
+    var readerConfig = MacTypelessConfiguration.Load(settings);
+    bool? virtualCableSelected = engineProfile.VerifiesMicrophone
+        ? MacVoiceEngines.UsesVirtualCable
+        : null;
+    var engineModes = engineProfile.Modes.Select(mode => new
+    {
+        id = mode.Id,
+        label = mode.Label ?? mode.Id,
+        trigger = mode.Trigger,
+        configured = MacVoiceEngines.IsModeConfigured(mode.Id),
+        keys = MacVoiceEngines.ModeKeyNames(mode.Id)
+    }).ToArray();
     return Results.Ok(new
     {
         ok = true,
         name = "PhoneDeck",
-        version = "2.0.0-dev.2",
+        version = "2.0.0-dev.3",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -138,19 +150,31 @@ app.MapGet("/api/health", () =>
             restoreCount = usbWatchdog.RestoreCount,
             lastRestoredAt = usbWatchdog.LastRestoredAt
         },
+        // 遗留 typeless 块：从当前引擎映射生成，供旧手机端继续读取；
+        // 新手机端优先读 voiceEngine 块（含引擎 id 与完整模式列表）。
         typeless = new
         {
-            capturing = typeless.IsCapturing(),
-            virtualCableSelected = typelessConfig.UsesBlackHole,
-            microphone = typelessConfig.Microphone,
-            settingsPath = typelessConfig.SettingsPath,
-            lastError = typelessConfig.Error,
+            capturing = engineController.IsCapturing(),
+            virtualCableSelected,
+            microphone = MacVoiceEngines.MicrophoneDescription,
+            settingsPath = readerConfig.SettingsPath,
+            lastError = readerConfig.Error,
             shortcuts = new
             {
-                dictation = SplitBinding(typelessConfig.DictationBinding),
-                translation = SplitBinding(typelessConfig.TranslationBinding),
-                ask = SplitBinding(typelessConfig.AskBinding)
+                dictation = MacVoiceEngines.ModeKeyNames("dictation"),
+                translation = MacVoiceEngines.ModeKeyNames("translation"),
+                ask = MacVoiceEngines.ModeKeyNames("ask")
             }
+        },
+        voiceEngine = new
+        {
+            id = engineProfile.Id,
+            displayName = engineProfile.DisplayName,
+            experimental = engineProfile.Experimental,
+            capturing = engineController.IsCapturing(),
+            virtualCableSelected,
+            microphone = MacVoiceEngines.MicrophoneDescription,
+            modes = engineModes
         }
     });
 });
@@ -158,7 +182,8 @@ app.MapGet("/api/health", () =>
 app.MapGet("/api/diagnostics", () =>
 {
     var audio = audioBridge.Probe();
-    var typelessConfig = typeless.Configuration;
+    var engineProfile = MacVoiceEngines.Active;
+    var readerConfig = MacTypelessConfiguration.Load(settings);
     return Results.Ok(new
     {
         ok = true,
@@ -184,13 +209,24 @@ app.MapGet("/api/diagnostics", () =>
             lastError = audio.Error,
             recommendedVirtualDevice = "BlackHole 2ch / 48 kHz"
         },
-        typeless = new
+        voiceEngine = new
         {
-            capturing = typeless.IsCapturing(),
-            microphone = typelessConfig.Microphone,
-            settingsPath = typelessConfig.SettingsPath,
-            usesBlackHole = typelessConfig.UsesBlackHole,
-            lastError = typelessConfig.Error
+            id = engineProfile.Id,
+            displayName = engineProfile.DisplayName,
+            experimental = engineProfile.Experimental,
+            capturing = engineController.IsCapturing(),
+            microphone = MacVoiceEngines.MicrophoneDescription,
+            settingsPath = readerConfig.SettingsPath,
+            usesBlackHole = MacVoiceEngines.UsesVirtualCable,
+            lastError = readerConfig.Error,
+            modes = engineProfile.Modes.Select(mode => new
+            {
+                id = mode.Id,
+                label = mode.Label ?? mode.Id,
+                trigger = mode.Trigger,
+                configured = MacVoiceEngines.IsModeConfigured(mode.Id),
+                keys = MacVoiceEngines.ModeKeyNames(mode.Id)
+            }).ToArray()
         },
         lan = new
         {
@@ -404,13 +440,31 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine(audio.Available
         ? $"  手机语音：Core Audio AUHAL → {audio.DeviceName}"
         : $"  手机语音：不可用（{audio.Error}）");
+    var engineProfile = MacVoiceEngines.Active;
+    Console.WriteLine(
+        $"  语音引擎：{engineProfile.DisplayName}{(engineProfile.Experimental ? "（实验性，快捷键/进程名未在真机核实）" : "")}（{engineProfile.Id}）");
+    foreach (var mode in engineProfile.Modes)
+    {
+        var modeKeys = MacVoiceEngines.ModeKeyNames(mode.Id);
+        var triggerName = string.Equals(MacVoiceEngines.TriggerFor(mode.Id),
+            MacEngineTriggers.Hold, StringComparison.Ordinal) ? "按住式" : "切换式";
+        Console.WriteLine(
+            $"  {engineProfile.DisplayName} {MacVoiceEngines.LabelOf(mode.Id)}："
+            + (modeKeys is null || modeKeys.Length == 0 ? "未配置" : string.Join(" + ", modeKeys))
+            + $"（{triggerName}）"
+            + (MacVoiceEngines.IsModeConfigured(mode.Id) ? "" : "（未配置，手机端不显示）"));
+    }
+    if (engineProfile.VerifiesMicrophone)
+    {
+        Console.WriteLine(
+            $"  {engineProfile.DisplayName} 麦克风：{MacVoiceEngines.MicrophoneDescription ?? "未读取到配置"}");
+    }
+    else
+    {
+        Console.WriteLine(
+            $"  麦克风校验：{engineProfile.DisplayName} 无可读配置，请自行确认其输入设备已选择 BlackHole 2ch");
+    }
     Console.WriteLine("========================================");
 });
 
 await app.RunAsync();
-
-static string[]? SplitBinding(string? binding) =>
-    string.IsNullOrWhiteSpace(binding)
-        ? null
-        : binding.Split('+', StringSplitOptions.TrimEntries
-            | StringSplitOptions.RemoveEmptyEntries);

@@ -63,27 +63,37 @@ public sealed class MacDictationSessionManagerTests
         public bool StopSession(string sessionId) => true;
     }
 
-    private sealed class FakeTypeless : IMacTypelessController
+    private sealed class FakeTypeless : IMacVoiceEngineController
     {
-        public MacTypelessConfig Configuration { get; } = new(
-            "/tmp/app-settings.json", "BlackHole 2ch", true,
-            "Fn", "Command+Shift+T", "Control+Space", null);
         internal bool? Capturing { get; set; }
         internal string? LastMode { get; private set; }
         internal int ToggleCount { get; private set; }
+        public string EngineDisplayName => "Typeless";
+        public IReadOnlyCollection<string> Modes => new[] { "dictation", "translation", "ask" };
+        public bool? CanVerifyVirtualCable => true;
+        public bool UsesVirtualCable => true;
         public bool? IsCapturing() => Capturing;
         public bool? WaitForCapturing(bool expected, int timeoutMilliseconds) =>
             Capturing is null ? null : Capturing == expected;
-        public bool ToggleOnce(string requestId, string mode)
+        public bool IsModeConfigured(string mode) => true;
+        public bool BeginOnce(string requestId, string mode)
         {
             Toggle(mode);
             return false;
         }
-        public void Toggle(string mode)
+        public bool End(string mode, string? requestId)
+        {
+            Toggle(mode);
+            return false;
+        }
+        private void Toggle(string mode)
         {
             LastMode = mode;
             ToggleCount++;
             Capturing = !(Capturing ?? false);
+        }
+        public void Dispose()
+        {
         }
     }
 }

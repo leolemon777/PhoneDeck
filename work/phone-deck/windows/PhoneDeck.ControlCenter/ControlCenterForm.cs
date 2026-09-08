@@ -730,7 +730,7 @@ internal sealed class ControlCenterForm : Form
                     audioValue.Text = streaming ? "传输中" : available ? "已就绪" : "未配置";
                     audioValue.ForeColor = available ? Success : Warning;
                     audioDetail.Text = available
-                        ? "VB-CABLE · Typeless" : "请安装或检查 VB-CABLE";
+                        ? "VB-CABLE · 语音引擎" : "请安装或检查 VB-CABLE";
 
                     overallBadge.Text = network.Address is null ? "等待 Wi-Fi" : "可以连接手机";
                     overallBadge.ForeColor = network.Address is null ? Warning : Success;

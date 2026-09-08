@@ -26,13 +26,16 @@ public sealed class DiagnosticsMonitorTests
         var expected = new DiagnosticsSnapshot
         {
             CheckedAtMs = Environment.TickCount64,
-            TypelessCapturing = true,
+            Engine = new VoiceEngineSnapshot(
+                "typeless", "Typeless", false, true, null, true,
+                new[] { new EngineModeSnapshot("dictation", "听写", "toggle", true, new[] { "RightAlt" }) }),
             VirtualCableDevice = "CABLE Input (VB-Audio Virtual Cable)"
         };
         var monitor = StartMonitor(() => expected, out var snapshot);
         try
         {
-            Assert.IsTrue(snapshot.TypelessCapturing);
+            Assert.IsTrue(snapshot.Engine?.Capturing);
+            Assert.AreEqual("typeless", snapshot.Engine?.Id);
             Assert.IsTrue(snapshot.AudioAvailable);
             Assert.IsNull(snapshot.LastError);
         }

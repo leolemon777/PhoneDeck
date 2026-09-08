@@ -14,9 +14,9 @@ Windows PhoneDeck.Server        │
   │    ├─ 旧固定动作兼容
   │    └─ v2 信封/目标/键位白名单 → SendInput → 当前前台窗口
   ├─ /api/audio/stream
-  │    └─ sessionId + targetComputerId header → NAudio/WASAPI → CABLE Input → CABLE Output → Typeless
+  │    └─ sessionId + targetComputerId header → NAudio/WASAPI → CABLE Input → CABLE Output → 语音引擎（默认 Typeless，档案可换）
   ├─ /api/dictation/start|stop
-  │    └─ 幂等会话 → Typeless；断流时尽力复位
+  │    └─ 幂等会话 → 当前语音引擎（toggle/hold 两种触发）；断流时尽力复位
   └─ BluetoothReceiver
        └─ RFCOMM 快捷键 + ACK；无音频
 ```

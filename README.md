@@ -1,12 +1,12 @@
 # PhoneDeck 手机控制台
 
-PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端 Typeless 负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
+PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件（Typeless、豆包、微信输入法等，可扩展）负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
 
-当前源码版本是 **PhoneDeck 1.6.0-dev.11**，上一版完整实机稳定基线是
+当前源码版本是 **PhoneDeck 1.6.0-dev.13**，上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
-**2.0.0-dev.2 接收端预览**：Core Audio / BlackHole 与双语音模式源码已接入，20 项
+**2.0.0-dev.3 接收端预览**：Core Audio / BlackHole 与双语音模式源码已接入，20 项
 跨平台测试通过；真实 Mac 和三机锁屏共享验收尚未进行。
 
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
@@ -14,7 +14,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 ## 项目所有者真正想实现什么
 
 1. 闲置 Android 手机长期作为辅助键盘和手机麦克风使用。
-2. 手机一键唤醒或停止电脑端 Typeless。
+2. 手机一键唤醒或停止电脑端语音输入软件（Typeless 为默认，档案化适配豆包、微信输入法等，见 docs/VOICE_ENGINES.md）。
 3. 点击模式用同一个主按钮开始/停止；按住模式仍是按下开始、松开停止。
 4. 快捷键按钮可由用户修改，例如把“截屏”改为 F1，或配置 Ctrl+C、Ctrl+Shift+S。
 5. 加入 `/goal`、`/plan`、`/compact` 等文本命令，并为 Codex、Claude Code、ZCode、Cursor 提供语义化预设。
@@ -37,8 +37,8 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - 共享模式使用 Android 麦克风前台服务，可在后台/锁屏继续；通知和主按钮均可停止，
   服务采用 `START_NOT_STICKY`，App 或手机重启后不会自动恢复采音。
 - Windows 通过 NAudio/WASAPI 将音频写入 `CABLE Input (VB-Audio Virtual Cable)`。
-- Typeless 从 `CABLE Output` 读取手机音频。
-- 自动读取 Typeless 的主听写快捷键，读取失败时退回 RightAlt。
+- 语音引擎档案化：内置 Typeless（自动读取其配置与快捷键，失败退回 RightAlt）、豆包、微信输入法，支持切换式（按一下）与按住式（hold）触发；用户可在 data 目录的 voice-engines 子目录放置 JSON 零代码新增/覆盖引擎，详见 [docs/VOICE_ENGINES.md](./docs/VOICE_ENGINES.md)。
+- Windows 控制台设置页可选择引擎并手动覆盖快捷键；手机端自动发现每台电脑的引擎与模式并动态渲染。
 - 点击模式的大号主按钮依状态切换“开始说话 / 取消启动 / 停止说话”；按住模式支持按下说话、松开停止。
 - 输入目标编号放在固定语音面板右下方，可单手切换在线电脑。
 - 手机端音量条、震动、等待、成功和失败反馈。
@@ -203,10 +203,10 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 外部依赖
 
-- [Typeless](https://www.typeless.com/)：电脑端语音转文字，用户自行安装。
+- [Typeless](https://www.typeless.com/)：电脑端语音转文字（默认引擎），用户自行安装。其他引擎（豆包、微信输入法、千问输入法等）同样由用户自行安装，可用内置档案或自定义 JSON 适配，见 [docs/VOICE_ENGINES.md](./docs/VOICE_ENGINES.md)。
 - [VB-CABLE](https://vb-audio.com/Cable/)：Windows 虚拟音频设备，用户自行安装。
 - Android SDK Platform Tools：ADB USB 通道。
 - NAudio 2.2.1：Windows 接收端 NuGet 依赖。
 - [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 虚拟音频设备，用户自行安装并配置为 48 kHz。
 
-Typeless、VB-CABLE 和 BlackHole 不属于本仓库，也不会打包其安装文件。
+Typeless、豆包、微信输入法等语音软件与 VB-CABLE、BlackHole 均不属于本仓库，也不会打包其安装文件。

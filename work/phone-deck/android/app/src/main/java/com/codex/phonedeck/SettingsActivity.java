@@ -95,13 +95,13 @@ public final class SettingsActivity extends Activity {
         page.addView(voiceHeading, topMargin(dp(28)));
 
         managedOption = option("手机控制听写",
-                "手机按钮控制当前电脑的 Typeless，保留听写、翻译、问答和点击/按住操作", true);
+                "手机按钮控制当前电脑的语音输入软件（在电脑端设置中选择引擎），保留点击/按住操作", true);
         managedCheck = (TextView) managedOption.getChildAt(1);
         managedOption.setOnClickListener(view -> selectWorkMode(WORK_MANAGED));
         page.addView(managedOption, fullWidthMargins(dp(18)));
 
         sharedOption = option("共享麦克风",
-                "手机持续向所有在线电脑供音；在每台电脑上用自己的快捷键触发 Typeless", false);
+                "手机持续向所有在线电脑供音；在每台电脑上用自己的快捷键触发语音软件", false);
         sharedCheck = (TextView) sharedOption.getChildAt(1);
         sharedOption.setOnClickListener(view -> selectWorkMode(WORK_SHARED));
         page.addView(sharedOption, fullWidthMargins(dp(12)));

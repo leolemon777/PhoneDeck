@@ -110,7 +110,9 @@ public final class MainActivity extends Activity {
     private volatile boolean usbRecoveryFeedbackPending;
     private volatile boolean lanCheckInFlight;
     private volatile boolean managedDictationSupported;
-    private volatile String[] usbTypelessModes = new String[]{"dictation"};
+    private volatile EngineMode[] usbTypelessModes =
+            new EngineMode[]{new EngineMode("dictation", "听写")};
+    private volatile String usbEngineName = "Typeless";
     private String selectedTypelessMode = "dictation";
     private String currentSessionMode;
     private String remoteStopCandidateSessionId;
@@ -135,7 +137,8 @@ public final class MainActivity extends Activity {
     private TextView shortcutHintText;
     private volatile String usbForegroundApp;
     private volatile boolean phoneAudioAvailable;
-    private volatile boolean typelessVirtualCableSelected;
+    /// null = 电脑端引擎无可读配置、无法校验麦克风（不阻断启动）。
+    private volatile Boolean typelessVirtualCableSelected;
     private volatile int serverProtocolVersion;
     private volatile String targetComputerId;
     private volatile String targetDisplayName = "当前电脑";
@@ -342,9 +345,14 @@ public final class MainActivity extends Activity {
         if (!MODE_HOLD.equals(voiceMode)) {
             voiceMode = MODE_TAP;
         }
-        String storedTypelessMode = preferences.getString("voice_typeless_mode", "dictation");
-        selectedTypelessMode = "translation".equals(storedTypelessMode)
-                || "ask".equals(storedTypelessMode) ? storedTypelessMode : "dictation";
+        // 语音模式随引擎变化；旧键 voice_typeless_mode 迁移到 voice_engine_mode，
+        // 具体取值在渲染 chips 时按当前引擎的模式列表校验。
+        String storedMode = preferences.getString("voice_engine_mode", null);
+        if (storedMode == null) {
+            storedMode = preferences.getString("voice_typeless_mode", "dictation");
+        }
+        selectedTypelessMode = storedMode == null || storedMode.isBlank()
+                ? "dictation" : storedMode;
         keepConnectionAlive = preferences.getBoolean("keep_connection_alive", true);
         if (!previousWorkMode.equals(voiceWorkMode)) {
             reconcileVoiceWorkMode();
@@ -574,7 +582,7 @@ public final class MainActivity extends Activity {
                 theme.primary, theme.primaryPressed, 36));
         typelessButton.setElevation(dp(6));
         typelessButton.setStateListAnimator(null);
-        typelessButton.setContentDescription("Typeless 语音输入");
+        typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
@@ -1351,11 +1359,23 @@ public final class MainActivity extends Activity {
                 : isUsbTargetOnline() && phoneAudioAvailable;
     }
 
-    private boolean activeTypelessVirtualCableSelected() {
+    /// 当前引擎是否已确认选择虚拟声卡；null = 无法校验（不阻断启动）。
+    private Boolean activeTypelessVirtualCableSelected() {
         LanTargetStatus lanStatus = targetComputerId == null
                 ? null : lanTargets.get(targetComputerId);
-        return lanStatus != null ? lanStatus.typelessVirtualCableSelected
-                : isUsbTargetOnline() && typelessVirtualCableSelected;
+        if (lanStatus != null) {
+            return lanStatus.typelessVirtualCableSelected;
+        }
+        return isUsbTargetOnline() ? typelessVirtualCableSelected : null;
+    }
+
+    private String activeEngineName() {
+        LanTargetStatus lanStatus = targetComputerId == null
+                ? null : lanTargets.get(targetComputerId);
+        if (lanStatus != null && lanStatus.engineName != null) {
+            return lanStatus.engineName;
+        }
+        return isUsbTargetOnline() && usbEngineName != null ? usbEngineName : "语音引擎";
     }
 
     private boolean activeManagedDictationSupported() {
@@ -1365,17 +1385,56 @@ public final class MainActivity extends Activity {
                 : isUsbTargetOnline() && managedDictationSupported;
     }
 
-    private String[] activeTypelessModes() {
+    private EngineMode[] activeTypelessModes() {
         LanTargetStatus lanStatus = targetComputerId == null
                 ? null : lanTargets.get(targetComputerId);
         if (lanStatus != null) {
             return lanStatus.typelessModes != null && lanStatus.typelessModes.length > 0
-                    ? lanStatus.typelessModes : new String[]{"dictation"};
+                    ? lanStatus.typelessModes
+                    : new EngineMode[]{new EngineMode("dictation", "听写")};
         }
-        return isUsbTargetOnline() ? usbTypelessModes : new String[0];
+        return isUsbTargetOnline() ? usbTypelessModes : new EngineMode[0];
     }
 
-    private static String[] parseTypelessModes(JSONObject typeless) {
+    /// 当前选中模式若不被电脑端引擎支持（如切换了引擎），回退到第一个模式。
+    private String effectiveSelectedMode() {
+        EngineMode[] modes = activeTypelessModes();
+        for (EngineMode mode : modes) {
+            if (mode.id.equals(selectedTypelessMode)) {
+                return selectedTypelessMode;
+            }
+        }
+        return modes.length > 0 ? modes[0].id : "dictation";
+    }
+
+    /// 语音引擎模式：优先读 voiceEngine 块（多引擎协议 v2），
+    /// 旧接收端回退 typeless 块的 shortcuts 槽位。返回 null 表示健康信息里没有。
+    private static EngineMode[] parseEngineModes(JSONObject health) {
+        if (health == null) {
+            return null;
+        }
+        JSONObject engine = health.optJSONObject("voiceEngine");
+        if (engine != null) {
+            org.json.JSONArray modes = engine.optJSONArray("modes");
+            if (modes != null) {
+                java.util.ArrayList<EngineMode> configured = new java.util.ArrayList<>();
+                for (int index = 0; index < modes.length(); index++) {
+                    JSONObject mode = modes.optJSONObject(index);
+                    if (mode == null || !mode.optBoolean("configured", false)) {
+                        continue;
+                    }
+                    String id = mode.optString("id", null);
+                    if (id == null || id.isBlank()) {
+                        continue;
+                    }
+                    String label = mode.optString("label", null);
+                    configured.add(new EngineMode(id,
+                            label == null || label.isBlank() ? id : label));
+                }
+                return configured.toArray(new EngineMode[0]);
+            }
+        }
+        JSONObject typeless = health.optJSONObject("typeless");
         if (typeless == null) {
             return null;
         }
@@ -1384,22 +1443,44 @@ public final class MainActivity extends Activity {
             // 旧版电脑端没有 shortcuts 字段，只保留听写模式。
             return null;
         }
-        java.util.ArrayList<String> modes = new java.util.ArrayList<>();
-        if (hasTypelessShortcut(shortcuts, "dictation")) {
-            modes.add("dictation");
-        }
-        if (hasTypelessShortcut(shortcuts, "translation")) {
-            modes.add("translation");
-        }
-        if (hasTypelessShortcut(shortcuts, "ask")) {
-            modes.add("ask");
-        }
-        return modes.toArray(new String[0]);
+        java.util.ArrayList<EngineMode> modes = new java.util.ArrayList<>();
+        appendLegacyMode(modes, shortcuts, "dictation", "听写");
+        appendLegacyMode(modes, shortcuts, "translation", "翻译");
+        appendLegacyMode(modes, shortcuts, "ask", "问答");
+        return modes.toArray(new EngineMode[0]);
     }
 
-    private static boolean hasTypelessShortcut(JSONObject shortcuts, String mode) {
-        org.json.JSONArray keys = shortcuts.optJSONArray(mode);
-        return keys != null && keys.length() > 0;
+    private static void appendLegacyMode(
+            java.util.List<EngineMode> modes, JSONObject shortcuts,
+            String id, String label) {
+        org.json.JSONArray keys = shortcuts.optJSONArray(id);
+        if (keys != null && keys.length() > 0) {
+            modes.add(new EngineMode(id, label));
+        }
+    }
+
+    private static String parseEngineDisplayName(JSONObject health) {
+        JSONObject engine = health == null ? null : health.optJSONObject("voiceEngine");
+        if (engine != null) {
+            String name = engine.optString("displayName", null);
+            if (name != null && !name.isBlank()) {
+                return name;
+            }
+        }
+        return "Typeless";
+    }
+
+    /// 引擎虚拟声卡选择状态：voiceEngine.virtualCableSelected 为 null 时表示
+    /// 该引擎无可读配置（旧 typeless 块无此值时按 false 处理）。
+    private static Boolean parseVirtualCableSelected(JSONObject health) {
+        JSONObject node = health == null ? null : health.optJSONObject("voiceEngine");
+        if (node == null) {
+            node = health == null ? null : health.optJSONObject("typeless");
+        }
+        if (node == null || node.isNull("virtualCableSelected")) {
+            return null;
+        }
+        return node.optBoolean("virtualCableSelected", false);
     }
 
     private static String typelessModeLabel(String mode) {
@@ -1430,7 +1511,7 @@ public final class MainActivity extends Activity {
             typelessModeRow.setVisibility(View.GONE);
             return;
         }
-        String[] modes = activeTypelessModes();
+        EngineMode[] modes = activeTypelessModes();
         boolean usable = activeManagedDictationSupported() && modes.length > 1;
         typelessModeRow.setVisibility(usable ? View.VISIBLE : View.GONE);
         if (!usable) {
@@ -1441,9 +1522,10 @@ public final class MainActivity extends Activity {
         typelessModeRow.addView(modeTitle, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        for (String mode : modes) {
-            boolean selected = mode.equals(selectedTypelessMode);
-            Button chip = smallButton(typelessModeLabel(mode));
+        String engineName = activeEngineName();
+        for (EngineMode mode : modes) {
+            boolean selected = mode.id.equals(effectiveSelectedMode());
+            Button chip = smallButton(mode.label);
             chip.setAllCaps(false);
             chip.setSingleLine(true);
             chip.setTextSize(12);
@@ -1455,23 +1537,33 @@ public final class MainActivity extends Activity {
                     15));
             chip.setEnabled(!dictationActive);
             chip.setAlpha(dictationActive ? 0.55f : 1f);
-            chip.setContentDescription("切换语音模式：" + typelessModeLabel(mode));
+            chip.setContentDescription("切换语音模式：" + mode.label);
             chip.setOnClickListener(view -> {
                 if (dictationActive) {
                     return;
                 }
-                selectedTypelessMode = mode;
+                selectedTypelessMode = mode.id;
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit().putString("voice_typeless_mode", mode).apply();
+                        .edit().putString("voice_engine_mode", mode.id).apply();
                 refreshTypelessModeChips();
                 updateVoiceControls();
-                showActionFeedback("●  语音模式已切换为" + typelessModeLabel(mode), theme.muted);
+                showActionFeedback("●  语音模式已切换为" + mode.label, theme.muted);
             });
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
             chipParams.leftMargin = dp(8);
             installTouchFeedback(chip);
             typelessModeRow.addView(chip, chipParams);
+        }
+        // 引擎名随模式行展示：让用户知道当前电脑用的是哪个语音软件。
+        if (typelessModeRow.getChildCount() > 1 && !"语音引擎".equals(engineName)) {
+            TextView engineTag = text("· " + engineName, 10, theme.muted, Typeface.BOLD);
+            LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            tagParams.leftMargin = dp(8);
+            tagParams.gravity = Gravity.CENTER_VERTICAL;
+            typelessModeRow.addView(engineTag, tagParams);
         }
     }
 
@@ -1537,17 +1629,16 @@ public final class MainActivity extends Activity {
                     JSONObject audio = health.optJSONObject("audio");
                     phoneAudioAvailable = audio != null
                             && audio.optBoolean("available", false);
-                    JSONObject typeless = health.optJSONObject("typeless");
                     RemoteVoiceState remoteVoiceState =
                             RemoteVoiceState.fromHealth(health);
-                    typelessVirtualCableSelected = typeless != null
-                            && typeless.optBoolean("virtualCableSelected", false);
+                    typelessVirtualCableSelected = parseVirtualCableSelected(health);
+                    usbEngineName = parseEngineDisplayName(health);
                     String healthForegroundApp = health.optString("foregroundApp", null);
                     usbForegroundApp = healthForegroundApp == null
                             || healthForegroundApp.isBlank() ? null : healthForegroundApp;
-                    String[] typelessModes = parseTypelessModes(typeless);
-                    if (typelessModes != null) {
-                        usbTypelessModes = typelessModes;
+                    EngineMode[] engineModes = parseEngineModes(health);
+                    if (engineModes != null) {
+                        usbTypelessModes = engineModes;
                     }
                     String healthComputerId = health.optString("computerId", null);
                     if (healthComputerId != null && !healthComputerId.isBlank()) {
@@ -1604,9 +1695,10 @@ public final class MainActivity extends Activity {
                 usbConnected = false;
                 managedDictationSupported = false;
                 phoneAudioAvailable = false;
-                typelessVirtualCableSelected = false;
+                typelessVirtualCableSelected = null;
+                usbEngineName = "Typeless";
                 usbForegroundApp = null;
-                usbTypelessModes = new String[]{"dictation"};
+                usbTypelessModes = new EngineMode[]{new EngineMode("dictation", "听写")};
                 mainHandler.post(() -> {
                     applyStoredTarget();
                     if (wasConnected) {
@@ -1684,7 +1776,6 @@ public final class MainActivity extends Activity {
                         }
                     }
                     JSONObject audio = health.optJSONObject("audio");
-                    JSONObject typeless = health.optJSONObject("typeless");
                     RemoteVoiceState remoteVoiceState =
                             RemoteVoiceState.fromHealth(health);
                     String lanForegroundApp = health.optString("foregroundApp", null);
@@ -1693,9 +1784,9 @@ public final class MainActivity extends Activity {
                             health.optInt("protocolVersion", 0),
                             supportsManagedDictation,
                             audio != null && audio.optBoolean("available", false),
-                            typeless != null
-                                    && typeless.optBoolean("virtualCableSelected", false),
-                            parseTypelessModes(typeless),
+                            parseVirtualCableSelected(health),
+                            parseEngineModes(health),
+                            parseEngineDisplayName(health),
                             lanForegroundApp == null || lanForegroundApp.isBlank()
                                     ? null : lanForegroundApp));
                     PhoneDeckEndpoint healthEndpoint = result.endpoint;
@@ -1725,7 +1816,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动 Typeless
+    /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动语音引擎
     /// 不会触发手机录音；但当前会话已由电脑完成时，可靠健康快照会让手机
     /// 停止 AudioRecord、关闭 PCM 流并清理本地按钮状态。
     private void reconcileRemoteVoiceState(
@@ -1755,7 +1846,7 @@ public final class MainActivity extends Activity {
             return;
         }
 
-        // 启动初期 Typeless 状态快照可能比 start 响应晚一轮。只有亲眼观察到
+        // 启动初期引擎状态快照可能比 start 响应晚一轮。只有亲眼观察到
         // 当前会话正常采集后，才把后续的 false 当作电脑端手动完成。
         if (!remoteVoiceWasObservedHealthy) {
             return;
@@ -1863,7 +1954,7 @@ public final class MainActivity extends Activity {
         clearVoiceSessionState();
         microphoneLevel.setText("手机麦克风  ✕ USB 已断开");
         microphoneLevel.setTextColor(theme.danger);
-        showActionFeedback("✕  USB 已断开；电脑端会自动尝试复位 Typeless",
+        showActionFeedback("✕  USB 已断开；电脑端会自动尝试复位语音引擎",
                 theme.danger);
     }
 
@@ -1994,7 +2085,7 @@ public final class MainActivity extends Activity {
             targetTitleText.setText("输入到");
         }
         typelessButton.setContentDescription(holdMode
-                ? "按住开始 Typeless 语音输入，松开结束"
+                ? "按住开始语音输入，松开结束"
                 : "点击开始语音输入；再次点击同一按钮停止");
         updateVoiceControls();
     }
@@ -2273,15 +2364,18 @@ public final class MainActivity extends Activity {
         }
         if (!activePhoneAudioAvailable()) {
             showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
-            showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动 Typeless", theme.danger);
+            showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动语音输入", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
             testConnection();
             return;
         }
-        if (!activeTypelessVirtualCableSelected()) {
-            showConnection(targetDisplayName + " · Typeless 麦克风未配置", theme.warning);
-            showActionFeedback("✕  请先在 Typeless 中选择 CABLE Output", theme.danger);
+        // 引擎无可读配置时（virtualCableSelected 为 null）不阻断：
+        // 由服务端在 start 校验；可校验但未配置时给出指向性提示。
+        if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
+            String engineName = activeEngineName();
+            showConnection(targetDisplayName + " · " + engineName + " 麦克风未配置", theme.warning);
+            showActionFeedback("✕  请先在 " + engineName + " 中选择 CABLE Output", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
             testConnection();
@@ -2306,7 +2400,7 @@ public final class MainActivity extends Activity {
         currentSessionTargetComputerId = serverProtocolVersion >= 2
                 ? targetComputerId : null;
         currentSessionEndpoint = endpoint;
-        currentSessionMode = selectedTypelessMode;
+        currentSessionMode = effectiveSelectedMode();
         if (currentSessionManaged
                 && (currentSessionTargetComputerId == null
                 || currentSessionTargetComputerId.isBlank())) {
@@ -2331,9 +2425,9 @@ public final class MainActivity extends Activity {
         if (currentSessionManaged) {
             // 协议 v2 接收端会在 start 内等待同一 sessionId 的音频会话，
             // 因此无需先等 HTTPS 音频通道完成。录音、TLS/WASAPI 与
-            // Typeless 唤醒并行进行，首段 PCM 由手机和服务端 pre-roll 保留。
-            setTypelessBusy("正在快速唤醒 Typeless…");
-            showActionFeedback("●  正在并行启动麦克风与 Typeless…", theme.warning);
+            // 语音引擎唤醒并行进行，首段 PCM 由手机和服务端 pre-roll 保留。
+            setTypelessBusy("正在快速唤醒语音输入…");
+            showActionFeedback("●  正在并行启动麦克风与语音引擎…", theme.warning);
             sendTypelessToggle(true);
         }
     }
@@ -2360,11 +2454,11 @@ public final class MainActivity extends Activity {
         }
         audioStartPending = false;
         if (currentSessionManaged) {
-            showActionFeedback("●  手机麦克风已连接，正在等待 Typeless 确认…", theme.warning);
+            showActionFeedback("●  手机麦克风已连接，正在等待电脑端确认…", theme.warning);
             return;
         }
-        showActionFeedback("●  手机麦克风已连接，正在唤醒 Typeless…", theme.warning);
-        setTypelessBusy("正在唤醒 Typeless…");
+        showActionFeedback("●  手机麦克风已连接，正在唤醒语音输入…", theme.warning);
+        setTypelessBusy("正在唤醒语音输入…");
         sendTypelessToggle(true);
     }
 
@@ -2731,7 +2825,7 @@ public final class MainActivity extends Activity {
         if (isLanTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
                 showConnection(targetDisplayName + " · Wi-Fi · 缺少 VB-CABLE", theme.warning);
-            } else if (!activeTypelessVirtualCableSelected()) {
+            } else if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
                 showConnection(targetDisplayName + " · Wi-Fi · 麦克风未配置", theme.warning);
             } else {
                 showConnection(targetDisplayName + " · Wi-Fi 在线" + foregroundSuffix(),
@@ -2740,7 +2834,7 @@ public final class MainActivity extends Activity {
         } else if (isUsbTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
                 showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
-            } else if (!activeTypelessVirtualCableSelected()) {
+            } else if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
                 showConnection(targetDisplayName + " · 麦克风未配置", theme.warning);
             } else {
                 showConnection(targetDisplayName + " · USB 在线" + foregroundSuffix(),
@@ -2961,8 +3055,10 @@ public final class MainActivity extends Activity {
         final int protocolVersion;
         final boolean managedDictationSupported;
         final boolean phoneAudioAvailable;
-        final boolean typelessVirtualCableSelected;
-        final String[] typelessModes;
+        /// null = 引擎无可读配置、无法校验虚拟声卡（不阻断启动）。
+        final Boolean typelessVirtualCableSelected;
+        final EngineMode[] typelessModes;
+        final String engineName;
         final String foregroundApp;
         /// 本状态确认在线的时刻（elapsedRealtime），供离线判定宽限使用。
         final long lastOnlineAt;
@@ -2972,8 +3068,9 @@ public final class MainActivity extends Activity {
                 int protocolVersion,
                 boolean managedDictationSupported,
                 boolean phoneAudioAvailable,
-                boolean typelessVirtualCableSelected,
-                String[] typelessModes,
+                Boolean typelessVirtualCableSelected,
+                EngineMode[] typelessModes,
+                String engineName,
                 String foregroundApp) {
             this.endpoint = endpoint;
             this.protocolVersion = protocolVersion;
@@ -2981,8 +3078,21 @@ public final class MainActivity extends Activity {
             this.phoneAudioAvailable = phoneAudioAvailable;
             this.typelessVirtualCableSelected = typelessVirtualCableSelected;
             this.typelessModes = typelessModes;
+            this.engineName = engineName;
             this.foregroundApp = foregroundApp;
             this.lastOnlineAt = android.os.SystemClock.elapsedRealtime();
+        }
+    }
+
+    /// 语音引擎的一种工作模式（id + 显示名），来自 /api/health 的
+    /// voiceEngine.modes（多引擎协议）或旧 typeless 块的快捷键槽位。
+    private static final class EngineMode {
+        final String id;
+        final String label;
+
+        EngineMode(String id, String label) {
+            this.id = id;
+            this.label = label;
         }
     }
 

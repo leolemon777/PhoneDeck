@@ -1,42 +1,44 @@
 using System.Diagnostics;
 
+/// <summary>受管语音听写会话状态机：面向 IVoiceEngineController 编程，
+/// 对 toggle 引擎（按一下切换）与 hold 引擎（按住说话）一视同仁——
+/// 触发方式的差异由控制器内部消化，本类只负责校验、音频时序与复位。</summary>
 internal sealed class DictationSessionManager : IDisposable
 {
     // WASAPI cold start on the second receiver occasionally exceeds 1.2s even
     // though the phone audio request is already connected. These are maximum
     // failure budgets only; successful starts still return immediately.
     private const int AudioSessionReadyTimeoutMilliseconds = 3_000;
-    private const int TypelessStateTimeoutMilliseconds = 2_000;
+    private const int EngineStateTimeoutMilliseconds = 2_000;
 
     // 手机端已经并行发起 PCM POST。给 VB-CABLE/WASAPI 一个很短的预热窗口，
-    // 避免 Typeless 在二号电脑上先打开尚未唤醒的 CABLE Output，触发约 2–3 秒
-    // 的 Core Audio 冷启动。这里只等 250ms；超时仍立即发送快捷键，不会退回
-    // 旧版“音频完全建立后才唤醒 Typeless”的串行长等待。
+    // 避免语音引擎在二号电脑上先打开尚未唤醒的 CABLE Output，触发约 2–3 秒
+    // 的 Core Audio 冷启动。这里只等 250ms；超时仍立即发送触发键，不会退回
+    // 旧版“音频完全建立后才唤醒引擎”的串行长等待。
     private const int AudioWarmupGraceMilliseconds = 250;
 
-    /// <summary>停止 Typeless 前等待音频流（含 pre-roll 尾部排空）结束的上限。</summary>
+    /// <summary>停止语音引擎前等待音频流（含 pre-roll 尾部排空）结束的上限。</summary>
     private const int AudioDrainTimeoutMilliseconds = 2_000;
 
-    private static readonly string[] ValidModes = { "dictation", "translation", "ask" };
     private readonly object syncRoot = new();
     private readonly IPhoneAudioSessionController audioBridge;
-    private readonly ITypelessController typeless;
+    private readonly IVoiceEngineController engine;
 
     /// <summary>volatile：/api/health 等读端不得被启动/停止的慢路径阻塞。</summary>
     private volatile string? activeDictationSessionId;
-    private string activeMode = "dictation";
+    private string? activeMode;
 
     internal DictationSessionManager(PhoneAudioBridge audioBridge)
-        : this(audioBridge, new WindowsTypelessController())
+        : this(audioBridge, new WindowsVoiceEngineController())
     {
     }
 
     internal DictationSessionManager(
         IPhoneAudioSessionController audioBridge,
-        ITypelessController typeless)
+        IVoiceEngineController engine)
     {
         this.audioBridge = audioBridge;
-        this.typeless = typeless;
+        this.engine = engine;
     }
 
     internal bool IsActive => activeDictationSessionId is not null;
@@ -48,28 +50,28 @@ internal sealed class DictationSessionManager : IDisposable
         var normalizedSessionId = ValidateSessionId(sessionId);
         var normalizedRequestId = ValidateRequestId(requestId);
         var normalizedMode = NormalizeMode(mode);
-        if (!typeless.IsModeConfigured(normalizedMode))
+        if (!engine.IsModeConfigured(normalizedMode))
         {
             throw new InvalidOperationException(
-                "Typeless 未配置该模式的快捷键，无法启动");
+                $"{engine.EngineDisplayName} 未配置该模式的快捷键，无法启动");
         }
         // 文件读盘与 Core Audio 枚举都放在锁外：它们是只读前置检查，
-        // 进入锁后仍会复核会话唯一性。
-        if (!typeless.UsesVirtualCable)
+        // 进入锁后仍会复核会话唯一性。无可读配置的引擎跳过麦克风校验。
+        if (engine.CanVerifyVirtualCable == true && !engine.UsesVirtualCable)
         {
             throw new InvalidOperationException(
-                "Typeless 麦克风未选择 CABLE Output，已拒绝启动");
+                $"{engine.EngineDisplayName} 麦克风未选择 CABLE Output，已拒绝启动");
         }
-        var capturingBeforeStart = typeless.IsCapturing();
+        var capturingBeforeStart = engine.IsCapturing();
         if (capturingBeforeStart is null)
         {
             throw new InvalidOperationException(
-                "无法读取 Typeless 录音状态，已拒绝启动");
+                $"无法读取 {engine.EngineDisplayName} 录音状态，已拒绝启动");
         }
         if (capturingBeforeStart is true)
         {
             throw new InvalidOperationException(
-                "Typeless 已在听写，请先在电脑端停止后重试");
+                $"{engine.EngineDisplayName} 已在听写，请先在电脑端停止后重试");
         }
 
         lock (syncRoot)
@@ -81,7 +83,7 @@ internal sealed class DictationSessionManager : IDisposable
             }
             if (activeDictationSessionId is not null)
             {
-                throw new InvalidOperationException("另一个 Typeless 听写会话仍在运行");
+                throw new InvalidOperationException("另一个语音听写会话仍在运行");
             }
             var startTimestamp = Stopwatch.GetTimestamp();
             activeMode = normalizedMode;
@@ -93,47 +95,47 @@ internal sealed class DictationSessionManager : IDisposable
                 $"{(audioWarmed ? "ready" : "timeout")} " +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
 
-            var duplicate = typeless.ToggleOnce(normalizedRequestId, normalizedMode);
+            var duplicate = engine.BeginOnce(normalizedRequestId, normalizedMode);
             Console.WriteLine(
-                $"[dictation:{normalizedSessionId}] typelessStartRequested=" +
+                $"[dictation:{normalizedSessionId}] engineStartRequested=" +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
             activeDictationSessionId = normalizedSessionId;
             bool? started;
             try
             {
-                started = typeless.WaitForCapturing(
-                    expected: true, TypelessStateTimeoutMilliseconds);
+                started = engine.WaitForCapturing(
+                    expected: true, EngineStateTimeoutMilliseconds);
             }
             catch (Exception exception)
             {
                 ResetFailedStart(normalizedSessionId);
                 throw new InvalidOperationException(
-                    "读取 Typeless 启动状态失败", exception);
+                    $"读取 {engine.EngineDisplayName} 启动状态失败", exception);
             }
             if (started is not true)
             {
                 ResetFailedStart(normalizedSessionId);
                 throw new InvalidOperationException(started is null
-                    ? "无法确认 Typeless 是否开始听写"
-                    : "Typeless 未确认开始听写");
+                    ? $"无法确认 {engine.EngineDisplayName} 是否开始听写"
+                    : $"{engine.EngineDisplayName} 未确认开始听写");
             }
             Console.WriteLine(
-                $"[dictation:{normalizedSessionId}] typelessCapturing=" +
+                $"[dictation:{normalizedSessionId}] engineCapturing=" +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
             // 手机点击后会并行启动录音、音频 POST 和本 start 请求。
-            // 短预热后已立即唤醒 Typeless；这里再用完整失败预算复核对应
+            // 短预热后已立即唤醒引擎；这里再用完整失败预算复核对应
             // 音频会话仍然有效。若音频连接失败，ResetFailedStart 会把
-            // 已唤醒的 Typeless 自动复位，不留下孤立录音会话。
+            // 已唤醒的引擎自动复位，不留下孤立录音会话。
             if (!audioBridge.WaitForSessionActive(
                     normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
             {
                 ResetFailedStart(normalizedSessionId);
                 throw new InvalidOperationException("音频会话不存在或已断开");
             }
-            // Typeless 已真实采集：放行 pre-roll，把点击后最先到达的音频
+            // 引擎已真实采集：放行 pre-roll，把点击后最先到达的音频
             // 按原顺序送入 CABLE，保证第一音节不丢。
             audioBridge.BeginPlayback(normalizedSessionId);
-            Console.WriteLine($"Typeless 会话已启动：{normalizedSessionId}");
+            Console.WriteLine($"语音听写会话已启动：{normalizedSessionId}");
             return duplicate;
         }
     }
@@ -155,24 +157,24 @@ internal sealed class DictationSessionManager : IDisposable
             if (!string.Equals(activeDictationSessionId, normalizedSessionId,
                     StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("请求的会话不是当前 Typeless 会话");
+                throw new InvalidOperationException("请求的会话不是当前听写会话");
             }
 
-            // 先等音频流（含 pre-roll 尾部排空）真正结束，再停 Typeless，
-            // 否则突发灌入的尾部音频会被 Typeless 提前停止而丢失。
+            // 先等音频流（含 pre-roll 尾部排空）真正结束，再停引擎，
+            // 否则突发灌入的尾部音频会被引擎提前停止而丢失。
             audioBridge.WaitForSessionEnd(
                 normalizedSessionId, AudioDrainTimeoutMilliseconds);
 
             try
             {
-                stopConfirmed = TryStopTypeless(normalizedRequestId, out duplicate);
+                stopConfirmed = TryStopEngine(normalizedRequestId, out duplicate);
             }
             catch (Exception exception)
             {
                 stopConfirmed = false;
                 stopFailure = exception;
             }
-            // 无论 Typeless 是否确认，都释放服务内部所有权和音频会话。
+            // 无论引擎是否确认停止，都释放服务内部所有权和音频会话。
             // 如果真实录音仍在进行，下一次 Start 的状态检查会拒绝误启动，
             // 但不会因为一个陈旧 sessionId 永久锁死服务。
             activeDictationSessionId = null;
@@ -180,11 +182,13 @@ internal sealed class DictationSessionManager : IDisposable
         audioBridge.StopSession(normalizedSessionId);
         if (stopFailure is not null)
         {
-            throw new InvalidOperationException("停止 Typeless 时发生错误", stopFailure);
+            throw new InvalidOperationException(
+                $"停止 {engine.EngineDisplayName} 时发生错误", stopFailure);
         }
         if (!stopConfirmed)
         {
-            throw new InvalidOperationException("Typeless 仍在听写，停止指令未被确认");
+            throw new InvalidOperationException(
+                $"{engine.EngineDisplayName} 仍在听写，停止指令未被确认");
         }
         Console.WriteLine(
             $"[dictation:{normalizedSessionId}] sessionStopped 已停止");
@@ -204,12 +208,12 @@ internal sealed class DictationSessionManager : IDisposable
             var stopped = false;
             try
             {
-                stopped = TryStopTypeless(requestId: null, out _);
+                stopped = TryStopEngine(requestId: null, out _);
             }
             catch (Exception exception)
             {
                 Console.Error.WriteLine(
-                    $"音频断流后复位 Typeless 失败：{exception.Message}");
+                    $"音频断流后复位 {engine.EngineDisplayName} 失败：{exception.Message}");
             }
             finally
             {
@@ -218,12 +222,12 @@ internal sealed class DictationSessionManager : IDisposable
             }
             if (stopped)
             {
-                Console.WriteLine($"音频断流，已自动复位 Typeless：{sessionId}");
+                Console.WriteLine($"音频断流，已自动复位 {engine.EngineDisplayName}：{sessionId}");
             }
             else
             {
                 Console.Error.WriteLine(
-                    $"音频断流，但 Typeless 停止状态未被确认：{sessionId}");
+                    $"音频断流，但 {engine.EngineDisplayName} 停止状态未被确认：{sessionId}");
             }
         }
     }
@@ -249,20 +253,21 @@ internal sealed class DictationSessionManager : IDisposable
         return normalized;
     }
 
-    private bool TryStopTypeless(string? requestId, out bool duplicate)
+    private bool TryStopEngine(string? requestId, out bool duplicate)
     {
-        var capturing = typeless.IsCapturing();
+        var capturing = engine.IsCapturing();
         if (capturing is false)
         {
             duplicate = true;
             return true;
         }
 
+        var mode = activeMode ?? engine.Modes.First();
         duplicate = requestId is null
-            ? ToggleWithoutRequestId()
-            : typeless.ToggleOnce(requestId, activeMode);
-        var stopped = typeless.WaitForCapturing(
-            expected: false, TypelessStateTimeoutMilliseconds);
+            ? EndWithoutRequestId(mode)
+            : engine.End(mode, requestId);
+        var stopped = engine.WaitForCapturing(
+            expected: false, EngineStateTimeoutMilliseconds);
         if (stopped is true)
         {
             return true;
@@ -273,10 +278,10 @@ internal sealed class DictationSessionManager : IDisposable
             return false;
         }
 
-        // SendInput 成功只代表 Windows 接收了按键，不代表 Electron
-        // 应用已处理。重试前立即再次读取真实状态，避免 Typeless
-        // 刚刚停止后被第二个切换键重新打开。
-        capturing = typeless.IsCapturing();
+        // SendInput 成功只代表 Windows 接收了按键，不代表目标应用
+        // 已处理。重试前立即再次读取真实状态，避免引擎刚刚停止后被
+        // 第二个切换键重新打开。
+        capturing = engine.IsCapturing();
         if (capturing is false)
         {
             return true;
@@ -287,27 +292,28 @@ internal sealed class DictationSessionManager : IDisposable
         }
 
         // 仅当音频会话仍明确为 Active 时重试一次，
-        // 避免已经停止后又被双击切换回开启。
-        typeless.Toggle(activeMode);
-        stopped = typeless.WaitForCapturing(
-            expected: false, TypelessStateTimeoutMilliseconds);
+        // 避免已经停止后又被双击切换回开启（hold 引擎的 End 是
+        // 幂等释放，重试安全）。
+        engine.End(mode, null);
+        stopped = engine.WaitForCapturing(
+            expected: false, EngineStateTimeoutMilliseconds);
         return stopped is true;
     }
 
-    private bool ToggleWithoutRequestId()
+    private bool EndWithoutRequestId(string mode)
     {
-        typeless.Toggle(activeMode);
+        engine.End(mode, null);
         return false;
     }
 
-    private static string NormalizeMode(string? mode)
+    private string NormalizeMode(string? mode)
     {
         var normalized = string.IsNullOrWhiteSpace(mode)
-            ? "dictation"
+            ? engine.Modes.First()
             : mode.Trim().ToLowerInvariant();
-        if (!ValidModes.Contains(normalized))
+        if (!engine.Modes.Contains(normalized))
         {
-            throw new ArgumentException($"未知的 Typeless 模式：{mode}");
+            throw new ArgumentException($"未知的语音引擎模式：{mode}");
         }
         return normalized;
     }
@@ -316,16 +322,16 @@ internal sealed class DictationSessionManager : IDisposable
     {
         try
         {
-            if (!TryStopTypeless(requestId: null, out _))
+            if (!TryStopEngine(requestId: null, out _))
             {
                 Console.Error.WriteLine(
-                    $"Typeless 启动失败，停止状态未被确认：{sessionId}");
+                    $"引擎启动失败，停止状态未被确认：{sessionId}");
             }
         }
         catch (Exception exception)
         {
             Console.Error.WriteLine(
-                $"Typeless 启动失败后的复位也失败：{exception.Message}");
+                $"引擎启动失败后的复位也失败：{exception.Message}");
         }
         activeDictationSessionId = null;
     }
@@ -341,14 +347,14 @@ internal sealed class DictationSessionManager : IDisposable
             {
                 try
                 {
-                    if (!TryStopTypeless(requestId: null, out _))
+                    if (!TryStopEngine(requestId: null, out _))
                     {
-                        Console.Error.WriteLine("退出时 Typeless 停止状态未被确认");
+                        Console.Error.WriteLine("退出时引擎停止状态未被确认");
                     }
                 }
                 catch (Exception exception)
                 {
-                    Console.Error.WriteLine($"退出时复位 Typeless 失败：{exception.Message}");
+                    Console.Error.WriteLine($"退出时复位引擎失败：{exception.Message}");
                 }
             }
         }
@@ -356,5 +362,6 @@ internal sealed class DictationSessionManager : IDisposable
         {
             audioBridge.StopSession(sessionId);
         }
+        engine.Dispose();
     }
 }

@@ -1,22 +1,11 @@
-/// <summary>Typeless app-settings.json 一次读取得到的全部配置状态。</summary>
-internal sealed record TypelessConfigState(
-    string? MicrophoneDescription,
-    bool UsesVirtualCable,
-    string? DictationBinding,
-    string? TranslationBinding,
-    string? AskBinding);
-
 /// <summary>诊断快照：只由后台线程刷新，读者（/api/health）从不触发 IO。</summary>
 internal sealed record DiagnosticsSnapshot
 {
     public long CheckedAtMs { get; init; }
     public string? LastError { get; init; }
-    public bool? TypelessCapturing { get; init; }
-    public string? TypelessMicrophone { get; init; }
-    public bool TypelessUsesVirtualCable { get; init; }
-    public string[]? DictationKeys { get; init; }
-    public string[]? TranslationKeys { get; init; }
-    public string[]? AskKeys { get; init; }
+
+    /// <summary>当前语音引擎的一次完整状态（含各模式快捷键与录音探测）。</summary>
+    public VoiceEngineSnapshot? Engine { get; init; }
     public string? VirtualCableDevice { get; init; }
     public string? ForegroundApp { get; init; }
 
@@ -29,7 +18,7 @@ internal sealed record DiagnosticsSnapshot
     };
 }
 
-/// <summary>后台周期执行较慢的诊断（Typeless 配置读盘、Core Audio 会话枚举、
+/// <summary>后台周期执行较慢的诊断（语音引擎配置读盘、Core Audio 会话枚举、
 /// 设备枚举、前台窗口查询），以不可变快照提供给 /api/health。
 /// 后台线程与 RefreshAsync 通过同一信号量串行，避免并发 COM 枚举互抢。</summary>
 internal sealed class DiagnosticsMonitor : IDisposable

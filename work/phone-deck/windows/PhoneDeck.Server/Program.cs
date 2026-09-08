@@ -44,19 +44,12 @@ using var lanDiscovery = new LanDiscoveryResponder(
     lanIdentity.HttpsPort);
 using var diagnostics = new DiagnosticsMonitor(() =>
 {
-    var typelessState = KeyboardInput.ReadTypelessState();
+    var engine = VoiceEngines.Active;
     return new DiagnosticsSnapshot
     {
         CheckedAtMs = Environment.TickCount64,
-        TypelessCapturing = TypelessStateProbe.IsCapturing(),
-        TypelessMicrophone = typelessState.MicrophoneDescription,
-        TypelessUsesVirtualCable = typelessState.UsesVirtualCable,
-        DictationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
-            typelessState.DictationBinding),
-        TranslationKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
-            typelessState.TranslationBinding),
-        AskKeys = KeyboardInput.TypelessModeKeyNamesFromBinding(
-            typelessState.AskBinding),
+        Engine = VoiceEngines.BuildSnapshot(
+            VoiceEngineStateProbe.IsCapturing(engine)),
         VirtualCableDevice = audioBridge.FindVirtualCable(),
         ForegroundApp = KeyboardInput.ForegroundAppName()
     };
@@ -108,11 +101,12 @@ app.MapGet("/api/health", () =>
     var snapshot = diagnostics.Current;
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
     var stale = ageMs > DiagnosticsMonitor.StaleAfterMs;
+    var engine = snapshot.Engine;
     return Results.Ok(new
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.6",
+        version = "1.6.0-dev.8",
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -149,17 +143,41 @@ app.MapGet("/api/health", () =>
             restoreCount = usbWatchdog.RestoreCount,
             lastRestoredAt = usbWatchdog.LastRestoredAt
         },
+        // 遗留 typeless 块：从当前引擎映射生成，供尚未升级的旧手机端继续
+        // 读取；新手机端应优先读 voiceEngine 块（含引擎 id 与完整模式列表）。
         typeless = new
         {
-            capturing = snapshot.TypelessCapturing,
-            virtualCableSelected = snapshot.TypelessUsesVirtualCable,
-            microphone = snapshot.TypelessMicrophone,
+            capturing = engine?.Capturing,
+            virtualCableSelected = engine?.UsesVirtualCable,
+            microphone = engine?.Microphone,
             shortcuts = new
             {
-                dictation = snapshot.DictationKeys,
-                translation = snapshot.TranslationKeys,
-                ask = snapshot.AskKeys
+                dictation = LegacyModeKeys(engine, "dictation"),
+                translation = LegacyModeKeys(engine, "translation"),
+                ask = LegacyModeKeys(engine, "ask")
             },
+            checkedAtMs = snapshot.CheckedAtMs,
+            ageMs,
+            lastError = snapshot.LastError,
+            stale
+        },
+        voiceEngine = new
+        {
+            id = engine?.Id,
+            displayName = engine?.DisplayName,
+            experimental = engine?.Experimental ?? false,
+            capturing = engine?.Capturing,
+            // null 表示该引擎无可读配置、无法校验（手机端不应据此阻断）。
+            virtualCableSelected = engine?.UsesVirtualCable,
+            microphone = engine?.Microphone,
+            modes = engine?.Modes.Select(mode => new
+            {
+                id = mode.Id,
+                label = mode.Label,
+                trigger = mode.Trigger,
+                configured = mode.Configured,
+                keys = mode.Keys
+            }).ToArray(),
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
@@ -223,11 +241,90 @@ app.MapPost("/api/shared/request", (SharedMicrophoneRequest command) =>
     });
 });
 
+// 语音引擎配置：控制台读取可用引擎列表、写入选择与快捷键覆盖。
+// 保存后由控制台重启接收端生效（档案目录启动时加载一次）。
+app.MapGet("/api/config/voice-engines", () =>
+{
+    var catalog = VoiceEngines.Catalog;
+    return Results.Ok(new
+    {
+        ok = true,
+        activeEngine = catalog.Active.Id,
+        engines = catalog.Profiles.Select(profile => new
+        {
+            id = profile.Id,
+            displayName = profile.DisplayName,
+            experimental = profile.Experimental,
+            verifiesMicrophone = profile.VerifiesMicrophone,
+            processNames = profile.ProcessNames,
+            modes = profile.Modes.Select(mode => new
+            {
+                id = mode.Id,
+                label = mode.Label ?? mode.Id,
+                trigger = mode.Trigger,
+                defaultKeys = mode.Keys,
+                overrideKeys = catalog.Settings.ShortcutOverrideFor(profile.Id, mode.Id)
+            }).ToArray()
+        }).ToArray()
+    });
+});
+
+app.MapPost("/api/config/voice-engines", (VoiceEngineConfigRequest request) =>
+{
+    var catalog = VoiceEngines.Catalog;
+    var activeId = request.ActiveEngine?.Trim().ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(activeId) || catalog.Find(activeId) is null)
+    {
+        return Results.BadRequest(new { ok = false, error = $"未知引擎：{request.ActiveEngine}" });
+    }
+    if (request.ShortcutOverrides is not null)
+    {
+        foreach (var (engineId, engineOverrides) in request.ShortcutOverrides)
+        {
+            if (engineOverrides is null)
+            {
+                continue;
+            }
+            foreach (var (modeId, binding) in engineOverrides)
+            {
+                if (string.IsNullOrWhiteSpace(binding))
+                {
+                    continue;
+                }
+                if (KeyboardInput.ParseBindingKeys(binding) is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        ok = false,
+                        error = $"引擎 {engineId} 模式 {modeId} 的快捷键无法识别：{binding}"
+                    });
+                }
+            }
+        }
+    }
+    try
+    {
+        var settings = catalog.Settings;
+        settings.ActiveEngine = activeId;
+        settings.ShortcutOverrides = request.ShortcutOverrides
+            ?? new Dictionary<string, Dictionary<string, string>>();
+        VoiceEngineSettings.Save(settings);
+        Console.WriteLine($"语音引擎设置已更新：{activeId}（重启接收端后生效）");
+        return Results.Ok(new { ok = true, activeEngine = activeId });
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"保存语音引擎设置失败：{exception.Message}");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+});
+
 app.MapGet("/api/diagnostics", async () =>
 {
     // 深诊断：强制刷新一次（带超时），不阻塞 health、音频或快捷键请求。
     var snapshot = await diagnostics.RefreshAsync(2_000);
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
+    var engine = snapshot.Engine;
     return Results.Ok(new
     {
         ok = true,
@@ -238,15 +335,32 @@ app.MapGet("/api/diagnostics", async () =>
         lastError = snapshot.LastError,
         typeless = new
         {
-            capturing = snapshot.TypelessCapturing,
-            virtualCableSelected = snapshot.TypelessUsesVirtualCable,
-            microphone = snapshot.TypelessMicrophone,
+            capturing = engine?.Capturing,
+            virtualCableSelected = engine?.UsesVirtualCable,
+            microphone = engine?.Microphone,
             shortcuts = new
             {
-                dictation = snapshot.DictationKeys,
-                translation = snapshot.TranslationKeys,
-                ask = snapshot.AskKeys
+                dictation = LegacyModeKeys(engine, "dictation"),
+                translation = LegacyModeKeys(engine, "translation"),
+                ask = LegacyModeKeys(engine, "ask")
             }
+        },
+        voiceEngine = new
+        {
+            id = engine?.Id,
+            displayName = engine?.DisplayName,
+            experimental = engine?.Experimental ?? false,
+            capturing = engine?.Capturing,
+            virtualCableSelected = engine?.UsesVirtualCable,
+            microphone = engine?.Microphone,
+            modes = engine?.Modes.Select(mode => new
+            {
+                id = mode.Id,
+                label = mode.Label,
+                trigger = mode.Trigger,
+                configured = mode.Configured,
+                keys = mode.Keys
+            }).ToArray()
         },
         audio = new
         {
@@ -411,7 +525,7 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
         var duplicate = dictationSessions.Start(
             command.SessionId,
             command.RequestId,
-            KeyboardInput.NormalizeTypelessMode(command.Mode));
+            VoiceEngines.NormalizeMode(command.Mode));
         return Results.Ok(new
         {
             ok = true,
@@ -481,14 +595,31 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");
-    foreach (var mode in KeyboardInput.TypelessModes)
+    var engineProfile = VoiceEngines.Active;
+    Console.WriteLine(
+        $"  语音引擎：{engineProfile.DisplayName}{(engineProfile.Experimental ? "（实验性，快捷键/进程名未在真机核实）" : "")}（{engineProfile.Id}）");
+    foreach (var mode in engineProfile.Modes)
+    {
+        var modeKeys = VoiceEngines.ModeKeyNames(mode.Id);
+        var triggerName = VoiceEngines.TriggerFor(mode.Id) == EngineTriggers.Hold
+            ? "按住式"
+            : "切换式";
+        Console.WriteLine(
+            $"  {engineProfile.DisplayName} {VoiceEngines.LabelOf(mode.Id)}："
+            + (modeKeys is null || modeKeys.Length == 0 ? "未配置" : string.Join(" + ", modeKeys))
+            + $"（{triggerName}）"
+            + (VoiceEngines.IsModeConfigured(mode.Id) ? "" : "（未配置，手机端不显示）"));
+    }
+    if (engineProfile.VerifiesMicrophone)
     {
         Console.WriteLine(
-            $"  Typeless {KeyboardInput.TypelessModeDisplayName(mode)}："
-            + $"{KeyboardInput.TypelessModeDescription(mode)}"
-            + (KeyboardInput.TypelessModeConfigured(mode) ? "" : "（未配置，手机端不显示）"));
+            $"  {engineProfile.DisplayName} 麦克风：{VoiceEngines.MicrophoneDescription ?? "未读取到配置"}");
     }
-    Console.WriteLine($"  Typeless 麦克风：{KeyboardInput.TypelessMicrophoneDescription}");
+    else
+    {
+        Console.WriteLine(
+            $"  麦克风校验：{engineProfile.DisplayName} 无可读配置，请自行确认其输入设备已选择 CABLE Output");
+    }
     Console.WriteLine("  保持此窗口运行；按 Ctrl+C 可退出。");
     Console.WriteLine("========================================");
 });
@@ -522,9 +653,18 @@ static IResult ExecuteDictationCommand(Func<IResult> execute)
     }
     catch (Exception exception)
     {
-        Console.Error.WriteLine($"Typeless 会话处理失败：{exception.Message}");
+        Console.Error.WriteLine($"语音听写会话处理失败：{exception.Message}");
         return Results.StatusCode(StatusCodes.Status500InternalServerError);
     }
+}
+
+/// <summary>旧 typeless 健康块只暴露 dictation/translation/ask 三个槽位；
+/// 从当前引擎快照按 id 取，引擎没有该模式时为 null。</summary>
+static string[]? LegacyModeKeys(VoiceEngineSnapshot? engine, string modeId)
+{
+    var mode = engine?.Modes.FirstOrDefault(
+        candidate => string.Equals(candidate.Id, modeId, StringComparison.Ordinal));
+    return mode?.Keys;
 }
 
 internal sealed record InputCommand(
@@ -551,6 +691,9 @@ internal sealed record DictationCommand(
     string? TargetComputerId,
     string? Mode);
 internal sealed record SharedMicrophoneRequest(bool Requested);
+internal sealed record VoiceEngineConfigRequest(
+    string? ActiveEngine,
+    Dictionary<string, Dictionary<string, string>>? ShortcutOverrides);
 
 internal static class KeyboardInput
 {
@@ -595,45 +738,8 @@ internal static class KeyboardInput
     private const ushort VkMediaPrevious = 0xB1;
     private const ushort VkMediaPlayPause = 0xB3;
 
-    internal static readonly string[] TypelessModes = { "dictation", "translation", "ask" };
-
-    internal static string TypelessShortcutDescription => TypelessModeDescription("dictation");
-
-    internal static string TypelessModeDescription(string mode)
-    {
-        var keys = TypelessModeKeyNames(mode);
-        return keys is null || keys.Length == 0 ? "未配置" : string.Join(" + ", keys);
-    }
-
-    internal static string TypelessModeDisplayName(string mode) => mode switch
-    {
-        "translation" => "翻译",
-        "ask" => "问答",
-        _ => "听写"
-    };
-
-    internal static string NormalizeTypelessMode(string? mode)
-    {
-        var normalized = string.IsNullOrWhiteSpace(mode)
-            ? "dictation"
-            : mode.Trim().ToLowerInvariant();
-        if (!TypelessModes.Contains(normalized))
-        {
-            throw new ArgumentException($"未知的 Typeless 模式：{mode}");
-        }
-        return normalized;
-    }
-
-    internal static bool TypelessModeConfigured(string mode)
-        => ReadTypelessModeBinding(NormalizeTypelessMode(mode)) is not null;
-
-    /// <summary>规范化键名数组（修饰键在前），如 ["SHIFT","Z"]；未配置该模式时返回 null。</summary>
-    internal static string[]? TypelessModeKeyNames(string mode) =>
-        TypelessModeKeyNamesFromBinding(
-            ReadTypelessModeBinding(NormalizeTypelessMode(mode)));
-
-    /// <summary>把 "CTRL+SHIFT+S" 这类绑定字符串规范化为键名数组；空绑定返回 null。</summary>
-    internal static string[]? TypelessModeKeyNamesFromBinding(string? binding)
+    /// <summary>把 "CTRL+SHIFT+S" 这类引擎快捷键绑定串规范化为键名数组；空绑定返回 null。</summary>
+    internal static string[]? BindingKeyNames(string? binding)
     {
         if (string.IsNullOrWhiteSpace(binding))
         {
@@ -685,20 +791,6 @@ internal static class KeyboardInput
             baseKeys.Add(token);
         }
         return modifiers.Concat(baseKeys).ToArray();
-    }
-
-    internal static string TypelessMicrophoneDescription =>
-        ReadTypelessMicrophoneDescription() ?? "未读取到配置";
-    internal static bool TypelessUsesVirtualCable
-    {
-        get
-        {
-            var microphone = ReadTypelessMicrophoneDescription();
-            return microphone is not null
-                && (microphone.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
-                    || microphone.Contains(
-                        "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
-        }
     }
 
     internal static string? ForegroundAppName()
@@ -1011,9 +1103,24 @@ internal static class KeyboardInput
             case "desktop": SendChord(VkLWin, 'D'); break;
             case "screenshot": SendChord(VkLWin, VkShift, 'S'); break;
             case "typeless":
-                SendChordWithHold(55, ResolveTypelessShortcut(
-                    string.IsNullOrWhiteSpace(text) ? "dictation" : NormalizeTypelessMode(text)));
-                break;
+                {
+                    // 遗留协议：旧手机端的 action=typeless，路由到当前激活引擎。
+                    // toggle 引擎按一下切换键；hold 引擎退化为按下 55ms 再松开的
+                    // 轻触（完整按住语义需要协议 v2 的 /api/dictation 端点）。
+                    var legacyMode = string.IsNullOrWhiteSpace(text)
+                        ? VoiceEngines.Active.PrimaryModeId
+                        : VoiceEngines.NormalizeMode(text);
+                    var legacyKeys = VoiceEngines.ResolveKeysOrThrow(legacyMode);
+                    if (VoiceEngines.TriggerFor(legacyMode) == EngineTriggers.Hold)
+                    {
+                        EngineHoldTap(legacyKeys);
+                    }
+                    else
+                    {
+                        SendChordWithHold(55, legacyKeys);
+                    }
+                    break;
+                }
             case "switchInputMethod": SendChord(VkLWin, VkSpace); break;
             case "enter": SendKey(VkReturn); break;
             case "backspace": SendKey(VkBack); break;
@@ -1031,166 +1138,35 @@ internal static class KeyboardInput
         }
     }
 
-    private static ushort[] ResolveTypelessShortcut(string mode)
+    /// <summary>解析引擎快捷键绑定串（如 "CTRL+SHIFT+S"）为虚拟键码序列；
+    /// 含无法识别的键时返回 null。Typeless 配置读取逻辑已移至
+    /// TypelessSettingsReader，引擎绑定解析见 VoiceEngines。</summary>
+    internal static ushort[]? ParseBindingKeys(string? binding)
     {
-        var binding = ReadTypelessModeBinding(mode)
-            ?? throw new ArgumentException(
-                $"Typeless 未配置「{TypelessModeDisplayName(mode)}」模式的快捷键");
-        var keys = new List<ushort>();
-        foreach (var token in binding.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-        {
-            var key = ParseTypelessKey(token);
-            if (key is null)
-            {
-                if (mode != "dictation")
-                {
-                    throw new ArgumentException(
-                        $"Typeless「{TypelessModeDisplayName(mode)}」模式快捷键无法识别：{binding}");
-                }
-                return [VkRightMenu];
-            }
-            keys.Add(key.Value);
-        }
-
-        if (keys.Count == 0)
-        {
-            if (mode != "dictation")
-            {
-                throw new ArgumentException(
-                    $"Typeless 未配置「{TypelessModeDisplayName(mode)}」模式的快捷键");
-            }
-            return [VkRightMenu];
-        }
-
-        return keys.OrderByDescending(IsModifier).ToArray();
-    }
-
-    private static string? ReadTypelessModeBinding(string mode)
-    {
-        var propertyName = mode switch
-        {
-            "translation" => "translationMode",
-            "ask" => "askAnythingMode",
-            _ => "dictationMode"
-        };
-        try
-        {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Typeless.exe", "app-settings.json");
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var bindings = document.RootElement
-                .GetProperty("featureShortcutBindings")
-                .GetProperty(propertyName);
-            if (bindings.ValueKind == JsonValueKind.Array && bindings.GetArrayLength() > 0)
-            {
-                var binding = bindings[0].GetString();
-                if (!string.IsNullOrWhiteSpace(binding))
-                {
-                    return binding;
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // Typeless 未安装、配置文件被占用或格式变化时按未配置处理。
-        }
-        // 听写保留官方 Windows 默认键 RightAlt，其余模式没有可靠默认值。
-        return mode == "dictation" ? "RightAlt" : null;
-    }
-
-    private static string? ReadTypelessMicrophoneDescription()
-    {
-        try
-        {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Typeless.exe", "app-settings.json");
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var selected = document.RootElement.GetProperty("selectedMicrophoneDevice");
-            var label = selected.TryGetProperty("label", out var labelValue)
-                ? labelValue.GetString()
-                : null;
-            var description = selected.TryGetProperty("description", out var descriptionValue)
-                ? descriptionValue.GetString()
-                : null;
-            if (!string.IsNullOrWhiteSpace(label) && !string.IsNullOrWhiteSpace(description))
-            {
-                return $"{label} / {description}";
-            }
-            return string.IsNullOrWhiteSpace(label) ? description : label;
-        }
-        catch (Exception)
+        if (string.IsNullOrWhiteSpace(binding))
         {
             return null;
         }
-    }
-
-    /// <summary>一次读取 Typeless 配置文件，聚合麦克风与三种模式绑定；
-    /// 由后台诊断线程调用，避免每个请求重复读盘。
-    /// 读不到配置时听写键退回官方默认 RightAlt，其余模式视为未配置。</summary>
-    internal static TypelessConfigState ReadTypelessState()
-    {
-        try
+        var keys = new List<ushort>();
+        foreach (var token in binding.Split('+',
+                     StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Typeless.exe", "app-settings.json");
-            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var root = document.RootElement;
-
-            string? ReadBinding(string propertyName)
+            var key = ParseBindingKey(token);
+            if (key is null)
             {
-                if (root.TryGetProperty("featureShortcutBindings", out var bindings)
-                    && bindings.TryGetProperty(propertyName, out var mode)
-                    && mode.ValueKind == JsonValueKind.Array
-                    && mode.GetArrayLength() > 0)
-                {
-                    var binding = mode[0].GetString();
-                    return string.IsNullOrWhiteSpace(binding) ? null : binding;
-                }
                 return null;
             }
-
-            string? microphone = null;
-            if (root.TryGetProperty("selectedMicrophoneDevice", out var selected))
-            {
-                var label = selected.TryGetProperty("label", out var labelValue)
-                    ? labelValue.GetString()
-                    : null;
-                var description = selected.TryGetProperty("description", out var descriptionValue)
-                    ? descriptionValue.GetString()
-                    : null;
-                if (!string.IsNullOrWhiteSpace(label)
-                    && !string.IsNullOrWhiteSpace(description))
-                {
-                    microphone = $"{label} / {description}";
-                }
-                else
-                {
-                    microphone = string.IsNullOrWhiteSpace(label) ? description : label;
-                }
-            }
-
-            var usesVirtualCable = microphone is not null
-                && (microphone.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
-                    || microphone.Contains(
-                        "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase));
-
-            return new TypelessConfigState(
-                microphone,
-                usesVirtualCable,
-                ReadBinding("dictationMode") ?? "RightAlt",
-                ReadBinding("translationMode"),
-                ReadBinding("askAnythingMode"));
+            keys.Add(key.Value);
         }
-        catch (Exception)
-        {
-            return new TypelessConfigState(null, false, "RightAlt", null, null);
-        }
+        return keys.Count == 0 ? null : keys.ToArray();
     }
 
-    private static ushort? ParseTypelessKey(string token)
+    /// <summary>修饰键排前（Ctrl→Shift→Alt→Win），普通键最后；
+    /// 与手动组合键的按下顺序约定一致。</summary>
+    internal static ushort[] OrderModifiersFirst(ushort[] keys) =>
+        keys.OrderByDescending(IsModifier).ToArray();
+
+    private static ushort? ParseBindingKey(string token)
     {
         if (token.Length == 1 && char.IsLetterOrDigit(token[0]))
         {
@@ -1288,6 +1264,110 @@ internal static class KeyboardInput
     private static void SendKey(ushort key)
     {
         Send([VirtualKey(key, keyUp: false), VirtualKey(key, keyUp: true)]);
+    }
+
+    /// <summary>引擎切换式触发键（按住 55ms），带 requestId 去重；true 表示重复请求。</summary>
+    internal static bool EngineToggleOnce(string? requestId, ushort[] keys) =>
+        ExecuteOnceCore(requestId, () => SendChordSafely(55, keys));
+
+    /// <summary>引擎切换式触发键，不去重（服务端内部复位/重试用）。</summary>
+    internal static void EngineToggle(ushort[] keys) => SendChordSafely(55, keys);
+
+    /// <summary>引擎按住式触发：按下并保持，带 requestId 去重；
+    /// true 表示重复请求（不重复按下）。后续必须用 EngineHoldUp 释放。</summary>
+    internal static bool EngineHoldDownOnce(string? requestId, ushort[] keys)
+    {
+        lock (SyncRoot)
+        {
+            var normalizedRequestId = string.IsNullOrWhiteSpace(requestId)
+                ? null
+                : requestId.Trim();
+            if (normalizedRequestId is { Length: > 128 })
+            {
+                throw new ArgumentException("requestId 过长");
+            }
+            var now = Environment.TickCount64;
+            if (normalizedRequestId is not null)
+            {
+                RemoveExpiredRequestIds(now);
+                if (RecentRequestIds.ContainsKey(normalizedRequestId))
+                {
+                    return true;
+                }
+            }
+            SendChordDown(keys);
+            if (normalizedRequestId is not null)
+            {
+                RecentRequestIds[normalizedRequestId] = now;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>释放按住式触发键（倒序、逐键释放）；未按下的键释放为安全空操作。</summary>
+    internal static void EngineHoldUp(ushort[] keys) => SendChordUp(keys);
+
+    /// <summary>完整轻触一次按住式触发键：按下、保持、释放（遗留协议兜底）。</summary>
+    internal static void EngineHoldTap(ushort[] keys)
+    {
+        SendChordDown(keys);
+        try
+        {
+            Thread.Sleep(55);
+        }
+        finally
+        {
+            SendChordUp(keys);
+        }
+    }
+
+    /// <summary>按给定顺序按下全部键；中途失败时把已按下的键全部释放再抛出。</summary>
+    private static void SendChordDown(IReadOnlyList<ushort> keys)
+    {
+        var pressedKeys = new List<ushort>(keys.Count);
+        try
+        {
+            foreach (var key in keys)
+            {
+                pressedKeys.Add(key);
+                Send([VirtualKey(key, keyUp: false)]);
+            }
+        }
+        catch (Exception)
+        {
+            ReleaseChord(pressedKeys, rethrow: false);
+            throw;
+        }
+    }
+
+    /// <summary>倒序释放全部键；任一键释放失败时抛出（按键悬挂必须显式暴露）。</summary>
+    private static void SendChordUp(IReadOnlyList<ushort> keys) =>
+        ReleaseChord(keys, rethrow: true);
+
+    private static void ReleaseChord(IReadOnlyList<ushort> keys, bool rethrow)
+    {
+        if (keys.Count == 0)
+        {
+            return;
+        }
+        Exception? releaseFailure = null;
+        for (var index = keys.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                Send([VirtualKey(keys[index], keyUp: true)]);
+            }
+            catch (Exception exception)
+            {
+                releaseFailure ??= exception;
+                Console.Error.WriteLine(
+                    $"释放按键 0x{keys[index]:X2} 失败：{exception.Message}");
+            }
+        }
+        if (rethrow && releaseFailure is not null)
+        {
+            throw new InvalidOperationException("未能释放全部组合键", releaseFailure);
+        }
     }
 
     private static void SendText(string text)
