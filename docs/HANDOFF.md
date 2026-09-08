@@ -1,12 +1,20 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-07
+更新时间：2026-09-08
 当前分支：`main`
 当前源码：Android 1.6.0-dev.13（九主题 + 多语音引擎动态 UI）/ Windows 1.6.0-dev.8（语音引擎档案化 + 控制台引擎设置）；macOS 接收端预览 2.0.0-dev.3（CGEvent + AUHAL/BlackHole + 引擎档案化）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-08 Windows 控制台图标清晰度修复
+
+- 本机控制台改用透明底蓝青色麦克风，替换缩小后难辨认的深色立体图标；窗口、托盘和 EXE 共用清晰配色，兼容现有深浅主题资源路径。
+- 矢量母版：`design/phonedeck-console-icon.xaml`；运行 `powershell -NoProfile -STA -File scripts/windows/Build-ControlCenterIcons.ps1` 可重建 PNG 与包含 16/20/24/32/40/48/64/128/256 px 的 ICO。
+- 验证：控制台 Release 自包含 publish 成功；Windows 接收端 Release 构建零警告/错误；现有 61 项测试全部通过；16 px ICO 解码及透明角检查通过。
+- 已部署至本机 `PhoneDeck电脑控制台/PhoneDeck.ControlCenter.exe`，校验发布文件哈希并重新打开；接收端原进程持续运行。旧控制台备份在本地忽略目录 `outputs/console-icon-backup`。
+- 待办：其他电脑在下次更新控制台时同步图标；此前音频、多机及 Mac 验收待办继续保留。
 
 ## 2026-09-07 dev.13/Windows dev.8/macOS dev.3：语音引擎档案化——开源多引擎适配（1号电脑）
 

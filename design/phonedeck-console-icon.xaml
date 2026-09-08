@@ -1,0 +1,27 @@
+<DrawingImage xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+  <DrawingImage.Drawing>
+    <DrawingGroup>
+      <!-- Transparent canvas; a bold microphone remains legible at 16 px. -->
+      <GeometryDrawing Brush="Transparent" Geometry="M0,0 H128 V128 H0 Z" />
+      <GeometryDrawing Geometry="M32,58 V66 C32,85 45,98 64,98 C83,98 96,85 96,66 V58 M64,98 V114 M46,114 H82">
+        <GeometryDrawing.Pen>
+          <Pen Brush="#278CF5" Thickness="10" StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+        </GeometryDrawing.Pen>
+      </GeometryDrawing>
+      <GeometryDrawing Geometry="M64,9 C51,9 43,18 43,30 V62 C43,76 51,84 64,84 C77,84 85,76 85,62 V30 C85,18 77,9 64,9 Z">
+        <GeometryDrawing.Brush>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#48E1EE" Offset="0" />
+            <GradientStop Color="#299AF6" Offset="1" />
+          </LinearGradientBrush>
+        </GeometryDrawing.Brush>
+        <GeometryDrawing.Pen><Pen Brush="#227EE5" Thickness="4" /></GeometryDrawing.Pen>
+      </GeometryDrawing>
+      <GeometryDrawing Geometry="M57,31 H71 M57,43 H71 M57,55 H71">
+        <GeometryDrawing.Pen>
+          <Pen Brush="#FFFFFF" Thickness="5" StartLineCap="Round" EndLineCap="Round" />
+        </GeometryDrawing.Pen>
+      </GeometryDrawing>
+    </DrawingGroup>
+  </DrawingImage.Drawing>
+</DrawingImage>
