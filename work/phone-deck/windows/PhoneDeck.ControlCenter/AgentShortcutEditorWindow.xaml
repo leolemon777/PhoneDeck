@@ -4,6 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="配置 Agent 操作" Width="860" Height="600" MinWidth="760" MinHeight="520"
         WindowStartupLocation="CenterOwner" WindowStyle="None"
+        AllowsTransparency="True"
         Background="Transparent"
         FontFamily="{StaticResource FontFamilyBody}"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
