@@ -1,12 +1,29 @@
 # PhoneDeck 项目交接说明
 
-更新时间：2026-09-09
+更新时间：2026-09-10
 当前分支：`main`
 当前源码：Android 1.6.0-dev.14（九主题 + 多语音引擎动态 UI + 设置页模块化）/ Windows 1.6.0-dev.8（语音引擎档案化 + 控制台引擎设置）；macOS 接收端预览 2.0.0-dev.3（CGEvent + AUHAL/BlackHole + 引擎档案化）
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.4
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-10 1号电脑接收端部署 dev.8 + 启动脚本防身份漂移修复
+
+- 1号电脑运行目录 `PhoneDeck.Server.exe` 从 dev.6（9月4日）升级为 **1.6.0-dev.8**
+  （61 项测试全绿后 dotnet publish 单文件替换，旧 exe 备份 `.bak-dev6`，data 未动）。
+  手机配对身份 31dc403f 保持、LAN 令牌有效、共享音频流自动重连、
+  `/api/health` 出现 voiceEngine 块、`/api/config/voice-engines` 正常返回
+  （typeless 激活，含 doubao/wetype 实验档案）。2号电脑（.100）仍为 dev.6 待升级。
+- **发现并修复部署陷阱**：`StartOrRepairPhoneDeck.ps1` 不设 `PHONEDECK_DATA_DIR`，
+  服务端会回退 `%LOCALAPPDATA%\PhoneDeck` 生成新身份（9月9日晚测试控制台时已生成过一个
+  ee03b436 幽灵身份），导致手机 LAN 配对失效。修复：脚本内固定
+  `$env:PHONEDECK_DATA_DIR = $PSScriptRoot\data`；两个 ps1 补 UTF-8 BOM 修复
+  Windows PowerShell 5.1 按 ANSI 解析中文注释的报错；仓库 scripts/windows 同步（7c7e4e6）。
+- 注册了缺失的登录自启计划任务 "PhoneDeck Receiver Auto Start"（此前服务端一直靠手工启动，
+  重启即失联）。运行目录与仓库脚本均已带补丁。
+- 顺带结案（另见记忆）：PC2 401 之谜 = 排查时 curl 用 `Authorization: Bearer`，服务端只认
+  `X-PhoneDeck-Token`；PC2 接收端 dev.6 在 .100 一切正常。
 
 ## 2026-09-09 dev.14：设置页模块化——根列表 + 三子页（1号电脑）
 
