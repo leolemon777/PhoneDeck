@@ -1,10 +1,17 @@
 param(
-    [Parameter(Mandatory=$true)][string]$InstallDirectory,
+    [string]$InstallDirectory,
     [string]$DataDirectory
 )
 # One-time LOCAL enrollment for receivers that predate the update protocol.
 # Extract the bootstrap ZIP to a separate directory, then run this script there.
 $ErrorActionPreference = 'Stop'
+if (!$InstallDirectory) {
+    $taskDesktop = [Environment]::GetFolderPath('Desktop')
+    $taskCandidates = @(Get-ChildItem -LiteralPath $taskDesktop -Directory -Depth 1 -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $_.FullName 'PhoneDeck.Server.exe')) -and (Test-Path -LiteralPath (Join-Path $_.FullName 'data/computer-id.txt')) })
+    if ($taskCandidates.Count -eq 1) { $InstallDirectory = $taskCandidates[0].FullName }
+    else { $InstallDirectory = Read-Host 'Enter the EXISTING PhoneDeck console folder path' }
+}
 $taskInstall = (Resolve-Path -LiteralPath $InstallDirectory).Path
 if (!$DataDirectory) { $DataDirectory = Join-Path $taskInstall 'data' }
 $taskData = (Resolve-Path -LiteralPath $DataDirectory).Path
