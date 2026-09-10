@@ -7,6 +7,7 @@
 1. 完整阅读仓库根目录的 `README.md`。
 2. 完整阅读 `spec plan.markdown`，它是产品范围和决策的唯一长期来源。
 3. 阅读 `docs/HANDOFF.md`、`docs/ARCHITECTURE.md` 和相关源代码。
+   涉及构建、版本或发布时同时阅读 `docs/BUILD_PIPELINE.md`，按规格 0.21 的依赖执行。
 4. 执行 `git status`，确认没有覆盖其他 Agent 或用户的未提交修改。
 5. 明确本次工作属于哪个版本，不把后续版本功能偷偷塞进当前里程碑。
 
