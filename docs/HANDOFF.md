@@ -1,12 +1,35 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/build-plan`（基于 `agent/fleet-updates` / d815815；文档 PR 叠加在 PR #5 之上）
+当前分支：`agent/b01-build-pipeline`（基于 `agent/build-plan` / bdc167f）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-10 B01 统一开发构建入口与 CI 完善
+
+- **统一开发构建入口**：新增 `scripts/build.ps1`、`scripts/build.sh` 以及根目录便捷入口 `build.ps1` 与 `build.sh`。
+  - **路径可移植**：通过脚本定位计算仓库根目录，杜绝任何开发机绝对路径硬编码；自动探测 JDK 17（JAVA_HOME / PATH / local.properties）与 Android SDK。
+  - **失败即停（Fail Fast）**：启用严格模式与错误即停，任一编译、测试、单文件校验步骤失败立即以非零状态码退出，不产生伪成功产物。
+  - **参数化与产物输出**：支持 `-Platform All/Windows/Android/MacOS`、`-Configuration`、`-OutputDir`（默认 `outputs/build-review`）、`-Clean` 与 `-SkipTests`。
+- **Windows 控制台单文件发布及原生依赖**：
+  - `PhoneDeck.ControlCenter.csproj` 增加 `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>` 作为默认配置。
+  - 统一入口与 CI 显式发布单文件并执行**原生依赖严格检查**：验证控制台输出目录仅存在单文件 `PhoneDeck.ControlCenter.exe`，且不存在散落的 WPF 原生 DLL（如 `wpfgfx_cor3.dll` 等）。
+- **Android 单元测试与报告归档**：
+  - 构建任务补齐 `:app:testDebugUnitTest`（与 `:app:assembleDebug`、`:app:lintDebug`、`:app:assembleRelease` 并行）。
+  - 自动归档测试报告（`testDebugUnitTest/index.html`）和 Lint 报告到输出目录 `reports/android/`。
+- **CI 完善与重复 CI 处理**：
+  - 更新 `.github/workflows/ci.yml`，补齐 Windows 控制台单文件发布与原生库内嵌校验、Android 单元测试与报告归档、Windows/macOS TRX 测试报告上传和二进制 Artifact 归档。
+  - 添加 `concurrency: group: ${{ github.workflow }}-${{ github.ref }} cancel-in-progress: true`，并将 PR 触发目标限定在 main，消除 agent 分支提交 PR 时的双重重复运行并自动取消过期构建。
+- **保留三平台检查与完整验证**：
+  - Windows：86 项单元测试全部通过；Server 与 ControlCenter 单文件发布校验通过。
+  - Android：12 项单元测试全绿，Lint 无错误（保留既有警告），Debug/Release APK 生成正常。
+  - macOS：20 项单元测试全部通过，跨平台编译通过。
+  - 故障注入验证：故意注入单测失败，脚本以 exit code 1 立即终止，输出目录无伪成功二进制产物。
+- **约束遵守**：本次仅完成 B01，未安装或重启设备，未修改系统键盘设置，未读取签名私钥，未接触运行中进程。
+- **待办**：接下来进入 B02（统一版本与依赖约束）和 B03（候选打包与正式发布流程）；另一台 Windows dev.6 一次性接入、T02 会话契约和 Mac/iOS 真机缺口继续保留。
 
 ## 2026-09-10 构建与发布计划梳理（文档）
 

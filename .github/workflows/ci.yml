@@ -6,13 +6,19 @@ on:
       - main
       - "agent/**"
   pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   windows:
-    name: Windows receiver and tests
+    name: Windows receiver, control center, and tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -20,11 +26,43 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Run receiver tests
-        run: dotnet test work/phone-deck/windows/PhoneDeck.Server.Tests/PhoneDeck.Server.Tests.csproj -c Release
-      - name: Build receiver
-        run: dotnet build work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release
-      - name: Publish self-contained receiver
-        run: dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+        run: dotnet test work/phone-deck/windows/PhoneDeck.Server.Tests/PhoneDeck.Server.Tests.csproj -c Release --logger "trx;LogFileName=PhoneDeck.Server.Tests.trx" --results-directory work/phone-deck/windows/PhoneDeck.Server.Tests/TestResults
+      - name: Build receiver and control center
+        run: |
+          dotnet build work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release
+          dotnet build work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCenter.csproj -c Release
+      - name: Publish self-contained single-file binaries
+        run: |
+          dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o outputs/windows/server
+          dotnet publish work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCenter.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o outputs/windows/console
+      - name: Verify single-file outputs and native dependencies
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath outputs/windows/server/PhoneDeck.Server.exe)) {
+            throw "PhoneDeck.Server.exe not found in publish output"
+          }
+          if (-not (Test-Path -LiteralPath outputs/windows/console/PhoneDeck.ControlCenter.exe)) {
+            throw "PhoneDeck.ControlCenter.exe not found in publish output"
+          }
+          $looseDlls = Get-ChildItem -LiteralPath outputs/windows/console -Filter "*.dll" -File
+          if ($looseDlls.Count -gt 0) {
+            $dllNames = ($looseDlls | ForEach-Object { $_.Name }) -join ", "
+            throw "Loose native DLLs found in console output ($dllNames). WPF native libraries must be embedded for single-file deployment."
+          }
+          Write-Host "Windows single-file publish verification succeeded." -ForegroundColor Green
+      - name: Archive Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: outputs/windows/
+          if-no-files-found: error
+      - name: Archive Windows test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-test-results
+          path: work/phone-deck/windows/PhoneDeck.Server.Tests/TestResults/*.trx
+          if-no-files-found: ignore
 
   macos:
     name: macOS receiver, tests, and app bundle
@@ -35,12 +73,25 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Run macOS receiver tests
-        run: dotnet test work/phone-deck/macos/PhoneDeck.Receiver.Tests/PhoneDeck.Receiver.Tests.csproj -c Release
+        run: dotnet test work/phone-deck/macos/PhoneDeck.Receiver.Tests/PhoneDeck.Receiver.Tests.csproj -c Release --logger "trx;LogFileName=PhoneDeck.Receiver.Tests.trx" --results-directory work/phone-deck/macos/PhoneDeck.Receiver.Tests/TestResults
       - name: Build and ad-hoc sign app bundle
         run: zsh scripts/macos/Build-PhoneDeckReceiver.sh
+      - name: Archive macOS app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app-bundle
+          path: work/phone-deck/dist/macos/**/*.app
+          if-no-files-found: error
+      - name: Archive macOS test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-test-results
+          path: work/phone-deck/macos/PhoneDeck.Receiver.Tests/TestResults/*.trx
+          if-no-files-found: ignore
 
   android:
-    name: Android build and lint
+    name: Android build, test, and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -53,8 +104,21 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-35 build-tools;35.0.0"
-      - name: Build and lint Android app
+      - name: Build, test, and lint Android app
         working-directory: work/phone-deck/android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug --no-daemon
+          ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleRelease --no-daemon --console=plain
+      - name: Archive Android APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: work/phone-deck/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+      - name: Archive Android test and lint reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-reports
+          path: work/phone-deck/android/app/build/reports/
+          if-no-files-found: ignore

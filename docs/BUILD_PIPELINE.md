@@ -64,7 +64,23 @@
 ## 4. 当前可执行的构建命令
 
 以下以仓库根目录为起点。`outputs/build-review` 是开发构建目录，正式候选包应改为独立的发布编号/commit 目录，防止混入旧文件。
-每个命令失败即停止后续打包；当前尚无统一脚本替用户完成这种失败传递。
+B01 已实现统一开发构建入口脚本，支持跨平台路径可移植、失败即停、单文件原生依赖检查及报告归档。
+
+### 统一开发构建入口（B01 实现）
+
+Windows / PowerShell 环境：
+
+```powershell
+# 全量构建、测试、单文件检查与报告归档（支持 -Clean、-SkipTests、-Platform All/Windows/Android/MacOS）
+./build.ps1 -Clean
+```
+
+Linux / macOS / Bash 环境：
+
+```bash
+# 全量构建与测试
+./build.sh --clean
+```
 
 ### Android
 
@@ -98,7 +114,7 @@ dotnet publish work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.Control
 ```
 
 统一更新只替换两个 EXE，因此控制台发布必须包含上述原生依赖参数。
-当前 csproj 没有将它设为默认值；后续 B01 应把这个要求写进统一入口或项目默认配置，并检查单文件产物。
+B01 已将 `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>` 写入 `PhoneDeck.ControlCenter.csproj` 作为默认配置，并在统一构建与 CI 中对单文件产物做无散落原生 DLL 的校验。
 FocusSink 是可选输入验收工具，独立于用户安装包：`work/phone-deck/test/FocusSink/FocusSink.csproj`。
 
 ### macOS
@@ -177,36 +193,37 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 
 ## 7. 现有 CI 的真实覆盖与缺口
 
-依据 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，PR #5 核对时所有已有检查成功。
+依据 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，B01 完成后 CI 具备以下检查与归档能力：
 
 | 项目 | 当前 CI | 下一步 |
 |---|---|---|
-| Windows 接收端 | test + build + self-contained publish | 保留，归档报告 |
-| Windows 控制台 | 没有构建步骤 | B01 增加 build/publish 与单文件检查 |
-| Android | assembleDebug、assembleRelease、lintDebug | B01 增加 testDebugUnitTest 与报告 |
-| Mac | test + 当前运行器架构的 `.app` | B04 明确 arm64/x64 矩阵及正式签名边界 |
+| Windows 接收端与控制台 | test + build + self-contained publish + 单文件及原生依赖校验 | 已在 B01 完成，归档 EXE 产物与 trx 报告 |
+| Windows 控制台 | build/publish + 单文件原生库内嵌校验 | 已在 B01 完成，归档 EXE 产物 |
+| Android | assembleDebug、assembleRelease、lintDebug、testDebugUnitTest | 已在 B01 完成，归档 APK 与测试/Lint 报告 |
+| Mac | test + 当前运行器架构的 `.app` | B04 明确 arm64/x64 矩阵及正式签名边界；已归档 app 与 trx 报告 |
 | 包/版本/签名 | 未校验发行组合，也未生成统一更新包 | B02/B03 增加校验和失败用例 |
-| 产物归档 | 没有 upload-artifact 步骤 | B01 归档报告与明确标记的测试产物 |
+| 产物与报告归档 | upload-artifact 归档各端二进制与测试/Lint 报告 | 已在 B01 完成 |
+| 重复 CI 与并发 | pull_request 针对 main，增加 concurrency cancel-in-progress | 已在 B01 完成 |
 | 正式发布 | 没有专用 Release workflow | B03 设计受保护签名/发布，不给 PR 私钥 |
 | iOS | 无 | M0 原型后在 B04 接入真实工程与 Mac 构建机 |
 
-`agent/**` push 与 pull_request 都会触发，目前同一提交可能运行两套相同作业；后续 B01 评估去重及取消过期运行。
 CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也没有验证用户的麦克风、辅助功能或 BlackHole。
 
 ## 8. 实施顺序与验收门槛
 
-以下是总计划 0.21 的执行细化，目前均为待实施，负责人角色用于分工而非表示已经派发任务。
+以下是总计划 0.21 的执行细化，目前 B01 已完成，负责人角色用于分工而非表示已经派发任务。
 
-| 任务 | 依赖/负责人角色 | 具体交付 | 完成证据 |
-|---|---|---|---|
-| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 |
-| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 |
-| B03 候选包与发布 | B02；发布维护 | 首次安装/旧版接入/统一更新各自打包；签名渠道分离；产物报告；受保护发布流程 | 缺密钥、混渠道、漏控制台、错误版本、错误哈希均不产生可发布候选 |
-| B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 原型产生工程后再接入 CI；各平台独立签名任务 | 可重复构建各已实现目标，未支持组合明确排除 |
-| B05 多设备候选验收 | B03 + M0/T01/T02；测试角色 | 第二台旧电脑接入、两机升级、离线补更、取消/低磁盘/文件占用/断电恢复；音频与身份回归 | 逐设备版本/设置/身份及测试结果可追溯；未确认的安装不显示成功 |
-| B06 开源发行准备 | B03–B05 + M1–M4；维护角色 | 全新用户安装/卸载、许可证/资产清单、支持矩阵、SBOM、发行渠道、维护流程 | 支持矩阵内完成干净安装和升级，才能按 M5 声明稳定支持 |
+| 任务 | 依赖/负责人角色 | 具体交付 | 完成证据 | 状态 |
+|---|---|---|---|---|
+| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **已完成** |
+| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 | 待实施 |
+| B03 候选包与发布 | B02；发布维护 | 首次安装/旧版接入/统一更新各自打包；签名渠道分离；产物报告；受保护发布流程 | 缺密钥、混渠道、漏控制台、错误版本、错误哈希均不产生可发布候选 | 待实施 |
+| B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 原型产生工程后再接入 CI；各平台独立签名任务 | 可重复构建各已实现目标，未支持组合明确排除 | 待实施 |
+| B05 多设备候选验收 | B03 + M0/T01/T02；测试角色 | 第二台旧电脑接入、两机升级、离线补更、取消/低磁盘/文件占用/断电恢复；音频与身份回归 | 逐设备版本/设置/身份及测试结果可追溯；未确认的安装不显示成功 | 待实施 |
+| B06 开源发行准备 | B03–B05 + M1–M4；维护角色 | 全新用户安装/卸载、许可证/资产清单、支持矩阵、SBOM、发行渠道、维护流程 | 支持矩阵内完成干净安装和升级，才能按 M5 声明稳定支持 | 待实施 |
 
-建议现在先做 B01，再做 B02/B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
+建议现在先做 B01（已完成），再做 B02/B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
 Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。
+
