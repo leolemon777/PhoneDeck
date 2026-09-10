@@ -78,6 +78,7 @@ public final class PhoneAudioService extends Service {
     private WifiManager.WifiLock wifiLock;
     private PowerManager.WakeLock wakeLock;
     private volatile boolean desiredRunning;
+    private boolean stopping;
     /// 本次共享是由电脑 shared.requested 联动开启（而不是用户在手机上手动开启）；
     /// 只有联动开启的会话才会在电脑全部取消请求后自动停止。
     private volatile boolean startedByLinkage;
@@ -114,6 +115,9 @@ public final class PhoneAudioService extends Service {
 
             @Override
             public void onConnectionsChanged(Map<String, Boolean> connections) {
+                if (!desiredRunning) {
+                    return;
+                }
                 int connected = 0;
                 for (Map.Entry<String, Boolean> entry : connections.entrySet()) {
                     if (Boolean.TRUE.equals(entry.getValue())) {
@@ -134,14 +138,12 @@ public final class PhoneAudioService extends Service {
 
             @Override
             public void onStopped(String reason) {
-                if (desiredRunning && reason != null) {
-                    statusDetail = "共享麦克风已停止：" + reason;
-                }
-                if (desiredRunning) {
-                    stopShared();
-                } else {
-                    publishStatus();
-                }
+                handler.post(() -> {
+                    desiredRunning = false;
+                    statusDetail = reason == null ? "共享麦克风已关闭"
+                            : "共享麦克风已停止：" + reason;
+                    finishSharedStop();
+                });
             }
         });
     }
@@ -161,6 +163,11 @@ public final class PhoneAudioService extends Service {
     }
 
     private void startShared() {
+        if (stopping || broadcaster.isFinishing()) {
+            statusDetail = "手机录音已停止，正在发送最后一段声音，请稍后重试";
+            publishStatus();
+            return;
+        }
         if (desiredRunning) {
             publishStatus();
             return;
@@ -196,6 +203,10 @@ public final class PhoneAudioService extends Service {
     }
 
     private void stopShared() {
+        if (stopping) {
+            return;
+        }
+        stopping = true;
         desiredRunning = false;
         startedByLinkage = false;
         handler.removeCallbacks(probeTick);
@@ -205,7 +216,25 @@ public final class PhoneAudioService extends Service {
         connectedCount = 0;
         receiverStates.clear();
         lastLevel = 0;
-        statusDetail = "共享麦克风已关闭";
+        statusDetail = "手机录音已停止，正在发送最后一段声音";
+        publishStatus();
+        // Keep the service and network/CPU locks until queued PCM is acknowledged.
+        if (broadcaster == null || !broadcaster.isFinishing()) {
+            finishSharedStop();
+        }
+    }
+
+    private void finishSharedStop() {
+        desiredRunning = false;
+        startedByLinkage = false;
+        stopping = false;
+        handler.removeCallbacks(probeTick);
+        connectedCount = 0;
+        receiverStates.clear();
+        lastLevel = 0;
+        if (statusDetail.equals("手机录音已停止，正在发送最后一段声音")) {
+            statusDetail = "共享麦克风已关闭";
+        }
         releaseLocks();
         stopForeground(STOP_FOREGROUND_REMOVE);
         publishStatus();

@@ -2787,7 +2787,8 @@ public final class MainActivity extends Activity {
             String endpoint,
             JSONObject body) {
         long startedAt = SystemClock.elapsedRealtime();
-        int readTimeout = endpoint.startsWith("/api/dictation/") ? 7_000 : 1_800;
+        int readTimeout = endpoint.equals("/api/dictation/stop") ? 12_000
+                : endpoint.startsWith("/api/dictation/") ? 7_000 : 1_800;
         try {
             PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, readTimeout);
             return PostAttemptResult.SUCCESS;

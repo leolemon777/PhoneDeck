@@ -1,35 +1,53 @@
 package com.codex.phonedeck;
 
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.ArrayDeque;
 
 /** Pure-Java policies shared by the Android audio fan-out and its unit tests. */
 final class SharedAudioPolicies {
     private SharedAudioPolicies() {}
 
     static final class FrameQueue {
-        private final ArrayBlockingQueue<byte[]> frames;
+        private final ArrayDeque<byte[]> frames = new ArrayDeque<>();
+        private final int capacity;
+        private boolean finished;
 
         FrameQueue(int capacity) {
-            frames = new ArrayBlockingQueue<>(capacity);
-        }
-
-        void offerLatest(byte[] frame) {
-            if (!frames.offer(frame)) {
-                frames.poll();
-                frames.offer(frame);
+            if (capacity <= 0) {
+                throw new IllegalArgumentException("capacity must be positive");
             }
+            this.capacity = capacity;
         }
 
-        byte[] take() throws InterruptedException {
-            return frames.take();
+        synchronized void offerLatest(byte[] frame) {
+            if (finished) {
+                return;
+            }
+            if (frames.size() == capacity) {
+                frames.removeFirst();
+            }
+            frames.addLast(frame);
+            notifyAll();
         }
 
-        byte[] poll() {
-            return frames.poll();
+        synchronized byte[] take() throws InterruptedException {
+            while (frames.isEmpty() && !finished) {
+                wait();
+            }
+            return frames.pollFirst();
         }
 
-        int size() {
+        synchronized byte[] poll() {
+            return frames.pollFirst();
+        }
+
+        synchronized int size() {
             return frames.size();
+        }
+
+        // EOF only after the already captured frames have been consumed.
+        synchronized void finish() {
+            finished = true;
+            notifyAll();
         }
     }
 

@@ -13,25 +13,44 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     /// <summary>流结束后等待 BufferedWaveProvider 排空的上限。</summary>
     internal const int DrainMaxMs = 3_000;
 
+    // Provider 为空仅表示 PCM 已被取走；重采样器、WASAPI 和虚拟声卡
+    // 仍可能持有最后几帧。继续播放静音，给输出/采集链路完成尾帧的时间。
+    internal const int OutputTailMs = 400;
+    internal const int StopWaitMs = DrainMaxMs + OutputTailMs + 1_500;
+
     private static readonly int PreRollHoldBytes = SampleRate * 2 * PreRollHoldMs / 1_000;
 
     private readonly SemaphoreSlim streamGate = new(1, 1);
     private readonly object sessionSync = new();
+    private readonly Func<IWaveProvider, IPhoneAudioPlayback> createPlayback;
     private CancellationTokenSource? activeCancellation;
     private ActiveStream? activeStream;
     private string? activeSessionId;
     private AudioStreamMode? activeMode;
+    private string? completedSessionId;
+    private bool completedDrainSucceeded;
+
+    internal PhoneAudioBridge()
+        : this(source => new WasapiPhoneAudioPlayback(source))
+    {
+    }
+
+    internal PhoneAudioBridge(Func<IWaveProvider, IPhoneAudioPlayback> createPlayback)
+    {
+        this.createPlayback = createPlayback;
+    }
 
     private sealed class ActiveStream
     {
         public required PreRollBuffer Preroll { get; init; }
-        public required BufferedWaveProvider Provider { get; init; }
+        public required PhonePcmBuffer Provider { get; init; }
         public required object PlaybackGate { get; init; }
         public required ManualResetEventSlim Ended { get; init; }
         public required AudioStreamMode Mode { get; init; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
         public bool PlaybackReleased;
-        public long ReleasedAtMs;
+        public long ReleasedAtMs = -1;
+        public bool DrainSucceeded;
     }
 
     internal bool IsStreaming
@@ -168,7 +187,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         {
             if (!string.Equals(activeSessionId, sessionId, StringComparison.Ordinal))
             {
-                return true;
+                return !string.Equals(completedSessionId, sessionId, StringComparison.Ordinal)
+                    || completedDrainSucceeded;
             }
             stream = activeStream;
         }
@@ -176,7 +196,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         {
             return true;
         }
-        return stream.Ended.Wait(timeoutMilliseconds);
+        return stream.Ended.Wait(timeoutMilliseconds) && stream.DrainSucceeded;
     }
 
     internal async Task<long> StreamAsync(
@@ -193,40 +213,17 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
-        MMDevice? selected = null;
-        List<MMDevice>? devices = null;
         var stream = new ActiveStream
         {
             Preroll = new PreRollBuffer(PreRollHoldBytes),
             PlaybackGate = new object(),
             Ended = new ManualResetEventSlim(false),
             Mode = mode,
-            Provider = new BufferedWaveProvider(new WaveFormat(SampleRate, 16, 1))
-            {
-                // 700ms 实时余量 + pre-roll 突发灌入 + 排空期间的到达数据。
-                BufferDuration = TimeSpan.FromMilliseconds(700 + PreRollHoldMs + 500),
-                DiscardOnBufferOverflow = true,
-                ReadFully = true
-            }
+            Provider = new PhonePcmBuffer(mode)
         };
         try
         {
-            using var enumerator = new MMDeviceEnumerator();
-            devices = enumerator
-                .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
-                .ToList();
-            selected = SelectDevice(devices);
-            if (selected is null)
-            {
-                throw new InvalidOperationException("未找到 VB-Audio Virtual Cable 播放端");
-            }
-
-            using var output = new WasapiOut(
-                selected,
-                AudioClientShareMode.Shared,
-                useEventSync: true,
-                latency: 60);
-            output.Init(stream.Provider);
+            using var output = createPlayback(stream.Provider);
             output.Play();
             Console.WriteLine(
                 $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms");
@@ -251,52 +248,66 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             var carry = 0;
             long totalBytes = 0;
             var firstBytesLogged = false;
-            while (true)
+            try
             {
-                var read = await input.ReadAsync(
-                    bytes.AsMemory(carry, bytes.Length - carry),
-                    sessionCancellation.Token);
-                if (read == 0)
+                while (true)
                 {
-                    break;
-                }
-                if (!firstBytesLogged)
-                {
-                    Console.WriteLine(
-                        $"[audio:{sessionId}] serverFirstBytes=+{ElapsedMs(stream.StartedAt)}ms");
-                    firstBytesLogged = true;
+                    var read = await input.ReadAsync(
+                        bytes.AsMemory(carry, bytes.Length - carry),
+                        sessionCancellation.Token);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    if (!firstBytesLogged)
+                    {
+                        Console.WriteLine(
+                            $"[audio:{sessionId}] serverFirstBytes=+{ElapsedMs(stream.StartedAt)}ms");
+                        firstBytesLogged = true;
+                    }
+
+                    var available = carry + read;
+                    var completeBytes = available & ~1;
+                    if (completeBytes > 0)
+                    {
+                        lock (stream.PlaybackGate)
+                        {
+                            if (!stream.PlaybackReleased
+                                && stream.Preroll.StoredBytes + completeBytes
+                                    >= stream.Preroll.CapacityBytes)
+                            {
+                                // 水位超限：Typeless 迟迟未确认采集，自动按序放行，
+                                // 不让已到达的语音无界积压。
+                                ReleasePreRoll(stream, sessionId, "watermark");
+                            }
+                            if (stream.PlaybackReleased)
+                            {
+                                stream.Provider.AddSamples(bytes, 0, completeBytes);
+                            }
+                            else
+                            {
+                                stream.Preroll.Write(bytes, 0, completeBytes);
+                            }
+                        }
+                        totalBytes += completeBytes;
+                    }
+                    carry = available - completeBytes;
+                    if (carry == 1)
+                    {
+                        bytes[0] = bytes[completeBytes];
+                    }
                 }
 
-                var available = carry + read;
-                var completeBytes = available & ~1;
-                if (completeBytes > 0)
-                {
-                    lock (stream.PlaybackGate)
-                    {
-                        if (!stream.PlaybackReleased
-                            && stream.Preroll.StoredBytes + completeBytes
-                                >= stream.Preroll.CapacityBytes)
-                        {
-                            // 水位超限：Typeless 迟迟未确认采集，自动按序放行，
-                            // 不让已到达的语音无界积压。
-                            ReleasePreRoll(stream, sessionId, "watermark");
-                        }
-                        if (stream.PlaybackReleased)
-                        {
-                            stream.Provider.AddSamples(bytes, 0, completeBytes);
-                        }
-                        else
-                        {
-                            stream.Preroll.Write(bytes, 0, completeBytes);
-                        }
-                    }
-                    totalBytes += completeBytes;
-                }
-                carry = available - completeBytes;
-                if (carry == 1)
-                {
-                    bytes[0] = bytes[completeBytes];
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 旧手机客户端 disconnect/显式取消仍须播放已收到的尾音。
+                Console.WriteLine($"[audio:{sessionId}] uploadCancelled; draining received PCM");
+            }
+            catch (IOException exception)
+            {
+                Console.WriteLine(
+                    $"[audio:{sessionId}] uploadDisconnected={exception.GetType().Name}; draining received PCM");
             }
 
             lock (stream.PlaybackGate)
@@ -327,16 +338,23 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 Console.Error.WriteLine(
                     $"[audio:{sessionId}] drainTimeoutBytes={stream.Provider.BufferedBytes}");
+                throw new TimeoutException("手机尾音未能在限定时间内播放完成");
             }
             else
             {
                 Console.WriteLine(
                     $"[audio:{sessionId}] drained=+{ElapsedMs(stream.StartedAt)}ms");
             }
+            if (totalBytes > 0 && stream.ReleasedAtMs >= 0)
+            {
+                // ReadFully 在输入排空后继续生成静音，不额外打开手机麦克风。
+                await Task.Delay(OutputTailMs, CancellationToken.None);
+            }
             output.Stop();
+            stream.DrainSucceeded = true;
             Console.WriteLine(
                 $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
-                $"bytes={totalBytes}");
+                $"bytes={totalBytes} droppedStaleBytes={stream.Provider.DroppedBytes}");
             return totalBytes;
         }
         finally
@@ -345,6 +363,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 if (ReferenceEquals(activeCancellation, sessionCancellation))
                 {
+                    completedSessionId = sessionId;
+                    completedDrainSucceeded = stream.DrainSucceeded;
                     activeCancellation = null;
                     activeSessionId = null;
                     activeStream = null;
@@ -353,24 +373,9 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             }
             // Ended 事件不 Dispose：WaitForSessionEnd 的等待方可能仍持有引用。
             stream.Ended.Set();
-            try
-            {
-                if (devices is not null)
-                {
-                    foreach (var device in devices)
-                    {
-                        device.Dispose();
-                    }
-                }
-            }
-            finally
-            {
-                // 先允许下一条音频流进入，再通知听写管理器。
-                // 否则快速“停止→重新开始”时，旧流的 AudioEnded
-                // 可能等待管理器锁，而新流又在等待旧流释放闸门。
-                streamGate.Release();
-                sessionEnded(sessionId, mode);
-            }
+            // 先释放闸门，再回调可能等待听写管理器锁的收尾。
+            streamGate.Release();
+            sessionEnded(sessionId, mode);
         }
     }
 
@@ -388,7 +393,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             $"reason={reason} preRollBytes={preRollAudio.Length}");
     }
 
-    private static MMDevice? SelectDevice(IEnumerable<MMDevice> devices) =>
+    internal static MMDevice? SelectDevice(IEnumerable<MMDevice> devices) =>
         devices
             .Where(device => device.FriendlyName.Contains(
                 "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase))

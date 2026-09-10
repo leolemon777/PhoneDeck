@@ -18,7 +18,7 @@ internal sealed class DictationSessionManager : IDisposable
     private const int AudioWarmupGraceMilliseconds = 250;
 
     /// <summary>停止语音引擎前等待音频流（含 pre-roll 尾部排空）结束的上限。</summary>
-    private const int AudioDrainTimeoutMilliseconds = 2_000;
+    private const int AudioDrainTimeoutMilliseconds = PhoneAudioBridge.StopWaitMs;
 
     private readonly object syncRoot = new();
     private readonly IPhoneAudioSessionController audioBridge;
@@ -147,6 +147,7 @@ internal sealed class DictationSessionManager : IDisposable
         bool duplicate = false;
         bool stopConfirmed = true;
         Exception? stopFailure = null;
+        bool audioDrained;
         lock (syncRoot)
         {
             if (activeDictationSessionId is null)
@@ -162,7 +163,7 @@ internal sealed class DictationSessionManager : IDisposable
 
             // 先等音频流（含 pre-roll 尾部排空）真正结束，再停引擎，
             // 否则突发灌入的尾部音频会被引擎提前停止而丢失。
-            audioBridge.WaitForSessionEnd(
+            audioDrained = audioBridge.WaitForSessionEnd(
                 normalizedSessionId, AudioDrainTimeoutMilliseconds);
 
             try
@@ -189,6 +190,11 @@ internal sealed class DictationSessionManager : IDisposable
         {
             throw new InvalidOperationException(
                 $"{engine.EngineDisplayName} 仍在听写，停止指令未被确认");
+        }
+        if (!audioDrained)
+        {
+            throw new InvalidOperationException(
+                "手机尾音传输未完成，已停止会话；请检查连接后重试");
         }
         Console.WriteLine(
             $"[dictation:{normalizedSessionId}] sessionStopped 已停止");
