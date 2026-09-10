@@ -1,12 +1,91 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`main`
-当前源码：Android 1.6.0-dev.14（九主题 + 多语音引擎动态 UI + 设置页模块化）/ Windows 1.6.0-dev.8（语音引擎档案化 + 控制台引擎设置）；macOS 接收端预览 2.0.0-dev.3（CGEvent + AUHAL/BlackHole + 引擎档案化）
+当前分支：`agent/fleet-updates`（基于 main / ed02c4d；保留此前未提交的总体规划与尾音修复）
+当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
-规格基线：v0.4
+规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-10 一端发起的设备统一更新：Android dev.17 / Windows dev.11
+
+- 用户要求在一端更新所有设备。本轮实现 Windows x64 接收端、控制台和 Android；旧电脑首次需本地接入，Mac/iOS 安装不在已实现范围。
+- 电脑「设备 → 更新所有设备」打开本地导包/请求页面；手机「设置 → 设备更新」协调分发。手机前台观察请求，缓存并独立验证签名包，先结束听写/暂停共享，再更新电脑，手机最后交给系统安装。
+- 发布清单 RSA/SHA-256 签名与每文件哈希校验；固定三个产物，拒绝多余/重复/越界路径和降级。LAN 保留 token/TLS/证书固定，所有写入增加 computerId 目标与自定义请求头。更新器只执行固定本机安装流程，不提供远程命令能力。
+- Windows 使用请求与安装共用准入锁；有活跃音频或听写时 waiting-idle。独立工作进程备份/替换接收端和控制台，检查新版本、发布序号、computerId；失败恢复原文件。data 不参与替换。离线补更队列保存在手机，在主页前台、目标重连后再协调；取消可停止后续安装。
+- 自动化：Windows Release、自包含 server/control-center publish、86 项测试通过；Android assembleDebug/assembleRelease、lintDebug、12 项测试通过。保留既有 lint warning，无错误。补测了签名与内容篡改、路径/重复条目、部分替换失败回滚、身份保留、并发音频准入和大小上限。
+- 本机实测：先本地接入 dev.10/sequence 22。使用签名但故意错误健康版本的测试包，确实启动检查失败并恢复 dev.10；随后正常包自动更新到 dev.11/sequence 23。共享流活跃时使用未来序号测试包得到 waiting-idle，未重启。测试包仅在 outputs，不能交付安装。
+- 手机发起电脑更新实测：在受控 dev.10 基线下，dev.17 手机通过已配对 LAN 下载、校验并回传约 111 MB 更新包，调用安装接口；本机接收端和控制台重启到 dev.11，手机逐设备结果确认为「更新完成」。原电脑 ID 与发布 EXE 哈希保持预期；运行目录两个 EXE 与最终构建完全相同。
+- 安卓实测：USB 首次接入 dev.16，随后通过产品下载/签名校验/UpdateApkProvider 和系统安装界面更新到 dev.17，不是用 adb 安装冒充自更新。已允许 PhoneDeck 的安装权限并点击系统更新确认。versionCode 23、firstInstallTime 仍为 2026-09-07 14:23:14，最终拉取已安装 APK 哈希与构建一致。主题、共享语音模式、25 个按键和原配对记录保留。
+- 设备结果：手机实际 1号「往里走的COMPUTE」仍为 dev.6，LAN 在线但没有更新 API，尚未部署；本机为手机 2号，dev.11 已完成；手机 3号为旧的同名离线/配对失效记录，保留并如实显示，不擅自删除。旧文档的电脑编号与手机槽位有差异，以 computerId 为准。
+- 交付：outputs/fleet-updates/PhoneDeck-统一更新-23.zip（后续从一个入口分发的签名包）；PhoneDeck-首次接入统一更新.zip（旧电脑一次性本地接入）；运行目录另存 PhoneDeck手机端-dev.17-统一更新.apk。首次接入不会搬移或覆盖 data；本地脚本经语法检查，未在另一台电脑执行。
+- 开发更新私钥位于 Git 忽略的 signing 目录；APK 使用与现有手机相同的开发证书，未把 unsigned release APK 当作可安装包。未发布正式 GitHub Release。使用/发布协议详见 FLEET_UPDATES.md。
+- 仍待真实多设备验收：另一台首次接入后的整批更新、离线设备恢复后的自动补更、不同 Android 厂商的安装/后台限制、断电恢复。已有单机与手机闭环不等于这些场景全部通过。
+- 测试结束后回到手机主页，恢复原有共享麦克风供音；本机 health 再次确认 shared/streaming=true、dictation.active=false。未操作输入法的真实转写触发键。
+
+## 2026-09-10 停止后丢最后几个字：Android dev.15 / Windows dev.9
+
+- 用户反馈：说完后不到一秒停止，最后几个字缺失；本轮只处理音频截尾。
+- 确认的源码缺陷：AudioStreamer.stop 直接 disconnect，未发送 HTTP chunked EOF；
+  SharedAudioBroadcaster.stop 中断发送线程，丢弃尚未消费的队列；Windows ReadAsync
+  取消/IOException 跳过正常排空；听写只等 2 秒而音频最多排空 3 秒；
+  Provider 为空后立即停 WASAPI，忽略重采样/设备仍持有的尾帧。
+- Android：立即停止 AudioRecord，但已读 PCM 继续发送；关闭请求输出以发送 EOF，
+  读取电脑响应后断开。共享队列可 finish，先消费队列再返回 EOF；各目标并行收尾、
+  最长 8 秒看门狗；前台服务与 CPU/Wi-Fi 锁保留至收尾完成。启动/停止锁避免停止后再次开录。
+- Windows：正常 EOF、取消和网络断开均排空已收到且已放行的 PCM；Provider 排空后
+  继续供静音 400ms，再停输出/回调听写结束；managed 停止等待预算统一为 4900ms，
+  超时仍安全清理但不报告尾音完整。Android stop 请求读取预算为 12 秒。
+- 共享模式：手机队列从 500ms 收至 120ms，Windows 共享缓冲最多保留最近 120ms；
+  网络突发积压时淘汰旧帧，避免长期落后及溢出时丢最新词尾。managed pre-roll 不受此限制。
+  这不是网络丢包修复，严重拥塞仍可能损失旧音频；原生输入法停止也无法补收停止后的声音。
+- 新增可替换播放后端，回归测试用延迟设备模拟 Provider 已空但尾帧尚未输出；
+  同时覆盖 managed/shared × EOF/IOException/取消、未确认启动不放行、
+  排空失败、引擎等待顺序、共享缓冲保留最新帧、HTTP EOF/响应与发送队列结束。
+- 验证：Windows Release 构建/自包含 publish 通过；74 项测试全部通过。
+  Android assembleDebug、assembleRelease、testDebugUnitTest（10 项）及 lintDebug 通过；
+  lint 无错误，仍有既有 warning。release 未配项目签名，交付使用已验证的 debug 签名 APK。
+- 本机已备份 dev.8 并部署 dev.9，health 确认版本且手机共享流自动重连；
+  部署保留原 data/电脑身份/配对资料，发布 EXE 哈希一致。
+  备份：outputs/audio-tail-fix/backup-20260910-023548。
+- 手机包：运行目录 PhoneDeck手机端-dev.15-尾音修复.apk，versionCode=21。
+  用户接入 USB 后，拉取当前安装 base.apk 并核对签名：与修复包一致（653884d0…），
+  不是历史文档 df327953… 那把长期证书。adb install -r 成功，dev.14→dev.15；
+  firstInstallTime 保持 2026-09-07 14:23:14，未卸载/清数据；重建 reverse，App 冷启动无崩溃。
+- 真机共享闭环：手机开启共享后本机 health 为 shared/streaming=true，引擎 capturing=false；
+  点击停止后 health 在本轮轮询约 579ms 内变 false，日志 drained→sessionStopped 间隔约 411ms，
+  没有 uploadCancelled/断开异常；AppOps 确认 RECORD_AUDIO 不再 running。
+  本次流 received=2484480 bytes，droppedStaleBytes=10560（共享低延迟策略的旧帧舍弃，不能宣称零丢帧）。
+  随后再次开启共享成功，恢复用户原本的供音状态；未替用户启动或停止 Typeless。
+- 交付包：outputs/audio-tail-fix/PhoneDeck-尾音修复升级包.zip（手机 APK、Windows 单文件 EXE、
+  UPDATE.md、SHA256SUMS.txt）。其余电脑尚未部署，需按说明保留各自 data 进行更新。
+- 待完成：真实说话末尾数字/短句的两模式识别完整率、其他电脑升级与回归。
+  本轮没有将用户音频落盘，也没有把自动化尾帧或真机供音测试写成输入法识别 PASS。
+
+## 2026-09-10 面向开源发布的总体规划 v0.6
+
+- 用户确认长期方向：Android/iOS 手机任意搭配多台 Windows/macOS，适配 Typeless、
+  微信输入法、豆包输入法、千问输入法等，支持共享麦克风、点击/按住/电脑触发与多个主题。
+- 已将完整总规划写入 [spec plan.markdown](../spec%20plan.markdown) 第 0 章：
+  当前能力/缺口、平台矩阵、推荐架构、动态设备目录、扫码与逐手机授权、会话和状态、
+  引擎分级、iOS 原型、安装/虚拟音频、主题/无障碍、配置升级、开源维护、
+  M0–M5 路线、量化验收、资源与工期、风险退路及 T01–T08 首批任务。
+- 首轮容量建议为一台手机连接五台电脑，10 台只作探索；不写死三台，也不承诺无限并发。
+  快捷键目标与共享音频接收组独立；多手机首版按每接收端单音频源所有权管理。
+- 技术方案/排期是建议，方向是用户已确认；没有修改源码、协议版本或配置 schema。
+  旧规格保留并标记为历史，其旧 90–150 小时总估算不适用于现在的四端范围。
+- 发现源码的电脑持久化 shared 请求可触发手机采音，与旧“重启不恢复/仅手动”规格有差异；
+  新规划建议明确授权、请求有效期、停止优先和会话代次，尚未实施行为修复。
+- 官方资料核实：iOS/Android 后台开麦与持续录音约束、Bonjour 本地网络权限、Apple
+  外设/审核边界、.NET 8 支持结束日期；来源和核实限制集中在规格 0.20。
+- 同步 README、AGENTS、ARCHITECTURE 和 PROJECT_HANDOVER 的版本/规划入口；
+  历史部署证据保留，不把过去测试当成本轮测试。
+- 本轮验证：git fetch 后本地基线与 origin/main 一致；只读核对源码版本、CI、
+  LanIdentity 与 MainActivity 共享请求行为；文档 diff/链接/章节检查。
+  本轮没有执行构建、手机安装、真机录音、服务重启或发布。
+- 下一步：T01/T02 当前基线与契约；按硬件条件开展 T03 Mac 与 T04 iOS 原型；
+  T05 无 USB 配对设计、T06 引擎产品核实。公开发布前需所有者确定许可证和分发资源。
 
 ## 2026-09-10 1号电脑接收端部署 dev.8 + 启动脚本防身份漂移修复
 
