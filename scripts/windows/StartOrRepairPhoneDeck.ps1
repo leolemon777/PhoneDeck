@@ -1,8 +1,11 @@
-param(
+﻿param(
     [switch]$Quiet
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 数据目录固定为本文件夹 data\，避免回退到 %LOCALAPPDATA% 生成新身份导致手机配对失效
+$env:PHONEDECK_DATA_DIR = Join-Path $PSScriptRoot 'data'
 $serverPath = Join-Path $PSScriptRoot 'PhoneDeck.Server.exe'
 $adbPath = Join-Path $PSScriptRoot 'platform-tools\adb.exe'
 

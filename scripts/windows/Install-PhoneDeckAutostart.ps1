@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$TaskName = 'PhoneDeck Receiver Auto Start'
 )
 
