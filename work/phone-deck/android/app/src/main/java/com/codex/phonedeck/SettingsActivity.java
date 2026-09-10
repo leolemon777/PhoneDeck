@@ -7,16 +7,26 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.animation.AccelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+/**
+ * 设置模块：根列表页（入口 + 当前值摘要 + 内联保活开关）与三个子页
+ * （外观主题 / 语音输入 / 快捷键与布局）之间用 FrameLayout 页面栈切换，
+ * 返回键先退回根页再退出 Activity。
+ */
 public final class SettingsActivity extends Activity {
     private static final String PREFS_NAME = "PhoneDeckSettings";
     private static final String PREF_VOICE_WORK_MODE = "voice_work_mode";
@@ -25,8 +35,26 @@ public final class SettingsActivity extends Activity {
     private static final String WORK_SHARED = "shared";
     private static final String MODE_TAP = "tap";
     private static final String MODE_HOLD = "hold";
+    private static final int REQUEST_EXPORT_CONFIG = 4101;
+    private static final int REQUEST_IMPORT_CONFIG = 4102;
+    private static final long PAGE_SLIDE_MS = 230L;
+
     private SharedPreferences preferences;
     private PhoneDeckTheme theme;
+    private ShortcutConfigRepository repository;
+
+    private FrameLayout pageHost;
+    private View rootPage;
+    private View themePage;
+    private View voicePage;
+    private View shortcutsPage;
+    private View activeSubPage;
+    private boolean pageAnimating;
+
+    private TextView themeSummary;
+    private TextView voiceSummary;
+    private TextView shortcutSummary;
+
     private LinearLayout managedOption;
     private LinearLayout sharedOption;
     private TextView managedCheck;
@@ -35,9 +63,7 @@ public final class SettingsActivity extends Activity {
     private LinearLayout holdOption;
     private TextView tapCheck;
     private TextView holdCheck;
-    private ShortcutConfigRepository repository;
-    private static final int REQUEST_EXPORT_CONFIG = 4101;
-    private static final int REQUEST_IMPORT_CONFIG = 4102;
+    private LinearLayout tapHoldSection;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,56 +75,81 @@ public final class SettingsActivity extends Activity {
         repository = new ShortcutConfigRepository(this);
         setContentView(createInterface());
         refreshSelection();
+        refreshRootSummaries();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshRootSummaries();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (activeSubPage != null) {
+            popPage();
+        } else {
+            super.onBackPressed();
+        }
     }
 
     private View createInterface() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(20), dp(20), dp(24));
-        page.setBackgroundColor(theme.contentBackground());
-        scroll.addView(page);
+        pageHost = new FrameLayout(this);
+        rootPage = buildRootPage();
+        themePage = buildThemePage();
+        voicePage = buildVoicePage();
+        shortcutsPage = buildShortcutsPage();
+        pageHost.addView(rootPage, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        return theme.wrapContent(this, pageHost);
+    }
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        page.addView(header, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+    private View buildRootPage() {
+        LinearLayout page = pageShell();
+        addHeader(page, "设置", view -> finish());
 
-        Button back = new Button(this);
-        back.setText("←");
-        back.setTextSize(22);
-        back.setTextColor(theme.text);
-        back.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
-        back.setOnClickListener(view -> finish());
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        themeSummary = summaryText();
+        page.addView(navRow("🎨", "外观主题", themeSummary,
+                () -> pushPage(themePage, true)), fullWidthMargins(dp(16)));
 
-        TextView headerTitle = text("设置", 22, theme.text, Typeface.BOLD);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleParams.leftMargin = dp(13);
-        header.addView(headerTitle, titleParams);
+        voiceSummary = summaryText();
+        page.addView(navRow("🎤", "语音输入", voiceSummary,
+                () -> pushPage(voicePage, true)), fullWidthMargins(dp(10)));
 
-        TextView intro = text("两套语音工作方式互斥切换；快捷键和布局可单独编辑。",
-                14, theme.muted, Typeface.NORMAL);
-        page.addView(intro, topMargin(dp(22)));
+        shortcutSummary = summaryText();
+        page.addView(navRow("⌨️", "快捷键与布局", shortcutSummary,
+                () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(10)));
 
-        TextView appearanceHeading = text("外观主题", 17, theme.text, Typeface.BOLD);
-        page.addView(appearanceHeading, topMargin(dp(24)));
-        TextView appearanceHint = text("冰川玻璃与纸卡系列，另有瑞士黑白/克莱因蓝/工业沙橙/极简单色四款设计稿风格。",
-                12, theme.muted, Typeface.NORMAL);
-        page.addView(appearanceHint, topMargin(dp(4)));
+        page.addView(keepAliveRow(), fullWidthMargins(dp(10)));
+        return wrapInScroll(page);
+    }
+
+    private View buildThemePage() {
+        LinearLayout page = pageShell();
+        addHeader(page, "外观主题", view -> popPage());
+
+        TextView hint = text(
+                "冰川玻璃与纸卡系列，另有瑞士黑白/克莱因蓝/工业沙橙/极简单色四款设计稿风格。",
+                13, theme.muted, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.18f);
+        page.addView(hint, topMargin(dp(14)));
+
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
+        return wrapInScroll(page);
+    }
 
-        TextView voiceHeading = text("语音输入", 17, theme.text, Typeface.BOLD);
-        page.addView(voiceHeading, topMargin(dp(28)));
+    private View buildVoicePage() {
+        LinearLayout page = pageShell();
+        addHeader(page, "语音输入", view -> popPage());
 
         managedOption = option("手机控制听写",
                 "手机按钮控制当前电脑的语音输入软件（在电脑端设置中选择引擎），保留点击/按住操作", true);
         managedCheck = (TextView) managedOption.getChildAt(1);
         managedOption.setOnClickListener(view -> selectWorkMode(WORK_MANAGED));
-        page.addView(managedOption, fullWidthMargins(dp(18)));
+        page.addView(managedOption, fullWidthMargins(dp(14)));
 
         sharedOption = option("共享麦克风",
                 "手机持续向所有在线电脑供音；在每台电脑上用自己的快捷键触发语音软件", false);
@@ -106,32 +157,41 @@ public final class SettingsActivity extends Activity {
         sharedOption.setOnClickListener(view -> selectWorkMode(WORK_SHARED));
         page.addView(sharedOption, fullWidthMargins(dp(12)));
 
+        tapHoldSection = new LinearLayout(this);
+        tapHoldSection.setOrientation(LinearLayout.VERTICAL);
+
         TextView controlHeading = text("手机控制听写方式", 14, theme.muted, Typeface.BOLD);
-        page.addView(controlHeading, topMargin(dp(24)));
+        tapHoldSection.addView(controlHeading, topMargin(dp(10)));
 
         tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
-        page.addView(tapOption, fullWidthMargins(dp(18)));
+        tapHoldSection.addView(tapOption, fullWidthMargins(dp(18)));
 
         holdOption = option("按住说话", "按下立即开始，松开后自动停止并输入文字", false);
         holdCheck = (TextView) holdOption.getChildAt(1);
         holdOption.setOnClickListener(view -> selectMode(MODE_HOLD));
-        page.addView(holdOption, fullWidthMargins(dp(12)));
+        tapHoldSection.addView(holdOption, fullWidthMargins(dp(12)));
 
         TextView tip = text("提示：点击模式适合长内容，使用同一个主按钮开始和停止；长按模式更适合短句。",
                 13, theme.muted, Typeface.NORMAL);
         tip.setLineSpacing(0, 1.18f);
         tip.setPadding(dp(14), dp(13), dp(14), dp(13));
         tip.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
-        page.addView(tip, fullWidthMargins(dp(22)));
+        tapHoldSection.addView(tip, fullWidthMargins(dp(20)));
 
-        TextView connectionHeading = text("连接保持", 17, theme.text, Typeface.BOLD);
-        page.addView(connectionHeading, topMargin(dp(28)));
-        page.addView(keepAliveOption(), fullWidthMargins(dp(18)));
+        page.addView(tapHoldSection);
+        return wrapInScroll(page);
+    }
 
-        TextView shortcutHeading = text("快捷键与布局", 17, theme.text, Typeface.BOLD);
-        page.addView(shortcutHeading, topMargin(dp(28)));
+    private View buildShortcutsPage() {
+        LinearLayout page = pageShell();
+        addHeader(page, "快捷键与布局", view -> popPage());
+
+        TextView hint = text("编辑手机上的按钮、按键、颜色和顺序；配置可导出为 JSON，在其他设备导入。",
+                13, theme.muted, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.18f);
+        page.addView(hint, topMargin(dp(14)));
 
         Button shortcuts = new Button(this);
         shortcuts.setText("编辑按钮、按键、颜色和顺序  →");
@@ -144,8 +204,10 @@ public final class SettingsActivity extends Activity {
                 theme.feedbackSurface(theme.primary), 16, 1, theme.primary));
         shortcuts.setOnClickListener(view ->
                 startActivity(new Intent(this, ShortcutSettingsActivity.class)));
-        page.addView(shortcuts, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(60)));
+        LinearLayout.LayoutParams shortcutParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(60));
+        shortcutParams.topMargin = dp(16);
+        page.addView(shortcuts, shortcutParams);
 
         LinearLayout transferRow = new LinearLayout(this);
         transferRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -172,8 +234,8 @@ public final class SettingsActivity extends Activity {
             startActivityForResult(intent, REQUEST_IMPORT_CONFIG);
         });
         transferRow.addView(importButton, importParams);
-        page.addView(transferRow, topMargin(dp(10)));
-        return theme.wrapContent(this, scroll);
+        page.addView(transferRow, fullWidthMargins(dp(10)));
+        return wrapInScroll(page);
     }
 
     @Override
@@ -209,6 +271,7 @@ public final class SettingsActivity extends Activity {
                 String json = buffer.toString("UTF-8");
                 if (repository.importJson(json)) {
                     Toast.makeText(this, "配置已导入并生效", Toast.LENGTH_SHORT).show();
+                    refreshRootSummaries();
                 } else {
                     Toast.makeText(this, "导入失败：文件无效，原配置未改动", Toast.LENGTH_LONG).show();
                 }
@@ -218,63 +281,148 @@ public final class SettingsActivity extends Activity {
         }
     }
 
-    private Button button(String label) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setTextSize(15);
-        button.setTextColor(theme.text);
-        button.setAllCaps(false);
-        button.setGravity(Gravity.CENTER);
-        button.setBackground(roundRect(theme.surfaceRaised, 16, 1, theme.outline));
-        return button;
+    private void pushPage(View page, boolean animated) {
+        if (activeSubPage != null || pageAnimating) {
+            return;
+        }
+        activeSubPage = page;
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT);
+        if (!animated) {
+            pageHost.addView(page, params);
+            page.bringToFront();
+            return;
+        }
+        pageAnimating = true;
+        float slide = slideDistance();
+        page.setTranslationX(slide);
+        pageHost.addView(page, params);
+        page.bringToFront();
+        page.animate().translationX(0f).setDuration(PAGE_SLIDE_MS)
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(() -> pageAnimating = false);
+        rootPage.animate().translationX(-slide * 0.22f).alpha(0.35f)
+                .setDuration(PAGE_SLIDE_MS)
+                .setInterpolator(new DecelerateInterpolator());
     }
 
-    private LinearLayout option(String title, String detail, boolean tap) {
+    private void popPage() {
+        if (activeSubPage == null || pageAnimating) {
+            return;
+        }
+        View page = activeSubPage;
+        activeSubPage = null;
+        pageAnimating = true;
+        float slide = slideDistance();
+        page.animate().translationX(slide).setDuration(PAGE_SLIDE_MS)
+                .setInterpolator(new AccelerateInterpolator())
+                .withEndAction(() -> {
+                    pageHost.removeView(page);
+                    pageAnimating = false;
+                });
+        rootPage.animate().translationX(0f).alpha(1f).setDuration(PAGE_SLIDE_MS)
+                .setInterpolator(new AccelerateInterpolator());
+        refreshRootSummaries();
+    }
+
+    private float slideDistance() {
+        int width = pageHost.getWidth();
+        return width > 0 ? width : getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private void addHeader(LinearLayout page, String title, View.OnClickListener onBack) {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button back = new Button(this);
+        back.setText("←");
+        back.setTextSize(22);
+        back.setTextColor(theme.text);
+        back.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
+        back.setOnClickListener(onBack);
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+
+        TextView titleView = text(title, 22, theme.text, Typeface.BOLD);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        titleParams.leftMargin = dp(13);
+        header.addView(titleView, titleParams);
+
+        page.addView(header, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+    }
+
+    private LinearLayout navRow(String glyph, String title, TextView summary, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(18), dp(17), dp(16), dp(17));
+        row.setPadding(dp(14), dp(13), dp(14), dp(13));
+        row.setBackground(roundRect(theme.surface, 18, 1, theme.outline));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(42), dp(42)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        row.addView(copy, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        copyParams.leftMargin = dp(13);
+        copy.addView(text(title, 17, theme.text, Typeface.BOLD));
+        if (summary != null) {
+            copy.addView(summary, topMargin(dp(3)));
+        }
+        row.addView(copy, copyParams);
 
-        copy.addView(text(title, 18, theme.text, Typeface.BOLD));
-        TextView detailText = text(detail, 13, theme.muted, Typeface.NORMAL);
-        detailText.setLineSpacing(0, 1.12f);
-        copy.addView(detailText, topMargin(dp(5)));
+        TextView chevron = text("›", 22, theme.muted, Typeface.BOLD);
+        chevron.setGravity(Gravity.CENTER);
+        row.addView(chevron, new LinearLayout.LayoutParams(dp(24), dp(28)));
 
-        TextView check = text(tap ? "✓" : "○", 22, theme.primary, Typeface.BOLD);
-        check.setGravity(Gravity.CENTER);
-        row.addView(check, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        installPressFeedback(row);
+        row.setOnClickListener(view -> {
+            confirmHaptic(row);
+            open.run();
+        });
         return row;
     }
 
-    private LinearLayout keepAliveOption() {
+    private LinearLayout iconTile(String glyph) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setGravity(Gravity.CENTER);
+        tile.setBackground(roundRect(
+                theme.feedbackSurface(theme.primary), 13, 1, theme.primary));
+        TextView glyphText = text(glyph, 17, theme.text, Typeface.NORMAL);
+        tile.addView(glyphText, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        return tile;
+    }
+
+    private LinearLayout keepAliveRow() {
         boolean enabled = preferences.getBoolean("keep_connection_alive", true);
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(18), dp(17), dp(16), dp(17));
+        row.setPadding(dp(14), dp(13), dp(14), dp(13));
         row.setBackground(roundRect(
                 enabled ? theme.feedbackSurface(theme.primary) : theme.surface,
                 18, enabled ? 2 : 1,
                 enabled ? theme.primary : theme.outline));
+        row.addView(iconTile("📡"), new LinearLayout.LayoutParams(dp(42), dp(42)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        row.addView(copy, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        copyParams.leftMargin = dp(13);
+        row.addView(copy, copyParams);
 
-        copy.addView(text("Wi-Fi 保活", 18, theme.text, Typeface.BOLD));
+        copy.addView(text("Wi-Fi 保活", 17, theme.text, Typeface.BOLD));
         TextView detail = text(
                 "App 运行期间保持 Wi-Fi 高性能模式，降低灭屏或省电导致的无线断流；"
                         + "USB 断连由电脑端看门狗自动恢复。",
-                13, theme.muted, Typeface.NORMAL);
+                12, theme.muted, Typeface.NORMAL);
         detail.setLineSpacing(0, 1.12f);
-        copy.addView(detail, topMargin(dp(5)));
+        copy.addView(detail, topMargin(dp(4)));
 
-        android.widget.Switch switchView = new android.widget.Switch(this);
+        Switch switchView = new Switch(this);
         switchView.setChecked(enabled);
         switchView.setContentDescription("Wi-Fi 保活开关");
         switchView.setOnCheckedChangeListener((view, checked) -> {
@@ -292,13 +440,53 @@ public final class SettingsActivity extends Activity {
         return row;
     }
 
+    private void refreshRootSummaries() {
+        if (themeSummary == null) {
+            return;
+        }
+        themeSummary.setText(theme.name);
+        boolean sharedSelected = WORK_SHARED.equals(
+                preferences.getString(PREF_VOICE_WORK_MODE, WORK_MANAGED));
+        boolean holdSelected = MODE_HOLD.equals(
+                preferences.getString(PREF_VOICE_MODE, MODE_TAP));
+        voiceSummary.setText(sharedSelected ? "共享麦克风"
+                : "手机控制 · " + (holdSelected ? "按住说话" : "点击说话"));
+        shortcutSummary.setText(repository.load().size() + " 个按钮");
+    }
+
+    private TextView summaryText() {
+        TextView view = text("", 13, theme.muted, Typeface.NORMAL);
+        view.setMaxLines(1);
+        view.setEllipsize(TextUtils.TruncateAt.END);
+        return view;
+    }
+
+    private LinearLayout pageShell() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(20), dp(20), dp(20), dp(24));
+        page.setBackgroundColor(theme.contentBackground());
+        return page;
+    }
+
+    private View wrapInScroll(LinearLayout page) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(page);
+        return scroll;
+    }
+
+    private void confirmHaptic(View view) {
+        view.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? HapticFeedbackConstants.CONFIRM
+                : HapticFeedbackConstants.VIRTUAL_KEY);
+    }
+
     private void selectMode(String mode) {
         preferences.edit().putString(PREF_VOICE_MODE, mode).apply();
         refreshSelection();
+        refreshRootSummaries();
         View selected = MODE_HOLD.equals(mode) ? holdOption : tapOption;
-        selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                ? HapticFeedbackConstants.CONFIRM
-                : HapticFeedbackConstants.VIRTUAL_KEY);
+        confirmHaptic(selected);
         selected.announceForAccessibility(MODE_HOLD.equals(mode)
                 ? "已选择按住说话模式" : "已选择点击说话模式");
     }
@@ -310,10 +498,9 @@ public final class SettingsActivity extends Activity {
             stopSharedMicrophone();
         }
         refreshSelection();
+        refreshRootSummaries();
         View selected = WORK_SHARED.equals(selectedMode) ? sharedOption : managedOption;
-        selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                ? HapticFeedbackConstants.CONFIRM
-                : HapticFeedbackConstants.VIRTUAL_KEY);
+        confirmHaptic(selected);
         selected.announceForAccessibility(WORK_SHARED.equals(selectedMode)
                 ? "已选择共享麦克风模式，需要返回主界面手动开启"
                 : "已选择手机控制听写模式");
@@ -359,6 +546,7 @@ public final class SettingsActivity extends Activity {
         holdOption.setEnabled(!sharedSelected);
         tapOption.setAlpha(sharedSelected ? 0.48f : 1f);
         holdOption.setAlpha(sharedSelected ? 0.48f : 1f);
+        tapHoldSection.setVisibility(sharedSelected ? View.GONE : View.VISIBLE);
     }
 
     private View themeOption(PhoneDeckTheme candidate) {
@@ -421,11 +609,16 @@ public final class SettingsActivity extends Activity {
             return;
         }
         PhoneDeckTheme.save(this, themeId);
-        selected.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                ? HapticFeedbackConstants.CONFIRM
-                : HapticFeedbackConstants.VIRTUAL_KEY);
+        confirmHaptic(selected);
         selected.announceForAccessibility("主题已切换");
-        recreate();
+        theme = PhoneDeckTheme.load(this);
+        theme.applyWindow(this);
+        activeSubPage = null;
+        pageAnimating = false;
+        setContentView(createInterface());
+        refreshSelection();
+        refreshRootSummaries();
+        pushPage(themePage, false);
     }
 
     private void installPressFeedback(View row) {
@@ -440,6 +633,38 @@ public final class SettingsActivity extends Activity {
             }
             return false;
         });
+    }
+
+    private Button button(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setTextColor(theme.text);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(roundRect(theme.surfaceRaised, 16, 1, theme.outline));
+        return button;
+    }
+
+    private LinearLayout option(String title, String detail, boolean tap) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(18), dp(17), dp(16), dp(17));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        row.addView(copy, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        copy.addView(text(title, 18, theme.text, Typeface.BOLD));
+        TextView detailText = text(detail, 13, theme.muted, Typeface.NORMAL);
+        detailText.setLineSpacing(0, 1.12f);
+        copy.addView(detailText, topMargin(dp(5)));
+
+        TextView check = text(tap ? "✓" : "○", 22, theme.primary, Typeface.BOLD);
+        check.setGravity(Gravity.CENTER);
+        row.addView(check, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        return row;
     }
 
     private TextView text(String value, int size, int color, int style) {
