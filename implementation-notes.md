@@ -1,3 +1,86 @@
+# Codex independent validation — 2026-09-10
+
+The implementation notes below describe earlier agent work, not final acceptance. Independently rerun:
+7 Windows fixture regression cases (0 skipped), 8 CI helper checks, AST/precheck probes, Windows receiver
+86 tests and both single-file publishes, Android 12 tests plus Debug/Release assemble and lint (0 errors,
+33 warnings). Windows success run: `20260910T105926Z-87d4f353`; Android: `20260910T110236Z-9c633c81`.
+Android required the normal ASCII user Gradle cache; a prior non-ASCII cache failed worker startup.
+Release APK is unsigned. Cloud CI and real macOS remain unverified; no installation or device restart.
+
+# Implementation Notes — B01 approved small fixes (2026-09-10 follow-up)
+
+## Spec Interpretation
+- Approved post-real-Windows-build fixes only: server native self-extract, validate phase name, finally write fail → non-zero, atomic latest write vs symlink, mac appDst no Remove-Item, CI wire puredata. No scripts/tests, no real rebuild, no commit/push.
+
+## Decisions Made
+- Server publish adds `-p:IncludeNativeLibrariesForSelfExtract=true` (same as console) so `aspnetcorev2_inprocess.dll` is bundled; strict loose-*.dll check can pass.
+- Single-file exe + loose-DLL checks run under `Invoke-NativeStep 'windows-validate'` so failed manifest phase is `windows-validate`, not last publish step.
+- `Write-AtomicTextFile`: random `.phonedeck-<guid>.tmp` + `FileMode.CreateNew`; if destination is reparse/symlink, `File.Delete` the link node then Move — never WriteAllText through a fixed `.tmp` or symlink target.
+- finally: manifest/latest write failure forces `PhaseExitCode=1` / `FinalStatus=failed`; does not emit success CI outputs; latest failure after run manifest write still fails the process.
+- New macOS run: if `PhoneDeck Receiver.app` already exists under run dir → throw (no recursive Remove-Item).
+- CI Windows job runs `scripts/ci/Test-CiHelpers.puredata.ps1` before full Windows build. Full mock pipeline tests wait for agy207.
+
+## Changes From Spec / Prior Draft
+- None beyond the approved five items.
+
+## Tradeoffs
+- If run `manifest.json` already flushed success and only `latest.json` write fails, on-disk run manifest may still say success while process exits non-zero / latest stale — prefer fail-closed exit over fake CI green.
+- IncludeNativeLibrariesForSelfExtract on Server may still leave non-DLL sidecars (`web.config`, staticwebassets json); check only rejects `*.dll`.
+
+## Verification
+- AST: scripts/build.ps1, build.ps1, CI helpers: OK.
+- Test-CiHelpers.puredata.ps1: OK (8 checks).
+- Validate-BuildScripts.static.ps1: OK (path reject + macos-on-windows precheck latest).
+- Real Windows/Android/macOS build NOT run (Codex to verify).
+
+## Risks / Follow-up
+- Real publish still needs Codex confirmation that Server output has no loose DLL after IncludeNativeLibrariesForSelfExtract.
+- scripts/tests full mock suite still owned by agy207; not added to CI until green.
+
+---
+# Implementation Notes — B01 unified build entry (2026-09-10)
+
+## Spec Interpretation
+- B01 = portable unified build entry + CI wiring; unique runId under OutputDir; fixed manifest/latest schema for agy tests/CI.
+- -Clean is compatibility-only: warn, do not delete historical outputs (new runs are isolated).
+- Prechecks before create-run; safe OutputDir precheck failures rewrite latest as failed/precheck; unsafe OutputDir must not touch latest.
+- File ownership: scripts/build.ps1, root build.ps1/build.sh, scripts/build.sh, .github/workflows/ci.yml, scripts/ci/* — not scripts/tests, not full build execution.
+
+## Decisions Made
+- runId = UTC stamp + 8-hex guid; artifacts and reports live under that run directory only.
+- Schema v1 fields fixed; status unverified when -SkipTests.
+- Android uses gradlew clean after reparse checks on android/build and app/build; no manual Remove-Item of those trees.
+- Windows publish into run/windows/{server,console}; fail on any loose *.dll.
+- macOS builds host RID only; copies real .app into run/macos and tars only that .app.
+- CI dedup: filter open PRs by head.repo.full_name + head.ref (same-repo, not owner-only); API failure fail-open (skip_push=false).
+- concurrency group includes event_name so push/PR do not cancel each other incorrectly.
+- Shell wrappers: thin pwsh -NoProfile -File with flag mapping to PowerShell names; nonzero passthrough.
+- Removed personal/machine JDK path hardcoding; JDK via JAVA_HOME/PATH, SDK via local.properties/ANDROID_HOME/ANDROID_SDK_ROOT/conventional user SDK dirs.
+
+## Changes From Spec / Prior Draft
+- Prior dirty scripts wrote flatly into OutputDir and could Remove-Item on -Clean; replaced with run isolation + warn-only Clean.
+- Prior CI fail-closed on API errors and used owner:branch head filter; replaced with fail-open + same-repo filter.
+- Prior CI archived fixed outputs/build-review globs and mac dist publish tree; now uses step run_directory and app tar only.
+
+## Tradeoffs
+- Platform=All on Linux runs Android only (no Win/Mac host artifacts) after warning.
+- Precheck failure does not create a run directory (only latest failed/precheck), matching precheck before create-run.
+- git update-index --chmod=+x applied to owned *.sh only; not committed.
+
+## Verification
+- AST parse of owned ps1 scripts: OK.
+- YAML safe_load of ci.yml: OK.
+- scripts/ci/Test-CiHelpers.puredata.ps1: OK (dedup + manifest schema).
+- scripts/ci/Validate-BuildScripts.static.ps1: OK (path reject + macos-on-windows precheck latest).
+- Full platform build NOT run (Codex after both agents; avoid conflict with agy scripts/tests).
+
+## Risks / Follow-up
+- Full Windows/Android/macOS build+CI still unverified in this session.
+- local.properties sdk.dir escaping variants may still surprise on exotic paths.
+- gh api pagination capped at 5 pages of open PRs.
+- Staged mode bits for build.sh/scripts/build.sh via update-index; content not committed by this agent.
+
+---
 # implementation-notes — 2026-09-05 dev.8 软色纸卡 UI
 
 ## 需求

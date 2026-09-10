@@ -163,8 +163,25 @@ PhoneDeck/
 
 ## 快速构建
 
-详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)，完整流程、签名渠道及 CI 缺口见
+详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)，完整流程、签名渠道及门槛见
 [docs/BUILD_PIPELINE.md](./docs/BUILD_PIPELINE.md)。以下命令从仓库根目录执行。
+
+统一开发构建入口（当前宿主支持的目标、测试、单文件检查与报告归档；要求 PowerShell 7）：
+
+```powershell
+# Windows：构建 Windows 与 Android
+pwsh -NoProfile -File ./build.ps1
+```
+
+```bash
+# Linux / macOS / Bash
+./build.sh
+```
+
+每次输出到 `outputs/build-review/<runId>`，最新结果见 `latest.json`。
+`-Clean` 保留旧产物，`-SkipTests` 会标记未经完整验证；候选包须来自成功且已验收的 run。
+
+各平台独立构建命令：
 
 Android Debug APK：
 
@@ -174,13 +191,14 @@ Push-Location work/phone-deck/android
 Pop-Location
 ```
 
-Windows 接收端：
+Windows 接收端与控制台：
 
 ```powershell
 dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
 
 dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
-  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true
 
 dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj `
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
@@ -196,7 +214,7 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 接下来的开发顺序
 
-1. B01 统一构建入口，补齐控制台、Android 单元测试和 CI 产物归档。
+1. B01 统一构建入口实现待独立验收（包含 Windows 控制台发布/原生依赖内嵌、Android 单元测试、CI 报告归档、重复 CI 处理）。
 2. B02/B03 统一版本校验，建立候选打包、签名渠道和发布流程。
 3. T01/T02 核对第二台旧电脑接入与会话/授权行为；有硬件时尽早开展 Mac/iOS 原型。
 4. 按 M1–M4 推进无线首次配对、多设备、Mac/iOS、多输入法、触发模式和主题。

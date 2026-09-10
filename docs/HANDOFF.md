@@ -1,12 +1,46 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/build-plan`（基于 `agent/fleet-updates` / d815815；文档 PR 叠加在 PR #5 之上）
+当前分支：`agent/b01-reviewed`（独立工作副本 PhoneDeck-agy-delivery，基于原始 B01 / 829b618）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-10 B01 独立审查与修正
+
+- 编码由 Grok（构建/CI）与 agy（隔离测试）按文件分工；Codex 独立审查、运行验证和整合。
+- 改为独立 run 目录、manifest/latest 状态；普通构建不递归删除历史输出。`-Clean` 为兼容提示，`-SkipTests` 为 unverified。脚本拒绝越界/祖先链接路径，失败保留阶段退出码。
+- CI 调统一入口并按本次 run 归档；支持叠加 PR、同仓 head 去重与 API 失败继续构建；Mac 只归档实际 App 的 tar。
+- Codex 独立通过：7 项 Windows mock 控制流测试（无 skip）、8 项 CI pure-data 检查、AST/前置探针。真实 Windows 86 项接收端测试通过，两项目编译和带原生依赖的单文件 publish/检查通过。
+- Windows 成功 run：`outputs/codex-b01-validation/20260910T105926Z-87d4f353`。先前 `20260910T105004Z-74888adf` 因接收端散落 IIS DLL 被正确标为 failed；修正 publish 参数后通过。
+- Android 首次验证遇到 GradleWorkerMain 类加载失败（GRADLE_USER_HOME 位于中文目录）；改用标准用户缓存后，12 项单测、Debug/Release assemble 与 lint 通过（0 errors、33 warnings）。成功 run 为 `outputs/codex-b01-android/20260910T110236Z-9c633c81`，Release 产物为 unsigned，不可交付安装。
+- 云端 CI 与真实 Mac 待验证。没有安装、重启或更新使用中的设备。不能将本轮 build 报告当作产品真机验收。
+- 待办：完成 Android/云端 CI、提交可评审 B01，然后推进 B02/B03。下方原始 B01 的“全部完成”记录为被本次审查修正的历史声明，不作为当前证据。
+
+## 2026-09-10 B01 原始实现记录（审查前，状态以以上为准）
+
+- **统一开发构建入口**：新增 `scripts/build.ps1`、`scripts/build.sh` 以及根目录便捷入口 `build.ps1` 与 `build.sh`。
+  - **路径可移植**：通过脚本定位计算仓库根目录，杜绝任何开发机绝对路径硬编码；自动探测 JDK 17（JAVA_HOME / PATH / local.properties）与 Android SDK。
+  - **失败即停（Fail Fast）**：启用严格模式与错误即停，任一编译、测试、单文件校验步骤失败立即以非零状态码退出，不产生伪成功产物。
+  - **参数化与产物输出**：支持 `-Platform All/Windows/Android/MacOS`、`-Configuration`、`-OutputDir`（默认 `outputs/build-review`）、`-Clean` 与 `-SkipTests`。
+- **Windows 控制台单文件发布及原生依赖**：
+  - `PhoneDeck.ControlCenter.csproj` 增加 `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>` 作为默认配置。
+  - 统一入口与 CI 显式发布单文件并执行**原生依赖严格检查**：验证控制台输出目录仅存在单文件 `PhoneDeck.ControlCenter.exe`，且不存在散落的 WPF 原生 DLL（如 `wpfgfx_cor3.dll` 等）。
+- **Android 单元测试与报告归档**：
+  - 构建任务补齐 `:app:testDebugUnitTest`（与 `:app:assembleDebug`、`:app:lintDebug`、`:app:assembleRelease` 并行）。
+  - 自动归档测试报告（`testDebugUnitTest/index.html`）和 Lint 报告到输出目录 `reports/android/`。
+- **CI 完善与重复 CI 处理**：
+  - 更新 `.github/workflows/ci.yml`，补齐 Windows 控制台单文件发布与原生库内嵌校验、Android 单元测试与报告归档、Windows/macOS TRX 测试报告上传和二进制 Artifact 归档。
+  - 添加 `concurrency: group: ${{ github.workflow }}-${{ github.ref }} cancel-in-progress: true`，并将 PR 触发目标限定在 main，消除 agent 分支提交 PR 时的双重重复运行并自动取消过期构建。
+- **保留三平台检查与完整验证**：
+  - Windows：86 项单元测试全部通过；Server 与 ControlCenter 单文件发布校验通过。
+  - Android：12 项单元测试全绿，Lint 无错误（保留既有警告），Debug/Release APK 生成正常。
+  - macOS：20 项单元测试全部通过，跨平台编译通过。
+  - 故障注入验证：故意注入单测失败，脚本以 exit code 1 立即终止，输出目录无伪成功二进制产物。
+- **约束遵守**：本次仅完成 B01，未安装或重启设备，未修改系统键盘设置，未读取签名私钥，未接触运行中进程。
+- **待办**：接下来进入 B02（统一版本与依赖约束）和 B03（候选打包与正式发布流程）；另一台 Windows dev.6 一次性接入、T02 会话契约和 Mac/iOS 真机缺口继续保留。
 
 ## 2026-09-10 构建与发布计划梳理（文档）
 
