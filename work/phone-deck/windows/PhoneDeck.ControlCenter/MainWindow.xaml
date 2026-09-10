@@ -270,6 +270,7 @@
                     <TextBlock Text="PHONEDECK / 设备" FontFamily="{StaticResource FontFamilyMono}" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource BrushSystemBlue}"/>
                     <TextBlock Text="设备与身份" Style="{StaticResource TextPageTitle}" Margin="0,6,0,4"/>
                     <TextBlock Text="这台电脑的稳定身份、平台能力与当前手机连接状态。" Style="{StaticResource TextMuted}" Margin="0,0,0,22"/>
+                    <Button Content="更新所有设备" Style="{StaticResource BlueButton}" HorizontalAlignment="Left" Margin="0,0,0,18" Click="FleetUpdates_Click"/>
                     <Border Style="{StaticResource GlassCard}" Padding="28">
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource BrushGraphite}"><Path Data="{StaticResource IconComputer}" Width="28" Height="28" Stretch="Uniform" Stroke="White" StrokeThickness="1.7" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>

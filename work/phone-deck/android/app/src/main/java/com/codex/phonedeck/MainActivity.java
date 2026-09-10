@@ -2204,6 +2204,30 @@ public final class MainActivity extends Activity {
         if (computerId == null || computerId.isBlank() || health == null) {
             return;
         }
+        if (FleetUpdateActivity.opened) return;
+        JSONObject update = health.optJSONObject("updates");
+        SharedPreferences updatePrefs = getSharedPreferences("PhoneDeckUpdates", MODE_PRIVATE);
+        boolean retryUpdate = update != null && update.optBoolean("supported")
+                && updatePrefs.getStringSet("pending_devices", java.util.Collections.emptySet()).contains(computerId)
+                && update.optLong("sequence", 0) < updatePrefs.getLong("pending_sequence", 0)
+                && System.currentTimeMillis() - updatePrefs.getLong("last_auto_retry", 0) > 60000;
+        if (retryUpdate && hasWindowFocus() && !isVoiceStarting() && !dictationActive && !typelessInFlight
+                && (audioStreamer == null || !audioStreamer.isRunning())) {
+            updatePrefs.edit().putLong("last_auto_retry", System.currentTimeMillis()).apply();
+            startActivity(new Intent(this, FleetUpdateActivity.class).putExtra("resume", true));
+            return;
+        }
+        String updateRequest = update == null ? "" : update.optString("requestId", "");
+        if (!updateRequest.isBlank() && !"null".equals(updateRequest) && hasWindowFocus()
+                && !isVoiceStarting() && !dictationActive && !typelessInFlight
+                && (audioStreamer == null || !audioStreamer.isRunning())) {
+            SharedPreferences seen = getSharedPreferences("PhoneDeckUpdates", MODE_PRIVATE);
+            if (!updateRequest.equals(seen.getString("seen_" + computerId, ""))) {
+                seen.edit().putString("seen_" + computerId, updateRequest).apply();
+                startActivity(new Intent(this, FleetUpdateActivity.class).putExtra("sourceId", computerId));
+                return;
+            }
+        }
         JSONObject shared = health.optJSONObject("shared");
         boolean requested = shared != null && shared.optBoolean("requested", false);
         if (!requested) {

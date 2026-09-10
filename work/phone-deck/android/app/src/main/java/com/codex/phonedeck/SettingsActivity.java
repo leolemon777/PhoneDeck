@@ -122,6 +122,10 @@ public final class SettingsActivity extends Activity {
                 () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(10)));
 
         page.addView(keepAliveRow(), fullWidthMargins(dp(10)));
+        TextView updateSummary = summaryText();
+        updateSummary.setText("一次发起，逐台查看结果");
+        page.addView(navRow("↻", "设备更新", updateSummary,
+                () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(10)));
         return wrapInScroll(page);
     }
 
