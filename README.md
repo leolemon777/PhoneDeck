@@ -142,6 +142,7 @@ PhoneDeck/
 ├─ docs/
 │  ├─ HANDOFF.md               # 当前状态与 Agent 接力说明
 │  ├─ SETUP.md                 # 新电脑搭建、构建和运行
+│  ├─ BUILD_PIPELINE.md        # 完整 build、候选打包、发布与更新门槛
 │  ├─ MACOS_SETUP.md           # Mac 构建、权限、配对与验收
 │  ├─ WINDOWS_WIFI_DEPLOY.md   # 第二/第三台 Windows 无线部署
 │  └─ ARCHITECTURE.md          # 当前与目标架构
@@ -162,13 +163,15 @@ PhoneDeck/
 
 ## 快速构建
 
-详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)。
+详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)，完整流程、签名渠道及 CI 缺口见
+[docs/BUILD_PIPELINE.md](./docs/BUILD_PIPELINE.md)。以下命令从仓库根目录执行。
 
 Android Debug APK：
 
 ```powershell
-cd work\phone-deck\android
-.\gradlew.bat :app:assembleDebug
+Push-Location work/phone-deck/android
+./gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+Pop-Location
 ```
 
 Windows 接收端：
@@ -180,7 +183,8 @@ dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj 
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
 dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj `
-  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
 macOS 接收端（在 Mac 的仓库根目录执行）：
@@ -192,19 +196,20 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 接下来的开发顺序
 
-1. 在 macOS 14.2+ 构建 2.0.0-dev.2，安装 BlackHole 2ch 和 Typeless，完成权限与 48 kHz 配置。
-2. 用 USB 完成 Mac 首次配对，拔线后验证 Wi-Fi 快捷键和两套语音模式。
-3. 让两台 Windows 和一台 Mac 同时接收共享音频，分别及同时触发本机 Typeless 做三机验收。
-4. 完成 20 轮模式切换、断网/睡眠/重启恢复和至少两小时锁屏共享测试。
-5. 补齐标准 mDNS/Bonjour、凭据撤销/重配与 USB 共享切换器实测。
-6. 完成 1.7/1.8 的多配置、自动切换和受控自动化后，再完成 macOS Developer ID 签名、公证与安装包。
+1. B01 统一构建入口，补齐控制台、Android 单元测试和 CI 产物归档。
+2. B02/B03 统一版本校验，建立候选打包、签名渠道和发布流程。
+3. T01/T02 核对第二台旧电脑接入与会话/授权行为；有硬件时尽早开展 Mac/iOS 原型。
+4. 按 M1–M4 推进无线首次配对、多设备、Mac/iOS、多输入法、触发模式和主题。
+5. B05/B06 完成逐设备升级、故障恢复、干净安装与开源发行验收。
+
+依赖和验收标准以 [总计划第 0 章](./spec%20plan.markdown) 为准；构建工程任务详见 0.21。
 
 ## 关键安全边界
 
 - 不接受手机发送任意 PowerShell、CMD 或 shell 命令。
 - 键位、宏、文本长度和运行目标必须由电脑端验证。
 - USB 本地入口保持只监听 localhost。
-- 局域网入口未来必须使用显式配对和消息认证，不能直接暴露当前无鉴权接口。
+- 局域网入口保持 HTTPS、配对令牌、证书固定和目标 ID 校验；无鉴权入口仅限本机。
 - 不提交 Android 签名密钥、ADB 私钥、令牌、录音或个人 Typeless 配置。
 
 ## 外部依赖

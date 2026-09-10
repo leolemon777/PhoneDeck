@@ -1,190 +1,134 @@
 # 新电脑开发、构建与运行
 
-## 1. 克隆仓库
+核对日期：2026-09-10。本文负责开发环境和运行接线；编译、测试、签名、打包、CI 与发布门槛统一见
+[BUILD_PIPELINE.md](./BUILD_PIPELINE.md)。当前 Android/Windows 可开发运行，Mac 为待真机验收的预览，iOS 尚无工程。
+
+## 1. 获取源码
 
 ```powershell
 git clone https://github.com/leolemon777/PhoneDeck.git
 cd PhoneDeck
+git status
 ```
 
-私有仓库需要新电脑上的 GitHub 账号具有访问权限，并使用 GitHub CLI、Git Credential Manager 或 SSH 登录。
+仓库当前为私有，需要账号访问权限。使用 GitHub CLI、Git Credential Manager 或 SSH 登录。
+确认所需分支和 commit：当前 dev.17/dev.11 改动在 [PR #5](https://github.com/leolemon777/PhoneDeck/pull/5)，
+核对时尚未合并；默认克隆 main 不代表取得最新候选。开始修改前按 AGENTS.md 建立独立分支。
 
 ## 2. 开发依赖
 
-### Android
+| 目标 | 编译需要 | 真机运行另需 |
+|---|---|---|
+| Android | JDK 17、SDK Platform 35、Build Tools 35.0.0、仓库 Gradle Wrapper 8.9；Android Studio 可选 | 手机录音权限；USB 路径需要 Platform Tools/ADB |
+| Windows 接收端和控制台 | Windows x64、.NET 8 SDK | VB-CABLE、所选语音输入法；自包含发布不要求预装 .NET |
+| macOS 接收端 | Mac、.NET SDK、zsh/codesign；使用独立 macOS 工程 | macOS 14.2+、BlackHole、输入法、辅助功能及相关权限；见 [MACOS_SETUP.md](./MACOS_SETUP.md) |
+| 签名更新包 | PowerShell 7、已构建 EXE/APK、匹配渠道的签名材料 | 已接入更新能力的 Windows/Android |
 
-- JDK 17；
-- Android SDK Platform 35；
-- Android SDK Build Tools；
-- Android SDK Platform Tools（ADB）；
-- 可选 Android Studio。
+Android 设置 `JAVA_HOME` 和 `ANDROID_HOME`，或在 `work/phone-deck/android/local.properties`
+填写本机 SDK 路径。不要复制其他电脑的绝对路径；该文件不提交 Git。无需安装全局 Gradle。
+Windows 接收端不能直接当作 Mac 程序运行；Mac 源码位于 `work/phone-deck/macos/PhoneDeck.Receiver`。
+VB-CABLE、BlackHole 与输入法不属于编译依赖，也不随本仓库分发。
 
-仓库包含 Gradle Wrapper 8.9，不需要单独安装全局 Gradle。
+## 3. 构建与 Android 签名渠道
 
-确保 `JAVA_HOME` 指向 JDK 17，并设置 `ANDROID_HOME` 或在 `work/phone-deck/android/local.properties` 写入本机 SDK 路径。`local.properties` 不会提交。
+从仓库根目录执行 [构建手册第 4 节](./BUILD_PIPELINE.md#4-当前可执行的构建命令) 的命令。
+Android 包含 assemble、单元测试与 lint；Windows 同时发布接收端和控制台。
+统一更新只替换两个 EXE，控制台须带 `IncludeNativeLibrariesForSelfExtract=true` 发布参数。
 
-### Windows 接收端
-
-- Windows 10/11 x64；
-- .NET 8 SDK；
-- VB-CABLE（运行时外部依赖）；
-- Typeless（运行时外部依赖）。
-
-自包含发布后的 PhoneDeck.Server 不要求目标电脑预装 .NET，但开发和构建需要 SDK。
-
-### macOS
-
-当前没有 macOS 接收端。Android App 可以在 macOS 上构建，但 Windows 接收端依赖 NAudio、WASAPI、SendInput 和 Windows 蓝牙 API，不能直接作为 Mac 程序运行。
-
-## 3. Android 构建
-
-```powershell
-cd work\phone-deck\android
-.\gradlew.bat :app:assembleDebug
-.\gradlew.bat :app:lintDebug
-```
-
-Debug APK：
+仓库只包含 `work/phone-deck/signing.properties.example`。本机项目签名配置的位置为：
 
 ```text
-work/phone-deck/android/app/build/outputs/apk/debug/app-debug.apk
+work/phone-deck/signing/signing.properties
+work/phone-deck/signing/phonedeck-release.jks
 ```
 
-安装到已开启 USB 调试的手机：
+密钥文件名以实际配置为准。存在项目签名配置时，当前 Gradle 的 debug/release 共用该签名。
+缺少配置时，debug 使用本机开发证书，release 没有发行签名。不同电脑生成的 debug 包不保证能互相覆盖。
+
+当前 Samsung dev.17 使用开发证书渠道（指纹前缀 `653884d0…`）；历史长期证书
+（`df327953…`）是另一渠道。不要把恢复历史密钥等同于能覆盖当前手机。
+安装前用 SDK Build Tools 的 `apksigner verify --print-certs` 核对候选 APK 与目标安装渠道。
+签名不匹配时停止覆盖，保留应用数据，先明确渠道迁移方案。
+
+确认签名匹配后，开发者可从仓库根目录执行：
 
 ```powershell
 adb devices -l
-adb install -r work\phone-deck\android\app\build\outputs\apk\debug\app-debug.apk
+adb install -r work/phone-deck/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-PhoneDeck 1.5.0 起使用固定的项目签名。仓库只包含
-`work/phone-deck/signing.properties.example`，不包含私钥或真实密码。新电脑必须通过安全的
-离线方式恢复以下两个文件：
+这只是 USB 开发安装；产品自身更新必须另行验证下载、验签、系统安装确认与版本回报。
+正式公开发行需要正式签名渠道和候选验收，不能直接发布临时 debug 包。
 
-```text
-work/phone-deck/signing/phonedeck-release.jks
-work/phone-deck/signing/signing.properties
-```
+## 4. Windows 首次运行
 
-本机备份当前位于 `E:\Desktop\PhoneDeck-Signing-Backup`。复制到新电脑后应放回上面的
-Git 忽略目录；不要改名、重新生成或提交 GitHub。Gradle 检测到本地配置后，会让 Debug
-和 Release 使用同一长期签名。当前证书 SHA-256 为：
-
-```text
-df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f
-```
-
-如果缺少本地签名配置，Debug 会回退到该电脑自己的 Android Debug 证书，不能用于覆盖
-手机中的长期签名版本；此时生成的 Release 也不能作为正式包交付。
-
-## 4. Windows 构建
-
-语音会话状态机测试：
-
-```powershell
-dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
-```
-
-普通构建：
-
-```powershell
-dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release
-```
-
-单文件自包含发布：
-
-```powershell
-dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true
-```
-
-默认发布目录位于项目的 `bin/Release` 下。`bin` 和 `obj` 不提交 Git。
-
-## 5. Windows 运行链路
-
-1. 从 VB-Audio 官方渠道安装 VB-CABLE；必要时以管理员身份安装并重启。
-2. 在 Windows 声音设备中确认 `CABLE Input` 和 `CABLE Output` 存在。
-3. 安装并启动语音输入软件（默认 Typeless；豆包、微信输入法等可选，见 [VOICE_ENGINES.md](./VOICE_ENGINES.md)）。
-4. 在该软件中选择 `CABLE Output` 作为麦克风（Typeless 之外无法自动校验的软件，请自行确认）。
-5. 启动 `PhoneDeck.Server.exe`。
-6. 连接并授权 Android 手机。
-7. 建立 ADB 反向转发：
+1. 将同一候选构建的接收端与控制台放到独立运行目录，保留已有 `data`；不要直接覆盖正在运行的 EXE。
+2. 自行安装 VB-CABLE，确认 `CABLE Input` 和 `CABLE Output` 存在，按驱动要求重启。
+3. 安装并启动语音输入法，在输入法中选择 `CABLE Output` 作为麦克风。
+4. 启动控制台/接收端；若控制台已启动接收端，不再额外启动第二个服务器进程。
+5. 手机开启 USB 调试，解锁并批准该电脑的调试密钥；运行下面的开发连接命令。
 
 ```powershell
 adb reverse tcp:8765 tcp:8765
 adb shell am start -n com.codex.phonedeck/.MainActivity
 ```
 
-8. 手机先显示 USB 已连接，再点击大号“开始说话”主按钮。启动阶段同一按钮会变为“取消启动”。
-9. 听写中同一主按钮会变为“停止说话”，点击它完成本次文字；下方“暂停”会停止手机麦克风采集但保持会话，“继续”恢复采集。
+6. 完成手机与该电脑的配对，确认电脑名称和目标；首次 USB 配对后再验证同一 Wi-Fi 下的连接。
+7. 在真正的文字输入框放置光标，分别验证快捷键、点击听写和按住听写。
 
-如果手机显示“USB 已连接 · 缺少 VB-CABLE”，语音按钮不会启动语音输入。安装并启用 VB-CABLE 后，还必须在 Typeless 设置中把麦克风选为 `CABLE Output (VB-Audio Virtual Cable)`；保持“Auto-detect / 系统默认麦克风”会被 PhoneDeck 拒绝，以防误录电脑自带麦克风。切换其他引擎或覆盖快捷键见 `data` 目录下 `voice-engine-settings.json` 与 [VOICE_ENGINES.md](./VOICE_ENGINES.md)。
-
-### 双语音模式
-
-- “手机控制听写”保持原行为：先选当前电脑，再由手机按钮启动/停止该电脑的语音引擎（电脑端配置，默认 Typeless）。
-- “共享麦克风”需每次打开 App 后手动开启；手机向所有在线且音频就绪的电脑供音，
-  Typeless 只由各电脑自己的快捷键控制。不要期待开启共享本身产生文字。
-- 共享运行时 Android 会显示常驻通知；锁屏后应保留通知。通知中的“停止共享”和手机主
-  按钮都会关闭全部流并释放麦克风。App 或手机重启后不会自动采音。
-- Windows 端健康检查需包含 `sharedMicrophone`，且 `audio.available=true`；旧接收端会
-  被跳过并提示需要更新。蓝牙只传快捷键，不参与音频扇出。
-10. 电脑上先把光标放到真正的文字输入框。
-
-服务器健康检查：
+健康检查：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/api/health
 ```
 
-应返回 `ok: true`，并显示找到 `CABLE Input (VB-Audio Virtual Cable)`。
-1.5.0 候选版还会返回 `protocolVersion: 2`、稳定 `computerId`、平台、架构、能力列表，
-以及当前音频/Typeless 会话状态。
+检查 `ok`、版本、`computerId`、能力及音频状态。LAN 使用 HTTPS 8766、配对令牌和证书固定；
+不要为了连接方便将无鉴权 HTTP 8765 暴露到局域网。
 
-## 6. USB 重连
+Typeless 默认输入设备/选错设备可能导致语音启动被拒绝；确认其明确使用虚拟麦克风。
+其他输入法按 [VOICE_ENGINES.md](./VOICE_ENGINES.md) 配置档案、快捷键并实际验证，实验档案不等于正式兼容。
 
-USB 断开或 ADB transport 改变后，`adb reverse` 会丢失。发行包可将 `scripts/windows/AutoReconnectUsb.ps1` 复制到 `PhoneDeck.Server.exe` 同一目录，并在启动服务器时以隐藏 PowerShell 进程启动。
+## 5. 语音模式与多设备
 
-该脚本只负责恢复端口转发和唤醒 App。1.5.0 候选源码已经加入显式音频会话、
-幂等 Typeless 开始/停止和断流清理，但仍必须按 [HANDOFF.md](./HANDOFF.md) 使用真实
-手机完成连续断线验收，不能只凭构建结果视为稳定。
+- 手机控制听写：先选目标电脑，手机按钮启动/停止该电脑的输入法；分别检查点击与按住操作的尾音完整性。
+- 共享麦克风：手机向已连接且具备音频能力的电脑供音；每台电脑通过自己的输入法快捷键控制转写。
+- 现有桌面共享请求可由手机观察并联动，因此不能沿用“每次打开 App 必须手动开启”的旧说明。
+  手机授权、用户停止、重启与持久请求的具体契约仍是总计划 T02 的验收项。
+- 共享采音显示 Android 常驻通知；验证手机/通知停止后采音和连接实际结束。
+  蓝牙只传快捷键，不参与共享音频。
 
-## 6.1 1.5.0 快捷键配置
+每台电脑有独立身份和配对记录，不要复制另一台电脑的 `data` 来配置新电脑。
+旧电脑缺少更新接口时，先按 [FLEET_UPDATES.md](./FLEET_UPDATES.md) 一次性接入；
+之后才可一端发起统一更新。首次接入脚本要求已有电脑身份，不是全新用户安装器。
+全新安装、五机混合、Mac/iOS 的完整发布流程仍按总计划建设。
 
-快捷键布局保存在 Android 应用私有目录中的 `shortcut-config.json`，普通文件管理器不会
-直接看到。首次从 1.4.0 覆盖安装时会按原布局生成默认配置，原有语音模式继续保存在
-独立 `SharedPreferences` 中。不要为了测试清除 App 数据，否则会同时清除配置与语音模式。
+## 6. 重连、配置与故障定位
 
-配置损坏时 App 会保留 `shortcut-config.corrupt-<timestamp>.json` 并恢复默认布局。
-1.5.0 正式验收必须覆盖：编辑、隐藏、排序、新增、删除、单个恢复、全部恢复和重启持久化。
+USB 断开或 ADB transport 改变后可能需要重建 reverse。
+`scripts/windows/AutoReconnectUsb.ps1` 用于恢复转发和唤醒 App；先检查控制台现有重连机制，
+避免叠加多个看门狗。真实连续断线、锁屏、输入法与音频恢复仍需硬件验收。
 
-## 7. 蓝牙
+快捷键布局保存在 Android 私有目录的 `shortcut-config.json`，普通文件管理器不可直接访问。
+测试前使用应用支持的配置导出功能；不要用清除应用数据修复连接问题，否则会丢失配对和设置。
+配置损坏时程序会保留损坏文件并恢复默认布局，迁移仍需验证编辑、排序、隐藏与重启持久化。
 
-当前蓝牙只发送快捷键，不传输音频。Windows 与手机需要先在系统设置中人工确认配对码。不要绕过系统配对确认。
+| 现象 | 检查方向 |
+|---|---|
+| ADB unauthorized | 解锁手机并批准本机调试密钥 |
+| USB 无法连接 | ADB 设备在线、reverse 转发、服务器健康；不要绕过配对 |
+| 音量条有变化却没有文字 | 输入法是否启动、麦克风是否为 CABLE Output、目标输入框与快捷键 |
+| 音频设备不可用 | VB-CABLE 驱动与 CABLE Input 播放端是否启用 |
+| 快捷键对管理员窗口无效 | Windows 权限隔离会限制低权限进程注入输入 |
+| APK 无法覆盖安装 | 比较签名、versionCode 与系统安装结果，保留现有数据 |
+| 某台电脑不能统一更新 | 检查是否仍为无更新接口的旧版本，先完成首次接入 |
 
-## 8. 新电脑常见问题
+蓝牙使用前必须在系统设置中确认配对码；它不是音频传输的替代方案。
 
-- `adb devices` 显示 unauthorized：解锁手机并允许该电脑的 USB 调试密钥。
-- 手机显示连接失败：重新运行 `adb reverse tcp:8765 tcp:8765`。
-- 手机音量条跳动但 Typeless 没文字：检查 Typeless 麦克风是否仍是 `CABLE Output`。
-- 健康检查显示没有音频设备：重新检查 VB-CABLE 驱动和 `CABLE Input` 播放端。
-- 快捷键对管理员程序无效：Windows UIPI 会阻止低权限程序向高权限窗口注入输入。
-- Release APK 无法覆盖正式版：签名不同；不要卸载用户正式版，除非已经备份并明确接受应用数据丢失。
+## 7. 开发迁移与秘密材料
 
-## 9. 新电脑迁移与秘密材料
+需要维护同一签名渠道时，通过安全离线方式单独迁移相应密钥与配置，放回 Git 忽略的
+`work/phone-deck/signing/`。Android 安装签名与更新清单 RSA 私钥是两套材料，职责不同。
+不要通过 GitHub、Issue、PR 或聊天传输私钥和密码；公开公钥/证书指纹可用于核验。
 
-必须通过加密离线介质单独迁移 PhoneDeck 长期签名密钥和对应
-`signing.properties`，然后放入 Git 忽略的 `work/phone-deck/signing/`。不要通过 GitHub、
-Issue、PR、聊天或普通网盘传输它们。
-
-以下内容不应复制到新电脑或提交 GitHub：
-
-- ADB 私钥；
-- GitHub/API 令牌；
-- Typeless 个人配置；
-- 手机录音和测试语音；
-- `bin`、`obj`、`build`、`.gradle`、`artifacts`、`dist`；
-- 第三方驱动安装包。
+新电脑自行建立 ADB 信任和登录凭据，不迁移另一台机器的 ADB 私钥、访问令牌、个人输入法配置或录音。
+`bin`、`obj`、`build`、`.gradle`、`artifacts`、`dist` 和第三方驱动安装包不提交 Git；从源码重建产物。
