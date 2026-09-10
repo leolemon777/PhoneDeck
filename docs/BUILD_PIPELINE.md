@@ -2,7 +2,7 @@
 
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
-本轮更新文档，不安装软件、不修改 CI、不升级依赖或发布正式版本。
+B01 当前在独立分支 `agent/b01-reviewed` 实施并验证；已修改构建入口与 CI，尚未发布正式版本。
 
 ## 1. 当前基线
 
@@ -58,29 +58,43 @@
 环境路径通过 `JAVA_HOME`、`ANDROID_HOME` 或本机 `local.properties` 配置。
 不复制本开发机的 E 盘路径到 CI；不把驱动或输入法安装当作编译条件。
 检查环境可用 `java -version`、`dotnet --info` 和 `./gradlew --version`。
+Windows 验证发现 Gradle 缓存目录包含中文时可能无法加载 GradleWorkerMain；保留源码中文路径，
+将 `GRADLE_USER_HOME` 配为标准用户缓存等 ASCII 路径后已通过完整 Android 构建。无需把本机盘符写入脚本。
 目前没有 `global.json` 或依赖锁文件；Gradle Wrapper 已固定版本但没有配置分发包 SHA-256。
 后续 B02 固定可复现工具链，同时按总计划的运行时生命周期要求制定迁移验证，不能把当前 .NET 8 配置无限沿用。
 
 ## 4. 当前可执行的构建命令
 
-以下以仓库根目录为起点。`outputs/build-review` 是开发构建目录，正式候选包应改为独立的发布编号/commit 目录，防止混入旧文件。
+以下以仓库根目录为起点。统一入口要求 PowerShell 7，默认在 `outputs/build-review/<runId>` 生成独立开发产物。
 B01 已实现统一开发构建入口脚本，支持跨平台路径可移植、失败即停、单文件原生依赖检查及报告归档。
 
 ### 统一开发构建入口（B01 实现）
 
-Windows / PowerShell 环境：
+Windows / PowerShell 7 环境：
 
 ```powershell
-# 全量构建、测试、单文件检查与报告归档（支持 -Clean、-SkipTests、-Platform All/Windows/Android/MacOS）
-./build.ps1 -Clean
+# 当前宿主支持的目标；Windows 为 Windows + Android
+pwsh -NoProfile -File ./build.ps1
 ```
 
 Linux / macOS / Bash 环境：
 
 ```bash
-# 全量构建与测试
-./build.sh --clean
+# 仍需安装 pwsh；macOS 为 MacOS + Android，Linux 为 Android
+./build.sh
 ```
+
+`-Platform Windows/Android/MacOS` 可选单个目标，不受宿主支持的显式目标会失败。
+`-Clean` 仅兼容提示新 run 已隔离，**不再删除旧输出**。`-SkipTests` 标记为 `unverified`，不能作为已验收候选。
+`-OutputDir` 只能指向仓库 `outputs` 的严格子目录，并拒绝祖先链接路径。
+
+每次 run 保存 `manifest.json`；输出根的 `latest.json` 记录最新状态、runId、相对目录、阶段、退出码、
+测试跳过标记和产物相对路径。失败状态不能当作可发布包；前置检查失败时可能没有 runDirectory。
+CI 通过构建步骤输出的本次 runDirectory 归档报告和开发包；Mac 使用只含 `.app` 的 tar 保留权限。
+本机构建测试：`pwsh -File scripts/tests/Test-BuildPipeline.ps1`（Windows 隔离 mock）；
+CI 辅助逻辑测试：`pwsh -File scripts/ci/Test-CiHelpers.puredata.ps1`。
+
+下面的分平台直接命令用于诊断，与统一入口的 run 归档目录不同；制作候选包应优先使用统一入口和对应 manifest。
 
 ### Android
 
@@ -105,6 +119,7 @@ dotnet build work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCe
 
 dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj `
   -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
   -o outputs/build-review/windows/server
 
 dotnet publish work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCenter.csproj `
@@ -193,7 +208,8 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 
 ## 7. 现有 CI 的真实覆盖与缺口
 
-依据 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，B01 完成后 CI 具备以下检查与归档能力：
+依据 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，当前分支配置以下检查。
+本地验证与云端作业分别记录在 HANDOFF；配置存在不等于云端运行已成功。
 
 | 项目 | 当前 CI | 下一步 |
 |---|---|---|
@@ -203,7 +219,7 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 | Mac | test + 当前运行器架构的 `.app` | B04 明确 arm64/x64 矩阵及正式签名边界；已归档 app 与 trx 报告 |
 | 包/版本/签名 | 未校验发行组合，也未生成统一更新包 | B02/B03 增加校验和失败用例 |
 | 产物与报告归档 | upload-artifact 归档各端二进制与测试/Lint 报告 | 已在 B01 完成 |
-| 重复 CI 与并发 | pull_request 针对 main，增加 concurrency cancel-in-progress | 已在 B01 完成 |
+| 重复 CI 与并发 | 任意 base 的 PR；同仓分支存在 open PR 时跳过 push 构建，API 查询失败保留构建；同事件过期运行取消 | 纯数据 helper 已验证；实际云端作业待确认 |
 | 正式发布 | 没有专用 Release workflow | B03 设计受保护签名/发布，不给 PR 私钥 |
 | iOS | 无 | M0 原型后在 B04 接入真实工程与 Mac 构建机 |
 
@@ -211,18 +227,18 @@ CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也
 
 ## 8. 实施顺序与验收门槛
 
-以下是总计划 0.21 的执行细化，目前 B01 已完成，负责人角色用于分工而非表示已经派发任务。
+以下是总计划 0.21 的执行细化，目前 B01 实现待独立验收，负责人角色用于分工而非表示已经派发任务。
 
 | 任务 | 依赖/负责人角色 | 具体交付 | 完成证据 | 状态 |
 |---|---|---|---|---|
-| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **已完成** |
+| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **实现待独立验收** |
 | B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 | 待实施 |
 | B03 候选包与发布 | B02；发布维护 | 首次安装/旧版接入/统一更新各自打包；签名渠道分离；产物报告；受保护发布流程 | 缺密钥、混渠道、漏控制台、错误版本、错误哈希均不产生可发布候选 | 待实施 |
 | B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 原型产生工程后再接入 CI；各平台独立签名任务 | 可重复构建各已实现目标，未支持组合明确排除 | 待实施 |
 | B05 多设备候选验收 | B03 + M0/T01/T02；测试角色 | 第二台旧电脑接入、两机升级、离线补更、取消/低磁盘/文件占用/断电恢复；音频与身份回归 | 逐设备版本/设置/身份及测试结果可追溯；未确认的安装不显示成功 | 待实施 |
 | B06 开源发行准备 | B03–B05 + M1–M4；维护角色 | 全新用户安装/卸载、许可证/资产清单、支持矩阵、SBOM、发行渠道、维护流程 | 支持矩阵内完成干净安装和升级，才能按 M5 声明稳定支持 | 待实施 |
 
-建议现在先做 B01（已完成），再做 B02/B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
+建议现在先做 B01（实现待独立验收），再做 B02/B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
 Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。

@@ -1,14 +1,25 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/b01-build-pipeline`（基于 `agent/build-plan` / bdc167f）
+当前分支：`agent/b01-reviewed`（独立工作副本 PhoneDeck-agy-delivery，基于原始 B01 / 829b618）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
 
-## 2026-09-10 B01 统一开发构建入口与 CI 完善
+## 2026-09-10 B01 独立审查与修正
+
+- 编码由 Grok（构建/CI）与 agy（隔离测试）按文件分工；Codex 独立审查、运行验证和整合。
+- 改为独立 run 目录、manifest/latest 状态；普通构建不递归删除历史输出。`-Clean` 为兼容提示，`-SkipTests` 为 unverified。脚本拒绝越界/祖先链接路径，失败保留阶段退出码。
+- CI 调统一入口并按本次 run 归档；支持叠加 PR、同仓 head 去重与 API 失败继续构建；Mac 只归档实际 App 的 tar。
+- Codex 独立通过：7 项 Windows mock 控制流测试（无 skip）、8 项 CI pure-data 检查、AST/前置探针。真实 Windows 86 项接收端测试通过，两项目编译和带原生依赖的单文件 publish/检查通过。
+- Windows 成功 run：`outputs/codex-b01-validation/20260910T105926Z-87d4f353`。先前 `20260910T105004Z-74888adf` 因接收端散落 IIS DLL 被正确标为 failed；修正 publish 参数后通过。
+- Android 首次验证遇到 GradleWorkerMain 类加载失败（GRADLE_USER_HOME 位于中文目录）；改用标准用户缓存后，12 项单测、Debug/Release assemble 与 lint 通过（0 errors、33 warnings）。成功 run 为 `outputs/codex-b01-android/20260910T110236Z-9c633c81`，Release 产物为 unsigned，不可交付安装。
+- 云端 CI 与真实 Mac 待验证。没有安装、重启或更新使用中的设备。不能将本轮 build 报告当作产品真机验收。
+- 待办：完成 Android/云端 CI、提交可评审 B01，然后推进 B02/B03。下方原始 B01 的“全部完成”记录为被本次审查修正的历史声明，不作为当前证据。
+
+## 2026-09-10 B01 原始实现记录（审查前，状态以以上为准）
 
 - **统一开发构建入口**：新增 `scripts/build.ps1`、`scripts/build.sh` 以及根目录便捷入口 `build.ps1` 与 `build.sh`。
   - **路径可移植**：通过脚本定位计算仓库根目录，杜绝任何开发机绝对路径硬编码；自动探测 JDK 17（JAVA_HOME / PATH / local.properties）与 Android SDK。
