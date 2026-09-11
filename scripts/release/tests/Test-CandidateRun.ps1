@@ -89,6 +89,125 @@ $TestsPassed = 0
 $TestsFailed = 0
 $TestsSkipped = 0
 
+function Get-GitWorktreeProvenanceDefinition {
+    param([Parameter(Mandatory)][string]$ScriptPath)
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($ScriptPath, [ref]$tokens, [ref]$errors)
+    if ($errors -and $errors.Count -gt 0) {
+        throw "Failed to parse New-CandidateRun.ps1: $($errors[0].Message)"
+    }
+    $fn = $ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'Get-GitWorktreeProvenance'
+        }, $true) | Select-Object -First 1
+    if ($null -eq $fn) {
+        throw 'Get-GitWorktreeProvenance not found in New-CandidateRun.ps1'
+    }
+    return [scriptblock]::Create($fn.Extent.Text)
+}
+
+function New-TempGitRepo {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Dirty
+    )
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    & git -C $Path init --quiet
+    if ($LASTEXITCODE -ne 0) { throw "git init failed for $Path" }
+    & git -C $Path config user.email 'candidate-run-test@example.com'
+    & git -C $Path config user.name 'CandidateRunTest'
+    $tracked = Join-Path $Path 'tracked.txt'
+    Set-Content -LiteralPath $tracked -Value "tracked-$([Guid]::NewGuid().ToString('N'))" -NoNewline
+    & git -C $Path add -- tracked.txt
+    if ($LASTEXITCODE -ne 0) { throw "git add failed for $Path" }
+    & git -C $Path commit --quiet -m 'init'
+    if ($LASTEXITCODE -ne 0) { throw "git commit failed for $Path" }
+    if ($Dirty) {
+        Set-Content -LiteralPath (Join-Path $Path 'dirty-untracked.txt') -Value 'dirty'
+        $mod = Get-Content -LiteralPath $tracked -Raw
+        Set-Content -LiteralPath $tracked -Value ($mod + "`ndirty-edit") -NoNewline
+    }
+}
+
+Write-Host "Running Provenance Regression (clean/dirty temp git; isolated function extract)..."
+. (Get-GitWorktreeProvenanceDefinition -ScriptPath $CoreScript)
+
+# Old pattern must throw on AutomationNull (clean status / empty pipeline).
+$automationNull = & { }
+$oldPatternThrew = $false
+try {
+    $null = -not [string]::IsNullOrWhiteSpace(([string]$automationNull).Trim())
+} catch {
+    if ("$_" -match 'null-valued expression') { $oldPatternThrew = $true }
+    else { throw "Unexpected old-pattern error: $_" }
+}
+if (-not $oldPatternThrew) {
+    throw 'Expected old ([string]$statusOut).Trim() pattern to throw on AutomationNull'
+}
+
+$provRoot = Join-Path $CurrentTestRoot 'provenance-git'
+$cleanRepo = Join-Path $provRoot 'clean'
+$dirtyRepo = Join-Path $provRoot 'dirty'
+$nonGitRepo = Join-Path $provRoot 'nongit'
+New-TempGitRepo -Path $cleanRepo
+New-TempGitRepo -Path $dirtyRepo -Dirty
+New-Item -ItemType Directory -Path $nonGitRepo -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $nonGitRepo 'not-a-repo.txt') -Value 'x'
+
+$RepoRoot = $cleanRepo
+$cleanProv = Get-GitWorktreeProvenance
+if ([string]::IsNullOrWhiteSpace([string]$cleanProv.sourceCommit)) {
+    throw 'Clean temp repo sourceCommit empty'
+}
+if ($true -eq $cleanProv.sourceDirty) {
+    throw 'Clean temp repo must report sourceDirty=false'
+}
+if ($cleanProv.sourceDirty -isnot [bool]) {
+    throw 'Clean temp repo sourceDirty must be bool'
+}
+
+$RepoRoot = $dirtyRepo
+$dirtyProv = Get-GitWorktreeProvenance
+if ([string]::IsNullOrWhiteSpace([string]$dirtyProv.sourceCommit)) {
+    throw 'Dirty temp repo sourceCommit empty'
+}
+if ($false -eq $dirtyProv.sourceDirty) {
+    throw 'Dirty temp repo must report sourceDirty=true'
+}
+if ($dirtyProv.sourceDirty -isnot [bool]) {
+    throw 'Dirty temp repo sourceDirty must be bool'
+}
+
+$RepoRoot = $nonGitRepo
+$failedAsExpected = $false
+# nongit fixture lives under repo outputs/; without a ceiling, git walks parents and finds the real .git.
+$prevGitCeiling = $env:GIT_CEILING_DIRECTORIES
+try {
+    $env:GIT_CEILING_DIRECTORIES = $provRoot
+    try {
+        $null = Get-GitWorktreeProvenance
+    } catch {
+        if ("$_" -match 'Unable to read sourceCommit from git worktree') { $failedAsExpected = $true }
+        else { throw "Unexpected nongit provenance error: $_" }
+    }
+}
+finally {
+    if ($null -eq $prevGitCeiling) {
+        Remove-Item Env:GIT_CEILING_DIRECTORIES -ErrorAction SilentlyContinue
+    } else {
+        $env:GIT_CEILING_DIRECTORIES = $prevGitCeiling
+    }
+}
+if (-not $failedAsExpected) {
+    throw 'Expected git failure for non-git directory'
+}
+
+# Restore suite RepoRoot binding used by later path helpers / messaging.
+$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..\..\..')).Path
+$TestsPassed++
+
 Write-Host "Running Positive Test 1..."
 $beforeDirs = if (Test-Path -LiteralPath $CurrentTestRoot) { @(Get-ChildItem -LiteralPath $CurrentTestRoot -Directory | Select-Object -ExpandProperty FullName) } else { @() }
 $res1 = Invoke-CandidateRun -ServerArg $Server -ControlCenterArg $ControlCenter -ApkArg $Apk -Aapt2PathArg $Aapt2Path -OutputRootArg "outputs/candidate-tests/$TestGuid"
