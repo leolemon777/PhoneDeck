@@ -1,5 +1,13 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-11 Windows/Android交付整理
+
+eb1e052的运行34564477049全部通过：Windows、Android、macOS及B03 staging/transaction作业。事务131项、本轮S1/S2/S3检查均在该云端入口内运行并归档。未合并主分支、未签正式包、未做本轮设备覆盖安装。
+
+用户要求先完成Windows/Android，再携带干净项目到Mac。已确认并备份移除scratch、根test.ps1/test2.ps1及旧implementation-notes流水笔记，正式源码测试保留；本地备份在ignored outputs/cleanup-backup中，不进入源码交付。工作副本outputs工具链与历史产物不随源码包携带，不触碰正在运行的控制台目录或其data。Mac操作入口见MAC_HANDOVER.md。
+
+本轮只读设备检查：本机Windows dev.11/sequence23在线，VB-CABLE可用，共享音频正在传输；ADB设备列表为空。此健康检查不是尾音/升级验收。安卓实机、另一台Windows的接入/升级、与既有设备相同的APK签名渠道及更新清单签名仍需完成。
+
 ## 最新接手状态：2026-09-11 S4a
 
 用户已取消外部CLI及定时跟踪，后续由Codex直接编码、审查、测试和交付。分支agent/b03-release-transaction基于PR10已全云端通过的0445662。
