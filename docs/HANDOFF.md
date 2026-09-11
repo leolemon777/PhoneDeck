@@ -10,10 +10,19 @@ Android 配置版本：`schemaVersion=1`
 
 ## 2026-09-11 B03-S2 只读发行预检查
 
+- S2提交6e99881的PR10云端运行34555158882与push34555090971全部通过（Windows/Android/macOS及前置作业）。以下S3后续提交需重新核查CI，不能沿用此结果。
+
 - 新增渠道指纹、历史序号、候选哈希与实际APK证书的只读预检查。示例渠道默认关闭且指纹为空；即使eligible=true仍releasable=false，不签名、不占用历史序号。
 - Codex独立执行Test-ReleasePolicy.ps1：79断言通过、0失败，含131072字节stderr管道阻塞回归（20秒超时保护）。策略正向采用临时测试公钥和stub apksigner，不冒充真实发行批准。
 - 另用JDK17/apksigner35读取真实B02 debug APK证书成功，SHA256为653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef；真实release unsigned APK被拒绝exit1。该开发证书仅观察记录，未自动写入批准策略。
 - S3两类开发ZIP仍在独立审查；正式签名事务、干净提交的构建来源证明、实际设备安装/更新仍未验收。S2测试尚未接入CI，本轮没有安装或重启设备。
+
+## 2026-09-11 B03-S3 开发ZIP组装
+
+- 新增New-LocalCandidatePackages.ps1，输入真实S1候选并再验包内版本，输出独立GUID目录、两种STAGING ZIP及原子packages.json；完整状态仍releasable=false。
+- Codex独立执行Test-LocalCandidatePackages.ps1：9场景通过，真实解压核对固定条目、三份载荷与两份接入脚本SHA256、启动器内容；第二次运行前后重新读取同一旧报告与ZIP路径验证未变。缺失/篡改/重复条目/状态/错误布尔类型/输出越界均被拒绝。
+- 本次复用S1真实候选outputs/b03-review/804c5b8301a04f33a93208366762adb1及SDK35真实aapt2；未执行包内启动器或安装脚本。开发ZIP不是正式签名更新包，不证明设备安装、配置迁移或回退成功；未随包安装VB-CABLE、输入法、ADB。
+- 下一项接入S1/S2/S3云端测试，随后推进签名发布事务和逐设备验收；测试通过前不作正式发行声明。
 
 ## 2026-09-11 B03-S1 开发候选目录
 
