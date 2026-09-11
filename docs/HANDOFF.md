@@ -1,12 +1,34 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/b03-candidate-packages`（独立工作副本 PhoneDeck-agy-delivery，基于已验证 B02 / 6dd4e76）
+当前分支：`agent/b03-release-policy`（独立工作副本 PhoneDeck-agy-delivery，基于 B03-S1 / d1c089c）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-11 B03-S2 只读发行预检查
+
+### B03 CI接入本地验收（后续提交）
+
+云端d376940运行34558957807三平台与S2 79通过，但S1在干净git status无输出时Trim空值失败，B03作业未通过。修正AutomationNull归一化后，Codex独立S1测试8通过/0失败/0跳过（新增clean/dirty/nongit来源回归，nongit使用临时Git搜索边界并恢复环境）。此次修正待新云端运行验证，不能沿用本地成功声明云端已通过。
+
+新增依赖同轮Windows/Android产物的Windows作业，保留三平台并行与push去重。Codex独立运行Invoke-B03ReleaseTests.ps1：S2 79、S1 7、S3 9全部通过，报告outputs/ci-b03-reports/76d03b723f91460a9b8a1fbda5df294d。独立核对归档只有本轮目录，S3候选runId=f761b4d03bfa416f83b8315470a0518c一致，无裸EXE/APK或PEM/密钥文件混入归档；两个明确STAGING ZIP按预期保留。另独立验证缺输入exit1且summary.ok=false/error保留。子suite失败后的finally快照已静态核查，Grok隔离夹具验证exit7与JSON归档；该隔离证据不冒充Codex实际suite失败测试。云端新增作业仍待提交后验证，不沿用旧三平台绿灯。
+
+- S2提交6e99881的PR10云端运行34555158882与push34555090971全部通过（Windows/Android/macOS及前置作业）。以下S3后续提交需重新核查CI，不能沿用此结果。
+
+- 新增渠道指纹、历史序号、候选哈希与实际APK证书的只读预检查。示例渠道默认关闭且指纹为空；即使eligible=true仍releasable=false，不签名、不占用历史序号。
+- Codex独立执行Test-ReleasePolicy.ps1：79断言通过、0失败，含131072字节stderr管道阻塞回归（20秒超时保护）。策略正向采用临时测试公钥和stub apksigner，不冒充真实发行批准。
+- 另用JDK17/apksigner35读取真实B02 debug APK证书成功，SHA256为653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef；真实release unsigned APK被拒绝exit1。该开发证书仅观察记录，未自动写入批准策略。
+- S3两类开发ZIP仍在独立审查；正式签名事务、干净提交的构建来源证明、实际设备安装/更新仍未验收。S2测试尚未接入CI，本轮没有安装或重启设备。
+
+## 2026-09-11 B03-S3 开发ZIP组装
+
+- 新增New-LocalCandidatePackages.ps1，输入真实S1候选并再验包内版本，输出独立GUID目录、两种STAGING ZIP及原子packages.json；完整状态仍releasable=false。
+- Codex独立执行Test-LocalCandidatePackages.ps1：9场景通过，真实解压核对固定条目、三份载荷与两份接入脚本SHA256、启动器内容；第二次运行前后重新读取同一旧报告与ZIP路径验证未变。缺失/篡改/重复条目/状态/错误布尔类型/输出越界均被拒绝。
+- 本次复用S1真实候选outputs/b03-review/804c5b8301a04f33a93208366762adb1及SDK35真实aapt2；未执行包内启动器或安装脚本。开发ZIP不是正式签名更新包，不证明设备安装、配置迁移或回退成功；未随包安装VB-CABLE、输入法、ADB。
+- 下一项接入S1/S2/S3云端测试，随后推进签名发布事务和逐设备验收；测试通过前不作正式发行声明。
 
 ## 2026-09-11 B03-S1 开发候选目录
 

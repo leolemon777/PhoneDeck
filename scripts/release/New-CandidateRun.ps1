@@ -97,7 +97,10 @@ function Get-GitWorktreeProvenance {
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to read sourceDirty from git status."
     }
-    $dirty = -not [string]::IsNullOrWhiteSpace(([string]$statusOut).Trim())
+    # Clean `git status --porcelain` emits no pipeline objects (AutomationNull).
+    # [string]$null is $null, so (.Trim()) throws; normalize before Trim.
+    $statusText = if ($null -eq $statusOut) { '' } else { [string]$statusOut }
+    $dirty = -not [string]::IsNullOrWhiteSpace($statusText.Trim())
     return [ordered]@{
         sourceCommit = $commit.Trim()
         sourceDirty  = [bool]$dirty
