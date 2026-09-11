@@ -50,6 +50,9 @@ $script:LatestPath = $null
 $script:Artifacts = [System.Collections.Generic.List[object]]::new()
 $script:FinalStatus = 'failed'
 $script:ManifestInitialized = $false
+$script:RestoreLockedModeWasSet = $false
+$script:PrevRestoreLockedMode = $null
+$script:LockedRestoreModeEntered = $false
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..')).Path
@@ -302,6 +305,38 @@ function Invoke-NativeStep {
     if ($code -ne 0) {
         $script:PhaseExitCode = [int]$code
         throw "步骤 [$StepName] 失败，退出码: $code"
+    }
+}
+
+function Enter-LockedRestoreMode {
+    # Unified entry must not silently refresh packages.lock.json.
+    # Process env is inherited by dotnet and the macOS helper child processes.
+    $script:PrevRestoreLockedMode = [System.Environment]::GetEnvironmentVariable('RestoreLockedMode', 'Process')
+    $script:RestoreLockedModeWasSet = $null -ne $script:PrevRestoreLockedMode
+    [System.Environment]::SetEnvironmentVariable('RestoreLockedMode', 'true', 'Process')
+    $script:LockedRestoreModeEntered = $true
+}
+
+function Exit-LockedRestoreMode {
+    if (-not $script:LockedRestoreModeEntered) { return }
+    if ($script:RestoreLockedModeWasSet) {
+        [System.Environment]::SetEnvironmentVariable('RestoreLockedMode', $script:PrevRestoreLockedMode, 'Process')
+    } else {
+        [System.Environment]::SetEnvironmentVariable('RestoreLockedMode', $null, 'Process')
+    }
+    $script:LockedRestoreModeEntered = $false
+}
+
+function Invoke-SourceVersionValidate {
+    # Checked child pwsh: preserve Assert-ReleaseVersions exit code; no skip/swallow bypass.
+    # Keep missing-script failures inside this step so manifest phase is version-validate.
+    Invoke-NativeStep 'version-validate' {
+        Write-Host '  [Version] 校验 release-versions.json 与产品源码版本...'
+        $assertScript = Join-Path $RepoRoot 'scripts/versioning/Assert-ReleaseVersions.ps1'
+        if (-not (Test-Path -LiteralPath $assertScript)) {
+            throw "缺少源码版本校验脚本: $assertScript"
+        }
+        & pwsh -NoProfile -File $assertScript
     }
 }
 
@@ -702,6 +737,10 @@ try {
     Write-Host "本次 runId: $($script:RunId)" -ForegroundColor Cyan
     Write-Host "本次目录:   $($script:RunDirRelative)"
 
+    # Lock restores for this process tree before any product restore/build/publish.
+    Enter-LockedRestoreMode
+    Invoke-SourceVersionValidate
+
     $isMac = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::OSX)
 
@@ -748,33 +787,37 @@ catch {
     }
 }
 finally {
-    if ($script:ManifestInitialized) {
-        $manifestWriteOk = $false
-        try {
-            Write-ManifestFiles -Status $script:FinalStatus -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
-            $manifestWriteOk = $true
-            Write-FinalCiOutput -Status $script:FinalStatus -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
-        } catch {
-            Write-Host "写入最终 manifest/latest 失败: $_" -ForegroundColor Red
-            if ($script:PhaseExitCode -eq 0) { $script:PhaseExitCode = 1 }
-            $script:FinalStatus = 'failed'
-            # run manifest 已写成功但 latest 失败：仍非零退出，且不得再写成功态 CI 输出
-            if (-not $manifestWriteOk) {
-                try {
-                    Write-FinalCiOutput -Status 'failed' -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
-                } catch {
-                    Write-Host "写入失败态 CI 输出也失败: $_" -ForegroundColor Yellow
+    try {
+        if ($script:ManifestInitialized) {
+            $manifestWriteOk = $false
+            try {
+                Write-ManifestFiles -Status $script:FinalStatus -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
+                $manifestWriteOk = $true
+                Write-FinalCiOutput -Status $script:FinalStatus -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
+            } catch {
+                Write-Host "写入最终 manifest/latest 失败: $_" -ForegroundColor Red
+                if ($script:PhaseExitCode -eq 0) { $script:PhaseExitCode = 1 }
+                $script:FinalStatus = 'failed'
+                # run manifest 已写成功但 latest 失败：仍非零退出，且不得再写成功态 CI 输出
+                if (-not $manifestWriteOk) {
+                    try {
+                        Write-FinalCiOutput -Status 'failed' -Phase $script:PhaseName -ExitCode $script:PhaseExitCode
+                    } catch {
+                        Write-Host "写入失败态 CI 输出也失败: $_" -ForegroundColor Yellow
+                    }
                 }
             }
         }
-    }
 
-    Write-Host "`n==================================================" -ForegroundColor Cyan
-    Write-Host "status=$($script:FinalStatus) phase=$($script:PhaseName) exitCode=$($script:PhaseExitCode)" -ForegroundColor Cyan
-    if ($script:RunDirRelative) {
-        Write-Host "runDirectory=$($script:RunDirRelative)"
+        Write-Host "`n==================================================" -ForegroundColor Cyan
+        Write-Host "status=$($script:FinalStatus) phase=$($script:PhaseName) exitCode=$($script:PhaseExitCode)" -ForegroundColor Cyan
+        if ($script:RunDirRelative) {
+            Write-Host "runDirectory=$($script:RunDirRelative)"
+        }
+        Write-Host '=================================================='
+    } finally {
+        Exit-LockedRestoreMode
     }
-    Write-Host '=================================================='
 }
 
 exit $script:PhaseExitCode

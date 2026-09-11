@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Normalize roots so path scoping works on Windows and Unix hosts. -->
+    <_PhoneDeckRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)').TrimEnd('\').TrimEnd('/').Replace('\', '/'))</_PhoneDeckRepoRoot>
+    <_PhoneDeckProjectDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)').TrimEnd('\').TrimEnd('/').Replace('\', '/'))</_PhoneDeckProjectDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <!-- Match Codex-generated packages.lock.json RID graphs for existing projects only. -->
+  <PropertyGroup Condition="$([System.String]::Copy('$(_PhoneDeckProjectDir)').StartsWith('$(_PhoneDeckRepoRoot)/work/phone-deck/windows/', System.StringComparison.OrdinalIgnoreCase))">
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([System.String]::Copy('$(_PhoneDeckProjectDir)').StartsWith('$(_PhoneDeckRepoRoot)/work/phone-deck/test/FocusSink', System.StringComparison.OrdinalIgnoreCase))">
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([System.String]::Copy('$(_PhoneDeckProjectDir)').StartsWith('$(_PhoneDeckRepoRoot)/work/phone-deck/macos/', System.StringComparison.OrdinalIgnoreCase))">
+    <RuntimeIdentifiers>osx-x64;osx-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+</Project>

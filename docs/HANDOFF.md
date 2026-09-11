@@ -1,12 +1,21 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/b01-reviewed`（独立工作副本 PhoneDeck-agy-delivery，基于原始 B01 / 829b618）
+当前分支：`agent/b02-version-dependencies`（独立工作副本 PhoneDeck-agy-delivery，基于已验证 B01 / a954ab1）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-11 B02 本地独立验收（云端待验证）
+
+- release-versions.json 为唯一版本描述；显式 Sync 同步源码/程序集属性，构建与打包默认只校验。保留各端当前版本及 Mac 历史映射。
+- SDK8.0.425、六项目NuGet锁和Gradle8.9校验值已加入；统一入口强制锁还原，CI按global.json安装SDK。
+- Codex独立通过：版本60断言、构建控制流8项、打包13项、六项目锁还原。最终Windows统一入口86测试/两份单文件发布通过：outputs/b02-final-windows/20260911T005424Z-b5e2f900。
+- 最终Android统一入口12测试、debug/release assemble、lint通过（0错误33警告）：outputs/b02-final-android/20260911T005445Z-c3eab806。实际EXE和debug APK再经包内版本校验通过；未签统一更新包，未安装设备，release APK unsigned。
+- CI新增版本、控制流、打包回归，保留三个平台。B02云端待验证；Mac尚未真机验收。后续B03补发行序号/渠道、候选包及发布门槛。
+- scratch/、test.ps1、test2.ps1为旧代理临时文件，保留但不提交。开发工具和构建产物位于ignored outputs。
 
 ## 2026-09-10 B01 独立审查与修正
 
@@ -16,8 +25,8 @@ Android 配置版本：`schemaVersion=1`
 - Codex 独立通过：7 项 Windows mock 控制流测试（无 skip）、8 项 CI pure-data 检查、AST/前置探针。真实 Windows 86 项接收端测试通过，两项目编译和带原生依赖的单文件 publish/检查通过。
 - Windows 成功 run：`outputs/codex-b01-validation/20260910T105926Z-87d4f353`。先前 `20260910T105004Z-74888adf` 因接收端散落 IIS DLL 被正确标为 failed；修正 publish 参数后通过。
 - Android 首次验证遇到 GradleWorkerMain 类加载失败（GRADLE_USER_HOME 位于中文目录）；改用标准用户缓存后，12 项单测、Debug/Release assemble 与 lint 通过（0 errors、33 warnings）。成功 run 为 `outputs/codex-b01-android/20260910T110236Z-9c633c81`，Release 产物为 unsigned，不可交付安装。
-- 云端 CI 与真实 Mac 待验证。没有安装、重启或更新使用中的设备。不能将本轮 build 报告当作产品真机验收。
-- 待办：完成 Android/云端 CI、提交可评审 B01，然后推进 B02/B03。下方原始 B01 的“全部完成”记录为被本次审查修正的历史声明，不作为当前证据。
+- [PR #7](https://github.com/leolemon777/PhoneDeck/pull/7) 的[云端运行34469445810](https://github.com/leolemon777/PhoneDeck/actions/runs/34469445810)在提交a954ab1全部通过：Windows、Android、macOS、去重前置检查。真实 Mac 待验证。没有安装、重启或更新使用中的设备，不能将构建报告当作产品真机验收。
+- 待办：按 [B02 实施约定](B02_IMPLEMENTATION.md) 完成版本描述、源码/二进制校验和依赖锁，再推进B03候选包。下方原始 B01 声明为历史记录，以独立证据为准。
 
 ## 2026-09-10 B01 原始实现记录（审查前，状态以以上为准）
 

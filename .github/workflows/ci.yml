@@ -15,6 +15,9 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  ContinuousIntegrationBuild: 'true'
+
 jobs:
   pre_check:
     name: Push dedup (open PR)
@@ -47,10 +50,19 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          global-json-file: global.json
       - name: CI helper puredata checks
         shell: pwsh
         run: pwsh -NoProfile -File ./scripts/ci/Test-CiHelpers.puredata.ps1
+      - name: Version descriptor puredata suite
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/versioning/Test-ReleaseVersions.puredata.ps1
+      - name: Build pipeline mock regression
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/tests/Test-BuildPipeline.ps1
+      - name: Packaging version asserts
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/packaging/Assert-PackageVersions.Tests.ps1
       - name: Build and Test Windows
         id: build
         shell: pwsh
@@ -81,7 +93,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          global-json-file: global.json
       - name: Build and Test macOS
         id: build
         shell: pwsh
