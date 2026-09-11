@@ -2,7 +2,7 @@
 
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
-B01 当前在独立分支 `agent/b01-reviewed` 实施并验证；已修改构建入口与 CI，尚未发布正式版本。
+B01 已通过本地及三平台 CI；B02 在 `agent/b02-version-dependencies` 实施，尚未发布正式版本。
 
 ## 1. 当前基线
 
@@ -51,7 +51,7 @@ B01 当前在独立分支 `agent/b01-reviewed` 实施并验证；已修改构建
 | 构建目标 | 开发环境 | 运行时另需准备 |
 |---|---|---|
 | Android | JDK 17、SDK Platform 35、Build Tools 35.0.0、仓库 Gradle Wrapper；Windows/Linux/macOS 均可开发构建 | Android 手机；首次 USB 路径需 ADB；录音与安装权限 |
-| Windows 接收端及控制台 | Windows x64、.NET SDK（当前 CI 为 8.0.x） | 虚拟音频驱动、用户选择的输入法、LAN 防火墙与配对 |
+| Windows 接收端及控制台 | Windows x64、global.json 指定的 .NET SDK 8.0.425 | 虚拟音频驱动、用户选择的输入法、LAN 防火墙与配对 |
 | macOS `.app` | macOS、.NET SDK、zsh 与系统 codesign；架构显式指定 | BlackHole、输入法、辅助功能/音频权限 |
 | 更新 ZIP | PowerShell 7、已构建的两个 EXE 和同渠道 APK、更新发布私钥 | 接收端内置匹配的发布公钥 |
 
@@ -60,7 +60,7 @@ B01 当前在独立分支 `agent/b01-reviewed` 实施并验证；已修改构建
 检查环境可用 `java -version`、`dotnet --info` 和 `./gradlew --version`。
 Windows 验证发现 Gradle 缓存目录包含中文时可能无法加载 GradleWorkerMain；保留源码中文路径，
 将 `GRADLE_USER_HOME` 配为标准用户缓存等 ASCII 路径后已通过完整 Android 构建。无需把本机盘符写入脚本。
-目前没有 `global.json` 或依赖锁文件；Gradle Wrapper 已固定版本但没有配置分发包 SHA-256。
+B02 新增 global.json 精确固定 SDK 8.0.425、六个 .NET 项目的 packages.lock.json，以及 Gradle 8.9 官方分发 SHA-256。统一入口强制锁定还原，依赖变化应由维护者显式重新生成锁并审查；CI 从 global.json 安装 SDK。Mac 锁包含双架构依赖图，不代表双架构真机已验证。
 后续 B02 固定可复现工具链，同时按总计划的运行时生命周期要求制定迁移验证，不能把当前 .NET 8 配置无限沿用。
 
 ## 4. 当前可执行的构建命令
@@ -154,10 +154,12 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 | Android versionName / versionCode | `android/app/build.gradle` | APK 内元数据必须一致，覆盖升级时 code 递增 |
 | Windows Version / Sequence | `windows/PhoneDeck.Server/FleetUpdates.cs` | 更新清单 windowsVersion/sequence 必须与新接收端健康结果一致 |
 | Mac 版本 | `macos/PhoneDeck.Receiver/Program.cs` 与 `Packaging/Info.plist` | 健康信息、Bundle 版本和发布说明一起核对 |
-| 更新清单 | `build-update-package.ps1` 命令参数 | 当前为人工传参；不能只填新数字而没有构建对应程序 |
+| 更新清单 | `build-update-package.ps1` 命令参数 | 参数必须与 release-versions.json 一致；打包前校验源码和实际PE/APK，失败不读取签名私钥 |
 | 协议/配置版本 | 各端协议与配置实现 | 不能随营销版本号盲目递增；兼容性单独验收 |
 
-建议后续引入唯一发布版本描述文件，生成/校验各端字段及文档摘要；**本轮没有创建该机制**。
+版本唯一描述为 work/phone-deck/release-versions.json。默认运行 `pwsh -File scripts/versioning/Assert-ReleaseVersions.ps1` 只校验；维护者修改描述后显式加 `-Sync` 才同步源码与生成的程序集属性。控制台随Windows版本，Mac历史bundleVersion=2映射显式保留。统一构建在产品编译前运行该校验。Windows发布序号当前映射PE FileVersion最后一段，范围1–65535；后续超出范围必须先迁移映射。
+
+包内版本验证使用 `scripts/packaging/Assert-PackageVersions.ps1`，当前仅Windows宿主，静态读取两份EXE的身份及版本，并用Android SDK的aapt2核对APK包名/name/code。该检查不执行产品、不验证安装签名渠道；B03仍需独立完成签名与发布门槛。
 一组发布可以包含不同平台版本，但必须来自明确的同一提交或记录清楚的来源，发布后禁止复用相同发布序号替换成另一批字节。
 
 四种签名职责分别处理：
@@ -219,7 +221,7 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 | Mac | test + 当前运行器架构的 `.app` | B04 明确 arm64/x64 矩阵及正式签名边界；已归档 app 与 trx 报告 |
 | 包/版本/签名 | 未校验发行组合，也未生成统一更新包 | B02/B03 增加校验和失败用例 |
 | 产物与报告归档 | upload-artifact 归档各端二进制与测试/Lint 报告 | 已在 B01 完成 |
-| 重复 CI 与并发 | 任意 base 的 PR；同仓分支存在 open PR 时跳过 push 构建，API 查询失败保留构建；同事件过期运行取消 | 纯数据 helper 已验证；实际云端作业待确认 |
+| 重复 CI 与并发 | 任意 base 的 PR；同仓分支存在 open PR 时跳过 push 构建，API 查询失败保留构建；同事件过期运行取消 | 8项纯数据检查通过；PR #7 前置作业通过，创建PR前的首次push和PR各跑一次属于正常情况 |
 | 正式发布 | 没有专用 Release workflow | B03 设计受保护签名/发布，不给 PR 私钥 |
 | iOS | 无 | M0 原型后在 B04 接入真实工程与 Mac 构建机 |
 
@@ -227,18 +229,18 @@ CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也
 
 ## 8. 实施顺序与验收门槛
 
-以下是总计划 0.21 的执行细化，目前 B01 实现待独立验收，负责人角色用于分工而非表示已经派发任务。
+以下是总计划 0.21 的执行细化。B01 本地和三平台 CI 已通过，证据见 HANDOFF；B02 当前分工见 B02_IMPLEMENTATION.md。
 
 | 任务 | 依赖/负责人角色 | 具体交付 | 完成证据 | 状态 |
 |---|---|---|---|---|
-| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **实现待独立验收** |
-| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 | 待实施 |
+| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **本地与三平台 CI 通过，PR #7 待合并** |
+| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 | 实施中，未验收 |
 | B03 候选包与发布 | B02；发布维护 | 首次安装/旧版接入/统一更新各自打包；签名渠道分离；产物报告；受保护发布流程 | 缺密钥、混渠道、漏控制台、错误版本、错误哈希均不产生可发布候选 | 待实施 |
 | B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 原型产生工程后再接入 CI；各平台独立签名任务 | 可重复构建各已实现目标，未支持组合明确排除 | 待实施 |
 | B05 多设备候选验收 | B03 + M0/T01/T02；测试角色 | 第二台旧电脑接入、两机升级、离线补更、取消/低磁盘/文件占用/断电恢复；音频与身份回归 | 逐设备版本/设置/身份及测试结果可追溯；未确认的安装不显示成功 | 待实施 |
 | B06 开源发行准备 | B03–B05 + M1–M4；维护角色 | 全新用户安装/卸载、许可证/资产清单、支持矩阵、SBOM、发行渠道、维护流程 | 支持矩阵内完成干净安装和升级，才能按 M5 声明稳定支持 | 待实施 |
 
-建议现在先做 B01（实现待独立验收），再做 B02/B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
+当前 B01 构建验收通过，正在推进 B02，随后 B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
 Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。

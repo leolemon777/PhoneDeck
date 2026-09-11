@@ -15,6 +15,28 @@ $taskFiles = @(
     @{ name = 'PhoneDeck.ControlCenter.exe'; source = (Resolve-Path -LiteralPath $ControlCenter).Path },
     @{ name = 'PhoneDeck.apk'; source = (Resolve-Path -LiteralPath $Apk).Path }
 )
+
+$descriptorPath = Join-Path $PSScriptRoot "release-versions.json"
+$descriptor = Get-Content -Raw -LiteralPath $descriptorPath | ConvertFrom-Json
+
+if ($WindowsVersion -ne $descriptor.windows.version -or
+    $Sequence -ne $descriptor.windows.sequence -or
+    $AndroidVersionCode -ne $descriptor.android.versionCode) {
+    throw "CLI values do not match descriptor base"
+}
+
+$assertReleaseScript = Join-Path $PSScriptRoot "..\..\scripts\versioning\Assert-ReleaseVersions.ps1"
+& pwsh -NoProfile -NonInteractive -File $assertReleaseScript -DescriptorPath $descriptorPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaging aborted: Assert-ReleaseVersions.ps1 validation failed with exit code $LASTEXITCODE."
+}
+
+$assertScript = Join-Path $PSScriptRoot "..\..\scripts\packaging\Assert-PackageVersions.ps1"
+& pwsh -NoProfile -NonInteractive -File $assertScript -Server $taskFiles[0].source -ControlCenter $taskFiles[1].source -Apk $taskFiles[2].source -DescriptorPath $descriptorPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaging aborted: Assert-PackageVersions.ps1 validation failed with exit code $LASTEXITCODE."
+}
+
 $taskManifest = [ordered]@{
     schema = 1; sequence = $Sequence; windowsVersion = $WindowsVersion; androidVersionCode = $AndroidVersionCode
     files = @($taskFiles | ForEach-Object { [ordered]@{ name = $_.name; size = (Get-Item -LiteralPath $_.source).Length; sha256 = (Get-FileHash -LiteralPath $_.source -Algorithm SHA256).Hash.ToLowerInvariant() } })

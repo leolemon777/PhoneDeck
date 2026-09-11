@@ -39,6 +39,11 @@ function Assert-True ($Condition, $Message = "") { if (-not $Condition) { throw 
 function Assert-Equal ($Actual, $Expected, $Message = "") { if ($Actual -ne $Expected) { throw "Assertion Failed: $Message. Expected '$Expected', got '$Actual'" } }
 
 function Setup-Fixture {
+    param(
+        [ValidateSet('StubPass', 'RealInvalid')]
+        [string]$VersionGateMode = 'StubPass'
+    )
+
     $FixtureRoot = Join-Path $env:TEMP "PhoneDeck Fixture 中文 空格 $([guid]::NewGuid())"
     Write-Host "    [Fixture] $FixtureRoot" -ForegroundColor DarkGray
     New-Item -ItemType Directory -Path $FixtureRoot -Force | Out-Null
@@ -57,6 +62,44 @@ function Setup-Fixture {
     New-Item -ItemType Directory -Path (Join-Path $workWindowsPath "PhoneDeck.ControlCenter") -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $workWindowsPath "PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj") -Force | Out-Null
 
+    # Version gate fixture: controlled stub for existing flow cases; real validator for invalid-gate case.
+    $versioningDir = Join-Path $ScriptsDir "versioning"
+    New-Item -ItemType Directory -Path $versioningDir -Force | Out-Null
+    $phoneDeckRoot = Join-Path $FixtureRoot "work\phone-deck"
+    New-Item -ItemType Directory -Path $phoneDeckRoot -Force | Out-Null
+    $assertDst = Join-Path $versioningDir "Assert-ReleaseVersions.ps1"
+    if ($VersionGateMode -eq 'StubPass') {
+        Set-Content -LiteralPath $assertDst -Encoding utf8 -Value @'
+# Controlled stub for unrelated mock flow cases only.
+Write-Host 'OK: stub version gate'
+exit 0
+'@
+    } else {
+        $assertSrc = Join-Path $RepoRoot "scripts\versioning\Assert-ReleaseVersions.ps1"
+        Assert-True (Test-Path -LiteralPath $assertSrc) "Real Assert-ReleaseVersions.ps1 must exist at $assertSrc"
+        Copy-Item -LiteralPath $assertSrc -Destination $assertDst -Force
+        # Invalid descriptor alone fails closed inside Read-ReleaseDescriptor (no product sources required).
+        Set-Content -LiteralPath (Join-Path $phoneDeckRoot "release-versions.json") -Encoding utf8 -Value @'
+{
+  "schemaVersion": 1,
+  "windows": { "version": "1.6.0-dev.11", "sequence": 23.1 },
+  "android": { "versionName": "1.6.0-dev.17", "versionCode": 23 },
+  "macos": {
+    "version": "2.0.0-dev.3",
+    "bundleShortVersion": "2.0.0",
+    "bundleVersion": "2",
+    "historicBundleMapping": {
+      "healthVersion": "2.0.0-dev.3",
+      "bundleShortVersion": "2.0.0",
+      "bundleVersion": "2",
+      "note": "invalid-gate fixture"
+    }
+  },
+  "console": { "follows": "windows.version", "informationalVersion": "1.6.0-dev.11" }
+}
+'@
+    }
+
     $MockBin = Join-Path $FixtureRoot "mock_bin"
     New-Item -ItemType Directory -Path $MockBin -Force | Out-Null
 
@@ -65,7 +108,10 @@ function Setup-Fixture {
 param()
 $ArgsList = $args
 $LogPath = $env:MOCK_DOTNET_LOG
-$LogEntry = @{ Args = $ArgsList } | ConvertTo-Json -Compress
+$LogEntry = @{
+    Args = $ArgsList
+    RestoreLockedMode = [string]$env:RestoreLockedMode
+} | ConvertTo-Json -Compress
 if ($LogPath) { Add-Content -Path $LogPath -Value $LogEntry }
 
 if ($ArgsList -contains '--version') { Write-Output '8.0.100'; exit 0 }
@@ -171,6 +217,8 @@ Describe "PhoneDeck Build Pipeline Regression Tests" {
         $LogLines = Get-Content $LogPath
         $TestCount = ($LogLines | Where-Object { $_ -match '"test"' }).Count
         Assert-True ($TestCount -gt 0) "test called"
+        $LockedCount = ($LogLines | Where-Object { $_ -match '"RestoreLockedMode":"true"' }).Count
+        Assert-True ($LockedCount -gt 0) "RestoreLockedMode=true must be inherited by mocked dotnet"
 
         $RunDir = Join-Path $FixtureRoot $Manifest.runDirectory
         Assert-True (Test-Path (Join-Path $RunDir "windows\server\PhoneDeck.Server.exe")) "Server.exe must exist"
@@ -312,6 +360,28 @@ Describe "PhoneDeck Build Pipeline Regression Tests" {
 
         $ManifestPath = Join-Path $OutputDir "latest.json"
         Assert-True (Test-Path $ManifestPath) "Manifest must exist"
+    }
+
+    It "真实无效版本门禁阻止mocked dotnet且manifest记录version-validate失败" {
+        $FixtureRoot, $MockBin = Setup-Fixture -VersionGateMode RealInvalid
+        $LogPath = Join-Path $FixtureRoot "dotnet.log"
+        $OutputDir = Join-Path $FixtureRoot "outputs\build-review"
+        $Result = Invoke-Wrapper -FixtureRoot $FixtureRoot -ArgsList @("-OutputDir", $OutputDir) -EnvVars @{ "MOCK_DOTNET_LOG" = $LogPath; "PATH" = "$MockBin;$($env:PATH)" }
+
+        if ($Result.ExitCode -eq 0) {
+            Set-Content -Path (Join-Path $FixtureRoot "result.log") -Value "Stdout:`n$($Result.Output)`nStderr:`n$($Result.Error)"
+        }
+        Assert-True ($Result.ExitCode -ne 0) "Invalid version gate must fail. Output: $($Result.Output) Error: $($Result.Error)"
+        Assert-True (($Result.Output -match 'version-validate|windows\.sequence|JSON integer') -or ($Result.Error -match 'version-validate|windows\.sequence|JSON integer')) "Failure should mention version gate. Output: $($Result.Output) Error: $($Result.Error)"
+
+        Assert-True (-not (Test-Path $LogPath)) "Mocked dotnet must not run when version gate fails"
+
+        $ManifestPath = Join-Path $OutputDir "latest.json"
+        Assert-True (Test-Path $ManifestPath) "Manifest must exist after version-validate failure"
+        $Manifest = Get-Content $ManifestPath | ConvertFrom-Json
+        Assert-equal $Manifest.status "failed" "Status should be failed"
+        Assert-True ($Manifest.phase -match "version-validate") "Phase should be version-validate, got $($Manifest.phase)"
+        Assert-True ($Manifest.exitCode -ne 0) "Manifest exitCode should be non-zero"
     }
 }
 
