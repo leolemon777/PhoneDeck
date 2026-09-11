@@ -2,7 +2,7 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
 
-当前源码为 **Android 1.6.0-dev.17 / Windows 接收端 1.6.0-dev.11**，上一版完整实机稳定基线是
+当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**，本机与Samsung已完成序号24覆盖更新，另一台旧电脑仍需首次接入。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动

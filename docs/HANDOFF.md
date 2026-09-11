@@ -1,5 +1,11 @@
 # PhoneDeck 项目交接说明
 
+## 序号24：本机Windows与Samsung实际更新成功
+
+61dc5ea本地统一All构建通过，Windows86/Android12测试及lint通过。固定候选8e0b617149254c50ac79a4d783b37b10用原渠道生成五文件签名ZIP，独立核验签名/版本/哈希，并通过现有设备实际校验。手机协调本机Windows更新至dev.12/seq24，系统安装器将手机覆盖更新至dev.18/code24；安装后两个EXE/base.apk字节哈希与候选一致，Windows身份不变。重开手机共享，本机streaming=true，手机显示2台供音。
+
+另一台旧Windows明确提示需要首次接入；3号失效条目保留，未删除。真人尾音、旧电脑安装与后续批量升级仍未完成，不能报告Windows/Android全项收尾。操作及证据边界见WINDOWS_ANDROID_DELIVERY.md。本轮本地签名脚本/记录位于ignored outputs，通用S4b保护入口及云端证明并未因此完成。
+
 ## 本机同渠道更新候选 sequence 24
 
 用户明确授权本机使用原签名材料；Codex直接执行，不再调度CLI或定时任务。已核对Samsung安装版本dev.17/code23及实际APK证书，和本机debug keystore公开证书一致；更新清单私钥导出的公钥与源码信任根一致。未输出或上传私钥，不切换到历史release.jks渠道。
