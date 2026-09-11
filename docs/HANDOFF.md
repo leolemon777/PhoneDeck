@@ -1,12 +1,19 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/b03-candidate-packages`（独立工作副本 PhoneDeck-agy-delivery，基于已验证 B02 / 6dd4e76）
+当前分支：`agent/b03-release-policy`（独立工作副本 PhoneDeck-agy-delivery，基于 B03-S1 / d1c089c）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-11 B03-S2 只读发行预检查
+
+- 新增渠道指纹、历史序号、候选哈希与实际APK证书的只读预检查。示例渠道默认关闭且指纹为空；即使eligible=true仍releasable=false，不签名、不占用历史序号。
+- Codex独立执行Test-ReleasePolicy.ps1：79断言通过、0失败，含131072字节stderr管道阻塞回归（20秒超时保护）。策略正向采用临时测试公钥和stub apksigner，不冒充真实发行批准。
+- 另用JDK17/apksigner35读取真实B02 debug APK证书成功，SHA256为653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef；真实release unsigned APK被拒绝exit1。该开发证书仅观察记录，未自动写入批准策略。
+- S3两类开发ZIP仍在独立审查；正式签名事务、干净提交的构建来源证明、实际设备安装/更新仍未验收。S2测试尚未接入CI，本轮没有安装或重启设备。
 
 ## 2026-09-11 B03-S1 开发候选目录
 
