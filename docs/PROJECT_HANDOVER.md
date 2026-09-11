@@ -39,7 +39,7 @@ Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎�
 ```
 PhoneDeck开发工作区\
 ├── PhoneDeck手机键盘项目\        ← Git 仓库本体（唯一，main 分支）
-│   ├── README.md  AGENTS.md  spec plan.markdown  implementation-notes.md
+│   ├── README.md  AGENTS.md  spec plan.markdown
 │   ├── docs\                     ← 全部文档（见 §10 文档地图）
 │   ├── design\                   ← 控制台 UI 设计稿 + 图标
 │   ├── scripts\                  ← windows/*.ps1、macos/Build-PhoneDeckReceiver.sh

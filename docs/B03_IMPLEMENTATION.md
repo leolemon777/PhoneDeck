@@ -1,5 +1,15 @@
 # B03 候选包实施约定
 
+## S4a 事务基础（0445662全云端通过后的下一切片）
+
+分支agent/b03-release-transaction。Grok独占新增scripts/release/ReleaseTransaction.ps1和tests/Test-ReleaseTransaction.ps1。仅可点载入的内部库，无签名CLI、无私钥参数、无releasable=true。本轮调用与写入仅限独立outputs测试夹具，不读取或更改现有发行历史。S2只读门槛与运行时公钥保持不变。
+
+历史兼容schemaVersion=1/releases数组；严格正整型、全局唯一递增。提交条目含sequence、transactionId、committedUtc。锁为HistoryPath.lock，FileShare.None并持有至提交/中止；journal记录transactionId、sequence、状态pending/committed/aborted及历史基线哈希，原子写入。缺历史拒绝，显式空数组可初始化；锁文件存在不等于锁被占用，进程死亡不等于签名已验证。
+
+Begin在锁内校验并建立pending；Commit为内部状态原语，原子追加历史后更新journal；Abort不得删除已提交序号。Recover必须重新获得同一锁：pending且历史无对应transactionId/sequence则保守标记aborted，历史保持原样；历史存在精确对应则修复journal为committed，冲突/篡改拒绝，不能仅凭sequence匹配承认他人事务。提交时核对历史基线，拒绝非协作写入。所有结果mode=transaction-foundation/releasable=false；不删除产物、目录或超时强解锁。句柄释放在finally，路径链接与越界拒绝。
+
+测试保留纯数据夹具，覆盖正常提交/显式空历史/缺失或畸形历史/序号重复与倒退/真实子进程锁竞争/同序号竞争/中止/中断两侧恢复/不降低已提交历史/冲突journal/历史外改。测试只终止自己创建的夹具子进程，不对真实代理或产品进程操作。S4b再接入既有五文件ZIP、实际签名核验和可信构建来源；只有包装器核验通过才可调用内部Commit，此基础库不授予发行资格。
+
 基于B02提交6dd4e76，PR8运行34548668020三平台及全部前置检查成功。工作分支agent/b03-candidate-packages。Codex规划与独立验收；Grok、agy按文件独占编码。不得修改主仓库或安装设备。
 
 ## S1：可复核的开发候选目录
