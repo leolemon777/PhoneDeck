@@ -1,5 +1,11 @@
 # PhoneDeck 项目交接说明
 
+## 本机同渠道更新候选 sequence 24
+
+用户明确授权本机使用原签名材料；Codex直接执行，不再调度CLI或定时任务。已核对Samsung安装版本dev.17/code23及实际APK证书，和本机debug keystore公开证书一致；更新清单私钥导出的公钥与源码信任根一致。未输出或上传私钥，不切换到历史release.jks渠道。
+
+候选版本提升为Windows 1.6.0-dev.12 / Android 1.6.0-dev.18，两端序号24；由release-versions.json同步。此提交仅准备可追溯的构建版本；构建、签名包和设备安装结果仍待后续记录，不能标为已安装或正式开源发行。
+
 ## 2026-09-11 Windows/Android交付整理
 
 eb1e052的运行34564477049全部通过：Windows、Android、macOS及B03 staging/transaction作业。事务131项、本轮S1/S2/S3检查均在该云端入口内运行并归档。未合并主分支、未签正式包、未做本轮设备覆盖安装。
