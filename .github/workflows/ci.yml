@@ -147,3 +147,75 @@ jobs:
           name: android-reports-dev
           path: ${{ steps.build.outputs.run_directory }}/reports/android/
           if-no-files-found: warn
+
+  b03_release_tests:
+    name: B03 staging release tests (S1/S2/S3)
+    runs-on: windows-latest
+    needs: [pre_check, windows, android]
+    if: >-
+      !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true')
+      && needs.windows.result == 'success'
+      && needs.android.result == 'success'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup JDK 17 (Android SDK tools)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Setup Android SDK35 build-tools (real aapt2)
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools build-tools;35.0.0"
+      - name: Download Windows binaries (this run)
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts-dev
+          path: artifacts/windows
+      - name: Download Android APKs (this run)
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk-dev
+          path: artifacts/android
+      - name: Resolve SDK35 aapt2 and run B03 S1/S2/S3
+        id: b03
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $sdkRoots = @()
+          if ($env:ANDROID_HOME) { $sdkRoots += $env:ANDROID_HOME }
+          if ($env:ANDROID_SDK_ROOT) { $sdkRoots += $env:ANDROID_SDK_ROOT }
+          $aapt2 = $null
+          foreach ($root in $sdkRoots) {
+            $candidate = Join-Path $root 'build-tools\35.0.0\aapt2.exe'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+              $aapt2 = (Resolve-Path -LiteralPath $candidate).Path
+              break
+            }
+          }
+          if (-not $aapt2) {
+            throw "SDK35 real aapt2.exe not found under ANDROID_HOME/ANDROID_SDK_ROOT build-tools/35.0.0"
+          }
+          Write-Host "Using aapt2: $aapt2"
+          pwsh -NoProfile -File ./scripts/ci/Invoke-B03ReleaseTests.ps1 `
+            -WindowsArtifactRoot artifacts/windows `
+            -AndroidArtifactRoot artifacts/android `
+            -Aapt2Path $aapt2
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invoke-B03ReleaseTests.ps1 failed with exitCode=$LASTEXITCODE (reports under outputs/ci-b03-reports/ retained)"
+          }
+      - name: Upload B03 bounded reports and staging outputs
+        if: always() && steps.b03.outputs.report_directory != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-release-tests-reports
+          path: ${{ steps.b03.outputs.report_directory }}
+          if-no-files-found: warn
+      - name: Upload dedicated S1 candidate.json
+        if: always() && steps.b03.outputs.ci_candidate_output_root != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-ci-candidate-json
+          path: ${{ steps.b03.outputs.ci_candidate_output_root }}/**/candidate.json
+          if-no-files-found: warn

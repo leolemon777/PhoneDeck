@@ -10,6 +10,10 @@ Android 配置版本：`schemaVersion=1`
 
 ## 2026-09-11 B03-S2 只读发行预检查
 
+### B03 CI接入本地验收（后续提交）
+
+新增依赖同轮Windows/Android产物的Windows作业，保留三平台并行与push去重。Codex独立运行Invoke-B03ReleaseTests.ps1：S2 79、S1 7、S3 9全部通过，报告outputs/ci-b03-reports/76d03b723f91460a9b8a1fbda5df294d。独立核对归档只有本轮目录，S3候选runId=f761b4d03bfa416f83b8315470a0518c一致，无裸EXE/APK或PEM/密钥文件混入归档；两个明确STAGING ZIP按预期保留。另独立验证缺输入exit1且summary.ok=false/error保留。子suite失败后的finally快照已静态核查，Grok隔离夹具验证exit7与JSON归档；该隔离证据不冒充Codex实际suite失败测试。云端新增作业仍待提交后验证，不沿用旧三平台绿灯。
+
 - S2提交6e99881的PR10云端运行34555158882与push34555090971全部通过（Windows/Android/macOS及前置作业）。以下S3后续提交需重新核查CI，不能沿用此结果。
 
 - 新增渠道指纹、历史序号、候选哈希与实际APK证书的只读预检查。示例渠道默认关闭且指纹为空；即使eligible=true仍releasable=false，不签名、不占用历史序号。
