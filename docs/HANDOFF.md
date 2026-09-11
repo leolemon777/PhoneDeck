@@ -1,20 +1,27 @@
 # PhoneDeck 项目交接说明
 
 更新时间：2026-09-10
-当前分支：`agent/b02-version-dependencies`（独立工作副本 PhoneDeck-agy-delivery，基于已验证 B01 / a954ab1）
+当前分支：`agent/b03-candidate-packages`（独立工作副本 PhoneDeck-agy-delivery，基于已验证 B02 / 6dd4e76）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
 规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
 
-## 2026-09-11 B02 本地独立验收（云端待验证）
+## 2026-09-11 B03-S1 开发候选目录
+
+- 新增scripts/release/New-CandidateRun.ps1与路径/原子报告helper，复用B02验证真实暂存副本，报告三份文件的大小/SHA256、描述快照及PE版本。始终mode=staging、releasable=false，不签名、不打正式更新ZIP、不安装。
+- Codex真实生成outputs/b03-review/804c5b8301a04f33a93208366762adb1，独立比对三文件哈希/大小全部一致。
+- Codex独立测试7项通过、0失败0跳过：正向、重复隔离、越界、outputs根、junction祖先、缺aapt2、交换EXE。测试命令为scripts/release/tests/Test-CandidateRun.ps1，显式传入真实Server/ControlCenter/Apk/Aapt2Path。
+- S1只解决开发候选与审计报告；渠道/历史序号、首次安装/旧版接入、正式签名及设备验收尚未完成。工作树commit与PE内嵌commit在报告中分别记录，不把二者混称构建来源证明。
+
+## 2026-09-11 B02 本地与云端独立验收
 
 - release-versions.json 为唯一版本描述；显式 Sync 同步源码/程序集属性，构建与打包默认只校验。保留各端当前版本及 Mac 历史映射。
 - SDK8.0.425、六项目NuGet锁和Gradle8.9校验值已加入；统一入口强制锁还原，CI按global.json安装SDK。
 - Codex独立通过：版本60断言、构建控制流8项、打包13项、六项目锁还原。最终Windows统一入口86测试/两份单文件发布通过：outputs/b02-final-windows/20260911T005424Z-b5e2f900。
 - 最终Android统一入口12测试、debug/release assemble、lint通过（0错误33警告）：outputs/b02-final-android/20260911T005445Z-c3eab806。实际EXE和debug APK再经包内版本校验通过；未签统一更新包，未安装设备，release APK unsigned。
-- CI新增版本、控制流、打包回归，保留三个平台。B02云端待验证；Mac尚未真机验收。后续B03补发行序号/渠道、候选包及发布门槛。
+- CI新增版本、控制流、打包回归，保留三个平台。[PR8](https://github.com/leolemon777/PhoneDeck/pull/8)在提交6dd4e76的[运行34548668020](https://github.com/leolemon777/PhoneDeck/actions/runs/34548668020)全部通过，包含三个平台及前置作业，产物/报告归档通过。Mac尚未真机验收；PR未合并。B03分工见B03_IMPLEMENTATION.md，先实现不可发布的Staging报告，再补发行序号/渠道与安装候选。
 - scratch/、test.ps1、test2.ps1为旧代理临时文件，保留但不提交。开发工具和构建产物位于ignored outputs。
 
 ## 2026-09-10 B01 独立审查与修正
