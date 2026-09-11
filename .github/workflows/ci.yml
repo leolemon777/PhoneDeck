@@ -149,7 +149,7 @@ jobs:
           if-no-files-found: warn
 
   b03_release_tests:
-    name: B03 staging release tests (S1/S2/S3)
+    name: B03 staging and transaction tests
     runs-on: windows-latest
     needs: [pre_check, windows, android]
     if: >-
@@ -158,6 +158,20 @@ jobs:
       && needs.android.result == 'success'
     steps:
       - uses: actions/checkout@v6
+      - name: Release transaction foundation tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path outputs/ci-transaction-reports -Force | Out-Null
+          & pwsh -NoProfile -NonInteractive -File scripts/release/tests/Test-ReleaseTransaction.ps1 2>&1 |
+            Tee-Object -FilePath outputs/ci-transaction-reports/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload transaction test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-transaction-test-log
+          path: outputs/ci-transaction-reports/tests.log
+          if-no-files-found: warn
       - name: Setup JDK 17 (Android SDK tools)
         uses: actions/setup-java@v5
         with:

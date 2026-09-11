@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 最新接手状态：2026-09-11 S4a
+
+用户已取消外部CLI及定时跟踪，后续由Codex直接编码、审查、测试和交付。分支agent/b03-release-transaction基于PR10已全云端通过的0445662。
+
+新增内部ReleaseTransaction库：独占历史锁、pending/committed/aborted日志、原子历史追加和保守中断恢复；Commit/Abort要求有效锁与当前日志身份匹配，旧句柄不能覆盖新事务，已提交历史不会因Abort回退。库仅允许outputs夹具路径，所有结果releasable=false，不是签名发行入口。
+
+Codex独立复核后修正Begin序号参数隐式转换，拒绝小数/字符串/布尔/非正整数，验证拒绝时历史字节不变且不创建journal。最终独立测试128通过/0失败，夹具outputs/release-transaction-tests/7d9e77e92ad44534b5a519075207e042保留；含实际子进程锁竞争、旧句柄、日志冲突与中断恢复。事务测试及单独日志归档已接入B03 CI，云端结果待新提交验证。
+
+下一项为S4b：现有五文件ZIP的签名与可信来源验证，随后设备安装/接入/更新验收。本轮未读取现有签名私钥，未安装重启设备。历史临时笔记/scratch不提交。
+
 更新时间：2026-09-10
 当前分支：`agent/b03-release-policy`（独立工作副本 PhoneDeck-agy-delivery，基于 B03-S1 / d1c089c）
 当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
@@ -11,6 +21,8 @@ Android 配置版本：`schemaVersion=1`
 ## 2026-09-11 B03-S2 只读发行预检查
 
 ### B03 CI接入本地验收（后续提交）
+
+最终云端证据：提交04456625050eeeb6aabcfb98c611a3b3d170daeb的PR运行34560740475 completed/success。Windows、Android、macOS和新增B03 staging release tests均通过；两个B03归档上传成功（candidate JSON 1119字节、报告及两ZIP归档222392084字节）。push34560739291正确去重。S1现在8场景（新增Git来源回归），S2 79断言、S3 9场景；已验证开发包组装链路，不等于签名发布或设备安装成功。下一项S4签名事务基础与来源证明，仍不读取现有私钥或运行安装器。
 
 云端d376940运行34558957807三平台与S2 79通过，但S1在干净git status无输出时Trim空值失败，B03作业未通过。修正AutomationNull归一化后，Codex独立S1测试8通过/0失败/0跳过（新增clean/dirty/nongit来源回归，nongit使用临时Git搜索边界并恢复环境）。此次修正待新云端运行验证，不能沿用本地成功声明云端已通过。
 
