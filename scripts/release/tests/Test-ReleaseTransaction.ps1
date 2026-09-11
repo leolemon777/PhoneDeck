@@ -661,6 +661,15 @@ Assert-True ($recAA.status -eq 'recovered-committed') 'Recover reconciles histor
 Assert-True ((Read-JsonFile ($histAppendAbort + '.journal')).status -eq 'committed') 'Recover marked journal committed'
 Assert-True ((Get-FileSha256LowerLocalTest $histAppendAbort) -ceq $aaHistHash) 'Recover preserved history bytes'
 
+$metadataHistory = Join-Path $fx 'metadata-preservation.json'
+Write-Utf8NoBom -Path $metadataHistory -Content '{"schemaVersion":1,"channel":{"id":"fixture","notes":null},"releases":[{"sequence":1,"evidence":{"hashes":["a","b"]},"note":null}]}'
+$metadataSession = Begin-ReleaseTransaction -HistoryPath $metadataHistory -Sequence 2 -RepoRoot $RepoRoot
+[void](Commit-ReleaseTransaction -Session $metadataSession)
+$metadataAfter = Read-JsonFile $metadataHistory
+Assert-True ($metadataAfter.channel.id -ceq 'fixture') 'history append preserves top-level metadata'
+Assert-True (($metadataAfter.releases[0].evidence.hashes -join ',') -ceq 'a,b') 'history append preserves nested release metadata'
+Assert-True ($null -ne $metadataAfter.releases[0].PSObject.Properties['note'] -and $null -eq $metadataAfter.releases[0].note) 'history append preserves explicit null metadata'
+
 # Cleanup owned children only (fixtures retained).
 foreach ($invalidSequence in @(1.5, '2', $true, 0, -1)) {
     $invalidHistory = Join-Path $fx ('invalid-sequence-' + [guid]::NewGuid().ToString('N') + '.json')

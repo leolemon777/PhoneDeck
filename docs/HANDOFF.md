@@ -4,6 +4,8 @@
 
 用户已取消外部CLI及定时跟踪，后续由Codex直接编码、审查、测试和交付。分支agent/b03-release-transaction基于PR10已全云端通过的0445662。
 
+追加审查修正：历史追加保留顶层及已有版本的嵌套元数据/显式null，序列化超深时失败而不静默截断。Codex复测131通过/0失败，夹具outputs/release-transaction-tests/0449368d8b7740b6b6d75f4ec70ad357。PR11已建立，最新云端结果仍需核查。
+
 新增内部ReleaseTransaction库：独占历史锁、pending/committed/aborted日志、原子历史追加和保守中断恢复；Commit/Abort要求有效锁与当前日志身份匹配，旧句柄不能覆盖新事务，已提交历史不会因Abort回退。库仅允许outputs夹具路径，所有结果releasable=false，不是签名发行入口。
 
 Codex独立复核后修正Begin序号参数隐式转换，拒绝小数/字符串/布尔/非正整数，验证拒绝时历史字节不变且不创建journal。最终独立测试128通过/0失败，夹具outputs/release-transaction-tests/7d9e77e92ad44534b5a519075207e042保留；含实际子进程锁竞争、旧句柄、日志冲突与中断恢复。事务测试及单独日志归档已接入B03 CI，云端结果待新提交验证。

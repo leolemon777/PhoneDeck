@@ -240,13 +240,10 @@ function ConvertTo-ReleaseHistoryEntries {
                 throw "history.releases[$index].committedUtc must be a string or DateTime when present."
             }
         }
-        # Preserve unknown optional fields as strings/values when present (bounded).
+        # Append operations must retain existing metadata, including objects and nulls.
         foreach ($prop in $rel.PSObject.Properties) {
             if ($prop.Name -in @('sequence', 'transactionId', 'committedUtc')) { continue }
-            if ($null -eq $prop.Value) { continue }
-            if ($prop.Value -is [string] -or (Test-StrictJsonIntegerTypeLocal -Value $prop.Value) -or $prop.Value -is [bool]) {
-                $row[$prop.Name] = $prop.Value
-            }
+            $row[$prop.Name] = $prop.Value
         }
         [void]$entries.Add($row)
         $index++
@@ -258,7 +255,8 @@ function Write-ReleaseHistoryFile {
     param(
         [Parameter(Mandatory)][string]$HistoryPathFull,
         [Parameter(Mandatory)]$Entries,
-        [Parameter(Mandatory)][string]$SafeAncestorStopAt
+        [Parameter(Mandatory)][string]$SafeAncestorStopAt,
+        $OriginalHistory = $null
     )
     # Avoid @($list) around OrderedDictionary rows — that operator throws
     # "Argument types do not match" for List[object] of OrderedDictionary.
@@ -276,7 +274,12 @@ function Write-ReleaseHistoryFile {
         schemaVersion = 1
         releases      = $releaseArray
     }
-    $json = ConvertTo-Json -InputObject $body -Depth 8
+    if ($null -ne $OriginalHistory) {
+        foreach ($prop in $OriginalHistory.PSObject.Properties) {
+            if ($prop.Name -notin @('schemaVersion', 'releases')) { $body[$prop.Name] = $prop.Value }
+        }
+    }
+    $json = ConvertTo-Json -InputObject $body -Depth 100 -WarningAction Stop
     Write-AtomicTextFile -Path $HistoryPathFull -Content $json -SafeAncestorStopAt $SafeAncestorStopAt
 }
 
@@ -528,7 +531,7 @@ function Commit-ReleaseTransaction {
                 committedUtc  = $committedUtc
             })
 
-        Write-ReleaseHistoryFile -HistoryPathFull $historyFull -Entries $entries -SafeAncestorStopAt $safeStop
+        Write-ReleaseHistoryFile -HistoryPathFull $historyFull -Entries $entries -SafeAncestorStopAt $safeStop -OriginalHistory $parsed.History
         $newHash = Get-FileSha256Lower -LiteralPath $historyFull
 
         Write-ReleaseTransactionJournal `
