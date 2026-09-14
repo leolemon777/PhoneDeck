@@ -117,7 +117,8 @@ public final class ShortcutEditActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         Button back = button("←", theme.surfaceRaised, theme.text);
         back.setOnClickListener(view -> requestClose());
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        back.setContentDescription("返回；未保存的修改会询问处理方式");
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = text(draft.builtIn ? "编辑按钮" : "新增按钮", 22, theme.text,
                 Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
@@ -165,7 +166,7 @@ public final class ShortcutEditActivity extends Activity {
         feedback.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
         page.addView(feedback, topMargin(dp(7)));
 
-        Button save = button("保存并返回主界面", theme.primary, theme.onPrimary);
+        Button save = button("保存更改", theme.primary, theme.onPrimary);
         save.setOnClickListener(view -> saveAndFinish());
         page.addView(save, topMargin(dp(18)));
 
@@ -770,6 +771,8 @@ public final class ShortcutEditActivity extends Activity {
         button.setTextColor(foreground);
         button.setTextSize(15);
         button.setAllCaps(false);
+        button.setMinHeight(dp(48));
+        button.setStateListAnimator(null);
         button.setBackground(theme.pressable(this, background,
                 theme.mix(background, theme.primary, 0.16f), 14));
         return button;

@@ -70,7 +70,8 @@ public final class KeyPickerActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         Button back = button("←");
         back.setOnClickListener(view -> finish());
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        back.setContentDescription("返回");
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = text("选择按键", 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,

@@ -12,6 +12,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
+import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -77,6 +78,8 @@ public final class MainActivity extends Activity {
     private PhoneDeckTheme theme;
     private String appliedThemeId;
     private TextView statusText;
+    private TextView statusDetailText;
+    private LinearLayout connectionCard;
     private View statusDot;
     private TextView actionFeedback;
     private TextView microphoneLevel;
@@ -333,8 +336,16 @@ public final class MainActivity extends Activity {
         super.onResume();
         PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
         if (!latestTheme.id.equals(appliedThemeId)) {
-            recreate();
-            return;
+            // Rebind views only: recreating would destroy active audio/connection owners.
+            stopKeyRepeat();
+            lastFeedbackColor = lastFeedbackColor == theme.success ? latestTheme.success
+                    : lastFeedbackColor == theme.warning ? latestTheme.warning
+                    : lastFeedbackColor == theme.danger ? latestTheme.danger : latestTheme.muted;
+            theme = latestTheme;
+            appliedThemeId = theme.id;
+            theme.applyWindow(this);
+            setContentView(createInterface());
+            applyUiState();
         }
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String previousWorkMode = voiceWorkMode;
@@ -459,36 +470,37 @@ public final class MainActivity extends Activity {
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(18), dp(18), landscape ? dp(24) : dp(362));
+        page.setPadding(dp(20), dp(4), dp(20), dp(16));
         scrollView.addView(page, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT,
                 ScrollView.LayoutParams.WRAP_CONTENT));
 
-        TextView eyebrow = text("PHONE DECK  ·  PERSONAL CONSOLE", 11,
-                theme.primary, Typeface.BOLD);
-        eyebrow.setLetterSpacing(0.12f);
-        page.addView(eyebrow);
-
-        TextView title = text("PhoneDeck 手机控制台", 27, theme.text, Typeface.BOLD);
-        page.addView(title, marginTop(dp(4)));
-
-        TextView subtitle = text("语音优先 · 快捷操作 · 本地连接", 13,
-                theme.muted, Typeface.NORMAL);
-        page.addView(subtitle, marginTop(dp(2)));
+        LinearLayout pinnedHeader = new LinearLayout(this);
+        pinnedHeader.setOrientation(LinearLayout.VERTICAL);
+        pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
+        LinearLayout brandRow = new LinearLayout(this);
+        brandRow.setGravity(Gravity.CENTER_VERTICAL);
+        brandRow.addView(text("PhoneDeck", 24, theme.text, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button settings = smallButton("设置");
+        settings.setContentDescription("打开设置");
+        settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
+        brandRow.addView(settings, new LinearLayout.LayoutParams(dp(64), dp(48)));
+        pinnedHeader.addView(brandRow);
 
         LinearLayout connection = new LinearLayout(this);
+        connectionCard = connection;
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
         connection.setPadding(dp(16), dp(12), dp(12), dp(12));
         connection.setBackground(theme.shape(this, theme.surface, 24));
-        connection.setElevation(dp(4));
+        connection.setElevation(0);
         connection.setOnClickListener(view -> {
-            startBluetoothTransport();
-            testConnection();
+            showDeviceList();
         });
-        connection.setContentDescription("电脑连接状态；点击重新检测连接");
+        connection.setContentDescription("当前电脑；点击查看全部电脑");
         installTouchFeedback(connection);
-        page.addView(connection, margins(dp(0), dp(18), dp(0), dp(14),
+        pinnedHeader.addView(connection, margins(dp(0), dp(8), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         statusDot = new View(this);
@@ -501,33 +513,37 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         statusParams.leftMargin = dp(12);
-        connection.addView(statusText, statusParams);
-
-        TextView retryChevron = text("›", 25, theme.muted, Typeface.NORMAL);
-        retryChevron.setGravity(Gravity.CENTER);
-        retryChevron.setContentDescription("重新检测电脑连接");
-        connection.addView(retryChevron, new LinearLayout.LayoutParams(dp(26), dp(38)));
-
-        Button settings = smallButton("设置");
-        settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
-        installTouchFeedback(settings);
-        connection.addView(settings, new LinearLayout.LayoutParams(dp(60), dp(38)));
+        LinearLayout connectionCopy = new LinearLayout(this);
+        connectionCopy.setOrientation(LinearLayout.VERTICAL);
+        statusText.setSingleLine(false);
+        statusText.setMaxLines(2);
+        connectionCopy.addView(statusText);
+        statusDetailText = text("正在检测连接…", 12, theme.muted, Typeface.NORMAL);
+        statusDetailText.setMaxLines(2);
+        statusDetailText.setEllipsize(TextUtils.TruncateAt.END);
+        connectionCopy.addView(statusDetailText, marginTop(dp(3)));
+        connection.addView(connectionCopy, statusParams);
+        Button retry = smallButton("↻");
+        retry.setTextSize(22);
+        retry.setContentDescription("重新检测电脑连接");
+        retry.setOnClickListener(view -> { startBluetoothTransport(); testConnection(); });
+        connection.addView(retry, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout shortcutHeader = new LinearLayout(this);
         shortcutHeader.setOrientation(LinearLayout.HORIZONTAL);
         shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView shortcutTitle = text("Agent 快捷操作", 18, theme.text, Typeface.BOLD);
+        TextView shortcutTitle = text("快捷操作", 17, theme.text, Typeface.BOLD);
         shortcutHeader.addView(shortcutTitle, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         gridEditButton = smallButton(gridEditMode ? "完成" : "编辑");
         gridEditButton.setOnClickListener(view -> toggleGridEditMode());
         installTouchFeedback(gridEditButton);
-        shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(66), dp(36)));
+        shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(64), dp(48)));
         page.addView(shortcutHeader, marginTop(dp(2)));
 
         shortcutHintText = text(gridEditMode
                 ? "点击按钮编辑 · 长按拖动调换位置"
-                : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义", 12,
+                : "发送到当前电脑 · 编辑可调整按钮与顺序", 12,
                 theme.muted, Typeface.NORMAL);
         page.addView(shortcutHintText, marginTop(dp(3)));
 
@@ -541,9 +557,9 @@ public final class MainActivity extends Activity {
 
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
-        voiceDock.setPadding(dp(12), dp(10), dp(12), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 28));
-        voiceDock.setElevation(dp(14));
+        voiceDock.setPadding(dp(16), dp(12), dp(16), dp(12));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 20));
+        voiceDock.setElevation(0);
 
         LinearLayout dockHeader = new LinearLayout(this);
         dockHeader.setOrientation(LinearLayout.HORIZONTAL);
@@ -580,12 +596,12 @@ public final class MainActivity extends Activity {
         typelessButton.setPadding(dp(12), 0, dp(12), 0);
         typelessButton.setBackground(pressableRoundRect(
                 theme.primary, theme.primaryPressed, 36));
-        typelessButton.setElevation(dp(6));
+        typelessButton.setElevation(0);
         typelessButton.setStateListAnimator(null);
         typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
 
         LinearLayout voiceEditRow = new LinearLayout(this);
         voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -602,7 +618,7 @@ public final class MainActivity extends Activity {
         });
         installTouchFeedback(backspaceButton);
         voiceEditRow.addView(backspaceButton, new LinearLayout.LayoutParams(
-                0, dp(46), 1f));
+                0, dp(48), 1f));
 
         Button enterButton = voiceEditButton("回车");
         enterButton.setContentDescription("向电脑发送回车键");
@@ -610,7 +626,7 @@ public final class MainActivity extends Activity {
                 enterButton, "回车", "ENTER", "enter"));
         installTouchFeedback(enterButton);
         LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(
-                0, dp(46), 1f);
+                0, dp(48), 1f);
         enterParams.leftMargin = dp(8);
         voiceEditRow.addView(enterButton, enterParams);
         voiceDock.addView(voiceEditRow, margins(dp(0), dp(7), dp(0), dp(0),
@@ -619,19 +635,19 @@ public final class MainActivity extends Activity {
 
         voiceMeter = new VoiceLevelView(this, theme);
         voiceDock.addView(voiceMeter, margins(dp(8), dp(5), dp(8), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(30)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(16)));
 
-        actionFeedback = text("●  准备就绪 · 操作状态会显示在这里",
-                12, theme.muted, Typeface.BOLD);
+        actionFeedback = text("准备就绪", 12, theme.muted, Typeface.NORMAL);
         actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
-        actionFeedback.setPadding(dp(15), dp(12), dp(15), dp(12));
+        actionFeedback.setPadding(dp(10), dp(6), dp(10), dp(6));
+        actionFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         actionFeedback.setBackground(roundRect(theme.surface, 16));
         voiceDock.addView(actionFeedback, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         microphoneLevel = text("手机麦克风  ·  未启动", 12, theme.muted, Typeface.BOLD);
-        microphoneLevel.setPadding(dp(15), dp(7), dp(15), dp(7));
+        microphoneLevel.setPadding(dp(10), dp(3), dp(10), dp(3));
         voiceDock.addView(microphoneLevel, margins(dp(0), dp(2), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -641,6 +657,10 @@ public final class MainActivity extends Activity {
         targetDockRow.setGravity(Gravity.CENTER_VERTICAL);
 
         targetTitleText = text("输入到", 12, theme.muted, Typeface.BOLD);
+        targetTitleText.setMinHeight(dp(48));
+        targetTitleText.setGravity(Gravity.CENTER_VERTICAL);
+        targetTitleText.setOnClickListener(view -> showDeviceList());
+        targetTitleText.setContentDescription("查看全部电脑并选择输入目标");
         targetDockRow.addView(targetTitleText, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -668,7 +688,12 @@ public final class MainActivity extends Activity {
             LinearLayout console = new LinearLayout(this);
             console.setOrientation(LinearLayout.HORIZONTAL);
             console.setBackgroundColor(theme.contentBackground());
-            console.addView(scrollView, new LinearLayout.LayoutParams(0,
+            LinearLayout leftColumn = new LinearLayout(this);
+            leftColumn.setOrientation(LinearLayout.VERTICAL);
+            leftColumn.addView(pinnedHeader);
+            leftColumn.addView(scrollView, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+            console.addView(leftColumn, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.MATCH_PARENT, 1f));
             ScrollView dockScroll = new ScrollView(this);
             dockScroll.setFillViewport(true);
@@ -677,19 +702,34 @@ public final class MainActivity extends Activity {
                     ScrollView.LayoutParams.MATCH_PARENT,
                     ScrollView.LayoutParams.WRAP_CONTENT));
             console.addView(dockScroll, new LinearLayout.LayoutParams(
-                    dp(378), LinearLayout.LayoutParams.MATCH_PARENT));
+                    getResources().getDisplayMetrics().widthPixels * 44 / 100,
+                    LinearLayout.LayoutParams.MATCH_PARENT));
             root.addView(console, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT));
         } else {
-            root.addView(scrollView, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-            FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM);
-            dockParams.setMargins(dp(12), dp(0), dp(12), dp(10));
-            root.addView(voiceDock, dockParams);
+            LinearLayout console = new LinearLayout(this);
+            console.setOrientation(LinearLayout.VERTICAL);
+            console.addView(pinnedHeader);
+            console.addView(scrollView, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+            ScrollView dockScroll = new ScrollView(this);
+            dockScroll.setVerticalScrollBarEnabled(false);
+            dockScroll.addView(voiceDock);
+            LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            dockParams.setMargins(dp(12), 0, dp(12), dp(8));
+            console.addView(dockScroll, dockParams);
+            root.addView(console);
+            // Measure the real dock, not a magic bottom inset. Large fonts can scroll
+            // the dock independently without covering the shortcut grid.
+            voiceDock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                int height = Math.min(b - t, root.getHeight() * 55 / 100);
+                if (height > 0 && dockParams.height != height) {
+                    dockParams.height = height;
+                    dockScroll.setLayoutParams(dockParams);
+                }
+            });
         }
 
         page.setFocusableInTouchMode(true);
@@ -762,7 +802,8 @@ public final class MainActivity extends Activity {
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(88);
+        params.height = dp(Math.round(84 * Math.max(1f,
+                getResources().getConfiguration().fontScale)));
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
         grid.addView(button, params);
@@ -778,7 +819,7 @@ public final class MainActivity extends Activity {
         if (shortcutHintText != null) {
             shortcutHintText.setText(gridEditMode
                     ? "点击按钮编辑 · 长按拖动调换位置"
-                    : "退格长按全删 · 方向键长按连发 · 点右上「编辑」自定义");
+                    : "发送到当前电脑 · 编辑可调整按钮与顺序");
         }
         if (shortcutGrid != null) {
             for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
@@ -1194,6 +1235,8 @@ public final class MainActivity extends Activity {
                 chipLabel += " · " + sharedState.replace("正在", "").replace("电脑端", "");
             } else if (pairingRejected) {
                 chipLabel += " · 需重新配对";
+            } else if (!online) {
+                chipLabel += " · 离线";
             }
             Button chip = smallButton(chipLabel);
             chip.setAllCaps(false);
@@ -1205,8 +1248,9 @@ public final class MainActivity extends Activity {
                     20,
                     selected ? 0 : 1,
                     selected ? theme.primary : theme.outline));
-            chip.setAlpha(online ? 1f : 0.48f);
-            chip.setEnabled(online);
+            chip.setAlpha(1f);
+            // Offline entries remain actionable for diagnosis and removal.
+            chip.setEnabled(true);
             chip.setContentDescription(device.slot + "号电脑 " + device.displayName
                     + (sharedState == null ? "" : "，共享状态" + sharedState)
                     + (pairingRejected ? "，配对已失效，用 USB 连接该电脑一次可自动修复" : "")
@@ -1219,10 +1263,31 @@ public final class MainActivity extends Activity {
             });
             installTouchFeedback(chip);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
             params.rightMargin = dp(8);
             targetDeviceRow.addView(chip, params);
         }
+    }
+
+    private void showDeviceList() {
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            new android.app.AlertDialog.Builder(this).setTitle("连接第一台电脑")
+                    .setMessage("在电脑上启动 PhoneDeck 接收端，再用 USB 连接并允许调试。首次配对后，可在同一局域网使用。")
+                    .setPositiveButton("知道了", null).show();
+            return;
+        }
+        String[] labels = new String[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
+                    ? "需重新配对" : isDeviceOnline(device.computerId) ? "在线" : "离线";
+            labels[i] = device.slot + "号 · " + device.displayName + "\n" + state
+                    + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "");
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
+                .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
+                .setNegativeButton("取消", null).show();
     }
 
     private void selectTargetDevice(TargetDeviceManager.Device device, View source) {
@@ -1518,23 +1583,16 @@ public final class MainActivity extends Activity {
             return;
         }
         typelessModeRow.removeAllViews();
-        TextView modeTitle = text("模式", 11, theme.muted, Typeface.BOLD);
-        typelessModeRow.addView(modeTitle, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        String engineName = activeEngineName();
         for (EngineMode mode : modes) {
             boolean selected = mode.id.equals(effectiveSelectedMode());
             Button chip = smallButton(mode.label);
             chip.setAllCaps(false);
             chip.setSingleLine(true);
             chip.setTextSize(12);
-            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setTextColor(selected ? theme.primary : theme.muted);
             chip.setBackground(pressableRoundRect(
-                    selected ? theme.primary : theme.surfaceRaised,
-                    selected ? theme.primaryPressed
-                            : theme.mix(theme.surfaceRaised, theme.primary, 0.15f),
-                    15));
+                    selected ? theme.feedbackSurface(theme.primary) : theme.surface,
+                    theme.surfaceRaised, 12));
             chip.setEnabled(!dictationActive);
             chip.setAlpha(dictationActive ? 0.55f : 1f);
             chip.setContentDescription("切换语音模式：" + mode.label);
@@ -1550,20 +1608,10 @@ public final class MainActivity extends Activity {
                 showActionFeedback("●  语音模式已切换为" + mode.label, theme.muted);
             });
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
-            chipParams.leftMargin = dp(8);
+                    0, dp(48), 1f);
+            chipParams.leftMargin = typelessModeRow.getChildCount() == 0 ? 0 : dp(6);
             installTouchFeedback(chip);
             typelessModeRow.addView(chip, chipParams);
-        }
-        // 引擎名随模式行展示：让用户知道当前电脑用的是哪个语音软件。
-        if (typelessModeRow.getChildCount() > 1 && !"语音引擎".equals(engineName)) {
-            TextView engineTag = text("· " + engineName, 10, theme.muted, Typeface.BOLD);
-            LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            tagParams.leftMargin = dp(8);
-            tagParams.gravity = Gravity.CENTER_VERTICAL;
-            typelessModeRow.addView(engineTag, tagParams);
         }
     }
 
@@ -2079,8 +2127,8 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean holdMode = MODE_HOLD.equals(voiceMode);
-        voiceModeText.setText(holdMode ? "按住说话模式" : "点击说话模式");
-        voiceModeText.setTextColor(holdMode ? theme.warning : theme.primary);
+        voiceModeText.setText(activeEngineName() + (holdMode ? " · 按住" : " · 点击"));
+        voiceModeText.setTextColor(theme.muted);
         if (targetTitleText != null) {
             targetTitleText.setText("输入到");
         }
@@ -2128,9 +2176,10 @@ public final class MainActivity extends Activity {
             PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
             boolean stopState = state.running;
             boolean monoVoice = theme.isMonochrome();
-            int stopFill = monoVoice ? theme.primary
+            int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
                     : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-            int stopInk = monoVoice ? theme.onPrimary : theme.text;
+            int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
+                    : monoVoice ? theme.onPrimary : theme.text;
             typelessButton.setBackground(stopState
                     ? pressableRoundRect(stopFill,
                             monoVoice ? theme.primaryPressed : theme.danger, 36)
@@ -2165,9 +2214,10 @@ public final class MainActivity extends Activity {
                     : VoiceLevelView.IDLE);
         }
         boolean monoVoice = theme.isMonochrome();
-        int stopFill = monoVoice ? theme.primary
+        int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
                 : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-        int stopInk = monoVoice ? theme.onPrimary : theme.text;
+        int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
+                : monoVoice ? theme.onPrimary : theme.text;
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
                         stopFill,
@@ -2387,7 +2437,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (!activePhoneAudioAvailable()) {
-            showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
+            showConnection(targetDisplayName + " · 虚拟麦克风未就绪", theme.warning);
             showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动语音输入", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
@@ -2539,7 +2589,7 @@ public final class MainActivity extends Activity {
                     showConnection(transport + " 已连接", theme.success);
                     showActionFeedback(starting
                                     ? "✓  Typeless 正在使用手机麦克风听写 · " + transport
-                                    : "✓  Typeless 已停止并正在输入文字 · " + transport,
+                                    : "✓  听写已停止 · 请在电脑确认文字 · " + transport,
                             theme.success);
                     performResultHaptic(typelessButton, true);
                     flashResult(typelessButton, theme.success);
@@ -2842,14 +2892,14 @@ public final class MainActivity extends Activity {
     }
 
     private String foregroundSuffix() {
-        String app = activeForegroundApp();
-        return app == null ? "" : " · " + app;
+        String app = UiText.optional(activeForegroundApp());
+        return app.isEmpty() ? "" : " · " + app;
     }
 
     private void updateConnectionDisplay() {
         if (isLanTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
-                showConnection(targetDisplayName + " · Wi-Fi · 缺少 VB-CABLE", theme.warning);
+                showConnection(targetDisplayName + " · Wi-Fi · 虚拟麦克风未就绪", theme.warning);
             } else if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
                 showConnection(targetDisplayName + " · Wi-Fi · 麦克风未配置", theme.warning);
             } else {
@@ -2858,7 +2908,7 @@ public final class MainActivity extends Activity {
             }
         } else if (isUsbTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
-                showConnection(targetDisplayName + " · 缺少 VB-CABLE", theme.warning);
+                showConnection(targetDisplayName + " · 虚拟麦克风未就绪", theme.warning);
             } else if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
                 showConnection(targetDisplayName + " · 麦克风未配置", theme.warning);
             } else {
@@ -2875,7 +2925,10 @@ public final class MainActivity extends Activity {
     }
 
     private void showConnection(String title, int color) {
-        statusText.setText(title);
+        statusText.setText(targetComputerId == null ? "尚未连接电脑" : targetDisplayName);
+        statusDetailText.setText(UiText.connectionDetail(targetDisplayName, title));
+        connectionCard.setContentDescription(statusText.getText() + "，" + statusDetailText.getText()
+                + "。点击查看全部电脑");
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
     }
@@ -2888,7 +2941,6 @@ public final class MainActivity extends Activity {
         actionFeedback.setBackground(theme.shape(
                 this, theme.feedbackSurface(color), 14, 1,
                 theme.mix(theme.outline, color, 0.35f)));
-        actionFeedback.announceForAccessibility(message);
     }
 
     private void finishGuardedAction(Button source, boolean guarded) {

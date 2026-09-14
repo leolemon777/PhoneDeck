@@ -37,16 +37,35 @@ public final class FleetUpdateActivity extends Activity {
         directory = new File(getCacheDir(), "fleet-update");
         directory.mkdirs();
         LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL); page.setPadding(32, 40, 32, 40);
-        TextView title = new TextView(this); title.setText("设备统一更新"); title.setTextSize(26); title.setTextColor(theme.text);
-        page.addView(title);
+        page.setOrientation(LinearLayout.VERTICAL);
+        int spacing = PhoneDeckTheme.dp(this, 20);
+        page.setPadding(spacing, spacing, spacing, spacing);
+        page.setBackgroundColor(theme.contentBackground());
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        Button back = new Button(this); back.setText("←"); back.setTextColor(theme.text);
+        back.setContentDescription("返回"); back.setPadding(0, 0, 0, 0);
+        back.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        back.setOnClickListener(v -> onBackPressed());
+        header.addView(back, new LinearLayout.LayoutParams(PhoneDeckTheme.dp(this, 48), PhoneDeckTheme.dp(this, 48)));
+        TextView title = new TextView(this); title.setText("设备更新"); title.setTextSize(22); title.setTextColor(theme.text);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setPadding(PhoneDeckTheme.dp(this, 12), 0, 0, 0);
+        header.addView(title); page.addView(header);
         TextView hint = new TextView(this);
         hint.setText("在任一已配对电脑导入签名更新包，然后点击下方按钮。其他电脑依次更新，手机最后安装。请保持此页打开；离线或失败的设备可稍后重试。\n正在听写时会等待，空闲后会暂停共享麦克风。安卓安装需按系统提示确认。");
-        hint.setTextColor(theme.muted); hint.setPadding(0, 24, 0, 24); page.addView(hint);
-        start = new Button(this); start.setText("检查并更新所有设备"); page.addView(start);
-        install = new Button(this); install.setText("安装手机更新"); install.setEnabled(false); page.addView(install);
-        Button cancel = new Button(this); cancel.setText("停止后续更新"); page.addView(cancel);
-        status = new TextView(this); status.setTextColor(theme.text); status.setTextSize(16); page.addView(status);
+        hint.setTextColor(theme.muted); hint.setTextSize(14);
+        hint.setLineSpacing(PhoneDeckTheme.dp(this, 3), 1f);
+        hint.setPadding(0, spacing, 0, spacing); page.addView(hint);
+        start = updateButton(page, theme, "检查并更新所有设备", true);
+        install = updateButton(page, theme, "安装手机更新", false); install.setEnabled(false);
+        Button cancel = updateButton(page, theme, "停止后续更新", false);
+        cancel.setTextColor(theme.danger);
+        status = new TextView(this); status.setTextColor(theme.text); status.setTextSize(14);
+        status.setPadding(spacing, spacing, spacing, spacing);
+        status.setBackground(theme.shape(this, theme.surface, 16));
+        status.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        page.addView(status);
         ScrollView scroll = new ScrollView(this); scroll.addView(page); setContentView(theme.wrapContent(this, scroll));
         status.setText(getSharedPreferences("PhoneDeckUpdates", MODE_PRIVATE).getString("last_result", "尚未检查"));
         sourceId = getIntent().getStringExtra("sourceId");
@@ -57,6 +76,19 @@ public final class FleetUpdateActivity extends Activity {
             show("更新任务", "将停止后续设备；已开始安装的电脑会自行完成或回退");
         });
         if ((sourceId != null || getIntent().getBooleanExtra("resume", false)) && saved == null) begin();
+    }
+
+    private Button updateButton(LinearLayout page, PhoneDeckTheme theme, String label, boolean primary) {
+        Button button = new Button(this);
+        button.setText(label); button.setTextSize(15); button.setAllCaps(false);
+        button.setTextColor(primary ? theme.onPrimary : theme.text);
+        button.setBackground(theme.pressable(this, primary ? theme.primary : theme.surfaceRaised,
+                primary ? theme.primaryPressed : theme.key, 14));
+        button.setStateListAnimator(null);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, PhoneDeckTheme.dp(this, 52));
+        params.bottomMargin = PhoneDeckTheme.dp(this, 12);
+        page.addView(button, params);
+        return button;
     }
 
     @Override public void onBackPressed() {

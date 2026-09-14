@@ -69,6 +69,7 @@ final class VoiceLevelView extends View {
             if (state == IDLE || state == PAUSED || state == ERROR) {
                 height = dp(6);
             }
+            height = Math.min(height, Math.max(0, getHeight() - dp(2)));
             float left = index * (width + gap);
             paint.setColor(index < activeBars ? activeColor : theme.outline);
             canvas.drawRoundRect(
