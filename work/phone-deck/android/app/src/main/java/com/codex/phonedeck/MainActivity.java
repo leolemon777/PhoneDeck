@@ -726,13 +726,15 @@ public final class MainActivity extends Activity {
             root.addView(console);
             // Measure the real dock, not a magic bottom inset. Large fonts can scroll
             // the dock independently without covering the shortcut grid.
-            voiceDock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-                int height = Math.min(b - t, root.getHeight() * 55 / 100);
+            voiceDock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> dockScroll.post(() -> {
+                // A health refresh can reveal engine modes after the first layout.
+                // Resize outside the layout pass so the parent lays out again.
+                int height = Math.min(voiceDock.getHeight(), root.getHeight() * 55 / 100);
                 if (height > 0 && dockParams.height != height) {
                     dockParams.height = height;
                     dockScroll.setLayoutParams(dockParams);
                 }
-            });
+            }));
         }
 
         page.setFocusableInTouchMode(true);

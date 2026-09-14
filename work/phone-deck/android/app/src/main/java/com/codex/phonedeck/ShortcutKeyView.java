@@ -56,15 +56,6 @@ final class ShortcutKeyView extends FrameLayout {
         chordParams.topMargin = dp(6);
         content.addView(chord, chordParams);
 
-        if (theme.isNative()) {
-            View accent = new View(context);
-            accent.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-            accent.setBackground(theme.shape(context, theme.shortcutAccent(config.color), 3));
-            FrameLayout.LayoutParams accentParams = new FrameLayout.LayoutParams(dp(5), dp(5),
-                    Gravity.TOP | Gravity.END);
-            addView(accent, accentParams);
-        }
-
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);
         stateBadge.setGravity(Gravity.CENTER);
         stateBadge.setVisibility(View.GONE);
