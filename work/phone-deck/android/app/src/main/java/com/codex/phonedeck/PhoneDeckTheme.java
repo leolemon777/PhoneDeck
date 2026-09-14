@@ -235,7 +235,7 @@ final class PhoneDeckTheme {
                 light ? "简洁 · 浅色" : "简洁 · 深色",
                 light ? "清晰留白，蓝色强调" : "柔和深灰，舒适低光",
                 light,
-                Color.parseColor(light ? "#F5F6F8" : "#111317"),
+                Color.parseColor(light ? "#F0F2F5" : "#121316"),
                 Color.parseColor(light ? "#FFFFFF" : "#1B1E24"),
                 Color.parseColor(light ? "#EDF0F5" : "#2A2F39"),
                 Color.parseColor(light ? "#FFFFFF" : "#22262E"),
@@ -248,7 +248,7 @@ final class PhoneDeckTheme {
                 Color.parseColor(light ? "#8A5B0A" : "#EAC078"),
                 Color.parseColor(light ? "#BA3044" : "#FFA0AA"),
                 Color.parseColor(light ? "#E1E5EB" : "#343B48"),
-                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"), 18, 1);
+                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"), 24, 0);
     }
 
     /// 纸卡系列：卡片回归纸面，预设色只留给小面积点缀。

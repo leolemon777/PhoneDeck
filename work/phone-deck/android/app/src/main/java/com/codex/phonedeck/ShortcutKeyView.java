@@ -28,7 +28,7 @@ final class ShortcutKeyView extends FrameLayout {
                 context,
                 theme.shortcutColor(config.color),
                 theme.shortcutPressedColor(config.color),
-                16));
+                12));
         setElevation(theme.isNative() ? 0 : dp(2));
 
         content = new LinearLayout(context);
@@ -37,7 +37,7 @@ final class ShortcutKeyView extends FrameLayout {
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        TextView title = label(config.label, 14,
+        TextView title = label(config.label, 13,
                 theme.text, Typeface.BOLD);
         title.setGravity(Gravity.START);
         title.setMaxLines(2);
@@ -45,7 +45,7 @@ final class ShortcutKeyView extends FrameLayout {
         content.addView(title, new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        TextView chord = label(config.subtitle(), 12,
+        TextView chord = label(config.subtitle(), 11,
                 theme.isNative() ? theme.muted : theme.shortcutAccent(config.color),
                 Typeface.NORMAL);
         chord.setGravity(Gravity.START);
@@ -53,7 +53,7 @@ final class ShortcutKeyView extends FrameLayout {
         chord.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        chordParams.topMargin = dp(6);
+        chordParams.topMargin = dp(5);
         content.addView(chord, chordParams);
 
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);

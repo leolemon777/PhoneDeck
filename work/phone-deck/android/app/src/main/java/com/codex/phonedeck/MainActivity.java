@@ -480,9 +480,11 @@ public final class MainActivity extends Activity {
         pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        brandRow.addView(text("PhoneDeck", 24, theme.text, Typeface.BOLD),
+        brandRow.addView(text("PhoneDeck", 19, theme.text, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button settings = smallButton("设置");
+        settings.setBackgroundColor(Color.TRANSPARENT);
+        settings.setTextColor(theme.muted);
         settings.setContentDescription("打开设置");
         settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
         brandRow.addView(settings, new LinearLayout.LayoutParams(dp(64), dp(48)));
@@ -492,8 +494,7 @@ public final class MainActivity extends Activity {
         connectionCard = connection;
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
-        connection.setPadding(dp(16), dp(12), dp(12), dp(12));
-        connection.setBackground(theme.shape(this, theme.surface, 24));
+        connection.setPadding(0, dp(6), 0, dp(6));
         connection.setElevation(0);
         connection.setOnClickListener(view -> {
             showDeviceList();
@@ -505,9 +506,9 @@ public final class MainActivity extends Activity {
 
         statusDot = new View(this);
         statusDot.setBackground(roundRect(theme.muted, 20));
-        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(12), dp(12)));
+        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
 
-        statusText = text("正在检测电脑端…", 15, theme.text, Typeface.BOLD);
+        statusText = text("正在检测电脑端…", 13, theme.text, Typeface.BOLD);
         statusText.setSingleLine(true);
         statusText.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
@@ -524,6 +525,8 @@ public final class MainActivity extends Activity {
         connectionCopy.addView(statusDetailText, marginTop(dp(3)));
         connection.addView(connectionCopy, statusParams);
         Button retry = smallButton("↻");
+        retry.setBackgroundColor(Color.TRANSPARENT);
+        retry.setTextColor(theme.muted);
         retry.setTextSize(22);
         retry.setContentDescription("重新检测电脑连接");
         retry.setOnClickListener(view -> { startBluetoothTransport(); testConnection(); });
@@ -532,10 +535,12 @@ public final class MainActivity extends Activity {
         LinearLayout shortcutHeader = new LinearLayout(this);
         shortcutHeader.setOrientation(LinearLayout.HORIZONTAL);
         shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView shortcutTitle = text("快捷操作", 17, theme.text, Typeface.BOLD);
+        TextView shortcutTitle = text("快捷操作", 14, theme.text, Typeface.BOLD);
         shortcutHeader.addView(shortcutTitle, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         gridEditButton = smallButton(gridEditMode ? "完成" : "编辑");
+        gridEditButton.setBackgroundColor(Color.TRANSPARENT);
+        gridEditButton.setTextColor(theme.muted);
         gridEditButton.setOnClickListener(view -> toggleGridEditMode());
         installTouchFeedback(gridEditButton);
         shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(64), dp(48)));
@@ -547,6 +552,7 @@ public final class MainActivity extends Activity {
                 : "发送到当前电脑 · 编辑可调整按钮与顺序", 12,
                 theme.muted, Typeface.NORMAL);
         page.addView(shortcutHintText, marginTop(dp(3)));
+        shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
 
         GridLayout grid = new GridLayout(this);
         // Landscape already splits the screen with the voice dock; six columns
@@ -554,14 +560,14 @@ public final class MainActivity extends Activity {
         grid.setColumnCount(3);
         grid.setUseDefaultMargins(false);
         shortcutGrid = grid;
-        page.addView(grid, margins(dp(-4), dp(10), dp(-4), dp(0),
+        page.addView(grid, margins(dp(-4), dp(2), dp(-4), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         refreshShortcutGrid();
 
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
-        voiceDock.setPadding(dp(16), dp(12), dp(16), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 20));
+        voiceDock.setPadding(dp(16), dp(16), dp(16), dp(12));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 24, 0, theme.outline));
         voiceDock.setElevation(0);
 
         LinearLayout dockHeader = new LinearLayout(this);
@@ -642,15 +648,15 @@ public final class MainActivity extends Activity {
 
         actionFeedback = text("准备就绪", 12, theme.muted, Typeface.NORMAL);
         actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
-        actionFeedback.setPadding(dp(10), dp(6), dp(10), dp(6));
+        actionFeedback.setPadding(dp(4), dp(3), dp(4), dp(3));
         actionFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        actionFeedback.setBackground(roundRect(theme.surface, 16));
+        actionFeedback.setBackgroundColor(Color.TRANSPARENT);
         voiceDock.addView(actionFeedback, margins(dp(0), dp(7), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         microphoneLevel = text("手机麦克风  ·  未启动", 12, theme.muted, Typeface.BOLD);
-        microphoneLevel.setPadding(dp(10), dp(3), dp(10), dp(3));
+        microphoneLevel.setPadding(dp(4), dp(2), dp(4), dp(2));
         voiceDock.addView(microphoneLevel, margins(dp(0), dp(2), dp(0), dp(0),
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -807,7 +813,7 @@ public final class MainActivity extends Activity {
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(Math.round(84 * Math.max(1f,
+        params.height = dp(Math.round(72 * Math.max(1f,
                 getResources().getConfiguration().fontScale)));
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
@@ -822,6 +828,7 @@ public final class MainActivity extends Activity {
             performResultHaptic(gridEditButton, true);
         }
         if (shortcutHintText != null) {
+            shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
             shortcutHintText.setText(gridEditMode
                     ? "点击按钮编辑 · 长按拖动调换位置"
                     : "发送到当前电脑 · 编辑可调整按钮与顺序");
@@ -1237,21 +1244,28 @@ public final class MainActivity extends Activity {
                     : null;
             String chipLabel = device.slot + "号";
             if (sharedState != null) {
-                chipLabel += " · " + sharedState.replace("正在", "").replace("电脑端", "");
+                chipLabel += "\n" + sharedState.replace("正在", "").replace("电脑端", "");
             } else if (pairingRejected) {
-                chipLabel += " · 需重新配对";
+                chipLabel += "\n重配对";
             } else if (!online) {
-                chipLabel += " · 离线";
+                chipLabel += "\n离线";
+            } else {
+                chipLabel += selected ? "\n当前" : "\n在线";
             }
             Button chip = smallButton(chipLabel);
             chip.setAllCaps(false);
-            chip.setSingleLine(true);
+            chip.setSingleLine(false);
+            chip.setMaxLines(2);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setTextSize(10);
+            chip.setMinWidth(dp(48));
+            chip.setMinimumWidth(dp(48));
             chip.setTextColor(selected ? theme.onPrimary : theme.text);
             chip.setBackground(theme.shape(
                     this,
                     selected ? theme.primary : theme.surfaceRaised,
-                    20,
-                    selected ? 0 : 1,
+                    10,
+                    0,
                     selected ? theme.primary : theme.outline));
             chip.setAlpha(1f);
             // Offline entries remain actionable for diagnosis and removal.
@@ -1268,8 +1282,8 @@ public final class MainActivity extends Activity {
             });
             installTouchFeedback(chip);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
-            params.rightMargin = dp(8);
+                    devices.size() <= 5 ? 0 : dp(64), dp(48), devices.size() <= 5 ? 1f : 0f);
+            params.rightMargin = targetDeviceRow.getChildCount() == devices.size() - 1 ? 0 : dp(4);
             targetDeviceRow.addView(chip, params);
         }
     }
@@ -1598,7 +1612,7 @@ public final class MainActivity extends Activity {
             chip.setTextSize(12);
             chip.setTextColor(selected ? theme.primary : theme.muted);
             chip.setBackground(pressableRoundRect(
-                    selected ? theme.feedbackSurface(theme.primary) : theme.surface,
+                    selected ? theme.feedbackSurface(theme.primary) : Color.TRANSPARENT,
                     theme.surfaceRaised, 12));
             chip.setEnabled(!dictationActive);
             chip.setAlpha(dictationActive ? 0.55f : 1f);
@@ -1791,6 +1805,9 @@ public final class MainActivity extends Activity {
                 boolean anySuccess = false;
                 ConcurrentHashMap<String, Boolean> rejectedNext = new ConcurrentHashMap<>();
                 for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
+                    if (lanProbePool.isShutdown() || Thread.currentThread().isInterrupted()) {
+                        return; // Activity was destroyed during a font/orientation change.
+                    }
                     if (!device.hasLanPairing()) {
                         continue;
                     }
@@ -1859,6 +1876,12 @@ public final class MainActivity extends Activity {
                 lanPairingRejected.clear();
                 lanPairingRejected.putAll(rejectedNext);
                 mainHandler.post(this::applyStoredTarget);
+            } catch (java.util.concurrent.RejectedExecutionException exception) {
+                // onDestroy may shut the pool down between the check and submission.
+                // Cancel this obsolete screen's probe without crashing the replacement.
+                if (!lanProbePool.isShutdown()) {
+                    throw exception;
+                }
             } finally {
                 lanCheckInFlight = false;
             }
@@ -3098,7 +3121,7 @@ public final class MainActivity extends Activity {
         button.setTextSize(14);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setBackground(theme.pressable(
-                this, theme.surface,
+                this, theme.surfaceRaised,
                 theme.mix(theme.surface, theme.primary, 0.16f), 23));
         return button;
     }
