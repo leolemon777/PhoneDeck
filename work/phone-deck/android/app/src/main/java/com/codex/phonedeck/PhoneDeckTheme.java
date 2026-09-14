@@ -136,29 +136,14 @@ final class PhoneDeckTheme {
                 .apply();
     }
 
-    /** 简洁浅/深优先展示，后接九套兼容主题。 */
+    /** 用户选择仅保留简洁浅色与深色。 */
     static PhoneDeckTheme[] all() {
         return new PhoneDeckTheme[]{
-                nativeTheme(true), nativeTheme(false),
-                frost(),
-                ivory(), pearl(), espresso(), cocoa(),
-                swiss(), klein(), bauhaus(), mono()};
+                nativeTheme(true), nativeTheme(false)};
     }
 
     static PhoneDeckTheme byId(String id) {
-        switch (validId(id)) {
-            case NATIVE_LIGHT: return nativeTheme(true);
-            case NATIVE_DARK: return nativeTheme(false);
-            case IVORY: return ivory();
-            case PEARL: return pearl();
-            case ESPRESSO: return espresso();
-            case COCOA: return cocoa();
-            case SWISS: return swiss();
-            case KLEIN: return klein();
-            case BAUHAUS: return bauhaus();
-            case MONO: return mono();
-            default: return frost();
-        }
+        return nativeTheme(!NATIVE_DARK.equals(validId(id)));
     }
 
     /**
@@ -214,6 +199,7 @@ final class PhoneDeckTheme {
         if (migrated == null) {
             migrated = NATIVE_LIGHT;
         }
+        migrated = validId(migrated);
         preferences.edit()
                 .putString(PREF_THEME_ID, migrated)
                 .remove("theme_brand")
@@ -228,7 +214,10 @@ final class PhoneDeckTheme {
                 return id;
             }
         }
-        return FROST;
+        if (ESPRESSO.equals(id) || COCOA.equals(id) || MONO.equals(id)) {
+            return NATIVE_DARK;
+        }
+        return NATIVE_LIGHT;
     }
 
     /// 冰川玻璃实例：主界面据此挂载极光磨砂背景。

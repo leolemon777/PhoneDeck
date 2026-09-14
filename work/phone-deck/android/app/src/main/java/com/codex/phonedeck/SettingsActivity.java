@@ -149,8 +149,6 @@ public final class SettingsActivity extends Activity {
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
                 page.addView(sectionLabel("简洁系列"), topMargin(dp(20)));
-            } else if (PhoneDeckTheme.FROST.equals(candidate.id)) {
-                page.addView(sectionLabel("经典主题 · 保留你的偏好"), topMargin(dp(24)));
             }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
