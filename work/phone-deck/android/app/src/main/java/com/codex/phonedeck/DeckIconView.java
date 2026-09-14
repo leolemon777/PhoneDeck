@@ -6,6 +6,7 @@ import android.graphics.Paint;
 import android.view.View;
 
 /** Small original line icons; no fonts, bitmaps or third-party asset dependency. */
+@android.annotation.SuppressLint("ViewConstructor") // Programmatic-only icon, never inflated from XML.
 final class DeckIconView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final String kind;

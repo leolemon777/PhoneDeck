@@ -489,6 +489,9 @@ public final class SettingsActivity extends Activity {
 
     private View wrapInScroll(LinearLayout page) {
         ScrollView scroll = new ScrollView(this);
+        // Subpages must cover the translated root, including their empty bottom.
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(theme.background);
         scroll.addView(page);
         return scroll;
     }

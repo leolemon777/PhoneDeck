@@ -539,7 +539,8 @@ public final class MainActivity extends Activity {
         gridEditButton.setOnClickListener(view -> toggleGridEditMode());
         installTouchFeedback(gridEditButton);
         shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(dp(64), dp(48)));
-        page.addView(shortcutHeader, marginTop(dp(2)));
+        page.addView(shortcutHeader, margins(0, dp(2), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         shortcutHintText = text(gridEditMode
                 ? "点击按钮编辑 · 长按拖动调换位置"
@@ -548,7 +549,9 @@ public final class MainActivity extends Activity {
         page.addView(shortcutHintText, marginTop(dp(3)));
 
         GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(landscape ? 6 : 3);
+        // Landscape already splits the screen with the voice dock; six columns
+        // in the remaining half truncate every meaningful shortcut label.
+        grid.setColumnCount(3);
         grid.setUseDefaultMargins(false);
         shortcutGrid = grid;
         page.addView(grid, margins(dp(-4), dp(10), dp(-4), dp(0),
@@ -1576,6 +1579,8 @@ public final class MainActivity extends Activity {
             typelessModeRow.setVisibility(View.GONE);
             return;
         }
+        voiceModeText.setText(getString(R.string.voice_mode_summary,
+                activeEngineName(), MODE_HOLD.equals(voiceMode) ? "按住" : "点击"));
         EngineMode[] modes = activeTypelessModes();
         boolean usable = activeManagedDictationSupported() && modes.length > 1;
         typelessModeRow.setVisibility(usable ? View.VISIBLE : View.GONE);
@@ -2127,7 +2132,8 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean holdMode = MODE_HOLD.equals(voiceMode);
-        voiceModeText.setText(activeEngineName() + (holdMode ? " · 按住" : " · 点击"));
+        voiceModeText.setText(getString(R.string.voice_mode_summary,
+                activeEngineName(), holdMode ? "按住" : "点击"));
         voiceModeText.setTextColor(theme.muted);
         if (targetTitleText != null) {
             targetTitleText.setText("输入到");

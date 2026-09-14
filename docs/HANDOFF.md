@@ -11,11 +11,16 @@
 - Mac 未携带 Samsung 原开发签名（实际证书 SHA256 前缀 `653884d0`）。新增独立
   `uiPreview` 构建类型，包名 `.preview`、独立数据，不能用作 fleet 载荷，不覆盖原应用。
 - 工具链安装于忽略的外置盘 `work/tools`；JDK 17、SDK 35 和 Gradle 缓存均在此。
-  已做 Java 17 全源码类型检查（仅使用临时 R 符号，不替代 Android 构建）；正式 Gradle、
-  单测、Lint 和真机截图结果仍待追加。当前不能声称已安装或全端翻新完成。
+  正式 Gradle assembleDebug、assembleUiPreview、testDebugUnitTest、lintDebug 均通过；
+  14 项单测通过，Lint 0 错误 / 33 警告。预览版已与原版并存安装到 Samsung Android 12。
+- 实机复查浅/深首页、设置根页、主题、语音设置、快捷键列表、设备列表、150% 字体和横屏。
+  修正快捷操作编辑入口对齐、引擎摘要刷新、设置子页背景穿透，以及横屏六列过窄问题；
+  最新 APK 已重新安装，背景覆盖和横屏三列已截图复查。手机字体/旋转恢复原值。
+  实际 Mac 连接显示在线；本轮未启动录音，不把连接或 UI 走查作为听写验收。
+  截图保存在忽略的 outputs/ui-refresh，PR 为 #13（叠加在 Mac 修复分支）。
 
-待办：完成 Android APK 构建/单测/Lint 与浅深页面真机走查；原渠道覆盖安装需原签名；
-真实点击/按住听写、连续会话及 Windows/macOS 界面仍需独立验收。
+待办：编辑器/按键选择/更新页完整交互、离线与空态、多设备切换，以及真实点击/按住听写、
+连续会话仍需验收；原渠道覆盖安装需原签名。Windows/macOS 界面尚未翻新，不能报告全端完成。
 
 ## 2026-09-14 macOS dev.3：Samsung → Mac → Typeless 真实听写闭环通过
 
