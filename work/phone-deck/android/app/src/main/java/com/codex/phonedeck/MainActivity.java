@@ -480,7 +480,7 @@ public final class MainActivity extends Activity {
         pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        brandRow.addView(text("PhoneDeck", 19, theme.text, Typeface.BOLD),
+        brandRow.addView(text(getString(R.string.app_name), 19, theme.text, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button settings = smallButton("设置");
         settings.setBackgroundColor(Color.TRANSPARENT);
