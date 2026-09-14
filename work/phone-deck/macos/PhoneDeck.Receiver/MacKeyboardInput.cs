@@ -383,6 +383,13 @@ internal sealed class MacKeyboardInput
         for (var index = pressed.Count - 1; index >= 0; index--)
         {
             var key = pressed[index];
+            // 事件 flags 表示“该事件发生时”仍然按下的修饰键。
+            // 因此修饰键自己的 key-up 必须先移除对应 flag；否则 Fn 等
+            // 单修饰键会被接收端误判为仍处于按住状态。
+            if (key.IsModifier)
+            {
+                flags &= ~key.Flag;
+            }
             try
             {
                 sink.PostKey(key.KeyCode, false, flags);
@@ -390,10 +397,6 @@ internal sealed class MacKeyboardInput
             catch (Exception exception)
             {
                 releaseFailure ??= exception;
-            }
-            if (key.IsModifier)
-            {
-                flags &= ~key.Flag;
             }
         }
         if (rethrow && releaseFailure is not null)

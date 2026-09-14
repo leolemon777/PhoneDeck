@@ -1,8 +1,8 @@
-# PhoneDeck macOS 接收端（2.0.0-dev.2）
+# PhoneDeck macOS 接收端（2.0.0-dev.3）
 
 ## 当前阶段能做什么
 
-macOS 2.0.0-dev.2 用于验证第三台 Mac 与两台 Windows 的混合控制和双语音模式：
+macOS 2.0.0-dev.3 用于验证 Mac 与 Windows 的混合控制和双语音模式：
 
 - 支持 Apple Silicon 与 Intel Mac；
 - 复用 PhoneDeck 协议 v2、稳定 `computerId`、USB 配对、HTTPS 8766、证书固定、访问令牌和 UDP 8767 发现；
@@ -15,7 +15,8 @@ macOS 2.0.0-dev.2 用于验证第三台 Mac 与两台 Windows 的混合控制和
 - 支持 `managed` 手机控制听写和 `shared` 共享麦克风；共享流只供音，不触发 Typeless。
 - 自动读取 Typeless 的三种快捷键和所选麦克风，并通过 Core Audio 进程对象确认真实采集状态。
 
-蓝牙、Developer ID 签名和公证尚未接入；真实 Mac 音频和三机压力测试也尚未完成。
+2026-09-14 已在 Apple Silicon Mac 与 Samsung 上完成 Wi-Fi 输入和 Typeless 听写最小闭环。
+蓝牙、Developer ID 签名和公证、Intel 真机、翻译/问答、连续断线与三机压力仍未完成。
 
 ## Mac 端准备
 
@@ -24,7 +25,11 @@ macOS 2.0.0-dev.2 用于验证第三台 Mac 与两台 Windows 的混合控制和
 1. .NET 8 SDK；
 2. Android SDK Platform Tools（需要 USB 自动配对时安装）；
 3. 已安装的 [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)，并在“音频 MIDI 设置”中设为 48,000 Hz；
-4. 已安装 Typeless，并把麦克风选为 `BlackHole 2ch`，三种模式按需设置本机快捷键。
+4. 已安装 Typeless，并把麦克风选为接收 BlackHole 的输入设备，三种模式按需设置本机快捷键。
+   2026-09-14 验证的 Typeless 2.6.0 会隐藏名称含 `Virtual` 的设备；如果原始
+   `BlackHole 2ch` 不出现在麦克风列表，请在“音频 MIDI 设置”创建仅包含
+   BlackHole 2ch 的 48 kHz 聚合设备（例如 `PhoneDeck Mic - BlackHole 2ch`），
+   再在 Typeless 中选择该聚合设备。
 
 在仓库根目录执行：
 
@@ -45,14 +50,17 @@ work/phone-deck/dist/macos/osx-arm64/PhoneDeck Receiver.app
 work/phone-deck/dist/macos/osx-x64/PhoneDeck Receiver.app
 ```
 
-把 `PhoneDeck Receiver.app` 移到 `/Applications`。正式授权前不要反复移动 App；macOS 的辅助功能授权与 App 身份、签名和位置有关。
+把 `PhoneDeck Receiver.app` 放到最终运行位置；可以是 `/Applications`，也可以是稳定的外置盘路径。
+正式授权前不要反复移动 App。当前 ad-hoc 包每次重建都会改变 CDHash；重建后需从辅助功能
+列表移除旧记录、重新添加新 App，并完全退出后重开。Developer ID 正式签名后再建立稳定的
+分发与升级身份。
 
 ## 首次启动与权限
 
 第一次建议从“终端”运行，便于看到诊断：
 
 ```zsh
-"/Applications/PhoneDeck Receiver.app/Contents/MacOS/PhoneDeck.Receiver"
+"/最终运行位置/PhoneDeck Receiver.app/Contents/MacOS/PhoneDeck.Receiver"
 ```
 
 然后进入：
@@ -107,6 +115,10 @@ curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
 ~/Library/Application Support/PhoneDeck/server-settings.json
 ```
 
+如需把 PhoneDeck 自身数据保留在外置盘，启动前设置
+`PHONEDECK_DATA_DIR=/稳定的外置盘目录`；证书、电脑 ID、令牌和接收端配置会写入该目录。
+Typeless 自身配置仍由 Typeless 管理，不会随此变量搬移。
+
 可用字段：
 
 ```json
@@ -147,7 +159,8 @@ curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
 
 ## 已知限制
 
-- 尚未在真实 Mac 上完成构建、权限、CGEvent、USB、Wi-Fi 和混合三机验收；Windows 上的编译与单元测试不能替代这些步骤。
+- 已在一台真实 Apple Silicon Mac 上完成构建、辅助功能、CGEvent、BlackHole 聚合输入、
+  Samsung Wi-Fi 听写开始/停止与最终文字验证；USB 拔线恢复、IP 变化、Intel 和混合三机仍未验收。
 - 当前 Android 按键编辑器仍使用 Windows 风格标签。Mac 接收端对默认组合做兼容转换；后续会把编辑器升级为明确的 `主键（Ctrl/Command）`、`Control`、`Option` 和 `Command` 语义。
 - macOS 没有标准 F21–F24 虚拟键码，本阶段支持 F1–F20；媒体播放/上一首/下一首暂不执行并返回明确错误。
 - BlackHole 和 Typeless 均由用户单独安装，不进入 PhoneDeck 安装包；设备 UID 和 Typeless

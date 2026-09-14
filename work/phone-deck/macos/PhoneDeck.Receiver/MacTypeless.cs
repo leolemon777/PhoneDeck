@@ -221,38 +221,49 @@ internal static class MacVoiceEngineStateProbe
         }
         try
         {
-            Process? process = null;
+            var states = new List<bool?>();
             foreach (var candidate in Process.GetProcesses())
             {
                 try
                 {
-                    if (process is null && MatchesProcess(profile, candidate.ProcessName))
+                    if (MatchesProcess(profile, candidate.ProcessName))
                     {
-                        process = candidate;
-                    }
-                    else
-                    {
-                        candidate.Dispose();
+                        states.Add(ReadRunningInput(candidate.Id));
                     }
                 }
                 catch
                 {
+                    states.Add(null);
+                }
+                finally
+                {
                     candidate.Dispose();
                 }
             }
-            if (process is null)
-            {
-                return false;
-            }
-            using (process)
-            {
-                return ReadRunningInput(process.Id);
-            }
+            return CombineCaptureStates(states);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>Electron 类语音引擎通常由独立音频服务进程持有输入流。
+    /// 任一匹配进程正在采集即为 true；没有匹配进程时表示引擎未运行。</summary>
+    internal static bool? CombineCaptureStates(IEnumerable<bool?> states)
+    {
+        var found = false;
+        var unreadable = false;
+        foreach (var state in states)
+        {
+            found = true;
+            if (state is true)
+            {
+                return true;
+            }
+            unreadable |= state is null;
+        }
+        return !found ? false : unreadable ? null : false;
     }
 
     private static bool MatchesProcess(MacVoiceEngineProfile profile, string processName) =>

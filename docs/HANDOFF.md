@@ -1,5 +1,41 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-14 macOS dev.3：Samsung → Mac → Typeless 真实听写闭环通过
+
+- 在 Apple Silicon Mac（macOS 26.3.1）从源码构建并运行
+  `PhoneDeck Receiver.app`；Samsung SM-G9880（Android 12，PhoneDeck
+  1.6.0-dev.18/code 24）通过已配对的 HTTPS/Wi-Fi 通道控制 Mac。`PROBE` 本机
+  CGEvent 与手机 `/plan` 都进入真实前台输入框，证明受控文字/快捷键路径可用。
+- 修复真实 Mac 首启时的证书导入崩溃：macOS 不支持带私钥 PFX 的
+  `EphemeralKeySet`，`LanIdentity` 改用 `DefaultKeySet`，并增加在隔离目录创建、
+  重载证书且保持指纹/令牌稳定的回归测试。
+- 修复 Typeless 的单独 `Fn` 触发：修饰键 key-up 事件现在先清除自身 flag，避免
+  Typeless 把轻触误判为持续按住并弹出“Typeless 快捷键”说明。
+- 修复 Electron 多进程录音探针：不再只检查第一个名字包含 `Typeless` 的进程；
+  主进程、Renderer 与独立音频服务全部纳入，任一进程持有 Core Audio 输入流即确认采集。
+- BlackHole 2ch 0.7.1 保持 48 kHz。Typeless 2.6.0 不列出名称含 `Virtual` 的原始
+  BlackHole 设备，本机建立仅包含 BlackHole 2ch 的 2 入/2 出聚合设备
+  `PhoneDeck Mic - BlackHole 2ch`，Typeless 已选择该设备。合成 800 Hz PCM 流使
+  Typeless 输入电平表真实响应；手机真实语音未由 PhoneDeck 落盘。
+- 用户完成两轮真实“开始 → 说话 → 停止”，并确认转写成功。手机日志记录首包约
+  84–89 ms、启动确认约 257–385 ms、停止确认约 139–234 ms；最终 health 为
+  `audio.streaming=false`、`dictation.active=false`、`typeless.capturing=false`，
+  无残留会话。
+- 自动化验证：macOS Release 构建 0 警告/0 错误，23/23 测试通过；arm64
+  self-contained App 已通过 ad-hoc `codesign --verify --deep --strict`。本机按用户要求
+  将 SDK、platform-tools、App 与 PhoneDeck 运行数据留在外置盘。ad-hoc 包每次重建会
+  改变 CDHash，辅助功能列表必须移除旧记录、重新添加新 App 并重启接收端；正式分发仍需
+  Developer ID 签名和公证。最终包已完成权限刷新并以 launchd 独立进程重开，health
+  再次确认输入、音频和 Typeless 配置可用；本机首次加载 102 MB 单文件包约两分钟，
+  需在更多外置盘环境判断是否为一次性安全扫描。
+- 本轮只确认 Samsung + Mac 的 Wi-Fi 听写最小闭环。翻译/问答、按住模式、USB 断线恢复、
+  IP 变化、睡眠/重启、20 轮与三机共享压力、Intel 包、蓝牙和 iOS 仍待验收。手机连接卡
+  目前会显示尾随的字面量 `null`，属于独立的 Android 展示缺陷，本轮未夹带修复。
+
+下一步：优先验收翻译/问答和连续断线，再推进三机共享与 iOS 原型；另需复测后续启动
+耗时，避免把本次约两分钟的首次单文件加载直接当成稳定性能。下方较早记录中的
+“Mac 尚未真机”是当时状态，不应覆盖本节的新证据。
+
 ## 序号24：本机Windows与Samsung实际更新成功
 
 61dc5ea本地统一All构建通过，Windows86/Android12测试及lint通过。固定候选8e0b617149254c50ac79a4d783b37b10用原渠道生成五文件签名ZIP，独立核验签名/版本/哈希，并通过现有设备实际校验。手机协调本机Windows更新至dev.12/seq24，系统安装器将手机覆盖更新至dev.18/code24；安装后两个EXE/base.apk字节哈希与候选一致，Windows身份不变。重开手机共享，本机streaming=true，手机显示2台供音。
