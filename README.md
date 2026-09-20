@@ -2,8 +2,8 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
 
-当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**，本机与Samsung已完成序号24覆盖更新，另一台旧电脑仍需首次接入。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
-**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
+当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
+**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、真机安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
 **2.0.0-dev.3 接收端预览**：Core Audio / BlackHole 与双语音模式源码已接入，20 项
@@ -31,7 +31,7 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
 
 ## 当前已经可以使用的功能
 
-- Windows/Android 设备统一更新：任一已接入电脑导入签名包，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。旧电脑首次需安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
+- Windows/Android 设备统一更新：任一已接入电脑导入签名包，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
 - 原生 Android Java App，最低 Android 8.0（API 26）。
 - Windows x64、.NET 8 自包含接收端。
 - USB ADB 反向隧道，服务仅监听 `127.0.0.1:8765`。
@@ -50,7 +50,7 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
 - 手机端音量条、震动、等待、成功和失败反馈。
 - 使用蓝紫渐变麦克风作为 Android 启动图标，项目内保留 1024 px 母版和标准密度切图。
 - 3 列动态快捷键网格，底部语音区保持固定。
-- 外观共九套主题：冰川玻璃（默认）、纸卡系列 4 套（奶油/云白/暖黑/暖灰），以及四款设计稿风格——瑞士黑白、克莱因蓝、工业沙橙、极简单色。
+- 外观提供浅色与深色两套原生主题；旧版九套主题已退役，升级后旧主题 ID 自动迁移。
 - 快捷键点击显示发送中、成功和失败状态；连接卡片显示当前电脑、通道与重新检测入口。
 - 1.6.0-dev.4 将手机录音、音频 HTTPS/WASAPI 建连和 Typeless 唤醒并行启动；语音浮窗
   不再串行等待音频通道，连接失败时接收端会自动复位 Typeless。
@@ -79,8 +79,8 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
   USB 看门狗、开机启动和 ADB 路径。
 - 电脑控制台可替换规划、目标、压缩上下文和新会话四个 Agent 按钮的名称、发送内容、
   自动回车与显示状态；手机连接当前电脑后自动同步，普通快捷键与宏不受影响。
-- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；控制台运行包把电脑身份、LAN 证书、
-  配对令牌和设置保存在 E 盘运行目录的 `data` 文件夹。
+- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；电脑身份、LAN 证书、
+  配对令牌和设置默认保存在接收端 EXE 旁的 `data` 文件夹，可用环境变量重定向到任意目录。
 - 新增文本指令时默认开启自动回车；实验性多步宏支持 1–8 个受控按键/文本步骤及有限延迟。
 - 协议 v2、稳定电脑 ID、目标电脑校验和安全键位白名单。
 - 蓝牙 RFCOMM 快捷键备用通道；蓝牙暂不传输音频。
@@ -91,7 +91,7 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
 - Windows 通过真实录音会话检查 Typeless 是否已停止；停止键未被 Typeless 处理时只在确认仍在录音后重试一次。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
-## macOS 2.0.0-dev.2 接收端预览
+## macOS 2.0.0-dev.3 接收端预览
 
 - 新增 Apple Silicon / Intel 共用源码的 .NET 8 macOS 接收端和 `.app` 构建脚本。
 - 复用现有 USB 8765、安全 HTTPS 8766、UDP 8767、稳定电脑 ID、证书固定、目标校验和请求去重。
@@ -153,7 +153,7 @@ PhoneDeck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
    ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
-   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.2）
+   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.3）
    ├─ macos/PhoneDeck.Receiver.Tests # macOS 协议与映射测试
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
@@ -216,7 +216,7 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 1. B01 统一构建入口实现待独立验收（包含 Windows 控制台发布/原生依赖内嵌、Android 单元测试、CI 报告归档、重复 CI 处理）。
 2. B02/B03 统一版本校验，建立候选打包、签名渠道和发布流程。
-3. T01/T02 核对第二台旧电脑接入与会话/授权行为；有硬件时尽早开展 Mac/iOS 原型。
+3. T01/T02 核对第二台电脑接入与会话/授权行为；有硬件时尽早开展 Mac/iOS 原型。
 4. 按 M1–M4 推进无线首次配对、多设备、Mac/iOS、多输入法、触发模式和主题。
 5. B05/B06 完成逐设备升级、故障恢复、干净安装与开源发行验收。
 
@@ -239,3 +239,8 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 - [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 虚拟音频设备，用户自行安装并配置为 48 kHz。
 
 Typeless、豆包、微信输入法等语音软件与 VB-CABLE、BlackHole 均不属于本仓库，也不会打包其安装文件。
+
+## 许可证
+
+本项目以 [MIT License](./LICENSE) 开源。语音引擎档案中的快捷键与进程名来自公开资料，
+商标与软件著作权归各自所有者。

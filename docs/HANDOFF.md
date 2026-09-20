@@ -512,7 +512,7 @@ Android 配置版本：`schemaVersion=1`
   `audio.streaming=true mode=shared`（LAN 双连接含音频流），关闭后约 3 秒停止。
 - 遗留待办：① 2号电脑仍收不到共享音频——其健康探测通过但未建音频 sink，指向
   该机接收端版本过旧（无 `sharedMicrophone` 能力）或缺 VB-CABLE，需在该机控制台
-  确认并升级到 dev.6+ 后复测；② 2号（192.168.0.103）上部署的接收端行为与仓库
+  确认并升级到 dev.6+ 后复测；② 2号电脑（192.168.1.103）上部署的接收端行为与仓库
   源码不一致（同一令牌手机可达、本机 curl 401，证书指纹却匹配手机配对记录），
   需要在该机上核对实际部署版本与 data 目录；③ 3号幽灵条目（本机旧 computerId
   82f731d3 的重复配对）可在手机上长按其芯片删除；④ 共享期间用户同时开 managed
@@ -583,7 +583,7 @@ Android 配置版本：`schemaVersion=1`
 
 ## 2026-09-03 WPF 控制台重构（Aether）
 
-- 用户决定停止 WinForms 视觉层，改用 `E:\Users\Administrator\Desktop\Web2WPF\05-Aether` 的 Apple 式磨砂玻璃设计系统重建控制台。
+- 用户决定停止 WinForms 视觉层，改用 `<开发工作区>\Web2WPF\05-Aether` 的 Apple 式磨砂玻璃设计系统重建控制台。
 - `PhoneDeck.ControlCenter.csproj` 已启用 WPF；旧 `Program.cs`、`ControlCenterForm.cs` 与 `AgentShortcutEditorForm.cs` 保留作迁移参考但从编译排除。
 - 新增模块化 `Themes/Colors.xaml`、`Fonts.xaml`、`Icons.xaml`、`Styles.xaml`、`Generic.xaml`，以及 `App.xaml`、`MainWindow.xaml` 和 WPF Agent 快捷操作编辑器。
 - WPF 主窗口已实现 Aether 悬浮胶囊导航、磨砂玻璃状态卡、连接拓扑、设置开关、日志页、连接页、设备页、自定义窗口按钮和托盘常驻；原有健康检查、启停/重启、LAN 发现、USB 看门狗、开机启动、ADB 路径及 Agent 配置行为已迁移。
@@ -628,7 +628,7 @@ Android 配置版本：`schemaVersion=1`
   的名称、文本、自动回车和显示状态；接收端通过 `/api/config/agent-shortcuts` 发布，手机
   只从当前选中的电脑增量同步这四项，不覆盖普通按键和宏。
 - 接收端增加 `PHONEDECK_DATA_DIR`：本机运行包与配对数据已迁到
-  `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台`，原
+  `<开发工作区>\PhoneDeck电脑控制台`，原
   `%LOCALAPPDATA%\PhoneDeck` 已移除，电脑身份、证书和令牌保持不变。
 - Windows 测试 42/42、ControlCenter Release 构建、Android `assembleDebug` 与
   `lintDebug` 通过；`1.6.0-dev.4` 接收端、Agent 配置接口和 UDP 8767 已在本机验证。

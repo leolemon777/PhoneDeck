@@ -34,7 +34,7 @@ Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎�
 
 ## 2. 仓库与工作区布局（重要）
 
-真实仓库与部署**都在** `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\` 下：
+真实仓库与部署**都在** `Desktop\PhoneDeck开发工作区\` 下：
 
 ```
 PhoneDeck开发工作区\
