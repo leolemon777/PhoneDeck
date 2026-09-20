@@ -7,6 +7,12 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+if (args.FirstOrDefault() == "--apply-fleet-update")
+{
+    Environment.ExitCode = await FleetUpdateWorker.Run(args);
+    return;
+}
+
 using var singleInstance = new Mutex(initiallyOwned: true, "PhoneDeck.Server.Singleton", out var isFirstInstance);
 if (!isFirstInstance)
 {
@@ -36,6 +42,7 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 var serverSettings = ServerSettings.LoadOrCreate();
+var fleetUpdates = new FleetUpdates();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
@@ -94,6 +101,23 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.Use(async (context, next) =>
+{
+    var isUse = HttpMethods.IsPost(context.Request.Method)
+        && !context.Request.Path.StartsWithSegments("/api/updates");
+    if (!isUse) { await next(); return; }
+    if (!fleetUpdates.EnterUse())
+    {
+        context.Response.StatusCode = 503;
+        await context.Response.WriteAsJsonAsync(new { ok = false, error = "正在更新，请稍后重试" });
+        return;
+    }
+    try { await next(); }
+    finally { fleetUpdates.ExitUse(); }
+});
+fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
+    || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
+
 app.MapGet("/api/health", () =>
 {
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
@@ -106,7 +130,8 @@ app.MapGet("/api/health", () =>
     {
         ok = true,
         name = "PhoneDeck",
-        version = "1.6.0-dev.8",
+        version = FleetUpdates.Version,
+        updates = fleetUpdates.Health,
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -115,7 +140,7 @@ app.MapGet("/api/health", () =>
         capabilities = new[]
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
-            "managedDictation", "sharedMicrophone", "secureLan"
+            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1"
         },
         audio = new
         {

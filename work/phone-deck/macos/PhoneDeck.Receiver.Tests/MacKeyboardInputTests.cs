@@ -64,6 +64,19 @@ public sealed class MacKeyboardInputTests
     }
 
     [TestMethod]
+    public void ModifierKeyUpClearsItsOwnFlag()
+    {
+        var sink = new RecordingSink();
+        var keyboard = new MacKeyboardInput(sink);
+
+        keyboard.SendEngineChord(MacKeyboardInput.ParseEngineBinding("Fn"));
+
+        Assert.HasCount(2, sink.KeyEvents);
+        Assert.AreEqual(MacModifierFlags.Function, sink.KeyEvents[0].Flags);
+        Assert.AreEqual(MacModifierFlags.None, sink.KeyEvents[1].Flags);
+    }
+
+    [TestMethod]
     public void FailureStillReleasesEveryPossiblyPressedKey()
     {
         var sink = new RecordingSink { ThrowOnKeyDownCode = 8 };

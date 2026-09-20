@@ -160,6 +160,30 @@ macOS 端数据目录默认是 `~/Library/Application Support/PhoneDeck/`。
 }
 ```
 
+### 闪电说（Windows 按住 Ctrl+Win；macOS 需先改键）
+
+```json
+{
+  "id": "shandian",
+  "displayName": "闪电说",
+  "experimental": true,
+  "processNames": ["Shandian"],
+  "modes": [
+    { "id": "dictation", "label": "按住说话", "keys": "Ctrl+Win", "macKeys": null, "trigger": "hold" }
+  ]
+}
+```
+
+适配注意：
+
+- `processNames` 为占位示例，首次适配时按下方核对清单第 4 步，用任务管理器 /
+  活动监视器核实真实进程名后替换，再用 `/api/diagnostics` 验证 `capturing` 跟随录音变化；
+- Windows 默认"按住 左Ctrl+左Win 说话"，可注入；若在软件内改过快捷键，用
+  `shortcutOverrides` 覆盖；
+- macOS 默认触发键 Fn 是固件键、无法程序注入——需在闪电说设置中改为右 Command
+  或 Ctrl 组合等可注入按键，并把组合写入 `shortcutOverrides`；
+- 输入设备须选 `CABLE Output`（Windows）/ `BlackHole 2ch`（macOS）。
+
 ## 实验性档案核对清单
 
 为一个新引擎写档案时，按顺序核对：

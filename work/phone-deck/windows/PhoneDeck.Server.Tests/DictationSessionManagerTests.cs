@@ -344,6 +344,45 @@ public sealed class DictationSessionManagerTests
             "停止 Typeless 前必须等待音频流排空，避免丢失 pre-roll 尾部");
     }
 
+    [TestMethod]
+    public void StopKeepsEngineActiveThroughoutFullDrainBudget()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        var manager = new DictationSessionManager(audio, engine);
+        var session = StartSuccessfulSession(manager, engine);
+        audio.OnWaitForEnd = timeout =>
+        {
+            Assert.IsTrue(timeout > PhoneAudioBridge.DrainMaxMs + PhoneAudioBridge.OutputTailMs,
+                "The stop request must allow the bridge its full drain and device-tail budget.");
+            Assert.AreEqual(1, engine.ToggleCount, "Engine must still be recording during drain.");
+        };
+        engine.IsCapturingResults.Enqueue(true);
+        engine.WaitResults.Enqueue(true);
+
+        manager.Stop(session, "stop");
+
+        Assert.AreEqual(2, engine.ToggleCount);
+    }
+
+    [TestMethod]
+    public void DrainTimeoutStopsSafelyButDoesNotClaimCompleteAudio()
+    {
+        var audio = new FakeAudioSessionController { WaitForSessionEndResult = false };
+        var engine = new FakeVoiceEngineController();
+        var manager = new DictationSessionManager(audio, engine);
+        var session = StartSuccessfulSession(manager, engine);
+        engine.IsCapturingResults.Enqueue(true);
+        engine.WaitResults.Enqueue(true);
+
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() => manager.Stop(session, "stop"));
+
+        StringAssert.Contains(error.Message, "尾音");
+        Assert.IsFalse(manager.IsActive);
+        Assert.AreEqual(1, audio.StopCalls);
+        Assert.AreEqual(2, engine.ToggleCount, "Timeout must still release the engine.");
+    }
+
     private sealed class FakeAudioSessionController : IPhoneAudioSessionController
     {
         public int StopCalls { get; private set; }
@@ -355,6 +394,7 @@ public sealed class DictationSessionManagerTests
         public bool WaitForSessionResult { get; set; } = true;
         public bool WaitForSessionEndResult { get; set; } = true;
         public Action<int>? OnWaitForSession { get; set; }
+        public Action<int>? OnWaitForEnd { get; set; }
 
         public bool IsSessionActive(string sessionId) => true;
 
@@ -381,6 +421,7 @@ public sealed class DictationSessionManagerTests
         public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds)
         {
             WaitForSessionEndCalls++;
+            OnWaitForEnd?.Invoke(timeoutMilliseconds);
             return WaitForSessionEndResult;
         }
     }

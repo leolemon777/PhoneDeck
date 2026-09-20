@@ -109,19 +109,30 @@ public final class SettingsActivity extends Activity {
         LinearLayout page = pageShell();
         addHeader(page, "设置", view -> finish());
 
+        page.addView(text("按你的习惯，调整控制台", 14, theme.muted, Typeface.NORMAL), topMargin(dp(12)));
+        page.addView(sectionLabel("使用偏好"), topMargin(dp(24)));
+
         themeSummary = summaryText();
-        page.addView(navRow("🎨", "外观主题", themeSummary,
-                () -> pushPage(themePage, true)), fullWidthMargins(dp(16)));
+        page.addView(navRow("appearance", "外观主题", themeSummary,
+                () -> pushPage(themePage, true)), fullWidthMargins(dp(8)));
 
         voiceSummary = summaryText();
-        page.addView(navRow("🎤", "语音输入", voiceSummary,
-                () -> pushPage(voicePage, true)), fullWidthMargins(dp(10)));
+        page.addView(navRow("voice", "语音输入", voiceSummary,
+                () -> pushPage(voicePage, true)), fullWidthMargins(dp(8)));
 
         shortcutSummary = summaryText();
-        page.addView(navRow("⌨️", "快捷键与布局", shortcutSummary,
-                () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(10)));
+        page.addView(navRow("keys", "快捷键与布局", shortcutSummary,
+                () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(8)));
 
-        page.addView(keepAliveRow(), fullWidthMargins(dp(10)));
+        page.addView(sectionLabel("连接与维护"), topMargin(dp(24)));
+        page.addView(keepAliveRow(), fullWidthMargins(dp(8)));
+        TextView updateSummary = summaryText();
+        updateSummary.setText("一次发起，逐台查看结果");
+        page.addView(navRow("↻", "设备更新", updateSummary,
+                () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(8)));
+        TextView privacy = text("PhoneDeck · 本地连接\n手机音频默认不保存；转写由电脑上的输入法处理。", 12, theme.muted, Typeface.NORMAL);
+        privacy.setLineSpacing(dp(4), 1f);
+        page.addView(privacy, topMargin(dp(24)));
         return wrapInScroll(page);
     }
 
@@ -130,12 +141,15 @@ public final class SettingsActivity extends Activity {
         addHeader(page, "外观主题", view -> popPage());
 
         TextView hint = text(
-                "冰川玻璃与纸卡系列，另有瑞士黑白/克莱因蓝/工业沙橙/极简单色四款设计稿风格。",
+                "浅色清晰，深色柔和。主题只改变外观，不改变电脑目标与快捷键。",
                 13, theme.muted, Typeface.NORMAL);
         hint.setLineSpacing(0, 1.18f);
         page.addView(hint, topMargin(dp(14)));
 
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
+            if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
+                page.addView(sectionLabel("简洁系列"), topMargin(dp(20)));
+            }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
         return wrapInScroll(page);
@@ -168,7 +182,7 @@ public final class SettingsActivity extends Activity {
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
         tapHoldSection.addView(tapOption, fullWidthMargins(dp(18)));
 
-        holdOption = option("按住说话", "按下立即开始，松开后自动停止并输入文字", false);
+        holdOption = option("按住说话", "按下开始，松开后停止采音和听写", false);
         holdCheck = (TextView) holdOption.getChildAt(1);
         holdOption.setOnClickListener(view -> selectMode(MODE_HOLD));
         tapHoldSection.addView(holdOption, fullWidthMargins(dp(12)));
@@ -289,7 +303,7 @@ public final class SettingsActivity extends Activity {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT);
-        if (!animated) {
+        if (!animated || !android.animation.ValueAnimator.areAnimatorsEnabled()) {
             pageHost.addView(page, params);
             page.bringToFront();
             return;
@@ -313,6 +327,13 @@ public final class SettingsActivity extends Activity {
         }
         View page = activeSubPage;
         activeSubPage = null;
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            pageHost.removeView(page);
+            rootPage.setTranslationX(0);
+            rootPage.setAlpha(1f);
+            refreshRootSummaries();
+            return;
+        }
         pageAnimating = true;
         float slide = slideDistance();
         page.animate().translationX(slide).setDuration(PAGE_SLIDE_MS)
@@ -339,9 +360,11 @@ public final class SettingsActivity extends Activity {
         back.setText("←");
         back.setTextSize(22);
         back.setTextColor(theme.text);
-        back.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
+        back.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        back.setContentDescription("返回");
+        back.setPadding(0, 0, 0, 0);
         back.setOnClickListener(onBack);
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         TextView titleView = text(title, 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
@@ -356,16 +379,17 @@ public final class SettingsActivity extends Activity {
     private LinearLayout navRow(String glyph, String title, TextView summary, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(13), dp(14), dp(13));
-        row.setBackground(roundRect(theme.surface, 18, 1, theme.outline));
-        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        row.setPadding(dp(16), dp(16), dp(16), dp(16));
+        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 16));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(32), dp(32)));
+        row.setFocusable(true);
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         copyParams.leftMargin = dp(13);
-        copy.addView(text(title, 17, theme.text, Typeface.BOLD));
+        copy.addView(text(title, 16, theme.text, Typeface.BOLD));
         if (summary != null) {
             copy.addView(summary, topMargin(dp(3)));
         }
@@ -386,12 +410,8 @@ public final class SettingsActivity extends Activity {
     private LinearLayout iconTile(String glyph) {
         LinearLayout tile = new LinearLayout(this);
         tile.setGravity(Gravity.CENTER);
-        tile.setBackground(roundRect(
-                theme.feedbackSurface(theme.primary), 13, 1, theme.primary));
-        TextView glyphText = text(glyph, 17, theme.text, Typeface.NORMAL);
-        tile.addView(glyphText, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        tile.addView(new DeckIconView(this, glyph, theme.primary),
+                new LinearLayout.LayoutParams(dp(24), dp(24)));
         return tile;
     }
 
@@ -401,11 +421,8 @@ public final class SettingsActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(13), dp(14), dp(13));
-        row.setBackground(roundRect(
-                enabled ? theme.feedbackSurface(theme.primary) : theme.surface,
-                18, enabled ? 2 : 1,
-                enabled ? theme.primary : theme.outline));
-        row.addView(iconTile("📡"), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        row.setBackground(roundRect(theme.surface, 16, 1, theme.outline));
+        row.addView(iconTile("connection"), new LinearLayout.LayoutParams(dp(32), dp(32)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -414,10 +431,9 @@ public final class SettingsActivity extends Activity {
         copyParams.leftMargin = dp(13);
         row.addView(copy, copyParams);
 
-        copy.addView(text("Wi-Fi 保活", 17, theme.text, Typeface.BOLD));
+        copy.addView(text("保持无线连接", 16, theme.text, Typeface.BOLD));
         TextView detail = text(
-                "App 运行期间保持 Wi-Fi 高性能模式，降低灭屏或省电导致的无线断流；"
-                        + "USB 断连由电脑端看门狗自动恢复。",
+                "运行期间保持 Wi-Fi 活跃，减少省电造成的断流。可能增加耗电。",
                 12, theme.muted, Typeface.NORMAL);
         detail.setLineSpacing(0, 1.12f);
         copy.addView(detail, topMargin(dp(4)));
@@ -427,10 +443,6 @@ public final class SettingsActivity extends Activity {
         switchView.setContentDescription("Wi-Fi 保活开关");
         switchView.setOnCheckedChangeListener((view, checked) -> {
             preferences.edit().putBoolean("keep_connection_alive", checked).apply();
-            row.setBackground(roundRect(
-                    checked ? theme.feedbackSurface(theme.primary) : theme.surface,
-                    18, checked ? 2 : 1,
-                    checked ? theme.primary : theme.outline));
             row.announceForAccessibility(checked
                     ? "已开启 Wi-Fi 保活" : "已关闭 Wi-Fi 保活");
         });
@@ -438,6 +450,10 @@ public final class SettingsActivity extends Activity {
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
+    }
+
+    private TextView sectionLabel(String label) {
+        return text(label, 12, theme.muted, Typeface.BOLD);
     }
 
     private void refreshRootSummaries() {
@@ -471,6 +487,9 @@ public final class SettingsActivity extends Activity {
 
     private View wrapInScroll(LinearLayout page) {
         ScrollView scroll = new ScrollView(this);
+        // Subpages must cover the translated root, including their empty bottom.
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(theme.background);
         scroll.addView(page);
         return scroll;
     }
@@ -520,13 +539,13 @@ public final class SettingsActivity extends Activity {
                 18, sharedSelected ? 1 : 2,
                 sharedSelected ? theme.outline : theme.primary));
         sharedOption.setBackground(roundRect(
-                sharedSelected ? theme.feedbackSurface(theme.warning) : theme.surface,
+                sharedSelected ? theme.feedbackSurface(theme.primary) : theme.surface,
                 18, sharedSelected ? 2 : 1,
-                sharedSelected ? theme.warning : theme.outline));
+                sharedSelected ? theme.primary : theme.outline));
         managedCheck.setText(sharedSelected ? "○" : "✓");
         managedCheck.setTextColor(sharedSelected ? theme.muted : theme.primary);
         sharedCheck.setText(sharedSelected ? "✓" : "○");
-        sharedCheck.setTextColor(sharedSelected ? theme.warning : theme.muted);
+        sharedCheck.setTextColor(sharedSelected ? theme.primary : theme.muted);
 
         boolean holdSelected = MODE_HOLD.equals(
                 preferences.getString(PREF_VOICE_MODE, MODE_TAP));
@@ -535,13 +554,13 @@ public final class SettingsActivity extends Activity {
                 18, holdSelected ? 1 : 2,
                 holdSelected ? theme.outline : theme.primary));
         holdOption.setBackground(roundRect(
-                holdSelected ? theme.feedbackSurface(theme.warning) : theme.surface,
+                holdSelected ? theme.feedbackSurface(theme.primary) : theme.surface,
                 18, holdSelected ? 2 : 1,
-                holdSelected ? theme.warning : theme.outline));
+                holdSelected ? theme.primary : theme.outline));
         tapCheck.setText(holdSelected ? "○" : "✓");
         tapCheck.setTextColor(holdSelected ? theme.muted : theme.primary);
         holdCheck.setText(holdSelected ? "✓" : "○");
-        holdCheck.setTextColor(holdSelected ? theme.warning : theme.muted);
+        holdCheck.setTextColor(holdSelected ? theme.primary : theme.muted);
         tapOption.setEnabled(!sharedSelected);
         holdOption.setEnabled(!sharedSelected);
         tapOption.setAlpha(sharedSelected ? 0.48f : 1f);
@@ -624,6 +643,7 @@ public final class SettingsActivity extends Activity {
     private void installPressFeedback(View row) {
         row.setHapticFeedbackEnabled(true);
         row.setOnTouchListener((view, event) -> {
+            if (!android.animation.ValueAnimator.areAnimatorsEnabled()) return false;
             if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN
                     && view.isEnabled()) {
                 view.animate().scaleX(0.985f).scaleY(0.985f).setDuration(55).start();
@@ -677,11 +697,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private GradientDrawable roundRect(int fill, int radius, int strokeWidth, int strokeColor) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(fill);
-        drawable.setCornerRadius(dp(radius));
-        drawable.setStroke(dp(strokeWidth), strokeColor);
-        return drawable;
+        return theme.shape(this, fill, radius, strokeWidth, strokeColor);
     }
 
     private LinearLayout.LayoutParams topMargin(int top) {

@@ -43,7 +43,7 @@ public final class ShortcutSettingsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(16), dp(20), dp(16), dp(32));
+        page.setPadding(dp(20), dp(20), dp(20), dp(32));
         page.setBackgroundColor(theme.contentBackground());
         scroll.addView(page);
 
@@ -51,7 +51,8 @@ public final class ShortcutSettingsActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         Button back = button("←", theme.surface, theme.text);
         back.setOnClickListener(view -> finish());
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        back.setContentDescription("返回");
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = text("快捷键与布局", 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -110,7 +111,7 @@ public final class ShortcutSettingsActivity extends Activity {
         drag.setGravity(Gravity.CENTER);
         drag.setContentDescription("调整" + config.label + "的顺序");
         drag.setOnClickListener(view -> showReorderDialog(config.id, index, total));
-        row.addView(drag, new LinearLayout.LayoutParams(dp(32), dp(48)));
+        row.addView(drag, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -126,11 +127,11 @@ public final class ShortcutSettingsActivity extends Activity {
         Button visible = miniButton(config.visible ? "隐藏" : "显示");
         visible.setContentDescription((config.visible ? "隐藏" : "显示") + config.label);
         visible.setOnClickListener(view -> toggleVisible(config.id));
-        row.addView(visible, new LinearLayout.LayoutParams(dp(52), dp(42)));
+        row.addView(visible, new LinearLayout.LayoutParams(dp(52), dp(48)));
 
         Button edit = miniButton("编辑");
         edit.setOnClickListener(view -> openEditor(config.id));
-        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(54), dp(42));
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(54), dp(48));
         editParams.leftMargin = dp(8);
         row.addView(edit, editParams);
 

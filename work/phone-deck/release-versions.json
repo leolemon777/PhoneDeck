@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "windows": {
+    "version": "1.6.0-dev.12",
+    "sequence": 24
+  },
+  "android": {
+    "versionName": "1.6.0-dev.18",
+    "versionCode": 24
+  },
+  "macos": {
+    "version": "2.0.0-dev.3",
+    "bundleShortVersion": "2.0.0",
+    "bundleVersion": "2",
+    "historicBundleMapping": {
+      "healthVersion": "2.0.0-dev.3",
+      "bundleShortVersion": "2.0.0",
+      "bundleVersion": "2",
+      "note": "Mac CFBundleVersion=2 historically diverged from marketing/health 2.0.0-dev.3. Preserve this mapping; do not silently renumber in this batch."
+    }
+  },
+  "console": {
+    "follows": "windows.version",
+    "informationalVersion": "1.6.0-dev.12"
+  }
+}

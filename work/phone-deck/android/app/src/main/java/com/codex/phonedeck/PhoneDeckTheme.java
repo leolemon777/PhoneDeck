@@ -11,7 +11,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-/// 主题仓库，共 9 套配色（应用户要求收拢）：
+/// 主题仓库：简洁浅/深主题 + 9 套历史配色；已有用户偏好保留。
 /// - 冰川玻璃：唯一玻璃拟态，极光背景 + 半透明玻璃层次；
 /// - 纸卡系列 4 套：奶油/云白浅色、暖黑/暖灰深色；
 /// - 风格皮肤 4 套（按用户设计稿）：瑞士黑白（直角细边）、
@@ -21,6 +21,8 @@ import android.widget.FrameLayout;
 final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";
+    static final String NATIVE_LIGHT = "native_light";
+    static final String NATIVE_DARK = "native_dark";
     static final String FROST = "frost";
     static final String IVORY = "ivory";
     static final String PEARL = "pearl";
@@ -134,26 +136,14 @@ final class PhoneDeckTheme {
                 .apply();
     }
 
-    /** 设置页主题清单：冰川玻璃 + 纸卡 4 套 + 风格皮肤 4 套。 */
+    /** 用户选择仅保留简洁浅色与深色。 */
     static PhoneDeckTheme[] all() {
         return new PhoneDeckTheme[]{
-                frost(),
-                ivory(), pearl(), espresso(), cocoa(),
-                swiss(), klein(), bauhaus(), mono()};
+                nativeTheme(true), nativeTheme(false)};
     }
 
     static PhoneDeckTheme byId(String id) {
-        switch (validId(id)) {
-            case IVORY: return ivory();
-            case PEARL: return pearl();
-            case ESPRESSO: return espresso();
-            case COCOA: return cocoa();
-            case SWISS: return swiss();
-            case KLEIN: return klein();
-            case BAUHAUS: return bauhaus();
-            case MONO: return mono();
-            default: return frost();
-        }
+        return nativeTheme(!NATIVE_DARK.equals(validId(id)));
     }
 
     /**
@@ -207,8 +197,9 @@ final class PhoneDeckTheme {
             }
         }
         if (migrated == null) {
-            migrated = FROST;
+            migrated = NATIVE_LIGHT;
         }
+        migrated = validId(migrated);
         preferences.edit()
                 .putString(PREF_THEME_ID, migrated)
                 .remove("theme_brand")
@@ -223,12 +214,41 @@ final class PhoneDeckTheme {
                 return id;
             }
         }
-        return FROST;
+        if (ESPRESSO.equals(id) || COCOA.equals(id) || MONO.equals(id)) {
+            return NATIVE_DARK;
+        }
+        return NATIVE_LIGHT;
     }
 
     /// 冰川玻璃实例：主界面据此挂载极光磨砂背景。
     boolean isFrost() {
         return FROST.equals(id);
+    }
+
+    boolean isNative() {
+        return NATIVE_LIGHT.equals(id) || NATIVE_DARK.equals(id);
+    }
+
+    private static PhoneDeckTheme nativeTheme(boolean light) {
+        return new PhoneDeckTheme(
+                light ? NATIVE_LIGHT : NATIVE_DARK,
+                light ? "简洁 · 浅色" : "简洁 · 深色",
+                light ? "清晰留白，蓝色强调" : "柔和深灰，舒适低光",
+                light,
+                Color.parseColor(light ? "#F0F2F5" : "#121316"),
+                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"),
+                Color.parseColor(light ? "#EDF0F5" : "#2A2F39"),
+                Color.parseColor(light ? "#FFFFFF" : "#22262E"),
+                Color.parseColor(light ? "#285ED4" : "#A9C7FF"),
+                Color.parseColor(light ? "#204CAA" : "#8BB2F2"),
+                Color.parseColor(light ? "#FFFFFF" : "#142746"),
+                Color.parseColor(light ? "#18202D" : "#F0F2F6"),
+                Color.parseColor(light ? "#626D7C" : "#A7B0C0"),
+                Color.parseColor(light ? "#157347" : "#79D2A3"),
+                Color.parseColor(light ? "#8A5B0A" : "#EAC078"),
+                Color.parseColor(light ? "#BA3044" : "#FFA0AA"),
+                Color.parseColor(light ? "#E1E5EB" : "#343B48"),
+                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"), 24, 0);
     }
 
     /// 纸卡系列：卡片回归纸面，预设色只留给小面积点缀。
@@ -260,6 +280,7 @@ final class PhoneDeckTheme {
     }
 
     void applyWindow(Activity activity) {
+        activity.setTheme(light ? R.style.AppTheme : R.style.AppThemeDark);
         // XML 主题固定是 Material.Light；深色主题下提前把窗口背景刷成主题底色，
         // 避免 onCreate 到 setContentView 之间闪一下白底。
         activity.getWindow().setBackgroundDrawable(
@@ -278,6 +299,7 @@ final class PhoneDeckTheme {
 
     /// 快捷卡底色：分类点缀色以低比例混入按键底，保持卡片安静。
     int shortcutColor(String color) {
+        if (isNative()) return key;
         if (isSoft()) {
             // 纸卡风格：卡片回归纸面，预设色只留给 chord 点缀。
             return surface;

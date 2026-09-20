@@ -7,6 +7,7 @@
 1. 完整阅读仓库根目录的 `README.md`。
 2. 完整阅读 `spec plan.markdown`，它是产品范围和决策的唯一长期来源。
 3. 阅读 `docs/HANDOFF.md`、`docs/ARCHITECTURE.md` 和相关源代码。
+   涉及构建、版本或发布时同时阅读 `docs/BUILD_PIPELINE.md`，按规格 0.21 的依赖执行。
 4. 执行 `git status`，确认没有覆盖其他 Agent 或用户的未提交修改。
 5. 明确本次工作属于哪个版本，不把后续版本功能偷偷塞进当前里程碑。
 
@@ -23,21 +24,24 @@
 
 ## 当前基线
 
-- 当前 Android/Windows 源码版本：1.6.0-dev.4（Windows 控制台、便携数据与 Agent 指令同步，以及低延迟语音启动、跨设备停止同步、自动发现、首音节优化与实验宏）；macOS 接收端预览：2.0.0-dev.1；上一实机稳定基线为 1.4.0。
-- 当前规格版本：v0.3。
+- 当前源码版本：Android 1.6.0-dev.18；Windows 接收端 1.6.0-dev.12（发布序号 24）；macOS 接收端预览 2.0.0-dev.3；iOS 尚待开发；上一实机稳定基线为 1.4.0。本机与Samsung已覆盖更新，具体边界见docs/WINDOWS_ANDROID_DELIVERY.md。
+- Windows/Android 统一更新已加入，协议与发布要求见 docs/FLEET_UPDATES.md。签名包只允许固定三个产物，禁止引入远程命令/脚本或跳过发布者验证。Android APK 签名和更新清单签名独立，私钥不能入 Git。
+- 当前规格版本：v0.6。第 0 章是面向开源的当前总规划，后续章节保留历史决策；与第 0 章冲突的旧范围、状态和排期不再作为执行依据。用户已确认四端、多设备、多输入法、多模式与主题方向，技术选型与工期仍是建议。
 - 1.5.0 已完成源码、构建/协议、长期签名、Samsung 安装和一轮 ADB 恢复验证；快捷键
   编辑与真实输入、音频、Typeless、连续断线和蓝牙仍待验收。
 - 当前 Android 代码是 Java，不要在没有明确收益和迁移计划时整体改写 Kotlin。
 - 当前 Windows 接收端是 .NET 8/C#，使用 ASP.NET Core、NAudio、SendInput 和原生蓝牙套接字。
-- 当前 macOS 已有 CGEvent 快捷键/文字接收端预览源码，但尚未在真实 Mac 验收，也没有
-  Core Audio / BlackHole / Typeless 语音链路；不得声称已完整支持 Mac。
+- 当前 macOS 已有 CGEvent、Core Audio / BlackHole 和引擎档案化语音预览源码，
+  但尚未在真实 Mac 验收；不得声称已完整支持 Mac。
 
 ## 当前最高优先级
 
-1. 在真实 Mac 构建 2.0.0-dev.1，完成辅助功能、本地网络、CGEvent、USB 和 Wi-Fi 输入验收。
-2. 与两台 Windows 完成混合三机目标隔离，再接 Core Audio / BlackHole / Typeless 语音。
-3. 回归 Windows 真实 Wi-Fi 音频、第二台安装和快捷键/蓝牙。
-4. 补齐 mDNS 自动发现、凭据撤销/重配与设备删除交互。
+1. 按规格 M0 完成跨设备验收：本机 Windows dev.11 / Android dev.17 已更新；另一台 Windows dev.6 仍需首次接入更新能力；Mac dev.3 尚待真机。
+2. 明确共享请求、手机授权、用户停止与重启的真实行为，建立会话/协议契约。
+3. 在真实 Mac 完成输入/音频最小闭环，并在硬件可用时尽早验证 iOS 采音、TLS 与锁屏原型。
+4. 形成无 USB 首次配对、mDNS、逐手机授权/撤销及动态设备目录的 M1 具体设计。
+5. 按产品/系统/版本建立 Typeless、微信输入法、豆包输入法、千问输入法的兼容矩阵。
+6. 仅执行当前任务授权的阶段；总体规划不代表已授权一次性实现或发布全部功能。
 
 ## 不可破坏的行为
 

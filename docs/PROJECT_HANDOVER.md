@@ -1,8 +1,14 @@
 # PhoneDeck 项目交接文档
 
-> 更新时间：2026-09-08 · 分支 `main` · 最新提交 `bf00bb2`
+> 概览更新：2026-09-10 · 开发分支 agent/fleet-updates · 总体规划、尾音修复与统一更新
 > 适用读者：接手开发的人、开源社区贡献者、以及未来的项目所有者本人。
 > 本文档是全项目一页式总览；细节按"文档地图"一节深入。
+
+当前完整路线以 [长期规格 v0.6 第 0 章](../spec%20plan.markdown) 为准：
+Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎兼容分级、
+双语音模式、主题与开源发行。iOS 尚待开发，Mac 尚待真机。
+本文后续部署、界面和待办保留原交接快照，最新执行状态以 HANDOFF.md 为准。
+当前 Windows/Android 已加入签名包统一更新；旧电脑首次接入和使用方法见 [统一更新说明](./FLEET_UPDATES.md)。
 
 ---
 
@@ -19,21 +25,21 @@
 
 | 端 | 技术栈 | 版本 | 状态 |
 |---|---|---|---|
-| Android App | 纯 Java（无 Kotlin），minSdk 26，程序化 UI | 1.6.0-dev.13 (versionCode 19) | 日常在用 |
-| Windows 接收端 + 控制台 | .NET 8 / Kestrel / NAudio / SendInput + WPF 控制台 | 1.6.0-dev.8 | 日常在用 |
+| Android App | 纯 Java（无 Kotlin），minSdk 26，程序化 UI | 1.6.0-dev.17 (versionCode 23) | 构建/lint/12 项测试、系统安装器覆盖更新通过 |
+| Windows 接收端 + 控制台 | .NET 8 / Kestrel / NAudio / SendInput + WPF 控制台 | 1.6.0-dev.11 | 86 项测试；本机自动升级和失败回退通过；另一台仍需首次接入 |
 | macOS 接收端 | .NET 8 / CGEvent / Core Audio AUHAL | 2.0.0-dev.3 | 预览（未真机验收） |
 
 上一实机稳定基线：**1.4.0**（1.5/1.6 dev 系列均通过构建与大部分真机验证，但未宣布稳定）。
-规格基线：`spec plan.markdown` v0.4。通信协议 v2（兼容 1.4.0 固定动作）。
+规格基线：`spec plan.markdown` v0.6。通信协议 v2（兼容 1.4.0 固定动作）。
 
 ## 2. 仓库与工作区布局（重要）
 
-真实仓库与部署**都在** `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\` 下：
+真实仓库与部署**都在** `Desktop\PhoneDeck开发工作区\` 下：
 
 ```
 PhoneDeck开发工作区\
 ├── PhoneDeck手机键盘项目\        ← Git 仓库本体（唯一，main 分支）
-│   ├── README.md  AGENTS.md  spec plan.markdown  implementation-notes.md
+│   ├── README.md  AGENTS.md  spec plan.markdown
 │   ├── docs\                     ← 全部文档（见 §10 文档地图）
 │   ├── design\                   ← 控制台 UI 设计稿 + 图标
 │   ├── scripts\                  ← windows/*.ps1、macos/Build-PhoneDeckReceiver.sh

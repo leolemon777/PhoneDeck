@@ -46,6 +46,8 @@ final class AudioStreamer implements AutoCloseable {
     private volatile HttpURLConnection activeConnection;
     private volatile OutputStream linkOutput;
     private volatile Exception linkFailure;
+    private String activeSessionId;
+    private boolean stopRequested;
     private Thread worker;
 
     AudioStreamer(Context context, Listener listener) {
@@ -86,6 +88,8 @@ final class AudioStreamer implements AutoCloseable {
                 return false;
             }
             shouldRun = true;
+            stopRequested = false;
+            activeSessionId = sessionId;
             paused = false;
             recorderNeedsRestart = false;
             linkOutput = null;
@@ -125,21 +129,40 @@ final class AudioStreamer implements AutoCloseable {
     }
 
     void stop() {
-        shouldRun = false;
-        paused = false;
-        recorderNeedsRestart = false;
-        AudioRecord current = recorder;
-        if (current != null) {
-            try {
-                current.stop();
-            } catch (IllegalStateException ignored) {
-                // 录音尚未完全启动或已经停止。
+        final Thread stoppingWorker;
+        final String stoppingSession;
+        synchronized (syncRoot) {
+            if (worker == null || stopRequested) {
+                return;
+            }
+            stopRequested = true;
+            stoppingWorker = worker;
+            stoppingSession = activeSessionId;
+            shouldRun = false;
+            paused = false;
+            recorderNeedsRestart = false;
+            AudioRecord current = recorder;
+            if (current != null) {
+                try {
+                    current.stop();
+                } catch (IllegalStateException ignored) {
+                    // 录音尚未完全启动或已经停止。
+                }
             }
         }
-        HttpURLConnection connection = activeConnection;
-        if (connection != null) {
-            connection.disconnect();
-        }
+        // Stop capture immediately, but let the upload thread close HTTP cleanly.
+        AudioUpload.abortAfter(stoppingWorker, AudioUpload.FINISH_TIMEOUT_MS, () -> {
+            HttpURLConnection connection;
+            synchronized (syncRoot) {
+                if (!stoppingSession.equals(activeSessionId)) {
+                    return;
+                }
+                connection = activeConnection;
+            }
+            if (connection != null) {
+                connection.disconnect();
+            }
+        });
     }
 
     /// 点击后最前面的 PCM 暂存环：只保留最近 PRE_ROLL_BYTES，
@@ -217,11 +240,15 @@ final class AudioStreamer implements AutoCloseable {
             if (localRecorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IllegalStateException("无法初始化手机麦克风");
             }
-            recorder = localRecorder;
-
             // 先开录：点击后立刻开始捕获，语音进入 pre-roll 环，
             // 不等 TLS 握手完成，用户立即开口也不会丢第一音节。
-            localRecorder.startRecording();
+            synchronized (syncRoot) {
+                if (!shouldRun) {
+                    return;
+                }
+                recorder = localRecorder;
+                localRecorder.startRecording();
+            }
             log(sessionId, "audioRecordStarted", startedAt);
 
             Thread connectThread = new Thread(
@@ -250,14 +277,21 @@ final class AudioStreamer implements AutoCloseable {
                     Thread.sleep(PAUSE_KEEPALIVE_INTERVAL_MS);
                     continue;
                 }
-                if (localRecorder.getRecordingState()
-                        != AudioRecord.RECORDSTATE_RECORDING) {
-                    // 从暂停恢复：同一 AudioRecord 实例重新开始采集。
-                    localRecorder.startRecording();
+                synchronized (syncRoot) {
+                    if (!shouldRun) {
+                        break;
+                    }
+                    if (localRecorder.getRecordingState()
+                            != AudioRecord.RECORDSTATE_RECORDING) {
+                        localRecorder.startRecording();
+                    }
                 }
                 int count = localRecorder.read(
                         chunk, 0, chunk.length, AudioRecord.READ_BLOCKING);
                 if (count <= 0) {
+                    if (!shouldRun) {
+                        break;
+                    }
                     throw new IllegalStateException("手机麦克风读取中断：" + count);
                 }
                 if (!firstPcmLogged) {
@@ -293,10 +327,14 @@ final class AudioStreamer implements AutoCloseable {
                 }
             }
             if (linkOutput != null) {
-                linkOutput.flush();
+                if (!preRollFlushed) {
+                    preRoll.drainTo(linkOutput);
+                }
+                AudioUpload.finish(activeConnection, linkOutput);
+                log(sessionId, "tailConfirmed", startedAt);
             }
         } catch (Exception exception) {
-            if (shouldRun) {
+            if (shouldRun || linkOutput != null) {
                 stoppedReason = exception.getMessage();
                 if (stoppedReason == null || stoppedReason.isBlank()) {
                     stoppedReason = exception.getClass().getSimpleName();
@@ -326,6 +364,7 @@ final class AudioStreamer implements AutoCloseable {
             log(sessionId, "sessionStopped", startedAt);
             synchronized (syncRoot) {
                 worker = null;
+                activeSessionId = null;
             }
             listener.onStopped(sessionId, stoppedReason);
         }
@@ -340,9 +379,10 @@ final class AudioStreamer implements AutoCloseable {
         final long startedAt = SystemClock.elapsedRealtime();
         log(sessionId, "requestStarted", startedAt);
         HttpURLConnection connection = null;
+        boolean published = false;
         try {
             connection = PhoneDeckHttp.open(
-                    endpoint, "/api/audio/stream", 1800, 2500);
+                    endpoint, "/api/audio/stream", 1800, 7000);
             connection.setRequestMethod("POST");
             connection.setRequestProperty(
                     "Content-Type", "audio/L16; rate=48000; channels=1");
@@ -355,16 +395,31 @@ final class AudioStreamer implements AutoCloseable {
             }
             connection.setChunkedStreamingMode(READ_CHUNK_BYTES);
             connection.setDoOutput(true);
-            activeConnection = connection;
+            synchronized (syncRoot) {
+                if (!shouldRun || !sessionId.equals(activeSessionId)) {
+                    return;
+                }
+                activeConnection = connection;
+            }
             OutputStream output = connection.getOutputStream();
             log(sessionId, "serverHeaders", startedAt);
-            linkOutput = output;
-            streaming = true;
-            listener.onReady(sessionId);
+            synchronized (syncRoot) {
+                if (!shouldRun || !sessionId.equals(activeSessionId)) {
+                    return;
+                }
+                linkOutput = output;
+                published = true;
+                streaming = true;
+                listener.onReady(sessionId);
+            }
         } catch (Exception exception) {
-            linkFailure = exception;
+            synchronized (syncRoot) {
+                if (sessionId.equals(activeSessionId)) {
+                    linkFailure = exception;
+                }
+            }
         } finally {
-            if (connection != null && (linkFailure != null || !shouldRun)) {
+            if (connection != null && !published) {
                 // 失败或工作线程已退出：由连接线程负责断开，避免句柄滞留。
                 connection.disconnect();
             }

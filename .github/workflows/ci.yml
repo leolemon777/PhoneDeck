@@ -7,41 +7,125 @@ on:
       - "agent/**"
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+  pull-requests: read
+
+env:
+  ContinuousIntegrationBuild: 'true'
 
 jobs:
+  pre_check:
+    name: Push dedup (open PR)
+    runs-on: ubuntu-latest
+    outputs:
+      skip_push: ${{ steps.decide.outputs.skip_push }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve push skip against open same-repo PRs
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          # PR 与 main 永不跳过；仅非 main 的 push 查询同仓库 open PR。
+          # API 失败时 Resolve-PushSkip 写 skip_push=false（fail-open，防漏测）。
+          if ($env:GITHUB_EVENT_NAME -ne 'push' -or $env:GITHUB_REF -eq 'refs/heads/main') {
+            'skip_push=false' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host 'PR 或 main：始终运行全部检查。'
+            return
+          }
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/ci/Resolve-PushSkip.ps1')
+
   windows:
     name: Windows receiver and tests
     runs-on: windows-latest
+    needs: pre_check
+    if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
-      - name: Run receiver tests
-        run: dotnet test work/phone-deck/windows/PhoneDeck.Server.Tests/PhoneDeck.Server.Tests.csproj -c Release
-      - name: Build receiver
-        run: dotnet build work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release
-      - name: Publish self-contained receiver
-        run: dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+          global-json-file: global.json
+      - name: CI helper puredata checks
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/ci/Test-CiHelpers.puredata.ps1
+      - name: Version descriptor puredata suite
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/versioning/Test-ReleaseVersions.puredata.ps1
+      - name: Build pipeline mock regression
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/tests/Test-BuildPipeline.ps1
+      - name: Packaging version asserts
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/packaging/Assert-PackageVersions.Tests.ps1
+      - name: Build and Test Windows
+        id: build
+        shell: pwsh
+        run: pwsh -NoProfile -File ./build.ps1 -Platform Windows
+      - name: Upload Windows Artifacts
+        if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts-dev
+          retention-days: 14
+          path: |
+            ${{ steps.build.outputs.run_directory }}/windows/server/PhoneDeck.Server.exe
+            ${{ steps.build.outputs.run_directory }}/windows/console/PhoneDeck.ControlCenter.exe
+          if-no-files-found: error
+      - name: Upload Windows Tests Report
+        if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-tests-dev
+          retention-days: 14
+          path: ${{ steps.build.outputs.run_directory }}/reports/windows-tests/
+          if-no-files-found: warn
 
   macos:
     name: macOS receiver, tests, and app bundle
     runs-on: macos-latest
+    needs: pre_check
+    if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
-      - name: Run macOS receiver tests
-        run: dotnet test work/phone-deck/macos/PhoneDeck.Receiver.Tests/PhoneDeck.Receiver.Tests.csproj -c Release
-      - name: Build and ad-hoc sign app bundle
-        run: zsh scripts/macos/Build-PhoneDeckReceiver.sh
+          global-json-file: global.json
+      - name: Build and Test macOS
+        id: build
+        shell: pwsh
+        run: pwsh -NoProfile -File ./build.ps1 -Platform MacOS
+      - name: Upload macOS App Tar
+        if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts-dev
+          retention-days: 14
+          path: ${{ steps.build.outputs.run_directory }}/macos/PhoneDeck-Receiver.app.tar
+          if-no-files-found: error
+      - name: Upload macOS Tests Report
+        if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-tests-dev
+          retention-days: 14
+          path: ${{ steps.build.outputs.run_directory }}/reports/macos-tests/
+          if-no-files-found: warn
 
   android:
     name: Android build and lint
     runs-on: ubuntu-latest
+    needs: pre_check
+    if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -54,7 +138,116 @@ jobs:
         with:
           packages: "platform-tools platforms;android-35 build-tools;35.0.0"
       - name: Build and lint Android app
-        working-directory: work/phone-deck/android
+        id: build
+        shell: pwsh
+        run: pwsh -NoProfile -File ./build.ps1 -Platform Android
+      - name: Upload Android APK
+        if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-dev
+          retention-days: 14
+          path: ${{ steps.build.outputs.run_directory }}/android/*.apk
+          if-no-files-found: error
+      - name: Upload Android Reports
+        if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports-dev
+          retention-days: 14
+          path: ${{ steps.build.outputs.run_directory }}/reports/android/
+          if-no-files-found: warn
+
+  b03_release_tests:
+    name: B03 staging and transaction tests
+    runs-on: windows-latest
+    needs: [pre_check, windows, android]
+    if: >-
+      !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true')
+      && needs.windows.result == 'success'
+      && needs.android.result == 'success'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Release transaction foundation tests
+        shell: pwsh
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleRelease :app:lintDebug --no-daemon
+          New-Item -ItemType Directory -Path outputs/ci-transaction-reports -Force | Out-Null
+          & pwsh -NoProfile -NonInteractive -File scripts/release/tests/Test-ReleaseTransaction.ps1 2>&1 |
+            Tee-Object -FilePath outputs/ci-transaction-reports/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload transaction test log
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-transaction-test-log
+          path: outputs/ci-transaction-reports/tests.log
+          if-no-files-found: warn
+      - name: Setup JDK 17 (Android SDK tools)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Setup Android SDK35 build-tools (real aapt2)
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools build-tools;35.0.0"
+      - name: Download Windows binaries (this run)
+        continue-on-error: true # 上游上传因配额失败时跳过 B03 组装断言，纯脚本测试仍执行
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts-dev
+          path: artifacts/windows
+      - name: Download Android APKs (this run)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk-dev
+          path: artifacts/android
+      - name: Resolve SDK35 aapt2 and run B03 S1/S2/S3
+        id: b03
+        continue-on-error: true # 依赖上游工件；配额期间工件缺失时降级跳过
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $sdkRoots = @()
+          if ($env:ANDROID_HOME) { $sdkRoots += $env:ANDROID_HOME }
+          if ($env:ANDROID_SDK_ROOT) { $sdkRoots += $env:ANDROID_SDK_ROOT }
+          $aapt2 = $null
+          foreach ($root in $sdkRoots) {
+            $candidate = Join-Path $root 'build-tools\35.0.0\aapt2.exe'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+              $aapt2 = (Resolve-Path -LiteralPath $candidate).Path
+              break
+            }
+          }
+          if (-not $aapt2) {
+            throw "SDK35 real aapt2.exe not found under ANDROID_HOME/ANDROID_SDK_ROOT build-tools/35.0.0"
+          }
+          Write-Host "Using aapt2: $aapt2"
+          pwsh -NoProfile -File ./scripts/ci/Invoke-B03ReleaseTests.ps1 `
+            -WindowsArtifactRoot artifacts/windows `
+            -AndroidArtifactRoot artifacts/android `
+            -Aapt2Path $aapt2
+          if ($LASTEXITCODE -ne 0) {
+            throw "Invoke-B03ReleaseTests.ps1 failed with exitCode=$LASTEXITCODE (reports under outputs/ci-b03-reports/ retained)"
+          }
+      - name: Upload B03 bounded reports and staging outputs
+        if: always() && steps.b03.outputs.report_directory != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-release-tests-reports
+          path: ${{ steps.b03.outputs.report_directory }}
+          if-no-files-found: warn
+      - name: Upload dedicated S1 candidate.json
+        if: always() && steps.b03.outputs.ci_candidate_output_root != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: b03-ci-candidate-json
+          path: ${{ steps.b03.outputs.ci_candidate_output_root }}/**/candidate.json
+          if-no-files-found: warn

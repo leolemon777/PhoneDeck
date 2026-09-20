@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "channels": [
+    {
+      "id": "dev",
+      "enabled": false,
+      "apkInstallCertSha256": "",
+      "publisherPublicKeySha256": ""
+    }
+  ]
+}

@@ -23,38 +23,36 @@ final class ShortcutKeyView extends FrameLayout {
         setSoundEffectsEnabled(true);
         setHapticFeedbackEnabled(true);
         setForegroundGravity(Gravity.CENTER);
-        setPadding(dp(10), dp(8), dp(10), dp(8));
+        setPadding(dp(12), dp(12), dp(12), dp(12));
         setBackground(theme.pressable(
                 context,
                 theme.shortcutColor(config.color),
                 theme.shortcutPressedColor(config.color),
-                20));
-        setElevation(dp(4));
+                12));
+        setElevation(theme.isNative() ? 0 : dp(2));
 
         content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER);
+        content.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        TextView title = label(config.label, 14,
+        TextView title = label(config.label, 13,
                 theme.text, Typeface.BOLD);
-        title.setGravity(Gravity.CENTER);
-        title.setMaxLines(1);
+        title.setGravity(Gravity.START);
+        title.setMaxLines(2);
         title.setEllipsize(TextUtils.TruncateAt.END);
         content.addView(title, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, dp(25)));
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
-        TextView chord = label(config.subtitle(), config.isTextAction() ? 11 : 10,
-                config.isTextAction() ? theme.shortcutAccent(config.color) : theme.muted,
-                Typeface.BOLD);
-        chord.setGravity(Gravity.CENTER);
+        TextView chord = label(config.subtitle(), 11,
+                theme.isNative() ? theme.muted : theme.shortcutAccent(config.color),
+                Typeface.NORMAL);
+        chord.setGravity(Gravity.START);
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
-        chord.setPadding(dp(6), 0, dp(6), 0);
-        chord.setBackground(theme.shape(context, theme.key, 10));
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
-                LayoutParams.WRAP_CONTENT, dp(19));
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         chordParams.topMargin = dp(5);
         content.addView(chord, chordParams);
 
@@ -97,7 +95,7 @@ final class ShortcutKeyView extends FrameLayout {
 
     private void showBadge(String text, int color) {
         stateBadge.setText(text);
-        stateBadge.setTextColor(theme.light ? theme.onPrimary : theme.text);
+        stateBadge.setTextColor(theme.light ? android.graphics.Color.WHITE : theme.background);
         stateBadge.setBackground(theme.shape(getContext(), color, 13));
         stateBadge.setVisibility(View.VISIBLE);
     }

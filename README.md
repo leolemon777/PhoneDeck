@@ -1,24 +1,29 @@
 # PhoneDeck 手机控制台
 
-PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件（Typeless、豆包、微信输入法等，可扩展）负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是一台手机管理多台 Windows / macOS 电脑，并在手机上明确切换输入目标。
+PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
 
-当前源码版本是 **PhoneDeck 1.6.0-dev.13**，上一版完整实机稳定基线是
-**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、Samsung 安装和
+当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
+**PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、真机安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
 **2.0.0-dev.3 接收端预览**：Core Audio / BlackHole 与双语音模式源码已接入，20 项
 跨平台测试通过；真实 Mac 和三机锁屏共享验收尚未进行。
 
+面向开源发布的完整路线见 [长期规格 v0.6 第 0 章](./spec%20plan.markdown)：
+无线首次配对与逐手机授权、动态多电脑管理、Mac 实机完善、四类语音输入法分级适配、
+iOS 原生客户端、主题与状态统一、签名分发和维护体系。第一轮容量目标为一台手机连接
+五台电脑，后续按实测扩展。方向已确认，技术方案和排期为建议；不代表上述能力已经实现。
+
 ![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
 
 ## 项目所有者真正想实现什么
 
-1. 闲置 Android 手机长期作为辅助键盘和手机麦克风使用。
+1. 闲置 Android / iOS 手机长期作为辅助键盘和手机麦克风使用（iOS 为后续目标）。
 2. 手机一键唤醒或停止电脑端语音输入软件（Typeless 为默认，档案化适配豆包、微信输入法等，见 docs/VOICE_ENGINES.md）。
 3. 点击模式用同一个主按钮开始/停止；按住模式仍是按下开始、松开停止。
 4. 快捷键按钮可由用户修改，例如把“截屏”改为 F1，或配置 Ctrl+C、Ctrl+Shift+S。
 5. 加入 `/goal`、`/plan`、`/compact` 等文本命令，并为 Codex、Claude Code、ZCode、Cursor 提供语义化预设。
-6. 一台手机管理两至四台 Windows / macOS 电脑；普通动作进入当前电脑，共享麦克风音频可同时供给全部合格电脑。
+6. 一台手机自由管理多台 Windows / macOS 电脑，首轮目标覆盖 1–5 台；普通动作进入当前电脑，未来共享范围由用户独立选择。
 7. 支持直接 USB、USB 共享切换器、本地无线和蓝牙备用，不把产品锁死在一种传输方式上。
 8. 项目可迁移到其他电脑继续开发、构建和发布。
 
@@ -26,6 +31,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 
 ## 当前已经可以使用的功能
 
+- Windows/Android 设备统一更新：任一已接入电脑导入签名包，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
 - 原生 Android Java App，最低 Android 8.0（API 26）。
 - Windows x64、.NET 8 自包含接收端。
 - USB ADB 反向隧道，服务仅监听 `127.0.0.1:8765`。
@@ -44,7 +50,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - 手机端音量条、震动、等待、成功和失败反馈。
 - 使用蓝紫渐变麦克风作为 Android 启动图标，项目内保留 1024 px 母版和标准密度切图。
 - 3 列动态快捷键网格，底部语音区保持固定。
-- 外观共九套主题：冰川玻璃（默认）、纸卡系列 4 套（奶油/云白/暖黑/暖灰），以及四款设计稿风格——瑞士黑白、克莱因蓝、工业沙橙、极简单色。
+- 外观提供浅色与深色两套原生主题；旧版九套主题已退役，升级后旧主题 ID 自动迁移。
 - 快捷键点击显示发送中、成功和失败状态；连接卡片显示当前电脑、通道与重新检测入口。
 - 1.6.0-dev.4 将手机录音、音频 HTTPS/WASAPI 建连和 Typeless 唤醒并行启动；语音浮窗
   不再串行等待音频通道，连接失败时接收端会自动复位 Typeless。
@@ -73,8 +79,8 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
   USB 看门狗、开机启动和 ADB 路径。
 - 电脑控制台可替换规划、目标、压缩上下文和新会话四个 Agent 按钮的名称、发送内容、
   自动回车与显示状态；手机连接当前电脑后自动同步，普通快捷键与宏不受影响。
-- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；控制台运行包把电脑身份、LAN 证书、
-  配对令牌和设置保存在 E 盘运行目录的 `data` 文件夹。
+- 接收端支持 `PHONEDECK_DATA_DIR` 便携数据目录；电脑身份、LAN 证书、
+  配对令牌和设置默认保存在接收端 EXE 旁的 `data` 文件夹，可用环境变量重定向到任意目录。
 - 新增文本指令时默认开启自动回车；实验性多步宏支持 1–8 个受控按键/文本步骤及有限延迟。
 - 协议 v2、稳定电脑 ID、目标电脑校验和安全键位白名单。
 - 蓝牙 RFCOMM 快捷键备用通道；蓝牙暂不传输音频。
@@ -85,7 +91,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 - Windows 通过真实录音会话检查 Typeless 是否已停止；停止键未被 Typeless 处理时只在确认仍在录音后重试一次。
 - Windows 运行包中已有 USB/ADB 自动恢复脚本模板。
 
-## macOS 2.0.0-dev.2 接收端预览
+## macOS 2.0.0-dev.3 接收端预览
 
 - 新增 Apple Silicon / Intel 共用源码的 .NET 8 macOS 接收端和 `.app` 构建脚本。
 - 复用现有 USB 8765、安全 HTTPS 8766、UDP 8767、稳定电脑 ID、证书固定、目标校验和请求去重。
@@ -136,6 +142,7 @@ PhoneDeck/
 ├─ docs/
 │  ├─ HANDOFF.md               # 当前状态与 Agent 接力说明
 │  ├─ SETUP.md                 # 新电脑搭建、构建和运行
+│  ├─ BUILD_PIPELINE.md        # 完整 build、候选打包、发布与更新门槛
 │  ├─ MACOS_SETUP.md           # Mac 构建、权限、配对与验收
 │  ├─ WINDOWS_WIFI_DEPLOY.md   # 第二/第三台 Windows 无线部署
 │  └─ ARCHITECTURE.md          # 当前与目标架构
@@ -146,7 +153,7 @@ PhoneDeck/
    ├─ android/                 # Android App
    ├─ windows/PhoneDeck.Server # Windows 接收端
    ├─ windows/PhoneDeck.ControlCenter # Windows 图形控制台
-   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.2）
+   ├─ macos/PhoneDeck.Receiver # macOS 接收端（2.0.0-dev.3）
    ├─ macos/PhoneDeck.Receiver.Tests # macOS 协议与映射测试
    ├─ test/FocusSink           # Windows 输入验证小工具
    └─ SOURCE_README.md         # 1.4.0 源码说明
@@ -156,25 +163,46 @@ PhoneDeck/
 
 ## 快速构建
 
-详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)。
+详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)，完整流程、签名渠道及门槛见
+[docs/BUILD_PIPELINE.md](./docs/BUILD_PIPELINE.md)。以下命令从仓库根目录执行。
+
+统一开发构建入口（当前宿主支持的目标、测试、单文件检查与报告归档；要求 PowerShell 7）：
+
+```powershell
+# Windows：构建 Windows 与 Android
+pwsh -NoProfile -File ./build.ps1
+```
+
+```bash
+# Linux / macOS / Bash
+./build.sh
+```
+
+每次输出到 `outputs/build-review/<runId>`，最新结果见 `latest.json`。
+`-Clean` 保留旧产物，`-SkipTests` 会标记未经完整验证；候选包须来自成功且已验收的 run。
+
+各平台独立构建命令：
 
 Android Debug APK：
 
 ```powershell
-cd work\phone-deck\android
-.\gradlew.bat :app:assembleDebug
+Push-Location work/phone-deck/android
+./gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+Pop-Location
 ```
 
-Windows 接收端：
+Windows 接收端与控制台：
 
 ```powershell
 dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release
 
 dotnet publish work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj `
-  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true
 
 dotnet publish work\phone-deck\windows\PhoneDeck.ControlCenter\PhoneDeck.ControlCenter.csproj `
-  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
 macOS 接收端（在 Mac 的仓库根目录执行）：
@@ -186,19 +214,20 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 接下来的开发顺序
 
-1. 在 macOS 14.2+ 构建 2.0.0-dev.2，安装 BlackHole 2ch 和 Typeless，完成权限与 48 kHz 配置。
-2. 用 USB 完成 Mac 首次配对，拔线后验证 Wi-Fi 快捷键和两套语音模式。
-3. 让两台 Windows 和一台 Mac 同时接收共享音频，分别及同时触发本机 Typeless 做三机验收。
-4. 完成 20 轮模式切换、断网/睡眠/重启恢复和至少两小时锁屏共享测试。
-5. 补齐标准 mDNS/Bonjour、凭据撤销/重配与 USB 共享切换器实测。
-6. 完成 1.7/1.8 的多配置、自动切换和受控自动化后，再完成 macOS Developer ID 签名、公证与安装包。
+1. B01 统一构建入口实现待独立验收（包含 Windows 控制台发布/原生依赖内嵌、Android 单元测试、CI 报告归档、重复 CI 处理）。
+2. B02/B03 统一版本校验，建立候选打包、签名渠道和发布流程。
+3. T01/T02 核对第二台电脑接入与会话/授权行为；有硬件时尽早开展 Mac/iOS 原型。
+4. 按 M1–M4 推进无线首次配对、多设备、Mac/iOS、多输入法、触发模式和主题。
+5. B05/B06 完成逐设备升级、故障恢复、干净安装与开源发行验收。
+
+依赖和验收标准以 [总计划第 0 章](./spec%20plan.markdown) 为准；构建工程任务详见 0.21。
 
 ## 关键安全边界
 
 - 不接受手机发送任意 PowerShell、CMD 或 shell 命令。
 - 键位、宏、文本长度和运行目标必须由电脑端验证。
 - USB 本地入口保持只监听 localhost。
-- 局域网入口未来必须使用显式配对和消息认证，不能直接暴露当前无鉴权接口。
+- 局域网入口保持 HTTPS、配对令牌、证书固定和目标 ID 校验；无鉴权入口仅限本机。
 - 不提交 Android 签名密钥、ADB 私钥、令牌、录音或个人 Typeless 配置。
 
 ## 外部依赖
@@ -210,3 +239,8 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 - [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)：macOS 虚拟音频设备，用户自行安装并配置为 48 kHz。
 
 Typeless、豆包、微信输入法等语音软件与 VB-CABLE、BlackHole 均不属于本仓库，也不会打包其安装文件。
+
+## 许可证
+
+本项目以 [MIT License](./LICENSE) 开源。语音引擎档案中的快捷键与进程名来自公开资料，
+商标与软件著作权归各自所有者。

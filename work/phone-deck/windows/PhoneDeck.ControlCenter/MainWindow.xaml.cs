@@ -768,8 +768,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void FleetUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        await EnsureServerAsync();
+        Process.Start(new ProcessStartInfo("http://127.0.0.1:8765/updates") { UseShellExecute = true });
+    }
+
+    private static bool FleetUpdateInProgress()
+    {
+        var marker = Path.Combine(DataDirectory, "updates", "installing");
+        return File.Exists(marker) && DateTime.UtcNow - File.GetLastWriteTimeUtc(marker) < TimeSpan.FromMinutes(5);
+    }
+
     private async Task EnsureServerAsync()
     {
+        if (FleetUpdateInProgress()) return;
         if (await IsHealthyAsync())
         {
             return;
@@ -800,6 +813,7 @@ public partial class MainWindow : Window
 
     private async Task RestartServerAsync()
     {
+        if (FleetUpdateInProgress()) return;
         await StopServersAsync();
         await Task.Delay(400);
         await EnsureServerAsync();
@@ -808,6 +822,7 @@ public partial class MainWindow : Window
 
     private static Task StopServersAsync()
     {
+        if (FleetUpdateInProgress()) return Task.CompletedTask;
         return Task.Run(() =>
         {
             foreach (var process in Process.GetProcessesByName("PhoneDeck.Server"))

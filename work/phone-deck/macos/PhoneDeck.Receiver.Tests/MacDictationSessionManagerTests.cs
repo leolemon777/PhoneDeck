@@ -54,6 +54,18 @@ public sealed class MacDictationSessionManagerTests
         Assert.AreEqual(2, typeless.ToggleCount);
     }
 
+    [TestMethod]
+    public void CaptureProbeAcceptsAnyCapturingEngineProcess()
+    {
+        Assert.AreEqual(true, MacVoiceEngineStateProbe.CombineCaptureStates(
+            [false, null, true]));
+        Assert.AreEqual(false, MacVoiceEngineStateProbe.CombineCaptureStates(
+            [false, false]));
+        Assert.IsNull(MacVoiceEngineStateProbe.CombineCaptureStates(
+            [false, null]));
+        Assert.AreEqual(false, MacVoiceEngineStateProbe.CombineCaptureStates([]));
+    }
+
     private sealed class FakeAudio : IMacPhoneAudioSessionController
     {
         internal bool PlaybackReleased { get; private set; }

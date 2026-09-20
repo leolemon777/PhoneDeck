@@ -20,8 +20,9 @@ android {
         applicationId "com.codex.phonedeck"
         minSdk 26
         targetSdk 35
-        versionCode 20
-        versionName "1.6.0-dev.14"
+        versionCode 24
+        versionName "1.6.0-dev.18"
+        resValue "string", "app_name", "Luma"
     }
 
     compileOptions {
@@ -52,6 +53,16 @@ android {
             if (hasPhoneDeckSigning) {
                 signingConfig signingConfigs.phoneDeck
             }
+        }
+
+        // Separate data/package identity for visual review when the installed
+        // development certificate is unavailable. Never a fleet-update artifact.
+        uiPreview {
+            initWith debug
+            applicationIdSuffix ".preview"
+            versionNameSuffix "-ui-preview"
+            signingConfig signingConfigs.debug
+            resValue "string", "app_name", "Luma"
         }
     }
 

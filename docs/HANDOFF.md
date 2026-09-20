@@ -1,12 +1,317 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-14 Luma 图标白底确认
+
+- 用户对比实机后明确选择之前的白色背景。日/夜自适应图标统一改为白底，保留暖白环体、
+  12% 前景内边距和 Luma 显示名；透明母版不变。下方透明背景探索记录是历史过程。
+- Debug/Preview 构建与 Lint 通过，Samsung 覆盖安装成功；桌面实图已确认白底生效，
+  截图 outputs/icon-review/luma-white-installed.png。未修改或清理用户数据。
+
+## 2026-09-14 暖白环体启动图标
+
+- 用户选定暖白陶瓷环体，要求无背景并授权重新生成替换。使用 GPT 内置 Image（imagegen）重新生成；
+  前两次背景移除得到不含 alpha 的棋盘格图，未采用。新生成文件已检查 hasAlpha=yes。
+- 新图替换 android/artwork/phonedeck-app-icon-1024.png 与日/夜五种 mipmap 密度，
+  不添加彩色底板、不修改包名或用户配置。原图可从 Git 历史恢复。
+- 提示词方向：单个暖白陶瓷扭转环体，保留大镂空与柔和自阴影，透明背景，
+  无地面/外部投影/文字/麦克风，完整主体居中留白。标准尺寸资源由生成图缩放得到。
+- 用户追加 3–5 字母显示名，采用 Luma，桌面标签和首页读同一 app_name；包名与 computerId 不变。
+  透明通道像素检查：图像左上角和环体中心 alpha 均为 0。Android 26+ 使用透明背景自适应图标，
+  前景留 12% 内边距，避免 Samsung 为旧式 PNG 自动套白底；日夜资源均提供。
+- 最终 Debug/Preview 构建、14 项单测、Lint 通过，Samsung 安装成功；桌面名称 Luma 与环体已实机确认。
+  注意 Samsung 实际将透明自适应背景显示为黑色底板（此前旧式 PNG 会套白底）；素材是真透明，
+  但桌面完全无底板尚未达成，不可把文件 alpha 验证等同于 Launcher 展示。截图 outputs/icon-review/luma-installed.png。
+
+## 2026-09-14 第二轮控制台视觉
+
+- 用户确认按推荐参考方向实现并看真机效果。轻量页头/无边框状态行、紧凑快捷卡片、
+  减少模式与语音区重复框线，五台电脑以编号/状态两行等分同屏显示；六台以上保留横向滚动。
+- 浅深新版已构建安装并截图复查，保留五台原设备，未触发真实录音或外部按键。
+- 字体重建真机测试发现 RejectedExecutionException：旧 Activity 探测循环遇到已关闭的线程池。
+  增加取消检查及关闭竞态处理，不吞掉非关闭状态的拒绝错误，不修改网络鉴权与配对协议。
+  修复后重新构建/安装，150% 字体及恢复 110% 后页面存活、五目标可见，未新增崩溃记录。
+  Debug/Preview 构建、14 项单测、Lint 通过；截图为 outputs/ui-refresh/refined-light.png、
+  refined-dark.png、refined-large-font-fixed.png。手机留在深色首页，原系统字号已恢复。
+
+## 2026-09-14 主题收敛与下一版视觉调研
+
+- 用户明确要求删除旧主题，主题选项收敛为简洁浅/深两套，历史浅/深选择迁到对应新主题，不影响设备配置。
+- 查阅 Raycast iOS 与 Elgato Stream Deck Mobile 官方产品页，下一轮建议压缩页头、减少重复卡片边框、
+  强化快捷键与语音主次层级。此方向仍待用户看参考后确认，不声称已完成新一轮整体重设计。
+
+## 2026-09-14 UI 追加反馈与设备配置迁移
+
+- 用户要求去掉快捷卡片右上角彩色圆点、恢复其他电脑入口并移除旧版 App。
+  已移除装饰点；修正健康状态从离线更新为在线后语音模式出现时，底部区域未重新布局的问题。
+- 空闲状态下通过已授权 ADB/run-as 备份原版与预览版私有配置到外置盘 ignored outputs/ui-refresh，
+  备份目录仅当前用户可读。迁入设备、快捷键、使用设置及快捷键同步记录，四份文件 SHA256 一致；
+  不迁移更新任务缓存，未输出配对令牌。主题手动切回简洁浅色。
+- 新版真机设备列表包含全部 5 个原条目，4 号 Mac 在线且切换确认成功；其他离线条目不删除。
+  这证明配置迁移与当前 Mac 切换，不代表其他 Windows 电脑真实听写已验收。
+- 最新 Debug/Preview 构建、14 项单测与 Lint 通过；重装后无圆点首页及完整底部区域已真机截图复查。
+  原包按用户要求保留数据卸载（package uninstall -k），应用列表仅剩预览包；原 APK 与配置备份可恢复。
+  预览包仍不是原签名发行渠道，后续 fleet 更新必须先处理包名/签名迁回，不能直接当正式版本分发。
+
+
+## 2026-09-14 Android UI 原生翻新（开发与真机预览阶段）
+
+- 用户选定“简洁精致、接近原生、浅色/深色、少装饰”。独立分支
+  `codex/native-ui-refresh` 基于 Mac 实机修复分支，不改音频或桌面接收端。
+- 新增简洁浅/深主题（保留原九主题及配置）；首页固定电脑状态/设置，网格与语音区分离布局；
+  原创线性设置图形、分组导航、全电脑列表、48dp 触摸入口、原生深色对话框及空值摘要修复。
+- 主题切换重绑视图而非 recreate，保留会话所有者；大字体和横屏使用自适应布局。
+  具体范围、设计令牌和后续桌面切片见 [UI_REFRESH.md](UI_REFRESH.md)。
+- Mac 未携带 Samsung 原开发签名（实际证书 SHA256 前缀 `653884d0`）。新增独立
+  `uiPreview` 构建类型，包名 `.preview`、独立数据，不能用作 fleet 载荷，不覆盖原应用。
+- 工具链安装于忽略的外置盘 `work/tools`；JDK 17、SDK 35 和 Gradle 缓存均在此。
+  正式 Gradle assembleDebug、assembleUiPreview、testDebugUnitTest、lintDebug 均通过；
+  14 项单测通过，Lint 0 错误 / 33 警告。预览版已与原版并存安装到 Samsung Android 12。
+- 实机复查浅/深首页、设置根页、主题、语音设置、快捷键列表、设备列表、150% 字体和横屏。
+  修正快捷操作编辑入口对齐、引擎摘要刷新、设置子页背景穿透，以及横屏六列过窄问题；
+  最新 APK 已重新安装，背景覆盖和横屏三列已截图复查。手机字体/旋转恢复原值。
+  实际 Mac 连接显示在线；本轮未启动录音，不把连接或 UI 走查作为听写验收。
+  截图保存在忽略的 outputs/ui-refresh，PR 为 #13（叠加在 Mac 修复分支）。
+
+待办：编辑器/按键选择/更新页完整交互、离线与空态、多设备切换，以及真实点击/按住听写、
+连续会话仍需验收；原渠道覆盖安装需原签名。Windows/macOS 界面尚未翻新，不能报告全端完成。
+
+## 2026-09-14 macOS dev.3：Samsung → Mac → Typeless 真实听写闭环通过
+
+- 在 Apple Silicon Mac（macOS 26.3.1）从源码构建并运行
+  `PhoneDeck Receiver.app`；Samsung SM-G9880（Android 12，PhoneDeck
+  1.6.0-dev.18/code 24）通过已配对的 HTTPS/Wi-Fi 通道控制 Mac。`PROBE` 本机
+  CGEvent 与手机 `/plan` 都进入真实前台输入框，证明受控文字/快捷键路径可用。
+- 修复真实 Mac 首启时的证书导入崩溃：macOS 不支持带私钥 PFX 的
+  `EphemeralKeySet`，`LanIdentity` 改用 `DefaultKeySet`，并增加在隔离目录创建、
+  重载证书且保持指纹/令牌稳定的回归测试。
+- 修复 Typeless 的单独 `Fn` 触发：修饰键 key-up 事件现在先清除自身 flag，避免
+  Typeless 把轻触误判为持续按住并弹出“Typeless 快捷键”说明。
+- 修复 Electron 多进程录音探针：不再只检查第一个名字包含 `Typeless` 的进程；
+  主进程、Renderer 与独立音频服务全部纳入，任一进程持有 Core Audio 输入流即确认采集。
+- BlackHole 2ch 0.7.1 保持 48 kHz。Typeless 2.6.0 不列出名称含 `Virtual` 的原始
+  BlackHole 设备，本机建立仅包含 BlackHole 2ch 的 2 入/2 出聚合设备
+  `PhoneDeck Mic - BlackHole 2ch`，Typeless 已选择该设备。合成 800 Hz PCM 流使
+  Typeless 输入电平表真实响应；手机真实语音未由 PhoneDeck 落盘。
+- 用户完成两轮真实“开始 → 说话 → 停止”，并确认转写成功。手机日志记录首包约
+  84–89 ms、启动确认约 257–385 ms、停止确认约 139–234 ms；最终 health 为
+  `audio.streaming=false`、`dictation.active=false`、`typeless.capturing=false`，
+  无残留会话。
+- 自动化验证：macOS Release 构建 0 警告/0 错误，23/23 测试通过；arm64
+  self-contained App 已通过 ad-hoc `codesign --verify --deep --strict`。本机按用户要求
+  将 SDK、platform-tools、App 与 PhoneDeck 运行数据留在外置盘。ad-hoc 包每次重建会
+  改变 CDHash，辅助功能列表必须移除旧记录、重新添加新 App 并重启接收端；正式分发仍需
+  Developer ID 签名和公证。最终包已完成权限刷新并以 launchd 独立进程重开，health
+  再次确认输入、音频和 Typeless 配置可用；本机首次加载 102 MB 单文件包约两分钟，
+  需在更多外置盘环境判断是否为一次性安全扫描。
+- 本轮只确认 Samsung + Mac 的 Wi-Fi 听写最小闭环。翻译/问答、按住模式、USB 断线恢复、
+  IP 变化、睡眠/重启、20 轮与三机共享压力、Intel 包、蓝牙和 iOS 仍待验收。手机连接卡
+  目前会显示尾随的字面量 `null`，属于独立的 Android 展示缺陷，本轮未夹带修复。
+
+下一步：优先验收翻译/问答和连续断线，再推进三机共享与 iOS 原型；另需复测后续启动
+耗时，避免把本次约两分钟的首次单文件加载直接当成稳定性能。下方较早记录中的
+“Mac 尚未真机”是当时状态，不应覆盖本节的新证据。
+
+## 序号24：本机Windows与Samsung实际更新成功
+
+61dc5ea本地统一All构建通过，Windows86/Android12测试及lint通过。固定候选8e0b617149254c50ac79a4d783b37b10用原渠道生成五文件签名ZIP，独立核验签名/版本/哈希，并通过现有设备实际校验。手机协调本机Windows更新至dev.12/seq24，系统安装器将手机覆盖更新至dev.18/code24；安装后两个EXE/base.apk字节哈希与候选一致，Windows身份不变。重开手机共享，本机streaming=true，手机显示2台供音。
+
+另一台旧Windows明确提示需要首次接入；3号失效条目保留，未删除。真人尾音、旧电脑安装与后续批量升级仍未完成，不能报告Windows/Android全项收尾。操作及证据边界见WINDOWS_ANDROID_DELIVERY.md。本轮本地签名脚本/记录位于ignored outputs，通用S4b保护入口及云端证明并未因此完成。
+
+## 本机同渠道更新候选 sequence 24
+
+用户明确授权本机使用原签名材料；Codex直接执行，不再调度CLI或定时任务。已核对Samsung安装版本dev.17/code23及实际APK证书，和本机debug keystore公开证书一致；更新清单私钥导出的公钥与源码信任根一致。未输出或上传私钥，不切换到历史release.jks渠道。
+
+候选版本提升为Windows 1.6.0-dev.12 / Android 1.6.0-dev.18，两端序号24；由release-versions.json同步。此提交仅准备可追溯的构建版本；构建、签名包和设备安装结果仍待后续记录，不能标为已安装或正式开源发行。
+
+## 2026-09-11 Windows/Android交付整理
+
+eb1e052的运行34564477049全部通过：Windows、Android、macOS及B03 staging/transaction作业。事务131项、本轮S1/S2/S3检查均在该云端入口内运行并归档。未合并主分支、未签正式包、未做本轮设备覆盖安装。
+
+用户要求先完成Windows/Android，再携带干净项目到Mac。已确认并备份移除scratch、根test.ps1/test2.ps1及旧implementation-notes流水笔记，正式源码测试保留；本地备份在ignored outputs/cleanup-backup中，不进入源码交付。工作副本outputs工具链与历史产物不随源码包携带，不触碰正在运行的控制台目录或其data。Mac操作入口见MAC_HANDOVER.md。
+
+本轮只读设备检查：本机Windows dev.11/sequence23在线，VB-CABLE可用，共享音频正在传输；ADB设备列表为空。此健康检查不是尾音/升级验收。安卓实机、另一台Windows的接入/升级、与既有设备相同的APK签名渠道及更新清单签名仍需完成。
+
+## 最新接手状态：2026-09-11 S4a
+
+用户已取消外部CLI及定时跟踪，后续由Codex直接编码、审查、测试和交付。分支agent/b03-release-transaction基于PR10已全云端通过的0445662。
+
+追加审查修正：历史追加保留顶层及已有版本的嵌套元数据/显式null，序列化超深时失败而不静默截断。Codex复测131通过/0失败，夹具outputs/release-transaction-tests/0449368d8b7740b6b6d75f4ec70ad357。PR11已建立，最新云端结果仍需核查。
+
+新增内部ReleaseTransaction库：独占历史锁、pending/committed/aborted日志、原子历史追加和保守中断恢复；Commit/Abort要求有效锁与当前日志身份匹配，旧句柄不能覆盖新事务，已提交历史不会因Abort回退。库仅允许outputs夹具路径，所有结果releasable=false，不是签名发行入口。
+
+Codex独立复核后修正Begin序号参数隐式转换，拒绝小数/字符串/布尔/非正整数，验证拒绝时历史字节不变且不创建journal。最终独立测试128通过/0失败，夹具outputs/release-transaction-tests/7d9e77e92ad44534b5a519075207e042保留；含实际子进程锁竞争、旧句柄、日志冲突与中断恢复。事务测试及单独日志归档已接入B03 CI，云端结果待新提交验证。
+
+下一项为S4b：现有五文件ZIP的签名与可信来源验证，随后设备安装/接入/更新验收。本轮未读取现有签名私钥，未安装重启设备。历史临时笔记/scratch不提交。
+
 更新时间：2026-09-10
-当前分支：`main`
-当前源码：Android 1.6.0-dev.14（九主题 + 多语音引擎动态 UI + 设置页模块化）/ Windows 1.6.0-dev.8（语音引擎档案化 + 控制台引擎设置）；macOS 接收端预览 2.0.0-dev.3（CGEvent + AUHAL/BlackHole + 引擎档案化）
+当前分支：`agent/b03-release-policy`（独立工作副本 PhoneDeck-agy-delivery，基于 B03-S1 / d1c089c）
+当前源码：Android 1.6.0-dev.17（versionCode 23）/ Windows 1.6.0-dev.11（发布序号 23），保留尾音修复并增加统一更新；macOS 接收端预览仍为 2.0.0-dev.3，本轮未修改
 上一实机稳定基线：PhoneDeck 1.4.0
-规格基线：v0.4
+规格基线：v0.6（第 0 章为当前总体规划，其余为历史规格）
 Android 配置版本：`schemaVersion=1`
 通信协议：v2，并兼容 1.4.0 固定动作
+
+## 2026-09-11 B03-S2 只读发行预检查
+
+### B03 CI接入本地验收（后续提交）
+
+最终云端证据：提交04456625050eeeb6aabcfb98c611a3b3d170daeb的PR运行34560740475 completed/success。Windows、Android、macOS和新增B03 staging release tests均通过；两个B03归档上传成功（candidate JSON 1119字节、报告及两ZIP归档222392084字节）。push34560739291正确去重。S1现在8场景（新增Git来源回归），S2 79断言、S3 9场景；已验证开发包组装链路，不等于签名发布或设备安装成功。下一项S4签名事务基础与来源证明，仍不读取现有私钥或运行安装器。
+
+云端d376940运行34558957807三平台与S2 79通过，但S1在干净git status无输出时Trim空值失败，B03作业未通过。修正AutomationNull归一化后，Codex独立S1测试8通过/0失败/0跳过（新增clean/dirty/nongit来源回归，nongit使用临时Git搜索边界并恢复环境）。此次修正待新云端运行验证，不能沿用本地成功声明云端已通过。
+
+新增依赖同轮Windows/Android产物的Windows作业，保留三平台并行与push去重。Codex独立运行Invoke-B03ReleaseTests.ps1：S2 79、S1 7、S3 9全部通过，报告outputs/ci-b03-reports/76d03b723f91460a9b8a1fbda5df294d。独立核对归档只有本轮目录，S3候选runId=f761b4d03bfa416f83b8315470a0518c一致，无裸EXE/APK或PEM/密钥文件混入归档；两个明确STAGING ZIP按预期保留。另独立验证缺输入exit1且summary.ok=false/error保留。子suite失败后的finally快照已静态核查，Grok隔离夹具验证exit7与JSON归档；该隔离证据不冒充Codex实际suite失败测试。云端新增作业仍待提交后验证，不沿用旧三平台绿灯。
+
+- S2提交6e99881的PR10云端运行34555158882与push34555090971全部通过（Windows/Android/macOS及前置作业）。以下S3后续提交需重新核查CI，不能沿用此结果。
+
+- 新增渠道指纹、历史序号、候选哈希与实际APK证书的只读预检查。示例渠道默认关闭且指纹为空；即使eligible=true仍releasable=false，不签名、不占用历史序号。
+- Codex独立执行Test-ReleasePolicy.ps1：79断言通过、0失败，含131072字节stderr管道阻塞回归（20秒超时保护）。策略正向采用临时测试公钥和stub apksigner，不冒充真实发行批准。
+- 另用JDK17/apksigner35读取真实B02 debug APK证书成功，SHA256为653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef；真实release unsigned APK被拒绝exit1。该开发证书仅观察记录，未自动写入批准策略。
+- S3两类开发ZIP仍在独立审查；正式签名事务、干净提交的构建来源证明、实际设备安装/更新仍未验收。S2测试尚未接入CI，本轮没有安装或重启设备。
+
+## 2026-09-11 B03-S3 开发ZIP组装
+
+- 新增New-LocalCandidatePackages.ps1，输入真实S1候选并再验包内版本，输出独立GUID目录、两种STAGING ZIP及原子packages.json；完整状态仍releasable=false。
+- Codex独立执行Test-LocalCandidatePackages.ps1：9场景通过，真实解压核对固定条目、三份载荷与两份接入脚本SHA256、启动器内容；第二次运行前后重新读取同一旧报告与ZIP路径验证未变。缺失/篡改/重复条目/状态/错误布尔类型/输出越界均被拒绝。
+- 本次复用S1真实候选outputs/b03-review/804c5b8301a04f33a93208366762adb1及SDK35真实aapt2；未执行包内启动器或安装脚本。开发ZIP不是正式签名更新包，不证明设备安装、配置迁移或回退成功；未随包安装VB-CABLE、输入法、ADB。
+- 下一项接入S1/S2/S3云端测试，随后推进签名发布事务和逐设备验收；测试通过前不作正式发行声明。
+
+## 2026-09-11 B03-S1 开发候选目录
+
+- 新增scripts/release/New-CandidateRun.ps1与路径/原子报告helper，复用B02验证真实暂存副本，报告三份文件的大小/SHA256、描述快照及PE版本。始终mode=staging、releasable=false，不签名、不打正式更新ZIP、不安装。
+- Codex真实生成outputs/b03-review/804c5b8301a04f33a93208366762adb1，独立比对三文件哈希/大小全部一致。
+- Codex独立测试7项通过、0失败0跳过：正向、重复隔离、越界、outputs根、junction祖先、缺aapt2、交换EXE。测试命令为scripts/release/tests/Test-CandidateRun.ps1，显式传入真实Server/ControlCenter/Apk/Aapt2Path。
+- S1只解决开发候选与审计报告；渠道/历史序号、首次安装/旧版接入、正式签名及设备验收尚未完成。工作树commit与PE内嵌commit在报告中分别记录，不把二者混称构建来源证明。
+
+## 2026-09-11 B02 本地与云端独立验收
+
+- release-versions.json 为唯一版本描述；显式 Sync 同步源码/程序集属性，构建与打包默认只校验。保留各端当前版本及 Mac 历史映射。
+- SDK8.0.425、六项目NuGet锁和Gradle8.9校验值已加入；统一入口强制锁还原，CI按global.json安装SDK。
+- Codex独立通过：版本60断言、构建控制流8项、打包13项、六项目锁还原。最终Windows统一入口86测试/两份单文件发布通过：outputs/b02-final-windows/20260911T005424Z-b5e2f900。
+- 最终Android统一入口12测试、debug/release assemble、lint通过（0错误33警告）：outputs/b02-final-android/20260911T005445Z-c3eab806。实际EXE和debug APK再经包内版本校验通过；未签统一更新包，未安装设备，release APK unsigned。
+- CI新增版本、控制流、打包回归，保留三个平台。[PR8](https://github.com/leolemon777/PhoneDeck/pull/8)在提交6dd4e76的[运行34548668020](https://github.com/leolemon777/PhoneDeck/actions/runs/34548668020)全部通过，包含三个平台及前置作业，产物/报告归档通过。Mac尚未真机验收；PR未合并。B03分工见B03_IMPLEMENTATION.md，先实现不可发布的Staging报告，再补发行序号/渠道与安装候选。
+- scratch/、test.ps1、test2.ps1为旧代理临时文件，保留但不提交。开发工具和构建产物位于ignored outputs。
+
+## 2026-09-10 B01 独立审查与修正
+
+- 编码由 Grok（构建/CI）与 agy（隔离测试）按文件分工；Codex 独立审查、运行验证和整合。
+- 改为独立 run 目录、manifest/latest 状态；普通构建不递归删除历史输出。`-Clean` 为兼容提示，`-SkipTests` 为 unverified。脚本拒绝越界/祖先链接路径，失败保留阶段退出码。
+- CI 调统一入口并按本次 run 归档；支持叠加 PR、同仓 head 去重与 API 失败继续构建；Mac 只归档实际 App 的 tar。
+- Codex 独立通过：7 项 Windows mock 控制流测试（无 skip）、8 项 CI pure-data 检查、AST/前置探针。真实 Windows 86 项接收端测试通过，两项目编译和带原生依赖的单文件 publish/检查通过。
+- Windows 成功 run：`outputs/codex-b01-validation/20260910T105926Z-87d4f353`。先前 `20260910T105004Z-74888adf` 因接收端散落 IIS DLL 被正确标为 failed；修正 publish 参数后通过。
+- Android 首次验证遇到 GradleWorkerMain 类加载失败（GRADLE_USER_HOME 位于中文目录）；改用标准用户缓存后，12 项单测、Debug/Release assemble 与 lint 通过（0 errors、33 warnings）。成功 run 为 `outputs/codex-b01-android/20260910T110236Z-9c633c81`，Release 产物为 unsigned，不可交付安装。
+- [PR #7](https://github.com/leolemon777/PhoneDeck/pull/7) 的[云端运行34469445810](https://github.com/leolemon777/PhoneDeck/actions/runs/34469445810)在提交a954ab1全部通过：Windows、Android、macOS、去重前置检查。真实 Mac 待验证。没有安装、重启或更新使用中的设备，不能将构建报告当作产品真机验收。
+- 待办：按 [B02 实施约定](B02_IMPLEMENTATION.md) 完成版本描述、源码/二进制校验和依赖锁，再推进B03候选包。下方原始 B01 声明为历史记录，以独立证据为准。
+
+## 2026-09-10 B01 原始实现记录（审查前，状态以以上为准）
+
+- **统一开发构建入口**：新增 `scripts/build.ps1`、`scripts/build.sh` 以及根目录便捷入口 `build.ps1` 与 `build.sh`。
+  - **路径可移植**：通过脚本定位计算仓库根目录，杜绝任何开发机绝对路径硬编码；自动探测 JDK 17（JAVA_HOME / PATH / local.properties）与 Android SDK。
+  - **失败即停（Fail Fast）**：启用严格模式与错误即停，任一编译、测试、单文件校验步骤失败立即以非零状态码退出，不产生伪成功产物。
+  - **参数化与产物输出**：支持 `-Platform All/Windows/Android/MacOS`、`-Configuration`、`-OutputDir`（默认 `outputs/build-review`）、`-Clean` 与 `-SkipTests`。
+- **Windows 控制台单文件发布及原生依赖**：
+  - `PhoneDeck.ControlCenter.csproj` 增加 `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>` 作为默认配置。
+  - 统一入口与 CI 显式发布单文件并执行**原生依赖严格检查**：验证控制台输出目录仅存在单文件 `PhoneDeck.ControlCenter.exe`，且不存在散落的 WPF 原生 DLL（如 `wpfgfx_cor3.dll` 等）。
+- **Android 单元测试与报告归档**：
+  - 构建任务补齐 `:app:testDebugUnitTest`（与 `:app:assembleDebug`、`:app:lintDebug`、`:app:assembleRelease` 并行）。
+  - 自动归档测试报告（`testDebugUnitTest/index.html`）和 Lint 报告到输出目录 `reports/android/`。
+- **CI 完善与重复 CI 处理**：
+  - 更新 `.github/workflows/ci.yml`，补齐 Windows 控制台单文件发布与原生库内嵌校验、Android 单元测试与报告归档、Windows/macOS TRX 测试报告上传和二进制 Artifact 归档。
+  - 添加 `concurrency: group: ${{ github.workflow }}-${{ github.ref }} cancel-in-progress: true`，并将 PR 触发目标限定在 main，消除 agent 分支提交 PR 时的双重重复运行并自动取消过期构建。
+- **保留三平台检查与完整验证**：
+  - Windows：86 项单元测试全部通过；Server 与 ControlCenter 单文件发布校验通过。
+  - Android：12 项单元测试全绿，Lint 无错误（保留既有警告），Debug/Release APK 生成正常。
+  - macOS：20 项单元测试全部通过，跨平台编译通过。
+  - 故障注入验证：故意注入单测失败，脚本以 exit code 1 立即终止，输出目录无伪成功二进制产物。
+- **约束遵守**：本次仅完成 B01，未安装或重启设备，未修改系统键盘设置，未读取签名私钥，未接触运行中进程。
+- **待办**：接下来进入 B02（统一版本与依赖约束）和 B03（候选打包与正式发布流程）；另一台 Windows dev.6 一次性接入、T02 会话契约和 Mac/iOS 真机缺口继续保留。
+
+## 2026-09-10 构建与发布计划梳理（文档）
+
+- 新增 [BUILD_PIPELINE.md](./BUILD_PIPELINE.md)：开发构建、候选包、正式发布、设备更新四阶段，含现有命令、版本来源、四类签名、包类型、CI 覆盖和放行证据。
+- 总计划 0.21 增加 B01–B06 及依赖；接下来先统一构建入口，再做版本校验与候选发布。产品 M0–M5 继续有效。
+- 核对发现 CI 缺少 Windows 控制台、Android 单元测试、产物归档、版本/签名组合校验；Mac 仅构建运行器架构。PR #5 的六项已有检查均成功（push/PR 各三项），不代表缺失检查已通过。
+- 修正 SETUP 中“无 Mac 接收端”、旧签名渠道及旧共享模式描述；README 补控制台原生依赖发布参数与最新顺序。
+- 验证范围：源码/脚本/CI 对照；六份文档的 22 个本地链接、构建项目/脚本路径、代码围栏和 `git diff --check` 均通过。本轮没有重新编译、安装、录音、重启服务或发布软件。新构建入口和 Release workflow 均尚未实现。
+- 待办：B01 起步；另一台 Windows dev.6 一次性接入、T02 会话契约和 Mac/iOS 真机缺口仍保留。
+
+## 2026-09-10 一端发起的设备统一更新：Android dev.17 / Windows dev.11
+
+- 用户要求在一端更新所有设备。本轮实现 Windows x64 接收端、控制台和 Android；旧电脑首次需本地接入，Mac/iOS 安装不在已实现范围。
+- 电脑「设备 → 更新所有设备」打开本地导包/请求页面；手机「设置 → 设备更新」协调分发。手机前台观察请求，缓存并独立验证签名包，先结束听写/暂停共享，再更新电脑，手机最后交给系统安装。
+- 发布清单 RSA/SHA-256 签名与每文件哈希校验；固定三个产物，拒绝多余/重复/越界路径和降级。LAN 保留 token/TLS/证书固定，所有写入增加 computerId 目标与自定义请求头。更新器只执行固定本机安装流程，不提供远程命令能力。
+- Windows 使用请求与安装共用准入锁；有活跃音频或听写时 waiting-idle。独立工作进程备份/替换接收端和控制台，检查新版本、发布序号、computerId；失败恢复原文件。data 不参与替换。离线补更队列保存在手机，在主页前台、目标重连后再协调；取消可停止后续安装。
+- 自动化：Windows Release、自包含 server/control-center publish、86 项测试通过；Android assembleDebug/assembleRelease、lintDebug、12 项测试通过。保留既有 lint warning，无错误。补测了签名与内容篡改、路径/重复条目、部分替换失败回滚、身份保留、并发音频准入和大小上限。
+- 本机实测：先本地接入 dev.10/sequence 22。使用签名但故意错误健康版本的测试包，确实启动检查失败并恢复 dev.10；随后正常包自动更新到 dev.11/sequence 23。共享流活跃时使用未来序号测试包得到 waiting-idle，未重启。测试包仅在 outputs，不能交付安装。
+- 手机发起电脑更新实测：在受控 dev.10 基线下，dev.17 手机通过已配对 LAN 下载、校验并回传约 111 MB 更新包，调用安装接口；本机接收端和控制台重启到 dev.11，手机逐设备结果确认为「更新完成」。原电脑 ID 与发布 EXE 哈希保持预期；运行目录两个 EXE 与最终构建完全相同。
+- 安卓实测：USB 首次接入 dev.16，随后通过产品下载/签名校验/UpdateApkProvider 和系统安装界面更新到 dev.17，不是用 adb 安装冒充自更新。已允许 PhoneDeck 的安装权限并点击系统更新确认。versionCode 23、firstInstallTime 仍为 2026-09-07 14:23:14，最终拉取已安装 APK 哈希与构建一致。主题、共享语音模式、25 个按键和原配对记录保留。
+- 设备结果：手机实际 1号「往里走的COMPUTE」仍为 dev.6，LAN 在线但没有更新 API，尚未部署；本机为手机 2号，dev.11 已完成；手机 3号为旧的同名离线/配对失效记录，保留并如实显示，不擅自删除。旧文档的电脑编号与手机槽位有差异，以 computerId 为准。
+- 交付：outputs/fleet-updates/PhoneDeck-统一更新-23.zip（后续从一个入口分发的签名包）；PhoneDeck-首次接入统一更新.zip（旧电脑一次性本地接入）；运行目录另存 PhoneDeck手机端-dev.17-统一更新.apk。首次接入不会搬移或覆盖 data；本地脚本经语法检查，未在另一台电脑执行。
+- 开发更新私钥位于 Git 忽略的 signing 目录；APK 使用与现有手机相同的开发证书，未把 unsigned release APK 当作可安装包。未发布正式 GitHub Release。使用/发布协议详见 FLEET_UPDATES.md。
+- 仍待真实多设备验收：另一台首次接入后的整批更新、离线设备恢复后的自动补更、不同 Android 厂商的安装/后台限制、断电恢复。已有单机与手机闭环不等于这些场景全部通过。
+- 测试结束后回到手机主页，恢复原有共享麦克风供音；本机 health 再次确认 shared/streaming=true、dictation.active=false。未操作输入法的真实转写触发键。
+
+## 2026-09-10 停止后丢最后几个字：Android dev.15 / Windows dev.9
+
+- 用户反馈：说完后不到一秒停止，最后几个字缺失；本轮只处理音频截尾。
+- 确认的源码缺陷：AudioStreamer.stop 直接 disconnect，未发送 HTTP chunked EOF；
+  SharedAudioBroadcaster.stop 中断发送线程，丢弃尚未消费的队列；Windows ReadAsync
+  取消/IOException 跳过正常排空；听写只等 2 秒而音频最多排空 3 秒；
+  Provider 为空后立即停 WASAPI，忽略重采样/设备仍持有的尾帧。
+- Android：立即停止 AudioRecord，但已读 PCM 继续发送；关闭请求输出以发送 EOF，
+  读取电脑响应后断开。共享队列可 finish，先消费队列再返回 EOF；各目标并行收尾、
+  最长 8 秒看门狗；前台服务与 CPU/Wi-Fi 锁保留至收尾完成。启动/停止锁避免停止后再次开录。
+- Windows：正常 EOF、取消和网络断开均排空已收到且已放行的 PCM；Provider 排空后
+  继续供静音 400ms，再停输出/回调听写结束；managed 停止等待预算统一为 4900ms，
+  超时仍安全清理但不报告尾音完整。Android stop 请求读取预算为 12 秒。
+- 共享模式：手机队列从 500ms 收至 120ms，Windows 共享缓冲最多保留最近 120ms；
+  网络突发积压时淘汰旧帧，避免长期落后及溢出时丢最新词尾。managed pre-roll 不受此限制。
+  这不是网络丢包修复，严重拥塞仍可能损失旧音频；原生输入法停止也无法补收停止后的声音。
+- 新增可替换播放后端，回归测试用延迟设备模拟 Provider 已空但尾帧尚未输出；
+  同时覆盖 managed/shared × EOF/IOException/取消、未确认启动不放行、
+  排空失败、引擎等待顺序、共享缓冲保留最新帧、HTTP EOF/响应与发送队列结束。
+- 验证：Windows Release 构建/自包含 publish 通过；74 项测试全部通过。
+  Android assembleDebug、assembleRelease、testDebugUnitTest（10 项）及 lintDebug 通过；
+  lint 无错误，仍有既有 warning。release 未配项目签名，交付使用已验证的 debug 签名 APK。
+- 本机已备份 dev.8 并部署 dev.9，health 确认版本且手机共享流自动重连；
+  部署保留原 data/电脑身份/配对资料，发布 EXE 哈希一致。
+  备份：outputs/audio-tail-fix/backup-20260910-023548。
+- 手机包：运行目录 PhoneDeck手机端-dev.15-尾音修复.apk，versionCode=21。
+  用户接入 USB 后，拉取当前安装 base.apk 并核对签名：与修复包一致（653884d0…），
+  不是历史文档 df327953… 那把长期证书。adb install -r 成功，dev.14→dev.15；
+  firstInstallTime 保持 2026-09-07 14:23:14，未卸载/清数据；重建 reverse，App 冷启动无崩溃。
+- 真机共享闭环：手机开启共享后本机 health 为 shared/streaming=true，引擎 capturing=false；
+  点击停止后 health 在本轮轮询约 579ms 内变 false，日志 drained→sessionStopped 间隔约 411ms，
+  没有 uploadCancelled/断开异常；AppOps 确认 RECORD_AUDIO 不再 running。
+  本次流 received=2484480 bytes，droppedStaleBytes=10560（共享低延迟策略的旧帧舍弃，不能宣称零丢帧）。
+  随后再次开启共享成功，恢复用户原本的供音状态；未替用户启动或停止 Typeless。
+- 交付包：outputs/audio-tail-fix/PhoneDeck-尾音修复升级包.zip（手机 APK、Windows 单文件 EXE、
+  UPDATE.md、SHA256SUMS.txt）。其余电脑尚未部署，需按说明保留各自 data 进行更新。
+- 待完成：真实说话末尾数字/短句的两模式识别完整率、其他电脑升级与回归。
+  本轮没有将用户音频落盘，也没有把自动化尾帧或真机供音测试写成输入法识别 PASS。
+
+## 2026-09-10 面向开源发布的总体规划 v0.6
+
+- 用户确认长期方向：Android/iOS 手机任意搭配多台 Windows/macOS，适配 Typeless、
+  微信输入法、豆包输入法、千问输入法等，支持共享麦克风、点击/按住/电脑触发与多个主题。
+- 已将完整总规划写入 [spec plan.markdown](../spec%20plan.markdown) 第 0 章：
+  当前能力/缺口、平台矩阵、推荐架构、动态设备目录、扫码与逐手机授权、会话和状态、
+  引擎分级、iOS 原型、安装/虚拟音频、主题/无障碍、配置升级、开源维护、
+  M0–M5 路线、量化验收、资源与工期、风险退路及 T01–T08 首批任务。
+- 首轮容量建议为一台手机连接五台电脑，10 台只作探索；不写死三台，也不承诺无限并发。
+  快捷键目标与共享音频接收组独立；多手机首版按每接收端单音频源所有权管理。
+- 技术方案/排期是建议，方向是用户已确认；没有修改源码、协议版本或配置 schema。
+  旧规格保留并标记为历史，其旧 90–150 小时总估算不适用于现在的四端范围。
+- 发现源码的电脑持久化 shared 请求可触发手机采音，与旧“重启不恢复/仅手动”规格有差异；
+  新规划建议明确授权、请求有效期、停止优先和会话代次，尚未实施行为修复。
+- 官方资料核实：iOS/Android 后台开麦与持续录音约束、Bonjour 本地网络权限、Apple
+  外设/审核边界、.NET 8 支持结束日期；来源和核实限制集中在规格 0.20。
+- 同步 README、AGENTS、ARCHITECTURE 和 PROJECT_HANDOVER 的版本/规划入口；
+  历史部署证据保留，不把过去测试当成本轮测试。
+- 本轮验证：git fetch 后本地基线与 origin/main 一致；只读核对源码版本、CI、
+  LanIdentity 与 MainActivity 共享请求行为；文档 diff/链接/章节检查。
+  本轮没有执行构建、手机安装、真机录音、服务重启或发布。
+- 下一步：T01/T02 当前基线与契约；按硬件条件开展 T03 Mac 与 T04 iOS 原型；
+  T05 无 USB 配对设计、T06 引擎产品核实。公开发布前需所有者确定许可证和分发资源。
 
 ## 2026-09-10 1号电脑接收端部署 dev.8 + 启动脚本防身份漂移修复
 
@@ -207,7 +512,7 @@ Android 配置版本：`schemaVersion=1`
   `audio.streaming=true mode=shared`（LAN 双连接含音频流），关闭后约 3 秒停止。
 - 遗留待办：① 2号电脑仍收不到共享音频——其健康探测通过但未建音频 sink，指向
   该机接收端版本过旧（无 `sharedMicrophone` 能力）或缺 VB-CABLE，需在该机控制台
-  确认并升级到 dev.6+ 后复测；② 2号（192.168.0.103）上部署的接收端行为与仓库
+  确认并升级到 dev.6+ 后复测；② 2号电脑（192.168.1.103）上部署的接收端行为与仓库
   源码不一致（同一令牌手机可达、本机 curl 401，证书指纹却匹配手机配对记录），
   需要在该机上核对实际部署版本与 data 目录；③ 3号幽灵条目（本机旧 computerId
   82f731d3 的重复配对）可在手机上长按其芯片删除；④ 共享期间用户同时开 managed
@@ -278,7 +583,7 @@ Android 配置版本：`schemaVersion=1`
 
 ## 2026-09-03 WPF 控制台重构（Aether）
 
-- 用户决定停止 WinForms 视觉层，改用 `E:\Users\Administrator\Desktop\Web2WPF\05-Aether` 的 Apple 式磨砂玻璃设计系统重建控制台。
+- 用户决定停止 WinForms 视觉层，改用 `<开发工作区>\Web2WPF\05-Aether` 的 Apple 式磨砂玻璃设计系统重建控制台。
 - `PhoneDeck.ControlCenter.csproj` 已启用 WPF；旧 `Program.cs`、`ControlCenterForm.cs` 与 `AgentShortcutEditorForm.cs` 保留作迁移参考但从编译排除。
 - 新增模块化 `Themes/Colors.xaml`、`Fonts.xaml`、`Icons.xaml`、`Styles.xaml`、`Generic.xaml`，以及 `App.xaml`、`MainWindow.xaml` 和 WPF Agent 快捷操作编辑器。
 - WPF 主窗口已实现 Aether 悬浮胶囊导航、磨砂玻璃状态卡、连接拓扑、设置开关、日志页、连接页、设备页、自定义窗口按钮和托盘常驻；原有健康检查、启停/重启、LAN 发现、USB 看门狗、开机启动、ADB 路径及 Agent 配置行为已迁移。
@@ -323,7 +628,7 @@ Android 配置版本：`schemaVersion=1`
   的名称、文本、自动回车和显示状态；接收端通过 `/api/config/agent-shortcuts` 发布，手机
   只从当前选中的电脑增量同步这四项，不覆盖普通按键和宏。
 - 接收端增加 `PHONEDECK_DATA_DIR`：本机运行包与配对数据已迁到
-  `E:\Users\Administrator\Desktop\PhoneDeck开发工作区\PhoneDeck电脑控制台`，原
+  `<开发工作区>\PhoneDeck电脑控制台`，原
   `%LOCALAPPDATA%\PhoneDeck` 已移除，电脑身份、证书和令牌保持不变。
 - Windows 测试 42/42、ControlCenter Release 构建、Android `assembleDebug` 与
   `lintDebug` 通过；`1.6.0-dev.4` 接收端、Agent 配置接口和 UDP 8767 已在本机验证。

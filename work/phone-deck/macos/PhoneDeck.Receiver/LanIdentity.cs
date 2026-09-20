@@ -24,9 +24,11 @@ internal sealed class LanIdentity : IDisposable
     internal string CertificateSha256 { get; }
     internal int HttpsPort => Port;
 
-    internal static LanIdentity LoadOrCreate(string computerId)
+    internal static LanIdentity LoadOrCreate(
+        string computerId,
+        string? directoryOverride = null)
     {
-        var directory = PhoneDeckDataDirectory.Get();
+        var directory = directoryOverride ?? PhoneDeckDataDirectory.Get();
         Directory.CreateDirectory(directory);
         var certificatePath = Path.Combine(directory, "lan-certificate.pfx");
         var passwordPath = Path.Combine(directory, "lan-certificate-password.txt");
@@ -103,8 +105,7 @@ internal sealed class LanIdentity : IDisposable
     }
 
     private static X509Certificate2 LoadCertificate(string path, string password) =>
-        new(path, password,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet);
+        new(path, password, X509KeyStorageFlags.DefaultKeySet);
 
     private static X509Certificate2 CreateCertificate(
         string path,
@@ -137,7 +138,7 @@ internal sealed class LanIdentity : IDisposable
         return new X509Certificate2(
             exported,
             password,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet);
+            X509KeyStorageFlags.DefaultKeySet);
     }
 
     public void Dispose() => certificate.Dispose();

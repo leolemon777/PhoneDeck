@@ -42,7 +42,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
 
     private static final int SAMPLE_RATE = 48_000;
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 * 20 / 1_000;
-    private static final int QUEUE_FRAMES = 25; // 500 ms; old frames are dropped first.
+    private static final int QUEUE_FRAMES = 6; // 120 ms; shared audio must remain live.
 
     private final Context context;
     private final Listener listener;
@@ -62,13 +62,19 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         return running;
     }
 
+    boolean isFinishing() {
+        synchronized (stateLock) {
+            return !running && captureThread != null;
+        }
+    }
+
     String getSessionId() {
         return sessionId;
     }
 
     boolean start(String newSessionId) {
         synchronized (stateLock) {
-            if (running) {
+            if (captureThread != null && captureThread.isAlive()) {
                 return false;
             }
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
@@ -84,26 +90,28 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     }
 
     void updateTargets(Map<String, Target> requested) {
-        if (!running) {
-            return;
-        }
-        Map<String, Target> desired = new HashMap<>(requested);
-        for (Map.Entry<String, TargetSink> entry : sinks.entrySet()) {
-            Target next = desired.remove(entry.getKey());
-            TargetSink existing = entry.getValue();
-            if (next == null || !existing.target.sameEndpoint(next) || !existing.isAlive()) {
-                if (sinks.remove(entry.getKey(), existing)) {
-                    existing.stop();
-                }
-                if (next != null) {
-                    addSink(next);
+        synchronized (stateLock) {
+            if (!running) {
+                return;
+            }
+            Map<String, Target> desired = new HashMap<>(requested);
+            for (Map.Entry<String, TargetSink> entry : sinks.entrySet()) {
+                Target next = desired.remove(entry.getKey());
+                TargetSink existing = entry.getValue();
+                if (next == null || !existing.target.sameEndpoint(next) || !existing.isAlive()) {
+                    if (sinks.remove(entry.getKey(), existing)) {
+                        existing.stop();
+                    }
+                    if (next != null) {
+                        addSink(next);
+                    }
                 }
             }
+            for (Target target : desired.values()) {
+                addSink(target);
+            }
+            notifyConnections();
         }
-        for (Target target : desired.values()) {
-            addSink(target);
-        }
-        notifyConnections();
     }
 
     private void addSink(Target target) {
@@ -138,8 +146,13 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             if (localRecorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IllegalStateException("无法初始化手机麦克风");
             }
-            recorder = localRecorder;
-            localRecorder.startRecording();
+            synchronized (stateLock) {
+                if (!running) {
+                    return;
+                }
+                recorder = localRecorder;
+                localRecorder.startRecording();
+            }
             byte[] chunk = new byte[CHUNK_BYTES];
             long lastLevelAt = 0;
             while (running) {
@@ -165,12 +178,13 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 failure = exception.getMessage();
             }
         } finally {
-            running = false;
-            recorder = null;
-            for (TargetSink sink : sinks.values()) {
-                sink.stop();
+            synchronized (stateLock) {
+                running = false;
+                recorder = null;
             }
-            sinks.clear();
+            for (TargetSink sink : sinks.values()) {
+                sink.finish();
+            }
             if (localRecorder != null) {
                 try {
                     if (localRecorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
@@ -180,6 +194,22 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 }
                 localRecorder.release();
             }
+            // All sinks drain in parallel; one slow receiver gets a bounded budget.
+            long deadline = SystemClock.elapsedRealtime() + AudioUpload.FINISH_TIMEOUT_MS;
+            for (TargetSink sink : sinks.values()) {
+                try {
+                    long remaining = deadline - SystemClock.elapsedRealtime();
+                    if (remaining > 0 && sink.worker != null) {
+                        sink.worker.join(remaining);
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                if (sink.worker != null && sink.worker.isAlive()) {
+                    sink.stop();
+                }
+            }
+            sinks.clear();
             synchronized (stateLock) {
                 captureThread = null;
             }
@@ -189,17 +219,17 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     }
 
     void stop() {
-        running = false;
-        AudioRecord current = recorder;
-        if (current != null) {
-            try {
-                current.stop();
-            } catch (IllegalStateException ignored) {
+        synchronized (stateLock) {
+            running = false;
+            AudioRecord current = recorder;
+            if (current != null) {
+                try {
+                    current.stop();
+                } catch (IllegalStateException ignored) {
+                }
             }
         }
-        for (TargetSink sink : sinks.values()) {
-            sink.stop();
-        }
+        // captureLoop seals queues after offering its last successful read.
     }
 
     private void notifyConnections() {
@@ -215,6 +245,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         final SharedAudioPolicies.FrameQueue queue =
                 new SharedAudioPolicies.FrameQueue(QUEUE_FRAMES);
         volatile boolean shouldRun = true;
+        volatile boolean finishing;
         volatile boolean connected;
         volatile HttpURLConnection connection;
         Thread worker;
@@ -244,7 +275,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         void writeLoop() {
             SharedAudioPolicies.ReconnectBackoff backoff =
                     new SharedAudioPolicies.ReconnectBackoff();
-            while (running && shouldRun) {
+            while (shouldRun) {
                 HttpURLConnection local = null;
                 try {
                     local = PhoneDeckHttp.open(
@@ -263,10 +294,16 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                         connected = true;
                         backoff.reset();
                         notifyConnections();
-                        while (running && shouldRun) {
+                        while (shouldRun) {
                             byte[] frame = queue.take();
+                            if (frame == null) {
+                                break;
+                            }
                             output.write(frame);
                             output.flush();
+                        }
+                        if (shouldRun && finishing) {
+                            AudioUpload.finish(local, output);
                         }
                     }
                 } catch (InterruptedException exception) {
@@ -282,7 +319,10 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     }
                     notifyConnections();
                 }
-                if (running && shouldRun) {
+                if (finishing) {
+                    break;
+                }
+                if (shouldRun && !finishing) {
                     try {
                         Thread.sleep(backoff.nextDelayMs());
                     } catch (InterruptedException exception) {
@@ -306,6 +346,12 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             if (local != null) {
                 local.disconnect();
             }
+        }
+
+        void finish() {
+            finishing = true;
+            queue.finish();
+            AudioUpload.abortAfter(worker, AudioUpload.FINISH_TIMEOUT_MS, this::stop);
         }
     }
 
