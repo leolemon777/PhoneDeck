@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+  - package-ecosystem: gradle
+    directory: /work/phone-deck/android
+    schedule:
+      interval: weekly
+      day: monday

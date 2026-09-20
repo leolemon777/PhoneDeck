@@ -1,0 +1,51 @@
+name: 问题反馈 / Bug report
+description: 手机端、Windows 接收端/控制台或 macOS 接收端出现异常行为
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: 出问题的组件 / Component
+      options:
+        - Android 手机端
+        - Windows 接收端（PhoneDeck.Server）
+        - Windows 电脑控制台（PhoneDeck.ControlCenter）
+        - macOS 接收端（预览）
+        - 构建 / CI
+        - 文档
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么 / What happened
+      description: 预期行为 vs 实际行为，越具体越好。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 手机与电脑 ...
+        2. 点击 ...
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 版本 / Versions
+      description: 手机端见设置页；电脑端访问 http://127.0.0.1:8765/api/health 或看控制台标题。
+      placeholder: "Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12 / 系统 Android 14, Win 11"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 诊断输出（可选）/ Diagnostics
+      description: 电脑端执行 `curl --noproxy "*" http://127.0.0.1:8765/api/diagnostics` 的输出；语音相关问题时请附上。
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或其他信息（可选）/ Logs or context
