@@ -25,7 +25,7 @@ jobs:
     outputs:
       skip_push: ${{ steps.decide.outputs.skip_push }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Resolve push skip against open same-repo PRs
         id: decide
         env:
@@ -47,7 +47,7 @@ jobs:
     needs: pre_check
     if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
@@ -94,7 +94,7 @@ jobs:
     needs: pre_check
     if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
@@ -127,7 +127,7 @@ jobs:
     needs: pre_check
     if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -169,7 +169,7 @@ jobs:
       && needs.windows.result == 'success'
       && needs.android.result == 'success'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Release transaction foundation tests
         shell: pwsh
         run: |
