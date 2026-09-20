@@ -1,5 +1,7 @@
 # PhoneDeck 手机控制台
 
+> **English** — PhoneDeck turns a spare Android phone into a voice-input panel and a programmable shortcut console for Windows (macOS in preview): the phone supplies the microphone, your PC's dictation software does the transcription, and the phone can also send shortcuts like copy / paste / screenshot or custom macros. Grab the pre-built binaries from the [v1.6.0-beta.1 release](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.1) and follow its QUICKSTART. Docs are Chinese-first; English contributions welcome.
+
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
 
 当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
@@ -14,7 +16,9 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 iOS 原生客户端、主题与状态统一、签名分发和维护体系。第一轮容量目标为一台手机连接
 五台电脑，后续按实测扩展。方向已确认，技术方案和排期为建议；不代表上述能力已经实现。
 
-![PhoneDeck 1.4.0 手机端界面](./work/phone-deck/phonedeck-screen.png)
+| 浅色主题 | 深色主题 |
+|---|---|
+| ![PhoneDeck 手机端控制台（浅色）](./work/phone-deck/phonedeck-screen-light.png) | ![PhoneDeck 手机端控制台（深色）](./work/phone-deck/phonedeck-screen-dark.png) |
 
 ## 项目所有者真正想实现什么
 

@@ -1,0 +1,63 @@
+name: 语音引擎适配反馈 / Voice engine feedback
+description: 反馈内置引擎档案（豆包/微信输入法等）的实际表现，或申请新引擎适配
+labels: [voice-engine]
+body:
+  - type: input
+    id: engine
+    attributes:
+      label: 引擎名称 / Engine
+      placeholder: "如：闪电说 / 豆包 / 微信输入法 / 其他"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 系统 / Platform
+      options:
+        - Windows
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: hotkey
+    attributes:
+      label: 实际全局快捷键 / Actual global hotkey
+      description: 在该软件设置里看到的语音快捷键；若可自定义请注明默认值。
+      placeholder: "如：Ctrl+Win（按住）"
+    validations:
+      required: true
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: 触发方式 / Trigger style
+      options:
+        - 按一下开始、再按结束（toggle）
+        - 按住说话、松开结束（hold）
+    validations:
+      required: true
+  - type: dropdown
+    id: device-select
+    attributes:
+      label: 能否把输入设备选成虚拟声卡 / Can it select the virtual cable as input?
+      options:
+        - 能（已设为 CABLE Output / BlackHole 2ch）
+        - 软件里找不到输入设备选项
+        - 只认系统默认麦克风
+  - type: input
+    id: process
+    attributes:
+      label: 录音时的进程名 / Recording process name
+      description: 语音输入时在任务管理器（详细信息）或活动监视器中占用麦克风的进程名，用于状态探测。
+      placeholder: "如：ShandianSay.exe"
+  - type: textarea
+    id: result
+    attributes:
+      label: 实测结果 / Result
+      description: 手机端能否正常开始/停止听写；用了什么档案 JSON；有无按键悬挂等问题。
+    validations:
+      required: true
+  - type: textarea
+    id: profile
+    attributes:
+      label: 你使用的档案 JSON（可选）/ Profile JSON used
+      render: json
