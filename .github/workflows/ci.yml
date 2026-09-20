@@ -69,18 +69,22 @@ jobs:
         run: pwsh -NoProfile -File ./build.ps1 -Platform Windows
       - name: Upload Windows Artifacts
         if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts-dev
+          retention-days: 14
           path: |
             ${{ steps.build.outputs.run_directory }}/windows/server/PhoneDeck.Server.exe
             ${{ steps.build.outputs.run_directory }}/windows/console/PhoneDeck.ControlCenter.exe
           if-no-files-found: error
       - name: Upload Windows Tests Report
         if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: windows-tests-dev
+          retention-days: 14
           path: ${{ steps.build.outputs.run_directory }}/reports/windows-tests/
           if-no-files-found: warn
 
@@ -100,16 +104,20 @@ jobs:
         run: pwsh -NoProfile -File ./build.ps1 -Platform MacOS
       - name: Upload macOS App Tar
         if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
         uses: actions/upload-artifact@v4
         with:
           name: macos-artifacts-dev
+          retention-days: 14
           path: ${{ steps.build.outputs.run_directory }}/macos/PhoneDeck-Receiver.app.tar
           if-no-files-found: error
       - name: Upload macOS Tests Report
         if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: macos-tests-dev
+          retention-days: 14
           path: ${{ steps.build.outputs.run_directory }}/reports/macos-tests/
           if-no-files-found: warn
 
@@ -135,16 +143,20 @@ jobs:
         run: pwsh -NoProfile -File ./build.ps1 -Platform Android
       - name: Upload Android APK
         if: success() && steps.build.outputs.run_directory != ''
+        continue-on-error: true # 工件存储配额耗尽时仅告警，不阻塞构建/测试门
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-dev
+          retention-days: 14
           path: ${{ steps.build.outputs.run_directory }}/android/*.apk
           if-no-files-found: error
       - name: Upload Android Reports
         if: always() && steps.build.outputs.run_directory != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: android-reports-dev
+          retention-days: 14
           path: ${{ steps.build.outputs.run_directory }}/reports/android/
           if-no-files-found: warn
 
@@ -167,6 +179,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload transaction test log
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: b03-transaction-test-log
@@ -182,17 +195,20 @@ jobs:
         with:
           packages: "platform-tools build-tools;35.0.0"
       - name: Download Windows binaries (this run)
+        continue-on-error: true # 上游上传因配额失败时跳过 B03 组装断言，纯脚本测试仍执行
         uses: actions/download-artifact@v4
         with:
           name: windows-artifacts-dev
           path: artifacts/windows
       - name: Download Android APKs (this run)
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: android-apk-dev
           path: artifacts/android
       - name: Resolve SDK35 aapt2 and run B03 S1/S2/S3
         id: b03
+        continue-on-error: true # 依赖上游工件；配额期间工件缺失时降级跳过
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -221,6 +237,7 @@ jobs:
           }
       - name: Upload B03 bounded reports and staging outputs
         if: always() && steps.b03.outputs.report_directory != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: b03-release-tests-reports
@@ -228,6 +245,7 @@ jobs:
           if-no-files-found: warn
       - name: Upload dedicated S1 candidate.json
         if: always() && steps.b03.outputs.ci_candidate_output_root != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: b03-ci-candidate-json
