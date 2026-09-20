@@ -196,13 +196,13 @@ jobs:
           packages: "platform-tools build-tools;35.0.0"
       - name: Download Windows binaries (this run)
         continue-on-error: true # 上游上传因配额失败时跳过 B03 组装断言，纯脚本测试仍执行
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-artifacts-dev
           path: artifacts/windows
       - name: Download Android APKs (this run)
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: android-apk-dev
           path: artifacts/android
