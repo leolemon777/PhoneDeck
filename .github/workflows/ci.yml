@@ -128,7 +128,7 @@ jobs:
     if: ${{ !(github.event_name == 'push' && needs.pre_check.outputs.skip_push == 'true') }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -186,7 +186,7 @@ jobs:
           path: outputs/ci-transaction-reports/tests.log
           if-no-files-found: warn
       - name: Setup JDK 17 (Android SDK tools)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
