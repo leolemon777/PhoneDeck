@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "windows": {
-    "version": "1.6.0-dev.12",
-    "sequence": 24
+    "version": "1.6.0-dev.15",
+    "sequence": 27
   },
   "android": {
-    "versionName": "1.6.0-dev.18",
-    "versionCode": 24
+    "versionName": "1.6.0-dev.20",
+    "versionCode": 26
   },
   "macos": {
     "version": "2.0.0-dev.3",
@@ -21,6 +21,6 @@
   },
   "console": {
     "follows": "windows.version",
-    "informationalVersion": "1.6.0-dev.12"
+    "informationalVersion": "1.6.0-dev.15"
   }
 }

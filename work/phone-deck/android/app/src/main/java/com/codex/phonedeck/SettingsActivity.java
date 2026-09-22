@@ -125,6 +125,10 @@ public final class SettingsActivity extends Activity {
                 () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(8)));
 
         page.addView(sectionLabel("连接与维护"), topMargin(dp(24)));
+        TextView computerSummary = summaryText();
+        computerSummary.setText("逐台管理输入法、快捷键与自动连接");
+        page.addView(navRow("devices", "电脑与输入法", computerSummary,
+                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(8)));
         page.addView(keepAliveRow(), fullWidthMargins(dp(8)));
         TextView updateSummary = summaryText();
         updateSummary.setText("一次发起，逐台查看结果");
@@ -158,9 +162,12 @@ public final class SettingsActivity extends Activity {
     private View buildVoicePage() {
         LinearLayout page = pageShell();
         addHeader(page, "语音输入", view -> popPage());
+        TextView computerSummary = summaryText(); computerSummary.setText("为每台电脑选择输入法");
+        page.addView(navRow("devices", "电脑与输入法", computerSummary,
+                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(12)));
 
         managedOption = option("手机控制听写",
-                "手机按钮控制当前电脑的语音输入软件（在电脑端设置中选择引擎），保留点击/按住操作", true);
+                "手机按钮控制当前电脑的语音输入软件（在本页「电脑与输入法」选择），保留点击/按住操作", true);
         managedCheck = (TextView) managedOption.getChildAt(1);
         managedOption.setOnClickListener(view -> selectWorkMode(WORK_MANAGED));
         page.addView(managedOption, fullWidthMargins(dp(14)));

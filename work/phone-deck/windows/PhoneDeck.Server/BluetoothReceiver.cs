@@ -205,7 +205,7 @@ internal sealed class BluetoothReceiver : IAsyncDisposable
         {
             type = "hello",
             name = "PhoneDeck",
-            version = "1.6.0-dev.12",
+            version = "1.6.0-dev.15",
             protocolVersion = 2,
             computerId,
             displayName,

@@ -2,9 +2,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>disable</ImplicitUsings>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Nullable>enable</Nullable>
     <AssemblyName>PhoneDeck.ControlCenter</AssemblyName>
     <RootNamespace>PhoneDeck.ControlCenter</RootNamespace>
@@ -18,14 +18,10 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="Program.cs" />
-    <Compile Remove="ControlCenterForm.cs" />
-    <Compile Remove="AgentShortcutEditorForm.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="ReceiverTray.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Assets\PhoneDeck.Light.ico" />
-    <Resource Include="Assets\PhoneDeck.Dark.ico" />
-    <Resource Include="Assets\PhoneDeck.Light.png" />
-    <Resource Include="Assets\PhoneDeck.Dark.png" />
+    <EmbeddedResource Include="Assets\PhoneDeck.Light.ico" />
   </ItemGroup>
 </Project>

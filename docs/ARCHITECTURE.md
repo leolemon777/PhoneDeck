@@ -2,19 +2,19 @@
 
 ## 当前实现与目标架构的边界
 
-源码基线：Android 1.6.0-dev.17 / Windows 接收端 1.6.0-dev.11 /
+源码基线：Android 1.6.0-dev.20 / Windows 接收端 1.6.0-dev.15 /
 macOS 预览 2.0.0-dev.3；当前协议仍为 v2。
 面向 Android/iOS × Windows/macOS 的目标架构、动态多设备模型、逐手机授权、
 会话状态、引擎适配和阶段依赖见 [长期规格 v0.6 第 0 章](../spec%20plan.markdown)。
 这些是后续规划，iOS、无线扫码配对与 Receiver.Core 公共库尚不能当作当前实现。
 
-目前共享请求可由电脑持久化并被手机轮询跟随，授权/重启语义仍需按规格 0.8 迁移；
+新版 Android 的采音只由手机主动开启，不再跟随旧电脑的持久化共享请求；
 当前电脑 LAN 令牌也不能当作已实现逐手机凭据与撤销。
 下文旧版本标记描述各能力引入时的结构，不替代当前支持矩阵或真机验收记录。
 
 ## 当前 Android/Windows 数据流
 
-统一更新使用独立路径：电脑本地更新页 → 签名包/批量请求 → 手机 FleetUpdateActivity 缓存与分发 →
+统一更新使用独立路径：手机导入签名包（或读取电脑缓存）→ 手机 FleetUpdateActivity 校验与分发 →
 各接收端 FleetUpdates 校验与空闲准入 → 独立 FleetUpdateWorker 固定文件替换、健康校验与异常回退。
 Android 通过非导出的只读 UpdateApkProvider 向系统安装器临时授予 APK 读取权；自身包名、签名与版本需一致。
 手机的离线补更队列持久化，主页在前台且目标恢复连接时再次协调，不承诺后台静默分发。
@@ -73,7 +73,9 @@ Windows PhoneDeck.Server        │
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
-- `PhoneDeck.ControlCenter`：.NET 8 WPF 控制台，采用 Web2WPF Aether 主题资源；通过本地健康接口展示接收端、Wi-Fi、音频和 USB 状态，并管理进程、便携设置、Agent 快捷操作与系统托盘。
+- `PhoneDeck.ControlCenter`：.NET 8 WinForms 原生托盘，状态窗口按需创建/销毁；只显示状态、重连和退出。隐藏或最小化后暂停 UI 轮询，不加载 WPF。
+- `DesktopConfigurationEndpoints` / `ConfigurationGate`：手机按电脑编辑引擎与连接设置。写入必须带目标 ID 和读取时的 revision，排斥并发输入/音频，原子落盘后热应用。
+- `ComputerSettingsActivity`：复用固定证书的 HTTPS；USB 回退先验证身份，保存不自动切换目标或重试。不再从电脑自动覆盖手机 Agent 按键。
 
 ### macOS 2.0.0-dev.2 预览组件
 

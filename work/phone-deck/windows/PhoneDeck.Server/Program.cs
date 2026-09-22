@@ -43,6 +43,7 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 var serverSettings = ServerSettings.LoadOrCreate();
 var fleetUpdates = new FleetUpdates();
+var configurationGate = new ConfigurationGate();
 using var audioBridge = new PhoneAudioBridge();
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
@@ -51,6 +52,8 @@ using var lanDiscovery = new LanDiscoveryResponder(
     lanIdentity.HttpsPort);
 using var diagnostics = new DiagnosticsMonitor(() =>
 {
+    lock (VoiceEngines.ConfigurationLock)
+    {
     var engine = VoiceEngines.Active;
     return new DiagnosticsSnapshot
     {
@@ -60,28 +63,15 @@ using var diagnostics = new DiagnosticsMonitor(() =>
         VirtualCableDevice = audioBridge.FindVirtualCable(),
         ForegroundApp = KeyboardInput.ForegroundAppName()
     };
+    }
 });
 diagnostics.Start();
 await using var bluetoothReceiver = new BluetoothReceiver(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName);
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
-if (serverSettings.UsbWatchdog)
-{
-    usbWatchdog.Start();
-}
-else
-{
-    Console.WriteLine("USB 看门狗已在 server-settings.json 中关闭。");
-}
-if (serverSettings.LanDiscovery)
-{
-    lanDiscovery.Start();
-}
-else
-{
-    Console.WriteLine("局域网发现在 server-settings.json 中关闭。");
-}
+usbWatchdog.SetEnabled(serverSettings.UsbWatchdog);
+lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
 
 app.Use(async (context, next) =>
 {
@@ -115,6 +105,23 @@ app.Use(async (context, next) =>
     try { await next(); }
     finally { fleetUpdates.ExitUse(); }
 });
+app.Use(async (context, next) =>
+{
+    var use = HttpMethods.IsPost(context.Request.Method)
+        && !context.Request.Path.StartsWithSegments("/api/config/desktop");
+    if (!use) { await next(); return; }
+    if (!configurationGate.EnterUse())
+    {
+        context.Response.StatusCode = 409;
+        await context.Response.WriteAsJsonAsync(new { ok = false, error = "正在保存设置，请稍后重试" });
+        return;
+    }
+    try { await next(); } finally { configurationGate.ExitUse(); }
+});
+DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configurationGate,
+    () => audioBridge.IsStreaming || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true,
+    () => serverSettings, value => serverSettings = value, usbWatchdog, lanDiscovery, diagnostics);
+
 fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
     || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
 
@@ -140,7 +147,7 @@ app.MapGet("/api/health", () =>
         capabilities = new[]
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
-            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1"
+            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1", "phoneManagedSettingsV1"
         },
         audio = new
         {
@@ -294,55 +301,9 @@ app.MapGet("/api/config/voice-engines", () =>
     });
 });
 
-app.MapPost("/api/config/voice-engines", (VoiceEngineConfigRequest request) =>
-{
-    var catalog = VoiceEngines.Catalog;
-    var activeId = request.ActiveEngine?.Trim().ToLowerInvariant();
-    if (string.IsNullOrWhiteSpace(activeId) || catalog.Find(activeId) is null)
-    {
-        return Results.BadRequest(new { ok = false, error = $"未知引擎：{request.ActiveEngine}" });
-    }
-    if (request.ShortcutOverrides is not null)
-    {
-        foreach (var (engineId, engineOverrides) in request.ShortcutOverrides)
-        {
-            if (engineOverrides is null)
-            {
-                continue;
-            }
-            foreach (var (modeId, binding) in engineOverrides)
-            {
-                if (string.IsNullOrWhiteSpace(binding))
-                {
-                    continue;
-                }
-                if (KeyboardInput.ParseBindingKeys(binding) is null)
-                {
-                    return Results.BadRequest(new
-                    {
-                        ok = false,
-                        error = $"引擎 {engineId} 模式 {modeId} 的快捷键无法识别：{binding}"
-                    });
-                }
-            }
-        }
-    }
-    try
-    {
-        var settings = catalog.Settings;
-        settings.ActiveEngine = activeId;
-        settings.ShortcutOverrides = request.ShortcutOverrides
-            ?? new Dictionary<string, Dictionary<string, string>>();
-        VoiceEngineSettings.Save(settings);
-        Console.WriteLine($"语音引擎设置已更新：{activeId}（重启接收端后生效）");
-        return Results.Ok(new { ok = true, activeEngine = activeId });
-    }
-    catch (Exception exception)
-    {
-        Console.Error.WriteLine($"保存语音引擎设置失败：{exception.Message}");
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-});
+// Legacy readers remain supported; writes must carry a target and revision.
+app.MapPost("/api/config/voice-engines", () => Results.Json(
+    new { ok = false, error = "请在新版手机 App 的电脑与输入法页面修改设置" }, statusCode: 409));
 
 app.MapGet("/api/diagnostics", async () =>
 {

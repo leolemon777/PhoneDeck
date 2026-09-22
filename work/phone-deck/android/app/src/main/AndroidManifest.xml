@@ -27,6 +27,7 @@
         android:usesCleartextTraffic="true">
         <provider android:name=".UpdateApkProvider" android:authorities="${applicationId}.updates"
             android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name=".ComputerSettingsActivity" android:exported="false" />
         <activity android:name=".FleetUpdateActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
         <service

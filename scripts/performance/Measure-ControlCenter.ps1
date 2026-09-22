@@ -1,39 +1,39 @@
 param(
-    [string]$SourceRoot = (Join-Path $PSScriptRoot '../..'),
-    [string]$DotNetPath = 'dotnet',
-    [switch]$Verify
+    [Parameter(Mandatory)][string]$InstallDirectory,
+    [ValidateRange(2, 60)][int]$SampleCount = 12,
+    [ValidateRange(100, 500)][int]$IntervalMilliseconds = 500,
+    [string]$OutputPath
 )
+# Read-only sampler for the native receiver. No GC, working-set trimming,
+# process restart, or real audio/input is performed.
 $ErrorActionPreference = 'Stop'
-if (-not $IsWindows) { throw 'This probe requires a Windows desktop session.' }
-$SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
-$run = Join-Path $SourceRoot ('outputs/control-center-probe/' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $run -Force | Out-Null
-$source = [System.Security.SecurityElement]::Escape((Join-Path $PSScriptRoot 'ControlCenterProbe.cs'))
-$targets = Join-Path $run 'probe.targets'
-"<Project><ItemGroup><Compile Include=`"$source`" /></ItemGroup></Project>" | Set-Content -LiteralPath $targets
-$project = Join-Path $SourceRoot 'work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCenter.csproj'
-$publish = Join-Path $run 'instrumented-only'
-Push-Location $SourceRoot
-try {
-    # Isolated intermediates prevent an instrumented entry point from being
-    # reused by an ordinary build. These binaries are never deployment packages.
-    & $DotNetPath publish $project -c Release -p:RestoreLockedMode=true `
-        -p:StartupObject=ControlCenterProbe "-p:CustomAfterMicrosoftCommonTargets=$targets" `
-        "-p:IntermediateOutputPath=$run/obj/" "-p:OutputPath=$run/bin/" -o $publish
-    if ($LASTEXITCODE -ne 0) { throw 'Probe build failed.' }
-    $arguments = '"' + $run + '"'
-    if ($Verify) { $arguments += ' --verify' }
-    $process = Start-Process -FilePath (Join-Path $publish 'PhoneDeck.ControlCenter.exe') `
-        -ArgumentList $arguments -WindowStyle Hidden -PassThru
-    try {
-        if (-not $process.WaitForExit(60000)) {
-            $process.Kill()
-            throw 'Probe exceeded its 60-second deadline.'
+if (-not $IsWindows) { throw 'This sampler requires Windows.' }
+$directory = (Resolve-Path -LiteralPath $InstallDirectory).Path
+$samples = @()
+for ($index = 0; $index -lt $SampleCount; $index++) {
+    foreach ($name in @('PhoneDeck.ControlCenter', 'PhoneDeck.Server')) {
+        $expected = Join-Path $directory ($name + '.exe')
+        foreach ($process in (Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            try {
+                if ($process.Path -ne $expected) { continue }
+                $process.Refresh()
+                $samples += [pscustomobject]@{
+                    at = [DateTimeOffset]::UtcNow.ToString('O'); name = $name; pid = $process.Id
+                    privateCommitMiB = [math]::Round($process.PrivateMemorySize64 / 1MB, 2)
+                    workingSetMiB = [math]::Round($process.WorkingSet64 / 1MB, 2)
+                    cpuMilliseconds = $process.TotalProcessorTime.TotalMilliseconds
+                    handles = $process.HandleCount; windowVisible = $process.MainWindowHandle -ne 0
+                }
+            } finally { $process.Dispose() }
         }
-        if ($process.ExitCode -ne 0) { throw "Probe failed; inspect $run/metrics.json" }
-    } finally { $process.Dispose() }
-    $report = Get-Content -LiteralPath (Join-Path $run 'metrics.json') -Raw | ConvertFrom-Json
-    if ($report.error) { throw $report.error }
-    if ($Verify -and -not $report.verified) { throw 'Behavior checks did not complete.' }
-    Write-Output $run
-} finally { Pop-Location }
+    }
+    if ($index -lt $SampleCount - 1) { Start-Sleep -Milliseconds $IntervalMilliseconds }
+}
+if ($samples.Count -eq 0) { throw 'No PhoneDeck processes found in this install directory.' }
+$report = [ordered]@{
+    note = 'Private commit and working set are distinct metrics. Compare equal workloads and warm-up periods.'
+    samples = $samples
+}
+$json = $report | ConvertTo-Json -Depth 5
+if ($OutputPath) { $json | Set-Content -LiteralPath $OutputPath -Encoding utf8 }
+$json
