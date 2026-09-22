@@ -4,7 +4,7 @@
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
 
-当前源码为 **Android 1.6.0-dev.18 / Windows 接收端 1.6.0-dev.12**。交付与未验收项见 [Windows/Android交付记录](docs/WINDOWS_ANDROID_DELIVERY.md)。上一版完整实机稳定基线是
+当前源码为 **Android 1.6.0-dev.21 / Windows 接收端 1.6.0-dev.16**。本轮实现、手机安装通道限制与未验收项见 [手机统一设置记录](docs/PHONE_MANAGED_DESKTOP.md)。上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、真机安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
@@ -35,7 +35,7 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
 
 ## 当前已经可以使用的功能
 
-- Windows/Android 设备统一更新：任一已接入电脑导入签名包，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
+- Windows/Android 设备统一更新：手机导入签名包或读取已接入电脑的缓存，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
 - 原生 Android Java App，最低 Android 8.0（API 26）。
 - Windows x64、.NET 8 自包含接收端。
 - USB ADB 反向隧道，服务仅监听 `127.0.0.1:8765`。
@@ -48,7 +48,7 @@ iOS 原生客户端、主题与状态统一、签名分发和维护体系。第�
   服务采用 `START_NOT_STICKY`，App 或手机重启后不会自动恢复采音。
 - Windows 通过 NAudio/WASAPI 将音频写入 `CABLE Input (VB-Audio Virtual Cable)`。
 - 语音引擎档案化：内置 Typeless（自动读取其配置与快捷键，失败退回 RightAlt）、豆包、微信输入法，支持切换式（按一下）与按住式（hold）触发；用户可在 data 目录的 voice-engines 子目录放置 JSON 零代码新增/覆盖引擎，详见 [docs/VOICE_ENGINES.md](./docs/VOICE_ENGINES.md)。
-- Windows 控制台设置页可选择引擎并手动覆盖快捷键；手机端自动发现每台电脑的引擎与模式并动态渲染。
+- 手机「设置 → 电脑与输入法」逐台选择引擎、覆盖快捷键、调整 USB 恢复/局域网发现/登录启动，保存后立即生效。Windows 仅保留原生托盘、状态窗口和重连；见 [手机统一设置](docs/PHONE_MANAGED_DESKTOP.md)。
 - 点击模式的大号主按钮依状态切换“开始说话 / 取消启动 / 停止说话”；按住模式支持按下说话、松开停止。
 - 输入目标编号放在固定语音面板右下方，可单手切换在线电脑。
 - 手机端音量条、震动、等待、成功和失败反馈。

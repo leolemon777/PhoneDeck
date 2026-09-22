@@ -154,7 +154,6 @@ public final class MainActivity extends Activity {
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
-    private AgentSyncManager agentSyncManager;
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
             new ConcurrentHashMap<>();
@@ -175,27 +174,11 @@ public final class MainActivity extends Activity {
     private static final long DISCOVERY_COOLDOWN_MS = 10_000;
     private ConnectivityManager.NetworkCallback networkCallback;
 
-    /// 电脑联动：当前仍在请求共享麦克风的电脑集合；空 = 没有任何电脑请求。
-    private final java.util.Set<String> sharedRequestedComputerIds = new java.util.HashSet<>();
-    /// 用户在手机上手动停止后抑制联动自动重启，直到所有电脑取消请求再重新允许。
-    private boolean sharedLinkageSuppressed;
-    private boolean sharedStatusWasRunning;
-
+    // Microphone activation is owned by explicit actions on the phone.
     private final BroadcastReceiver sharedStatusReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction())) {
-                boolean nowRunning = intent.getBooleanExtra(
-                        PhoneAudioService.EXTRA_RUNNING, false);
-                if (sharedStatusWasRunning && !nowRunning
-                        && !sharedRequestedComputerIds.isEmpty()) {
-                    // 运行中停止且电脑仍在请求：视为用户手动停止，暂时抑制联动，
-                    // 下一次轮询观察到电脑取消请求后自动解除抑制。
-                    sharedLinkageSuppressed = true;
-                }
-                sharedStatusWasRunning = nowRunning;
+        @Override public void onReceive(Context context, Intent intent) {
+            if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction()))
                 renderSharedAudioStatus(PhoneAudioService.getSnapshot());
-            }
         }
     };
 
@@ -233,10 +216,6 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
-        agentSyncManager = new AgentSyncManager(configRepository, () -> {
-            refreshShortcutGrid();
-            showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
-        });
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
         registerSharedAudioStatusReceiver();
@@ -1306,6 +1285,7 @@ public final class MainActivity extends Activity {
         }
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
                 .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
+                .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
                 .setNegativeButton("取消", null).show();
     }
 
@@ -1736,7 +1716,7 @@ public final class MainActivity extends Activity {
                     String activeComputerId = targetDeviceManager.getActiveComputerId();
                     if (activeComputerId == null
                             || sameComputer(healthComputerId, activeComputerId)) {
-                        syncAgentShortcuts(PhoneDeckEndpoint.USB);
+                        // Layout is owned by the phone; a PC must not overwrite it.
                     }
                     mainHandler.post(() -> {
                         targetDeviceManager.upsert(
@@ -1748,7 +1728,7 @@ public final class MainActivity extends Activity {
                                 PhoneDeckEndpoint.USB,
                                 healthComputerId,
                                 remoteVoiceState);
-                        maybeFollowSharedRequest(healthComputerId, health);
+                        maybeFollowUpdateRequest(healthComputerId, health);
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
@@ -1835,7 +1815,7 @@ public final class MainActivity extends Activity {
                     JSONObject health = result.health;
                     if (sameComputer(device.computerId,
                             targetDeviceManager.getActiveComputerId())) {
-                        syncAgentShortcuts(result.endpoint);
+                        // Keep the phone layout when moving between computers.
                     }
                     boolean supportsManagedDictation = false;
                     org.json.JSONArray capabilities = health.optJSONArray("capabilities");
@@ -1866,7 +1846,7 @@ public final class MainActivity extends Activity {
                     mainHandler.post(() -> {
                         reconcileRemoteVoiceState(
                                 healthEndpoint, healthComputerId, remoteVoiceState);
-                        maybeFollowSharedRequest(healthComputerId, health);
+                        maybeFollowUpdateRequest(healthComputerId, health);
                     });
                 }
                 lanCheckFailStreak = anyPaired && !anySuccess
@@ -1886,12 +1866,6 @@ public final class MainActivity extends Activity {
                 lanCheckInFlight = false;
             }
         });
-    }
-
-    private void syncAgentShortcuts(PhoneDeckEndpoint endpoint) {
-        if (agentSyncManager != null) {
-            agentSyncManager.sync(endpoint);
-        }
     }
 
     /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动语音引擎
@@ -2278,10 +2252,8 @@ public final class MainActivity extends Activity {
         button.setAlpha(enabled ? 1f : 0.45f);
     }
 
-    /// 电脑端联动：健康轮询观察到 shared.requested 后自动开启共享麦克风。
-    /// 手机正忙（managed 听写等）时本轮跳过，下一轮轮询会重试；
-    /// 手动停止后的抑制由本方法在观察到电脑取消请求时解除。
-    private void maybeFollowSharedRequest(String computerId, JSONObject health) {
+    /// 保留旧电脑的更新请求兼容；共享麦克风只能从手机主动开启。
+    private void maybeFollowUpdateRequest(String computerId, JSONObject health) {
         if (computerId == null || computerId.isBlank() || health == null) {
             return;
         }
@@ -2308,37 +2280,6 @@ public final class MainActivity extends Activity {
                 startActivity(new Intent(this, FleetUpdateActivity.class).putExtra("sourceId", computerId));
                 return;
             }
-        }
-        JSONObject shared = health.optJSONObject("shared");
-        boolean requested = shared != null && shared.optBoolean("requested", false);
-        if (!requested) {
-            sharedRequestedComputerIds.remove(computerId);
-            if (sharedRequestedComputerIds.isEmpty()) {
-                sharedLinkageSuppressed = false;
-            }
-            return;
-        }
-        sharedRequestedComputerIds.add(computerId);
-        PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
-        if (state.running || sharedStartPending || sharedLinkageSuppressed
-                || isVoiceStarting() || dictationActive || typelessInFlight
-                || (audioStreamer != null && audioStreamer.isRunning())) {
-            return;
-        }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            // 缺权限时保持安静；手动开启共享按钮会发起权限请求。
-            return;
-        }
-        Log.i("PhoneDeckShared", "电脑请求共享麦克风，自动开启：" + computerId);
-        showActionFeedback("●  电脑请求共享麦克风，正在开启…", theme.muted);
-        Intent start = new Intent(this, PhoneAudioService.class)
-                .setAction(PhoneAudioService.ACTION_START)
-                .putExtra(PhoneAudioService.EXTRA_LINKED, true);
-        try {
-            startForegroundService(start);
-        } catch (Exception exception) {
-            Log.w("PhoneDeckShared", "联动启动共享失败：" + exception.getMessage());
         }
     }
 
@@ -3081,9 +3022,6 @@ public final class MainActivity extends Activity {
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
-        if (agentSyncManager != null) {
-            agentSyncManager.shutdown();
-        }
         super.onDestroy();
     }
 
