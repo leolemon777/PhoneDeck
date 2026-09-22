@@ -43,13 +43,15 @@ public partial class MainWindow : Window
     };
 
     private static readonly TimeSpan ActiveRefreshInterval = TimeSpan.FromMilliseconds(2500);
-    private static readonly TimeSpan HiddenRefreshInterval = TimeSpan.FromSeconds(10);
     private readonly DispatcherTimer refreshTimer = new() { Interval = ActiveRefreshInterval };
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly Forms.NotifyIcon trayIcon = new();
     private bool loadingSettings;
     private bool isExiting;
+    private bool changingSharedRequest;
+    private bool? appliedDarkIcon;
+    private long lastRefreshTick = -1;
     private string currentComputerId = string.Empty;
     private bool lastSharedRequested;
     private bool applyingSharedLink;
@@ -71,9 +73,6 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-    [DllImport("psapi.dll")]
-    private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
     private static string AppDirectory => AppContext.BaseDirectory;
     private static string ServerPath => Path.Combine(AppDirectory, "PhoneDeck.Server.exe");
@@ -101,30 +100,21 @@ public partial class MainWindow : Window
         Closed += MainWindow_Closed;
         refreshTimer.Tick += RefreshTimer_Tick;
         SystemEvents.UserPreferenceChanged += SystemTheme_UserPreferenceChanged;
-        SizeChanged += (_, _) => UpdateWindowCorners();
-        StateChanged += (_, _) => UpdateWindowCorners();
+        IsVisibleChanged += (_, _) => UpdateRefreshActivity();
+        StateChanged += (_, _) =>
+        {
+            UpdateWindowCorners();
+            UpdateRefreshActivity();
+        };
         UpdateWindowCorners();
     }
 
-    private void UpdateWindowCorners()
-    {
-        if (WindowState == WindowState.Maximized)
-        {
-            WindowRoot.CornerRadius = new CornerRadius(0);
-            WindowRoot.BorderThickness = new Thickness(0);
-            WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight));
-            return;
-        }
-
-        const double radius = 20;
-        WindowRoot.CornerRadius = new CornerRadius(radius);
-        WindowRoot.BorderThickness = new Thickness(1);
-        WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight), radius, radius);
-    }
+    private void UpdateWindowCorners() => NativeWindowAppearance.UpdateBorder(this, WindowRoot);
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        NativeWindowAppearance.Initialize(this);
         var handle = new WindowInteropHelper(this).Handle;
         sourceHandle = HwndSource.FromHwnd(handle);
         sourceHandle?.AddHook(SharedHotkeyHook);
@@ -162,12 +152,21 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
-    private async Task ToggleSharedLinkAsync() => await SetSharedLinkAsync(!lastSharedRequested, fromHotkey: true);
+    private async Task ToggleSharedLinkAsync() => await SetSharedLinkAsync(null, fromHotkey: true);
 
-    private async Task SetSharedLinkAsync(bool requested, bool fromHotkey)
+    private async Task SetSharedLinkAsync(bool? requested, bool fromHotkey)
     {
+        if (changingSharedRequest || isExiting) return;
+        changingSharedRequest = true;
         try
         {
+            // Hidden windows do not poll. Read the authoritative state for each
+            // hotkey press, including changes made by the phone or another UI.
+            if (!requested.HasValue)
+            {
+                using var health = JsonDocument.Parse(await http.GetStringAsync("http://127.0.0.1:8765/api/health"));
+                requested = !health.RootElement.GetProperty("shared").GetProperty("requested").GetBoolean();
+            }
             using var content = new StringContent(
                 JsonSerializer.Serialize(new { requested }), Encoding.UTF8, "application/json");
             using var response = await http.PostAsync(
@@ -179,14 +178,18 @@ public partial class MainWindow : Window
                 await RefreshStatusAsync();
                 return;
             }
-            lastSharedRequested = requested;
-            Log((requested ? "已请求手机开启共享麦克风" : "已关闭共享麦克风联动")
+            lastSharedRequested = requested.Value;
+            Log((requested.Value ? "已请求手机开启共享麦克风" : "已关闭共享麦克风联动")
                     + (fromHotkey ? "（Ctrl+Alt+M）" : string.Empty) + "。",
-                requested ? ResourceBrush("BrushSuccess") : ResourceBrush("BrushMist"));
+                requested.Value ? ResourceBrush("BrushSuccess") : ResourceBrush("BrushMist"));
         }
         catch (Exception)
         {
             Log("接收端未运行，无法切换共享麦克风联动。", ResourceBrush("BrushDanger"));
+        }
+        finally
+        {
+            changingSharedRequest = false;
         }
         await RefreshStatusAsync();
     }
@@ -211,7 +214,7 @@ public partial class MainWindow : Window
         await EnsureServerAsync();
         await RefreshStatusAsync();
         await LoadEngineConfigAsync();
-        refreshTimer.Start();
+        UpdateRefreshActivity();
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -228,8 +231,6 @@ public partial class MainWindow : Window
             "PhoneDeck 已最小化到托盘",
             "接收端与 USB 看门狗在后台继续运行。双击托盘图标可重新打开控制台。",
             Forms.ToolTipIcon.Info);
-        refreshTimer.Interval = HiddenRefreshInterval;
-        TrimWorkingSet();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -243,11 +244,31 @@ public partial class MainWindow : Window
         }
         refreshTimer.Stop();
         http.Dispose();
-        refreshGate.Dispose();
+        // An in-flight refresh still releases the gate in its finally block.
+        // No WaitHandle is allocated, so let this managed semaphore be collected.
+        trayIcon.ContextMenuStrip?.Dispose();
+        trayIcon.Icon?.Dispose();
         trayIcon.Dispose();
     }
 
     private async void RefreshTimer_Tick(object? sender, EventArgs e) => await RefreshStatusAsync();
+
+    private bool CanRefresh => !isExiting && IsVisible && WindowState != WindowState.Minimized;
+
+    private void UpdateRefreshActivity()
+    {
+        if (!CanRefresh)
+        {
+            refreshTimer.Stop();
+            return;
+        }
+        if (!IsLoaded || refreshTimer.IsEnabled) return;
+        refreshTimer.Start();
+        // Rapid hide/show cycles can reuse a snapshot still within the normal
+        // refresh interval. A longer stay in the tray refreshes immediately.
+        if (lastRefreshTick < 0 || Environment.TickCount64 - lastRefreshTick >= ActiveRefreshInterval.TotalMilliseconds)
+            _ = RefreshStatusAsync();
+    }
 
     private void InitTrayIcon()
     {
@@ -313,6 +334,7 @@ public partial class MainWindow : Window
     private void ApplyThemeAwareIcons()
     {
         var useDarkIcon = IsSystemDarkMode();
+        if (appliedDarkIcon == useDarkIcon) return;
         var windowIconUri = useDarkIcon ? DarkIconUri : LightIconUri;
         var brandIconUri = useDarkIcon ? DarkBrandUri : LightBrandUri;
 
@@ -324,6 +346,8 @@ public partial class MainWindow : Window
             brandImage.BeginInit();
             brandImage.UriSource = brandIconUri;
             brandImage.CacheOption = BitmapCacheOption.OnLoad;
+            // 32 DIPs, retaining enough resolution for high-DPI displays.
+            brandImage.DecodePixelWidth = 96;
             brandImage.EndInit();
             brandImage.Freeze();
             BrandIcon.Source = brandImage;
@@ -331,12 +355,14 @@ public partial class MainWindow : Window
             var resource = System.Windows.Application.GetResourceStream(windowIconUri);
             if (resource is not null)
             {
-                using var sourceIcon = new Drawing.Icon(resource.Stream);
+                using var resourceStream = resource.Stream;
+                using var sourceIcon = new Drawing.Icon(resourceStream);
                 var replacement = (Drawing.Icon)sourceIcon.Clone();
                 var previous = trayIcon.Icon;
                 trayIcon.Icon = replacement;
                 previous?.Dispose();
             }
+            appliedDarkIcon = useDarkIcon;
         }
         catch
         {
@@ -359,25 +385,11 @@ public partial class MainWindow : Window
 
     private void RestoreFromTray()
     {
-        refreshTimer.Interval = ActiveRefreshInterval;
         Show();
         WindowState = WindowState.Normal;
         Activate();
         Topmost = true;
         Topmost = false;
-    }
-
-    private static void TrimWorkingSet()
-    {
-        try
-        {
-            // 窗口隐藏后大部分页面暂时用不到，让系统先移出物理内存，需要时会自动换回。
-            EmptyWorkingSet(System.Diagnostics.Process.GetCurrentProcess().Handle);
-        }
-        catch
-        {
-            // 失败不影响任何功能，占用保持原样。
-        }
     }
 
     private void ExitApplication()
@@ -803,7 +815,7 @@ public partial class MainWindow : Window
             WindowStyle = ProcessWindowStyle.Hidden
         };
         startInfo.Environment["PHONEDECK_DATA_DIR"] = DataDirectory;
-        Process.Start(startInfo);
+        using var launched = Process.Start(startInfo);
         Log("接收端已启动。", ResourceBrush("BrushSuccess"));
         for (var attempt = 0; attempt < 15 && !await IsHealthyAsync(); attempt++)
         {
@@ -827,6 +839,7 @@ public partial class MainWindow : Window
         {
             foreach (var process in Process.GetProcessesByName("PhoneDeck.Server"))
             {
+                using var ownedProcess = process;
                 try
                 {
                     process.Kill(entireProcessTree: true);
@@ -855,7 +868,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshStatusAsync()
     {
-        if (!await refreshGate.WaitAsync(0))
+        if (!CanRefresh || !await refreshGate.WaitAsync(0))
         {
             return;
         }
@@ -867,7 +880,10 @@ public partial class MainWindow : Window
             var danger = ResourceBrush("BrushDanger");
             var muted = ResourceBrush("BrushMist");
 
-            var network = FindWifiNetwork();
+            // Adapter enumeration can take tens of milliseconds. Restoring the
+            // window must not wait for this diagnostic work on the UI thread.
+            var network = await Task.Run(FindWifiNetwork);
+            if (!CanRefresh) return;
             SetStatus(WifiValue, WifiDot,
                 network.Address ?? "未连接",
                 network.Name is null ? "请连接 Wi-Fi" : network.Name + " · 手机需连接同一网络",
@@ -886,6 +902,12 @@ public partial class MainWindow : Window
             catch
             {
                 // 下面统一显示离线状态。
+            }
+
+            if (!CanRefresh)
+            {
+                health?.Dispose();
+                return;
             }
 
             if (health is null)
@@ -968,6 +990,7 @@ public partial class MainWindow : Window
             }
 
             var usb = await ReadUsbStatusAsync();
+            if (!CanRefresh) return;
             SetStatus(UsbValue, UsbDot,
                 usb.Connected ? "已连接" : "未连接",
                 usb.Detail,
@@ -975,6 +998,7 @@ public partial class MainWindow : Window
                 UsbDetail);
             ConnectionUsbStatus.Text = usb.Connected ? "ADB 设备已连接 · " + usb.Detail : usb.Detail;
             LastCheckedText.Text = "最后检查 " + DateTime.Now.ToString("HH:mm:ss");
+            lastRefreshTick = Environment.TickCount64;
         }
         finally
         {
