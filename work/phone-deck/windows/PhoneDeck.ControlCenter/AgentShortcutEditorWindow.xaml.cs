@@ -40,26 +40,12 @@ public partial class AgentShortcutEditorWindow : Window
             new("agentClear", ClearLabel, ClearText, ClearSubmit, ClearVisible)
         ];
         LoadValues();
-        SizeChanged += (_, _) => UpdateWindowCorners();
+        SourceInitialized += (_, _) => NativeWindowAppearance.Initialize(this);
         StateChanged += (_, _) => UpdateWindowCorners();
         UpdateWindowCorners();
     }
 
-    private void UpdateWindowCorners()
-    {
-        if (WindowState == WindowState.Maximized)
-        {
-            WindowRoot.CornerRadius = new CornerRadius(0);
-            WindowRoot.BorderThickness = new Thickness(0);
-            WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight));
-            return;
-        }
-
-        const double radius = 20;
-        WindowRoot.CornerRadius = new CornerRadius(radius);
-        WindowRoot.BorderThickness = new Thickness(1);
-        WindowRoot.Clip = new RectangleGeometry(new Rect(0, 0, ActualWidth, ActualHeight), radius, radius);
-    }
+    private void UpdateWindowCorners() => NativeWindowAppearance.UpdateBorder(this, WindowRoot);
 
     private void LoadValues()
     {

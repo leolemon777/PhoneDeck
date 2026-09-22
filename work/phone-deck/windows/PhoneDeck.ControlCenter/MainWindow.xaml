@@ -7,8 +7,7 @@
         Width="1260" Height="900" MinWidth="640" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Transparent"
+        Background="{StaticResource BrushPearl}"
         FontFamily="{StaticResource FontFamilyBody}"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
@@ -71,7 +70,7 @@
 
             <Border Grid.Column="0" Style="{StaticResource PillGlass}" Padding="10,6" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image x:Name="BrandIcon" Width="32" Height="32" Source="Assets/PhoneDeck.Light.png" Stretch="Uniform" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality" />
+                    <Image x:Name="BrandIcon" Width="32" Height="32" Stretch="Uniform" Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality" />
                     <TextBlock Text="PhoneDeck" Style="{StaticResource TextBase}" FontWeight="SemiBold" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center" />
                     <Button x:Name="NavOverview" AutomationProperties.Name="概览" Style="{StaticResource NavButton}" Tag="Active" Click="NavButton_Click">
                         <StackPanel Orientation="Horizontal"><Path Style="{StaticResource PageNavIcon}" Data="{StaticResource IconOverview}" /><TextBlock Text="概览" /></StackPanel>
@@ -240,7 +239,7 @@
                 <Border Grid.Row="5" Style="{StaticResource GlassCard}" Padding="18,14">
                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource TextSectionTitle}" FontSize="14"/><TextBlock Text="  ·  仅本机" Style="{StaticResource TextFine}" VerticalAlignment="Center"/></StackPanel><TextBlock Text="本地优先，不经过云端转发" Style="{StaticResource TextFine}" HorizontalAlignment="Right"/></Grid>
-                        <RichTextBox x:Name="ActivityLog" Grid.Row="1" Margin="0,8,0,0" Background="#85FFFFFF" BorderThickness="0" IsReadOnly="True" FontFamily="{StaticResource FontFamilyMono}" FontSize="11.5" Foreground="{DynamicResource BrushSlate}" VerticalScrollBarVisibility="Auto" Padding="8,5"/>
+                        <RichTextBox x:Name="ActivityLog" Grid.Row="1" Margin="0,8,0,0" Background="#85FFFFFF" BorderThickness="0" IsReadOnly="True" IsUndoEnabled="False" FontFamily="{StaticResource FontFamilyMono}" FontSize="11.5" Foreground="{DynamicResource BrushSlate}" VerticalScrollBarVisibility="Auto" Padding="8,5"/>
                     </Grid>
                 </Border>
                 </Grid>
@@ -285,7 +284,7 @@
             <Grid x:Name="PageLogs" Visibility="Collapsed" Margin="48,24,48,40">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <StackPanel><TextBlock Text="PHONEDECK / 日志" FontFamily="{StaticResource FontFamilyMono}" FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource BrushSystemBlue}"/><TextBlock Text="运行日志" Style="{StaticResource TextPageTitle}" Margin="0,6,0,4"/><TextBlock Text="接收端启动、网络状态、设置保存和错误记录。" Style="{StaticResource TextMuted}"/></StackPanel>
-                <Border Grid.Row="2" Style="{StaticResource GlassCard}" Padding="20"><RichTextBox x:Name="ActivityLogFull" Background="#85FFFFFF" BorderThickness="0" IsReadOnly="True" FontFamily="{StaticResource FontFamilyMono}" FontSize="12" Foreground="{DynamicResource BrushSlate}" VerticalScrollBarVisibility="Auto" Padding="10"/></Border>
+                <Border Grid.Row="2" Style="{StaticResource GlassCard}" Padding="20"><RichTextBox x:Name="ActivityLogFull" Background="#85FFFFFF" BorderThickness="0" IsReadOnly="True" IsUndoEnabled="False" FontFamily="{StaticResource FontFamilyMono}" FontSize="12" Foreground="{DynamicResource BrushSlate}" VerticalScrollBarVisibility="Auto" Padding="10"/></Border>
             </Grid>
 
             <!-- Settings page -->

@@ -1,7 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ResourceDictionary.MergedDictionaries>
-        <ResourceDictionary Source="Colors.xaml" />
         <ResourceDictionary Source="Fonts.xaml" />
         <ResourceDictionary Source="Icons.xaml" />
     </ResourceDictionary.MergedDictionaries>
@@ -11,11 +10,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="20" />
-        <Setter Property="Effect">
-            <Setter.Value>
-                <DropShadowEffect BlurRadius="24" Direction="270" ShadowDepth="4" Color="#0F172A" Opacity="0.06" />
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <Style x:Key="PillGlass" TargetType="Border">
@@ -23,11 +17,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="24" />
-        <Setter Property="Effect">
-            <Setter.Value>
-                <DropShadowEffect BlurRadius="20" Direction="270" ShadowDepth="3" Color="#0F172A" Opacity="0.08" />
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <Style x:Key="PrimaryButton" TargetType="Button">
