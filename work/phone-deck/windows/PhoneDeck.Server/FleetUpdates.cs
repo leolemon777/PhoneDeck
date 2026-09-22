@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Http.Features;
 
 internal sealed class FleetUpdates
 {
-    internal const string Version = "1.6.0-dev.15";
-    internal const long Sequence = 27;
+    internal const string Version = "1.6.0-dev.16";
+    internal const long Sequence = 28;
     private readonly string root;
     private readonly SemaphoreSlim gate = new(1, 1);
     private UpdateManifest? manifest;

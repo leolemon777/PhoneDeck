@@ -1,5 +1,25 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-21 UI 升级（最新）
+
+- 用户追加要求升级 UI，继续沿用 `agent/phone-managed-desktop`；Windows dev.16 / sequence 28，Android dev.21 / code 27。
+- 手机电脑设置加入设备卡片、输入法/连接分页与固定保存，切页保留草稿，离开/刷新提醒；
+  保存仅更新本组 revision，防止另一组远端修改被悄悄覆盖。横屏压缩摘要，保留电脑名称和操作。
+- Windows 原生状态面板采用 Luma 图标、浅/深色卡片和明确状态层级，保持按需创建/关闭释放，不增加常驻渲染器。
+- 最终 Windows 发布、91 项测试与 Android Debug/Preview 构建、14 项测试通过；lint 0 error / 44 warning。
+  Windows 四种状态/主题在 150% DPI 下无文字越界，10 次关闭释放验证通过。
+- Samsung 独立临时包真机验证浅/深色、横屏、150% 字体、读取错误和两组草稿保留；
+  受控接口验证保存一组后另一组仍携带旧 revision，409 时不丢草稿。示例设备明确标注，未读写用户配对。
+  临时包 `com.codex.phonedeck.uireview`、专用 8878 反向端口、测试服务已清理，系统字体保持原 1.1。
+  最终 APK 包名与版本正确，不含验收类。手机正式安装仍因原 Mac 预览证书不可用而待用户选择，不视为完成迁移。
+- 本机 Windows 经签名包 28 更新成功，状态 completed，版本/序号/稳定 computerId 和两份 EXE 哈希匹配。
+  窗口关闭后 12 次只读样本：托盘私有提交 13.96–14.20 MiB，工作集 57.29–58.33 MiB；
+  接收服务另为 25.14–26.03 MiB / 81.01–82.20 MiB。这是现场观测，不是严格同负载性能基准。
+- 产物/证据：ignored `outputs/ui-upgrade/PhoneDeck-28.zip`、`final/memory.json`、
+  `desktop/layout-report.json` 与 `android/verified-final`。截图含示例标记，不冒充真实在线设备。
+- 待办：选择手机正式安装通道并保留五台配对，验收真实配置读写/听写/长时共享/断线；多屏 DPI 切换和其他电脑继续验收。
+  详细界面规则见 [UI 翻新](UI_REFRESH.md)，配置协议仍见 [手机统一设置](PHONE_MANAGED_DESKTOP.md)。
+
 ## 2026-09-21 手机统一设置与精简桌面
 
 - 用户确认手机集中配置、桌面只负责显示和重连；在 `agent/phone-managed-desktop` 实现。

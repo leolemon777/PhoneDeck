@@ -20,8 +20,10 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="ReceiverTray.cs" />
+    <Compile Include="ReceiverStatusWindow.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\PhoneDeck.Light.ico" />
+    <EmbeddedResource Include="Assets\Luma.png" />
   </ItemGroup>
 </Project>

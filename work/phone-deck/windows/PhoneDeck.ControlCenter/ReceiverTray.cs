@@ -12,9 +12,8 @@ internal sealed class ReceiverTray : ApplicationContext
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 2500 };
     private readonly RegisteredWaitHandle activation;
-    private Form? window;
-    private Label? status;
-    private bool refreshing, closing;
+    private ReceiverStatusWindow? window;
+    private bool refreshing, reconnecting, closing;
     private static string ServerPath => Path.Combine(AppContext.BaseDirectory, "PhoneDeck.Server.exe");
     private static string DataDirectory => Environment.GetEnvironmentVariable("PHONEDECK_DATA_DIR") is string path
         && !string.IsNullOrWhiteSpace(path) ? Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()))
@@ -43,26 +42,9 @@ internal sealed class ReceiverTray : ApplicationContext
     {
         if (closing) return;
         if (window != null) { window.WindowState = FormWindowState.Normal; window.Show(); window.Activate(); return; }
-        window = new Form { Text = "PhoneDeck 接收器", AutoScaleMode = AutoScaleMode.Dpi, ClientSize = new Size(480, 360),
-            MinimumSize = new Size(470, 390), StartPosition = FormStartPosition.CenterScreen,
-            Font = new Font("Microsoft YaHei UI", 10), BackColor = Color.FromArgb(248, 249, 251), Icon = tray.Icon };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 4 };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "PhoneDeck", AutoSize = true, Padding = new Padding(0, 0, 0, 12), Font = new Font(window.Font.FontFamily, 19, FontStyle.Bold), Dock = DockStyle.Fill }, 0, 0);
-        status = new Label { Text = "正在检查连接…", Dock = DockStyle.Fill, AutoEllipsis = true };
-        status.AccessibleName = "连接状态"; layout.Controls.Add(status, 0, 1);
-        var reconnect = new Button { Text = "重新连接", Dock = DockStyle.Fill, AutoSize = true };
-        reconnect.Click += async (_, _) => { reconnect.Enabled = false; try { await Reconnect(); } finally { if (!reconnect.IsDisposed) reconnect.Enabled = true; } };
-        layout.Controls.Add(reconnect, 0, 2);
-        layout.Controls.Add(new Label { Text = "设置入口：手机 App → 设置 → 电脑与输入法\n关闭窗口后，托盘与接收器继续运行。", AutoSize = true, Dock = DockStyle.Fill,
-            ForeColor = Color.DimGray, Padding = new Padding(0, 8, 0, 0), Font = new Font(window.Font.FontFamily, 9) }, 0, 3);
-        window.Controls.Add(layout);
+        window = new ReceiverStatusWindow(tray.Icon, Reconnect);
         window.Resize += (_, _) => { if (window?.WindowState == FormWindowState.Minimized) timer.Stop(); else timer.Start(); };
-        window.FormClosed += (_, _) => { timer.Stop(); window = null; status = null; };
+        window.FormClosed += (_, _) => { timer.Stop(); window = null; };
         window.Show(); timer.Start(); _ = Refresh();
     }
 
@@ -80,7 +62,9 @@ internal sealed class ReceiverTray : ApplicationContext
             var audio = root.GetProperty("audio"); var engine = root.GetProperty("voiceEngine");
             var name = root.GetProperty("displayName").GetString();
             var streaming = audio.GetProperty("streaming").GetBoolean();
-            SetStatus($"{name}\n{(streaming ? "正在接收手机音频" : "接收器就绪 · 可从手机连接")}\n输入法：{engine.GetProperty("displayName").GetString() ?? "正在读取"}\n{(audio.GetProperty("available").GetBoolean() ? "音频通道就绪" : "音频通道未就绪，请检查虚拟声卡")} · {root.GetProperty("version").GetString()}");
+            window?.UpdateStatus(name ?? Environment.MachineName,
+                engine.GetProperty("displayName").GetString() ?? "正在读取", streaming,
+                audio.GetProperty("available").GetBoolean(), root.GetProperty("version").GetString() ?? "—");
             tray.Text = streaming ? "PhoneDeck · 正在接收音频" : "PhoneDeck · 接收器就绪";
             return true;
         }
@@ -88,12 +72,13 @@ internal sealed class ReceiverTray : ApplicationContext
         { SetStatus("接收器暂未响应\n点击重新连接，或从手机检查连接。"); return false; }
         finally { refreshing = false; }
     }
-    private void SetStatus(string text) { if (status is { IsDisposed: false }) status.Text = text; }
+    private void SetStatus(string text) { window?.ShowNotice("连接待恢复", text); }
     private async Task Reconnect()
     {
-        if (closing) return;
+        if (closing || reconnecting) return;
         if (File.Exists(Path.Combine(DataDirectory, "updates", "installing")))
         { SetStatus("正在安装更新，请稍候…"); return; }
+        reconnecting = true; window?.SetBusy(true);
         try
         {
             // Do not kill a healthy or temporarily busy receiver on a timeout.
@@ -112,6 +97,7 @@ internal sealed class ReceiverTray : ApplicationContext
             await Refresh();
         }
         catch (Exception e) { SetStatus("重新连接失败：" + e.Message); }
+        finally { reconnecting = false; window?.SetBusy(false); }
     }
     private static List<Process> ServerProcesses()
     {
