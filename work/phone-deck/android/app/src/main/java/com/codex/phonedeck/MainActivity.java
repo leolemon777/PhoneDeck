@@ -470,8 +470,8 @@ public final class MainActivity extends Activity {
         connection.setGravity(Gravity.CENTER_VERTICAL);
         connection.setPadding(dp(12), dp(10), dp(4), dp(10));
         connection.setElevation(0);
-        // 状态 chip：底色随语义色的淡染容器，未定状态前先按“检测中”着色。
-        connection.setBackground(theme.shape(this, theme.feedbackSurface(theme.warning), 16));
+        // 状态 chip：底色随语义容器色，未定状态前先按“检测中”着色。
+        connection.setBackground(theme.shape(this, theme.warningContainer, 16));
         connection.setOnClickListener(view -> {
             showDeviceList();
         });
@@ -2895,7 +2895,21 @@ public final class MainActivity extends Activity {
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
         connectionCard.setBackground(theme.shape(
-                this, theme.feedbackSurface(color), 16, 0, theme.outline));
+                this, statusContainer(color), 16, 0, theme.outline));
+    }
+
+    /** 状态 chip 底色：按语义取容器色；8% 淡染在真机上不可辨识，验收已确认。 */
+    private int statusContainer(int semanticColor) {
+        if (semanticColor == theme.success) {
+            return theme.successContainer;
+        }
+        if (semanticColor == theme.warning) {
+            return theme.warningContainer;
+        }
+        if (semanticColor == theme.danger) {
+            return theme.dangerContainer;
+        }
+        return theme.surfaceRaised;
     }
 
     private void showActionFeedback(String message, int color) {

@@ -59,7 +59,10 @@ final class VoiceLevelView extends View {
             float wave = 0.28f + 0.72f * (float) Math.abs(
                     Math.sin((index + 1) * 0.78));
             float height = dp(7) + wave * dp(state == ACTIVE ? 18 : 10);
-            if (state == IDLE || state == PAUSED || state == ERROR) {
+            if (state == IDLE) {
+                // 空闲态压到 3dp 静默线，避免被读成含义不明的虚线（真机走查反馈）。
+                height = dp(3);
+            } else if (state == PAUSED || state == ERROR) {
                 height = dp(6);
             }
             height = Math.min(height, Math.max(0, getHeight() - dp(2)));
