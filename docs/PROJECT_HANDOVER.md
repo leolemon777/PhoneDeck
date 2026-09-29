@@ -6,7 +6,8 @@
 
 当前完整路线以 [长期规格 v0.6 第 0 章](../spec%20plan.markdown) 为准：
 Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎兼容分级、
-双语音模式、主题与开源发行。iOS 尚待开发，Mac 尚待真机。
+双语音模式、主题与开源发行。iOS 尚待开发；Mac 已于 2026-09-14 在 Apple Silicon
+真机完成两轮 Wi-Fi 听写最小闭环，但不等于 Mac 全场景验收。
 本文后续部署、界面和待办保留原交接快照，最新执行状态以 HANDOFF.md 为准。
 当前 Windows/Android 已加入签名包统一更新；旧电脑首次接入和使用方法见 [统一更新说明](./FLEET_UPDATES.md)。
 
@@ -26,8 +27,8 @@ Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎�
 | 端 | 技术栈 | 版本 | 状态 |
 |---|---|---|---|
 | Android App | 纯 Java（无 Kotlin），minSdk 26，程序化 UI | 1.6.0-dev.17 (versionCode 23) | 构建/lint/12 项测试、系统安装器覆盖更新通过 |
-| Windows 接收端 + 控制台 | .NET 8 / Kestrel / NAudio / SendInput + WPF 控制台 | 1.6.0-dev.11 | 86 项测试；本机自动升级和失败回退通过；另一台仍需首次接入 |
-| macOS 接收端 | .NET 8 / CGEvent / Core Audio AUHAL | 2.0.0-dev.3 | 预览（未真机验收） |
+| Windows 接收端 + 控制台 | .NET 8 / Kestrel / NAudio / SendInput + WinForms 轻量托盘/状态窗 | 1.6.0-dev.11 | 86 项测试；本机自动升级和失败回退通过；另一台仍需首次接入 |
+| macOS 接收端 | .NET 8 / CGEvent / Core Audio AUHAL | 2.0.0-dev.3 | 预览（2026-09-14 两轮真实 Wi-Fi 听写最小闭环；其余场景未验收） |
 
 上一实机稳定基线：**1.4.0**（1.5/1.6 dev 系列均通过构建与大部分真机验证，但未宣布稳定）。
 规格基线：`spec plan.markdown` v0.6。通信协议 v2（兼容 1.4.0 固定动作）。
@@ -105,7 +106,7 @@ PhoneDeck开发工作区\
 
 ## 6. Android 端要点
 
-- 纯 Java、程序化 UI（无 XML 布局）、26 个源文件；9 套主题（冰川玻璃默认 + 纸卡×4 + 四款设计稿风格）；
+- 纯 Java、程序化 UI（无 XML 布局）、26 个源文件；主题现为浅/深两套（旧 9 套主题已退役，旧主题 ID 自动迁移）；
 - `MainActivity`（约 3000 行）：语音状态机、连接选择、健康轮询（USB 1 s / LAN 5 s）、反向同步（电脑端完成的会话手机自动停止）；
 - `AudioStreamer`：先开录后建连，TLS 握手期间最多 1 s pre-roll 环形暂存保首音节；
 - `PhoneAudioService` + `SharedAudioBroadcaster`：共享模式前台服务，每电脑独立有界队列 + 指数退避；
@@ -139,8 +140,8 @@ macOS `Build-PhoneDeckReceiver.sh`（打 .app）。
 1. **dev.13/dev.8/dev.3 均未部署**：运行目录 `PhoneDeck电脑控制台` 还是旧版（Windows dev.7 / Android dev.12）。部署时**只换 EXE/APK，绝不动 data**。
 2. **豆包/微信输入法未实装验收**（所有者决定不安装不测试）：档案标注 experimental，靠 `docs/VOICE_ENGINES.md` 核对清单 + 社区回馈修正。
 3. **Typeless 回归未做**：引擎改造后（协议双块、接口重构）建议下次实机听写时观察；单测已覆盖逻辑层。
-4. **macOS 端整体仍是预览**：无 Mac 实机验收（Core Audio/BlackHole/权限流程）。
-5. 开源发布打包（LICENSE 确认、issue 模板、发布流程）尚未开始；仓库不打包 Typeless/VB-CABLE/BlackHole 等第三方软件。
+4. **macOS 端整体仍是预览**：2026-09-14 已在 Apple Silicon Mac 完成两轮真实 Wi-Fi 听写最小闭环（Core Audio/BlackHole/Typeless/CGEvent）；按住模式、翻译/问答、三机共享等仍未验收。
+5. 开源基础件已具备（根目录 MIT LICENSE、Issue 模板、三平台 CI）；依赖/资产授权盘点、历史秘密扫描与正式发布流程仍未完成；仓库不打包 Typeless/VB-CABLE/BlackHole 等第三方软件。
 6. 共享麦克风"单电脑活跃"假设：电脑关机即停、热键暂固定 Ctrl+Alt+M（用户约束）。
 
 ## 10. 文档地图
@@ -173,7 +174,7 @@ macOS `Build-PhoneDeckReceiver.sh`（打 .app）。
 - **dev.5** — 共享音频扇出、WPF Aether 控制台
 - **dev.6** — 共享麦克风电脑端联动（Ctrl+Alt+M）
 - **dev.7** — 配对失效可视化、USB 自愈、设备删除（Windows）
-- **dev.8/9/10/11** — 主题迭代（最终九套）
+- **dev.8/9/10/11** — 主题迭代（当时九套；现已收敛为浅/深两套）
 - **dev.12** — 设计稿皮肤圆润化
 - **dev.13 / Win dev.8 / mac dev.3**（bf00bb2，2026-09-07）— **语音引擎档案化**（本次交接的核心新能力）
 

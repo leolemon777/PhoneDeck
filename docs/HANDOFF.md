@@ -1,6 +1,100 @@
 # PhoneDeck 项目交接说明
 
-## 2026-09-21 UI 升级（最新）
+## 2026-09-29 M0-B 契约双端消费 + UI 重设计 P1（最新）
+
+- **M0-B 收尾（跨语言消费）**：contracts/ 样本接入两端测试工程并通过构建门。
+  - Windows：新增 `PhoneDeck.Server.Tests/ContractsConformanceTests.cs`（MSTest，6 用例）——
+    全样本严格 JSON 解析；合法请求样本经真实 `TargetEnvelopeValidator.Validate` 通过；
+    4 个非法信封样本被拒绝；宏样本经真实 `KeyboardInput.ValidateMacroSteps`（1 合法通过 +
+    4 非法拒绝）；音频流头样本走与 Program.cs 端点一致的校验链（协议头 0 的
+    “记录在案契约收紧差异”用合法/非 GUID/协议 0 三态固化）。合计 **97/97 通过**。
+  - Android：新增 `app/src/test/.../ContractsConformanceTest.java`（JUnit4，4 用例，内置
+    零依赖 MiniJson 解析器，避开单测环境无 org.json 实现）——全样本解析、v2 信封不变量
+    （含 legacy paste 仅 requestId 的遗留路径）、动作拼写与 `ShortcutButtonConfig` 常量逐字
+    对齐、组合键边界（1–4 键/无重复/holdMs 20–500）接受合法并拒绝 6 个越界样本。
+    `testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+  - 跨语言发现并固化：宏步骤 type 大小写不敏感（接收端 `ToLowerInvariant` 归一），
+    样本 "keychord" 拼写与产品常量 "keyChord" 的差异被确认为合法而非缺陷。
+- **UI 重设计 P1**（用户另行授权“重新设计整个界面”，方案见 [UI_REDESIGN.md](UI_REDESIGN.md)）：
+  `PhoneDeckTheme` 重写 733→约 280 行（令牌 v2：live/onLive 录音红、三组语义容器、
+  primaryContainer 选中、9 套遗留主题实现与 FrostedBackdropView 删除、历史 ID 迁移保留）；
+  深色主按钮改饱和蓝；`VoiceLevelView`（ACTIVE→live、CONNECTING→warning）、
+  `ShortcutKeyView`、`styles.xml` 浅色状态栏残留修正；主控台状态 chip 化、语音主钮 72dp、
+  目标 chip 容器选中态。两轮 `assembleDebug`+`lintDebug` 通过。真机视觉走查待用户同意
+  安装 UI 预览包（独立包名，不动原应用）。
+- 验证边界：以上为代码通过构建/单测；无任何真机输入/音频/走查验收；改动全部未提交。
+- 待办：D01–D12 决策清单与提交切分方案已提交用户待拍板；根目录 `nul` 与
+  `%TEMP%vtiers.txt` 待清理授权；M0-C（需真机 Mac）与 M1 起阶段未开始。
+
+## 2026-09-29 按规格执行·M0 第一批
+
+- 用户授权按 [开源发布规格 1.1](OPEN_SOURCE_RELEASE_SPEC.md) 执行 M0 第一批，基线 HEAD a5ade04。
+  本轮六个子任务：现场盘点、规格修订 1.1、文档同步、CI 假绿修复、契约测试台、USB 只读冒烟。
+  全部改动均未提交（已核 `git status`：仅 M/??，无暂存）。
+- 现场盘点（全程只读）：README/HANDOFF/spec plan 三处 diff 为上一轮规格文档遗留，可继续编辑；
+  `ReceiverStatusWindow.cs` 与三个 `packages.lock.json`（ILLink.Tasks 8.0.31→8.0.30，疑 restore
+  环境差异自动产生，已核 diff）为他人源码 WIP，本轮全程 off-limits 未触碰。
+- 规格修订：OPEN_SOURCE_RELEASE_SPEC.md 升 1.1（:3），六项评审结论落档——REVIEW-001/002/003/004/005
+  采纳（§22 新增 D12 .NET 8→10 迁移决策含 2026-09-29 工具链复现事实 :609；§1 行内数值明确为提案值、
+  以 D03/D04 冻结为准；D10 补外测招募；§3.3 补 PhoneDeckDataDirectory.cs；§5 明确 N/A 审批角色），
+  REVIEW-006 部分采纳仅入 §26 修订记录（:671），待 §17/§19 落实，事项仍开放。
+- 文档同步：按规格 §3.2 清理 README/ARCHITECTURE/PROJECT_HANDOVER 共 15 处过时描述
+  （WPF→WinForms 轻量托盘、九主题→浅/深两套、“Mac 未真机”→2026-09-14 两轮真实 Wi-Fi 听写闭环
+  但不等于全场景通过、“缺 LICENSE”→根目录 MIT LICENSE），README 新增「数据目录说明」小节（:145）。
+  发现未改：README.md:59 仍写“蓝紫渐变麦克风”图标（实为 Luma 暖白环体）、PROJECT_HANDOVER/
+  ARCHITECTURE 多处版本号漂移、AGENTS.md 同类过时描述，超出本轮范围可另行安排。
+- CI 修复：ci.yml 消除 B03 假绿——断言步骤移除 continue-on-error，任一上游工件下载失败时降级必写
+  `$GITHUB_STEP_SUMMARY`『B03 SKIPPED (DEGRADED)』并发 `::warning::`（ci.yml:214-241），不再静默通过；
+  其余 11 处 continue-on-error 逐一确认（9 处上传告警 + 2 处下载降级入口）。静态复核通过，
+  未在云端触发实际运行验证。
+- 契约测试台：新增未跟踪 `contracts/`（8 域策略契约、schema、合法/非法样本、tools/validate.py），
+  补齐评审缺口 §16.2 全部 8 行；`X-PhoneDeck-Protocol` 头 `^[1-2]$` 标为契约收紧目标态，
+  description 写明接收端现状（仅拒 >2），新增非法样本固化差异。
+- USB 冒烟：PHONE-A（SM-G9880 / Android 12 / SDK 31）只读 ADB 检查，未安装、卸载或清理任何包；
+  设备现装 `com.codex.phonedeck.preview` 1.6.0-dev.18-ui-preview (versionCode 24)，正式包
+  `com.codex.phonedeck` 未安装。报告 `release-evidence/usb-smoke-2026-09-29/phone-a-report.md`。
+  8 项 NOT_RUN：USB 音频实测、输入注入、配对/授权/撤销、安装/渠道迁移、运行态 dumpsys、
+  蓝牙/LAN 8766/mDNS、Typeless 与三输入法矩阵、锁屏/TLS/iOS。
+- 验证门（各子任务执行并报告，均通过、0 轮返工）：
+  `.\gradlew.bat :app:assembleDebug`；`.\gradlew.bat :app:lintDebug`；
+  `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release`；
+  `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release`（91 项）；
+  `dotnet build work\phone-deck\macos\PhoneDeck.Receiver\PhoneDeck.Receiver.csproj -c Release`（跨平台编译）；
+  `dotnet test work\phone-deck\macos\PhoneDeck.Receiver.Tests\PhoneDeck.Receiver.Tests.csproj -c Release`（跨平台）。
+  以上仅代表“代码通过构建/测试”；USB 冒烟为只读检查，未安装任何包，渠道迁移决策 D05 未决，
+  两者均不构成 60 组验证中的真机/外部验收。
+- 交接撰写轮亲自复跑：`python tools/validate.py`（contracts/ 下）exit 0——101 个 JSON、31 合法/
+  47 非法样本、24 转移、7+2 规则、16 轨迹全部通过；`dotnet --list-sdks` 仅 9.0.311 / 10.0.400。
+  注：契约子任务汇总字段 `validateExit:2` 与其摘要文字 exit 0 矛盾，以本轮复跑 exit 0 为准，
+  字段疑为中间值笔误；6 组变异测试为子任务报告，本轮未复跑。
+- 环境事实：global.json 钉死 SDK 8.0.425 且 rollForward=disable（global.json:3-4），本机仅存
+  9.0.311/10.0.400，仓库内直接 `dotnet` 构建不可用，本轮以 SDK 10 从 C:\ 目录构建 net8.0 通过；
+  Android 构建须 `JAVA_HOME=E:\Android\Jdk17\jdk-17.0.20.1+1`（见 HANDOFF:972 既有记录）。
+  根目录异常未跟踪文件（仅记录未删，均不应入库）：`nul`（现 51 字节、09-29 13:01，较盘点时的
+  0 字节 12:15 有变化，疑又一 stray 重定向写入；cmd 下 `del nul` 命中设备，清理须用
+  `del \\?\E:\...\nul` 并经用户确认）、`%TEMP%vtiers.txt`（669 字节，规格编写草稿遗留）。
+- 未做与待办：M0-B 剩余消费端接线；M0-C 及 M1 起各阶段；60 组验证中的真机/外部验收（L3/L4）；
+  D01–D12 决策待用户拍板（D05 手机正式安装通道直接阻塞 Samsung 迁移）；REVIEW-006 在 §17/§19 落实；
+  云端 CI 实跑验证 B03 修复；README:59 等遗留过时文案清理；`contracts/`、`docs/OPEN_SOURCE_RELEASE_SPEC.md`、
+  `release-evidence/` 及本轮全部改动入库（提交时须一并纳入，避免规格链接悬空）。
+  会话开始前已存在的未跟踪 `docs/UI_REDESIGN.md` 非本轮产物，未触碰。
+
+## 2026-09-29 开源可用性与全端兼容规格（最新文档）
+
+- 用户要求完整 spec，加入各方面验证，供其他模型审查；本轮仅文档，无产品实现/安装/发布。
+- 新增 [开源可用性、全端兼容与发布验收规格 1.0](OPEN_SOURCE_RELEASE_SPEC.md)：
+  当前事实与证据边界、R0–R3 分档、完整需求、60 组验证及高风险详细步骤、证据模板、
+  放行标准、实施依赖、待决策和独立模型评审提示。新增设计/性能参数待评审，不冒充批准方案。
+- 基线 HEAD a5ade04；读取时 Windows ReceiverStatusWindow.cs 与 packages.lock.json 已有未提交修改，
+  本轮保留。文档同时说明托盘/直接启动服务的数据目录差异及 B03 CI continue-on-error 的发布门风险。
+- 同步长期规格入口，纠正旧“Mac 未真机/缺 LICENSE/WPF/九主题”摘要的使用边界，保留历史记录。
+- 验证：文档结构校验识别 26 章、80 项唯一需求、60 组完整测试编号；需求均有用例引用，
+  附件本地链接、表格列数、代码围栏、示例 JSON 和空白检查通过，git diff --check 通过。
+  本轮未重跑产品构建、硬件、签名或云端 CI；文档覆盖率不等于产品验证通过率。
+- 待办：其他模型按附件第 24 节独立评审；处理评审意见并冻结 D01–D11 中对应阶段所需决策，
+  再按用户选择的任务实施。手机正式渠道迁移与其他真机验收继续保持原未完成状态。
+
+## 2026-09-21 UI 升级
 
 - 用户追加要求升级 UI，继续沿用 `agent/phone-managed-desktop`；Windows dev.16 / sequence 28，Android dev.21 / code 27。
 - 手机电脑设置加入设备卡片、输入法/连接分页与固定保存，切页保留草稿，离开/刷新提醒；

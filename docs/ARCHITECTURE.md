@@ -93,8 +93,10 @@ Windows PhoneDeck.Server        │
   环形缓冲、managed pre-roll、shared 立即输出、冲突和会话复位。
 
 Mac 现在声明 `phoneAudio/sharedMicrophone/managedDictation`；`audio.available` 仍以实际找到
-BlackHole 为准。源码已跨平台编译并通过测试，但尚未在真实 Mac 上验证 AUHAL、CGEvent、
-TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
+BlackHole 为准。2026-09-14 已在 Apple Silicon Mac（macOS 26.3.1）完成 Samsung→Mac→Typeless
+两轮真实 Wi-Fi 听写最小闭环，实测覆盖 CGEvent、AUHAL/BlackHole、Typeless 采集探针与
+辅助功能权限；但按住模式、翻译/问答、USB 断线恢复、睡眠/重启、Intel、蓝牙和局域网
+防火墙行为仍未验收，不能视为 Mac 全场景通过。
 
 ## 当前单电脑/传输限制
 
@@ -104,7 +106,7 @@ TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
 4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
 5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
 6. Windows 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
-7. macOS 双语音模式已有预览源码；真实 BlackHole/Typeless、蓝牙和正式签名仍待验收或接入。
+7. macOS 双语音模式已有预览源码；真实 Mac 已完成两轮 Wi-Fi 听写最小闭环，按住模式、蓝牙和正式签名仍待验收或接入。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -185,7 +187,8 @@ Control / Option / Command，消除自定义组合的歧义。
 
 当前 `1.6.0-dev.5` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
 自动发现、单目标听写和共享麦克风扇出。macOS `2.0.0-dev.2` 已新增兼容相同安全传输的
-CGEvent、AUHAL/BlackHole 和 Typeless 会话预览。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
-真实 Mac 权限/音频验收和 Windows/macOS 三机联合压力测试。
+CGEvent、AUHAL/BlackHole 和 Typeless 会话预览，2026-09-14 在真实 Mac 完成两轮 Wi-Fi
+听写最小闭环。仍缺凭据撤销/重配、标准 mDNS/Bonjour、真实 Mac 全场景验收
+和 Windows/macOS 三机联合压力测试。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。
