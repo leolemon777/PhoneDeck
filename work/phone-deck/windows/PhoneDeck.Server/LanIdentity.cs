@@ -36,7 +36,7 @@ internal sealed class LanIdentity : IDisposable
         try
         {
             certificate = File.Exists(certificatePath)
-                ? new X509Certificate2(
+                ? X509CertificateLoader.LoadPkcs12FromFile(
                     certificatePath,
                     password,
                     X509KeyStorageFlags.UserKeySet
@@ -145,7 +145,7 @@ internal sealed class LanIdentity : IDisposable
             DateTimeOffset.UtcNow.AddYears(5));
         var exported = created.Export(X509ContentType.Pfx, password);
         File.WriteAllBytes(path, exported);
-        return new X509Certificate2(
+        return X509CertificateLoader.LoadPkcs12(
             exported,
             password,
             X509KeyStorageFlags.UserKeySet

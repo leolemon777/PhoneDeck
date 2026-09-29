@@ -1,5 +1,20 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-29 D12 执行：.NET 8→10 迁移（最新）
+
+- 用户批准 D12 立项并当日执行：`global.json` 钉 SDK 8.0.425→**10.0.400**（CI 经
+  `global-json-file` 自动跟随）；六个活项目 TargetFramework 迁 **net10.0**
+  （Server、Server.Tests、ControlCenter、Receiver、Receiver.Tests、FocusSink）；
+  artiacts/dist 历史打包副本未动。`X509Certificate2` 构造器过时（SYSLIB0057）三处
+  迁移 `X509CertificateLoader.LoadPkcs12 / LoadPkcs12FromFile`（Windows 两处、Mac 一处）。
+- 重验结果：仓库内直接 dotnet 构建恢复（无需 C:\\ 绕行）；Windows Server Release
+  **0 警告 0 错误、97/97 测试**；Receiver 编译 + **23/23 测试**；ControlCenter 与
+  FocusSink 构建通过。自包含 win-x64 发布还原成功（运行时包可用）。
+- 未免除项：最低 OS 实机矩阵、正式发布打包（自包含/裁剪产物验证）、真机 NAudio
+  回归仍属 R1 候选前必做（规格 §22 D12 行已记录）。
+- 同轮获用户批准：四笔提交已推送并入 PR #24（含本 D12 提交共五笔）；D02 方向确认为
+  “成熟加密实现+本机确认+逐手机凭据”（M1-A 设计据此推进）；UI 预览包安装走查已授权。
+
 ## 2026-09-29 M0-B 契约双端消费 + UI 重设计 P1（最新）
 
 - **M0-B 收尾（跨语言消费）**：contracts/ 样本接入两端测试工程并通过构建门。
