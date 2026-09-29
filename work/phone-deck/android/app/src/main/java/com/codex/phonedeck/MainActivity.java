@@ -433,11 +433,6 @@ public final class MainActivity extends Activity {
     private View createInterface() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
-        if (theme.isFrost()) {
-            root.addView(new FrostedBackdropView(this), new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        }
 
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
@@ -459,7 +454,7 @@ public final class MainActivity extends Activity {
         pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        brandRow.addView(text(getString(R.string.app_name), 19, theme.text, Typeface.BOLD),
+        brandRow.addView(text(getString(R.string.app_name), 17, theme.text, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button settings = smallButton("设置");
         settings.setBackgroundColor(Color.TRANSPARENT);
@@ -473,8 +468,10 @@ public final class MainActivity extends Activity {
         connectionCard = connection;
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
-        connection.setPadding(0, dp(6), 0, dp(6));
+        connection.setPadding(dp(12), dp(10), dp(4), dp(10));
         connection.setElevation(0);
+        // 状态 chip：底色随语义色的淡染容器，未定状态前先按“检测中”着色。
+        connection.setBackground(theme.shape(this, theme.feedbackSurface(theme.warning), 16));
         connection.setOnClickListener(view -> {
             showDeviceList();
         });
@@ -485,9 +482,9 @@ public final class MainActivity extends Activity {
 
         statusDot = new View(this);
         statusDot.setBackground(roundRect(theme.muted, 20));
-        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
+        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(8), dp(8)));
 
-        statusText = text("正在检测电脑端…", 13, theme.text, Typeface.BOLD);
+        statusText = text("正在检测电脑端…", 14, theme.text, Typeface.BOLD);
         statusText.setSingleLine(true);
         statusText.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
@@ -546,7 +543,7 @@ public final class MainActivity extends Activity {
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
         voiceDock.setPadding(dp(16), dp(16), dp(16), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 24, 0, theme.outline));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 20, 0, theme.outline));
         voiceDock.setElevation(0);
 
         LinearLayout dockHeader = new LinearLayout(this);
@@ -555,7 +552,7 @@ public final class MainActivity extends Activity {
         voiceDock.addView(dockHeader, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        TextView voiceTitle = text("语音输入", 15, theme.text, Typeface.BOLD);
+        TextView voiceTitle = text("语音输入", 14, theme.text, Typeface.BOLD);
         dockHeader.addView(voiceTitle, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -589,7 +586,7 @@ public final class MainActivity extends Activity {
         typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
 
         LinearLayout voiceEditRow = new LinearLayout(this);
         voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1239,13 +1236,13 @@ public final class MainActivity extends Activity {
             chip.setTextSize(10);
             chip.setMinWidth(dp(48));
             chip.setMinimumWidth(dp(48));
-            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setTextColor(selected ? theme.onPrimaryContainer : theme.text);
             chip.setBackground(theme.shape(
                     this,
-                    selected ? theme.primary : theme.surfaceRaised,
+                    selected ? theme.primaryContainer : theme.surfaceRaised,
                     10,
                     0,
-                    selected ? theme.primary : theme.outline));
+                    selected ? theme.primaryContainer : theme.outline));
             chip.setAlpha(1f);
             // Offline entries remain actionable for diagnosis and removal.
             chip.setEnabled(true);
@@ -2180,14 +2177,11 @@ public final class MainActivity extends Activity {
         if (WORK_SHARED.equals(voiceWorkMode)) {
             PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
             boolean stopState = state.running;
-            boolean monoVoice = theme.isMonochrome();
-            int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
-                    : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-            int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
-                    : monoVoice ? theme.onPrimary : theme.text;
+            int stopFill = theme.live;
+            int stopInk = theme.onLive;
             typelessButton.setBackground(stopState
                     ? pressableRoundRect(stopFill,
-                            monoVoice ? theme.primaryPressed : theme.danger, 36)
+                            theme.mix(theme.live, theme.onLive, 0.2f), 36)
                     : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
@@ -2218,15 +2212,12 @@ public final class MainActivity extends Activity {
                     ? VoiceLevelView.CONNECTING
                     : VoiceLevelView.IDLE);
         }
-        boolean monoVoice = theme.isMonochrome();
-        int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
-                : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-        int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
-                : monoVoice ? theme.onPrimary : theme.text;
+        int stopFill = theme.live;
+        int stopInk = theme.onLive;
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
                         stopFill,
-                        monoVoice ? theme.primaryPressed : theme.danger, 36)
+                        theme.mix(theme.live, theme.onLive, 0.2f), 36)
                 : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
@@ -2903,6 +2894,8 @@ public final class MainActivity extends Activity {
                 + "。点击查看全部电脑");
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
+        connectionCard.setBackground(theme.shape(
+                this, theme.feedbackSurface(color), 16, 0, theme.outline));
     }
 
     private void showActionFeedback(String message, int color) {
