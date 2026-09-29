@@ -21,6 +21,10 @@
     <Compile Include="Program.cs" />
     <Compile Include="ReceiverTray.cs" />
     <Compile Include="ReceiverStatusWindow.cs" />
+    <Compile Include="PairingForm.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\PhoneDeck.Light.ico" />

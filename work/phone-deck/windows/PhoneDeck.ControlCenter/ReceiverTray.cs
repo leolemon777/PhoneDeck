@@ -13,6 +13,7 @@ internal sealed class ReceiverTray : ApplicationContext
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 2500 };
     private readonly RegisteredWaitHandle activation;
     private ReceiverStatusWindow? window;
+    private PairingForm? pairingForm;
     private bool refreshing, reconnecting, closing;
     private static string ServerPath => Path.Combine(AppContext.BaseDirectory, "PhoneDeck.Server.exe");
     private static string DataDirectory => Environment.GetEnvironmentVariable("PHONEDECK_DATA_DIR") is string path
@@ -26,6 +27,7 @@ internal sealed class ReceiverTray : ApplicationContext
         tray = new NotifyIcon { Icon = resource is null ? SystemIcons.Application : new Icon(resource),
             Text = "PhoneDeck · 在手机 App 中设置", Visible = true, ContextMenuStrip = new ContextMenuStrip() };
         tray.ContextMenuStrip.Items.Add("查看连接状态", null, (_, _) => ShowWindow());
+        tray.ContextMenuStrip.Items.Add("配对新手机…", null, (_, _) => ShowPairingForm());
         tray.ContextMenuStrip.Items.Add("重新连接", null, async (_, _) => await Reconnect());
         tray.ContextMenuStrip.Items.Add("退出并停止接收", null, (_, _) => StopAndExit());
         tray.DoubleClick += (_, _) => ShowWindow();
@@ -36,6 +38,16 @@ internal sealed class ReceiverTray : ApplicationContext
             catch (InvalidOperationException) when (closing) { }
         }, null, Timeout.Infinite, false);
         dispatcher.BeginInvoke((Action)(async () => { if (!hidden) ShowWindow(); await Reconnect(); }));
+    }
+
+    /// <summary>M1-A A2：按需弹出的本机信任操作窗（设计 §6：配对确认允许独立窗口）。</summary>
+    private void ShowPairingForm()
+    {
+        if (closing) return;
+        if (pairingForm != null) { pairingForm.WindowState = FormWindowState.Normal; pairingForm.Show(); pairingForm.Activate(); return; }
+        pairingForm = new PairingForm();
+        pairingForm.FormClosed += (_, _) => pairingForm = null;
+        pairingForm.Show();
     }
 
     private void ShowWindow()

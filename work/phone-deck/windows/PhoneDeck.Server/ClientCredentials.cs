@@ -51,17 +51,33 @@ internal sealed class ClientCredentialsStore
         }
     }
 
-    /// <summary>签发新凭据；令牌本体只通过 out 参数交出一次，落库的只有哈希。</summary>
+    /// <summary>签发新凭据；令牌本体只通过 out 参数交出一次，落库的只有哈希。clientId 可由手机提供（须为 GUID），冲突或缺失时服务端生成。</summary>
     public ClientCredentialRecord Issue(
         string label,
         IEnumerable<string> scopes,
         string pairingId,
-        out string token)
+        out string token,
+        string? clientId = null)
     {
         token = NewToken();
+        string resolvedClientId;
+        if (clientId is { Length: > 0 }
+            && Guid.TryParse(clientId, out _)
+            && !records.Any(record => string.Equals(record.ClientId, clientId, StringComparison.Ordinal)))
+        {
+            resolvedClientId = clientId.Trim();
+        }
+        else
+        {
+            do
+            {
+                resolvedClientId = Guid.NewGuid().ToString();
+            }
+            while (records.Any(record => string.Equals(record.ClientId, resolvedClientId, StringComparison.Ordinal)));
+        }
         var record = new ClientCredentialRecord
         {
-            ClientId = Guid.NewGuid().ToString(),
+            ClientId = resolvedClientId,
             Label = string.IsNullOrWhiteSpace(label) ? "未命名手机" : label.Trim(),
             TokenHash = HashToken(token),
             PairingId = pairingId,

@@ -76,15 +76,26 @@ lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
 var clientCredentials = new ClientCredentialsStore(
     Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
 var clientSessions = new ClientSessionRegistry();
+var pairingWindows = new PairingWindowManager(
+    receiverIdentity.ComputerId,
+    receiverIdentity.DisplayName,
+    lanIdentity.CertificateSha256,
+    lanIdentity.HttpsPort);
 
 app.Use(async (context, next) =>
 {
-    var auth = LanRequestAuthenticator.Resolve(
-        context.Connection.LocalPort,
-        context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
-        context.Request.Headers["Authorization"].FirstOrDefault(),
-        lanIdentity.AccessToken,
-        clientCredentials);
+    // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料即授权证明，不经令牌鉴权（设计 §3/§10）。
+    var isPairingBootstrap = context.Connection.LocalPort == 8766
+        && HttpMethods.IsPost(context.Request.Method)
+        && context.Request.Path.StartsWithSegments("/api/lan/pair/qr");
+    var auth = isPairingBootstrap
+        ? new LanAuthResult(true, null)
+        : LanRequestAuthenticator.Resolve(
+            context.Connection.LocalPort,
+            context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
+            context.Request.Headers["Authorization"].FirstOrDefault(),
+            lanIdentity.AccessToken,
+            clientCredentials);
     if (!auth.Authorized)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -385,6 +396,122 @@ app.MapGet("/api/diagnostics", async () =>
         }
     });
 });
+
+// M1-A A2 扫码配对（设计 §3）：手机提交材料 → 本机确认 → 签发逐手机凭据。
+// 请求挂起等待托盘确认（30s），单次往返，无需轮询鉴权。
+app.MapPost("/api/lan/pair/qr", async (QrPairRequest body) =>
+{
+    var clientLabel = body.ClientLabel?.Trim();
+    if (clientLabel is { Length: > 64 })
+    {
+        clientLabel = clientLabel[..64];
+    }
+    var status = pairingWindows.TryBeginSubmit(
+        body.PairingId, body.OneTimeMaterial, body.ClientId?.Trim() ?? "", clientLabel ?? "",
+        out var pending);
+    switch (status)
+    {
+        case PairingSubmitStatus.WindowNotOpen:
+            return Results.NotFound(new { ok = false, error = "配对窗口未开启" });
+        case PairingSubmitStatus.MaterialInvalid:
+            return Results.Json(
+                new { ok = false, error = "配对材料无效或已使用" },
+                statusCode: StatusCodes.Status401Unauthorized);
+        case PairingSubmitStatus.FailureLimit:
+            return Results.Json(
+                new { ok = false, error = "失败次数过多，请在电脑上重新开启配对" },
+                statusCode: StatusCodes.Status429TooManyRequests);
+    }
+    if (pending is null)
+    {
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+    bool confirmed;
+    try
+    {
+        // 挂起等待本机确认/拒绝/超时（30s），随请求取消一并中断。
+        confirmed = await pending.Decision.Task.WaitAsync(
+            TimeSpan.FromSeconds(PairingWindowManager.ConfirmationTimeoutSeconds));
+    }
+    catch (TimeoutException)
+    {
+        return Results.Json(
+            new { ok = false, error = "本机确认超时，请重试" },
+            statusCode: StatusCodes.Status408RequestTimeout);
+    }
+    if (!confirmed)
+    {
+        return Results.Json(
+            new { ok = false, error = "电脑端已拒绝本次配对" },
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+    var record = clientCredentials.Issue(
+        pending.ClientLabel,
+        new[] { "control", "audio", "settings", "update-request" },
+        pending.PairingId,
+        out var clientToken,
+        pending.ClientId);
+    Console.WriteLine($"配对完成：clientId={record.ClientId} pairingId={pending.PairingId}（材料与令牌不落日志）");
+    return Results.Ok(new
+    {
+        ok = true,
+        clientId = record.ClientId,
+        clientToken,
+        scopes = record.Scopes,
+        pairingId = pending.PairingId,
+        computerId = receiverIdentity.ComputerId,
+        displayName = receiverIdentity.DisplayName,
+        certificateSha256 = lanIdentity.CertificateSha256,
+    });
+});
+
+// M1-A A2 回环配对管理（设计 §3/§10：配对窗口只经本地 UI 开启，无 HTTP 外部入口）。
+app.MapGet("/api/admin/pairing/status", (HttpContext context) =>
+    context.Connection.LocalPort != 8765
+        ? Results.NotFound()
+        : Results.Ok(pairingWindows.StatusSnapshot()));
+app.MapPost("/api/admin/pairing/begin", (HttpContext context) =>
+{
+    if (context.Connection.LocalPort != 8765)
+    {
+        return Results.NotFound();
+    }
+    if (pairingWindows.HasPendingConfirmation())
+    {
+        return Results.Conflict(new { ok = false, error = "有待确认的配对提交" });
+    }
+    var session = pairingWindows.Begin();
+    return Results.Ok(new
+    {
+        ok = true,
+        pairingId = session.PairingId,
+        qrPayload = session.QrPayloadJson,
+        manualCode = session.ManualCode,
+        checkCode = session.MaterialCheckCode,
+        validSeconds = PairingWindowManager.ValidSeconds,
+    });
+});
+app.MapPost("/api/admin/pairing/cancel", (HttpContext context) =>
+{
+    if (context.Connection.LocalPort != 8765)
+    {
+        return Results.NotFound();
+    }
+    pairingWindows.Cancel();
+    return Results.Ok(new { ok = true });
+});
+app.MapPost("/api/admin/pairing/confirm", (HttpContext context, PairingAdminRequest body) =>
+    context.Connection.LocalPort != 8765
+        ? Results.NotFound()
+        : pairingWindows.Confirm(body.PairingId)
+            ? Results.Ok(new { ok = true })
+            : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
+app.MapPost("/api/admin/pairing/deny", (HttpContext context, PairingAdminRequest body) =>
+    context.Connection.LocalPort != 8765
+        ? Results.NotFound()
+        : pairingWindows.Deny(body.PairingId)
+            ? Results.Ok(new { ok = true })
+            : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
 
 app.MapPost("/api/lan/pair", (HttpContext context) =>
 {
@@ -734,6 +861,12 @@ internal sealed record DictationCommand(
     string? TargetComputerId,
     string? Mode);
 internal sealed record ClientRevokeRequest(string? ClientId);
+internal sealed record QrPairRequest(
+    string? PairingId,
+    string? OneTimeMaterial,
+    string? ClientId,
+    string? ClientLabel);
+internal sealed record PairingAdminRequest(string? PairingId);
 internal sealed record SharedMicrophoneRequest(bool Requested);
 internal sealed record VoiceEngineConfigRequest(
     string? ActiveEngine,

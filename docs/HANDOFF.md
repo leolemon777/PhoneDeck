@@ -1,5 +1,27 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-29 M1-A A2 扫码配对窗口实现（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A2 落地 Windows 端配对闭环：
+  - **服务端**（新增 `PairingWindow.cs`）：窗口 120s 单调时钟、材料 32 字符 base32（160bit）
+    常量时间比对、单次使用、失败 5 次关窗、未知 pairingId=404 不计数（防 LAN 关窗 DoS）；
+    `POST /api/lan/pair/qr` 挂起等待本机确认（30s，单次往返免轮询鉴权），确认后经
+    A1 的 ClientCredentialsStore 签发四作用域凭据（支持手机自带 GUID clientId，冲突重生）；
+    回环 8765 新增 begin/cancel/confirm/deny/status 五个管理端点（配对窗口只经本地 UI）。
+    鉴权中间间对 pair/qr 显式豁免（TLS+材料即授权证明）。
+  - **ControlCenter**（新增 `PairingForm.cs`，新依赖 QRCoder 1.6.0/MIT）：QR 渲染 +
+    手工码 + 材料校验码 + 倒计时 + 确认/拒绝/重新生成；托盘菜单新增"配对新手机…"入口
+    （ReceiverTray.cs，未触碰他人 WIP 的 ReceiverStatusWindow.cs）；窗口关闭自动 cancel。
+  - **契约**：pairing.schema.json 新增 `qrPairRequest`/`qrCredentialsResponse` 定义，
+    两个样本入 manifest，validate.py 全过。
+  - **验收**：`PairingWindowTests` 5 用例（V11：单调时钟过期/单次/5 次关窗/未知
+    pairingId 不计数；V09：确认→签发→可认证、拒绝、取消收束、快照不含凭据字段）；
+    **108/108** 通过、Server 与 ControlCenter 构建 0 警告 0 错误。
+- 验证边界：pair/qr 的 HTTP 端到端（挂起/超时/429 状态码）与托盘确认卡为代码级实现，
+  真机闭环待 A3 手机端就绪后按 V09（L3）执行；QRCoder 依赖已入 ControlCenter
+  packages.lock.json（该 lock 按既定约定未提交，随 lock 批量决策处理）。
+- 下一步 A3：Android 扫码（zxing-android-embedded）+ 配对 UI + Keystore 封装存储。
+
 ## 2026-09-29 D03 部分冻结 + M1-A A1 实现（最新）
 
 - **D03 冻结**（随 M1-A 设计评审，回写契约并通过 validate.py）：撤销生效 ≤1s、
