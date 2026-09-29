@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/definitions.schema.json",
+  "title": "PhoneDeck 协议共用字段定义（draft-07）",
+  "description": "协议骨架字段约束。骨架 protocolVersion/requestId/sessionId/targetComputerId 与 LAN 头 X-PhoneDeck-Token 见 docs/OPEN_SOURCE_RELEASE_SPEC.md §8；字段上限来自当前源码：TargetEnvelopeValidator.cs（requestId/sessionId/targetComputerId 校验）、InputCommandProcessor.cs 与 Program.cs（动作/组合键/宏上限）。",
+  "definitions": {
+    "protocolVersionV2": {
+      "type": "integer",
+      "const": 2,
+      "description": "当前协议版本固定为 2；未知/更高版本必须整体拒绝（规格 §8 PRO-01）。"
+    },
+    "protocolVersionOptional": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 2,
+      "description": "遗留固定动作可省略 protocolVersion；一旦出现，必须 ≤2。值 >2 属于未来版本，拒绝（TargetEnvelopeValidator.cs:34-37）。"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "\\S",
+      "description": "幂等去重键。非空、去空格后 ≤128 字符（TargetEnvelopeValidator.cs:16-20）。同 ID 不同载荷必须拒绝（规格 §8 PRO-02 / §16.2 请求确认）；接收端去重 TTL 当前 30 秒（Program.cs RequestIdLifetimeMilliseconds=30_000）。"
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "会话标识：GUID 规范形式（dashed）。.NET Guid.TryParse 实际还接受其它形式，本契约把规范形式定为跨端唯一合法写法；长度 ≤128（TargetEnvelopeValidator.cs:21-26、DictationSessionManager.cs:244-245）。"
+    },
+    "targetComputerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "目标电脑稳定身份。v2 请求必填且必须等于接收端 computerId（比较不区分大小写，TargetEnvelopeValidator.cs:42-50）；空串即“错误目标”的形态层违例，身份值不匹配由接收端拒绝并映射 wrong_target。"
+    },
+    "computerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "接收端稳定身份（不能用 IP/名称/序号充当，规格 §8 DEV-01）。"
+    },
+    "text4096": {
+      "type": "string",
+      "maxLength": 4096,
+      "description": "文本载荷上限 4096（InputCommandProcessor.cs:11、宏文本步骤 Program.cs:877）。长度单位=Unicode 码点；注意当前 C# 实现按 UTF-16 码元计数，跨语言样本统一使用 BMP 字符使两种单位一致（规格 §8 要求明确跨语言长度单位）。"
+    },
+    "nonEmptyText4096": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "宏 text 步骤与 action=text 的非空文本（Program.cs:877、Program.cs:1074）。"
+    },
+    "keyName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24,
+      "pattern": "^[A-Za-z0-9`]*$",
+      "description": "受控按键名，仅允许字母/数字/反引号（空格、下划线、连字符会被接收端归一化删除，Program.cs:1001-1012）。归一化后 ≤24 字符。可用键位来自白名单映射表（Program.cs:1014-1058）：单字母/数字、F1–F24 及命名键；PRIMARY 归一化为 CTRL。"
+    },
+    "modifierKeyEnum": {
+      "enum": ["CTRL", "CONTROL", "SHIFT", "ALT", "WIN", "WINDOWS", "PRIMARY"],
+      "description": "修饰键集合（IsModifier：CTRL/SHIFT/ALT/WIN，PRIMARY 归一化为 CTRL，Program.cs:1060-1067）。"
+    },
+    "chordKeys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/keyName" },
+      "not": {
+        "items": { "$ref": "#/definitions/modifierKeyEnum" },
+        "description": "全部为修饰键则不满足“必须含普通键”。"
+      },
+      "description": "组合键 1–4 个、不得重复（Program.cs:969、978-982）。必须且只能包含 1 个普通键：JSON Schema（draft-07）可表达“至少 1 个非修饰键”（not+items+enum），“恰好 1 个”由接收端语义校验执行（Program.cs:987-991），见 contracts/README.md“形态/语义边界”。"
+    },
+    "holdMs": {
+      "type": "integer",
+      "minimum": 20,
+      "maximum": 500,
+      "description": "按键按住时长 20–500 ms（Program.cs:823、868）。缺省 45。"
+    },
+    "delayBeforeMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2000,
+      "description": "宏步骤前置延迟 0–2000 ms（Program.cs:858）。缺省 0。"
+    },
+    "macroSteps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/definitions/macroStep" },
+      "description": "宏 1–8 步（Program.cs:849）。受控结构，禁止任意脚本（规格 §12 SEC-04）。"
+    },
+    "macroStep": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": ["keychord", "text"],
+          "description": "步骤类型固定两种（接收端按 Trim+小写比较，Program.cs:863；契约钉死规范小写形式）。"
+        },
+        "keys": { "$ref": "#/definitions/chordKeys" },
+        "holdMs": { "$ref": "#/definitions/holdMs" },
+        "text": { "$ref": "#/definitions/nonEmptyText4096" },
+        "submit": { "type": ["boolean", "null"] },
+        "delayBeforeMs": { "$ref": "#/definitions/delayBeforeMs" }
+      },
+      "required": ["type"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "keychord" } } },
+          "then": { "required": ["keys"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "required": ["text"] }
+        }
+      ]
+    },
+    "capabilityName": {
+      "enum": [
+        "fixedAction",
+        "keyChord",
+        "text",
+        "macro",
+        "phoneAudio",
+        "managedDictation",
+        "sharedMicrophone",
+        "secureLan",
+        "fleetUpdatesV1",
+        "phoneManagedSettingsV1"
+      ],
+      "description": "能力协商枚举，来源 GET /api/health capabilities（Program.cs:147-151）。新增能力必须先扩展本枚举并升级协议版本，不由营销版本推断（规格 §8 PRO-01 / §16.2 能力）。"
+    },
+    "errorBrief": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "错误消息占位文本；正式文案以 error-codes.json 的 zh/en 模板为准，不得携带令牌等敏感值（规格 §12 SEC-05 脱敏）。"
+    },
+    "revisionSha256": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{64}$",
+      "description": "设置组修订号：settings JSON 的 SHA256 大写十六进制（DesktopConfiguration.cs:28-29）。voice 与 connection 两组各自独立（规格 §11 CFG-02）。样本一律使用占位全 A。"
+    },
+    "placeholderToken": {
+      "type": "string",
+      "pattern": "^PLACEHOLDER",
+      "description": "样本中的令牌/密钥一律以 PLACEHOLDER 开头；契约夹具不得携带真实凭据（规格 §12 SEC-01/SEC-05）。"
+    }
+  }
+}

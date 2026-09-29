@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/request.dictation.schema.json",
+  "title": "POST /api/dictation/start 与 /api/dictation/stop 请求体（请求确认/会话域）",
+  "description": "受管听写启停命令。信封必填：protocolVersion=2、requestId、sessionId（GUID）、targetComputerId（Program.cs:502-545 DictationCommand + TargetEnvelopeValidator.Validate）。会话语义（stop 优先、迟到 start 不得复活、过期会话拒绝）见 session-states.json；stop 引用非当前会话映射 expired_session（DictationSessionManager.cs:158-162）。",
+  "type": "object",
+  "properties": {
+    "protocolVersion": { "$ref": "definitions.schema.json#/definitions/protocolVersionV2" },
+    "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+    "requestId": { "$ref": "definitions.schema.json#/definitions/requestId" },
+    "targetComputerId": { "$ref": "definitions.schema.json#/definitions/targetComputerId" },
+    "mode": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+      "description": "引擎模式（如 dictation/translation/ask）。模式集合来自引擎档案、动态可配（AGENTS“新增引擎走档案 JSON”），契约只钉形态：小写、≤32 字符、可空（缺省取主模式，DictationSessionManager.cs:315-318）。未知模式由接收端按档案拒绝。"
+    }
+  },
+  "required": ["protocolVersion", "sessionId", "requestId", "targetComputerId"],
+  "additionalProperties": false
+}

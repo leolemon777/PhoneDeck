@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "service": "phonedeck",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "port": 8766,
+  "platform": "windows",
+  "capabilities": [
+    "fixedAction",
+    "keyChord",
+    "text",
+    "macro",
+    "phoneAudio",
+    "managedDictation",
+    "sharedMicrophone",
+    "secureLan"
+  ]
+}

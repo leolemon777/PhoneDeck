@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/response.ok.schema.json",
+  "title": "HTTP 200 成功响应（协议响应域）",
+  "description": "三类成功 ACK 的契约形态（Program.cs:552-560 输入、515-523/536-544 听写启停、473-479 音频建流结束）。ACK 仅表示接收端已接收/执行请求，不等于目标应用已处理输入（规格 §8 INP-02）；duplicate=true 表示 requestId 命中去重缓存，本次未重复执行（规格 §8 PRO-02）。",
+  "type": "object",
+  "anyOf": [
+    {
+      "description": "/api/input ACK。",
+      "properties": {
+        "ok": { "const": true },
+        "duplicate": { "type": "boolean" },
+        "requestId": { "$ref": "definitions.schema.json#/definitions/requestId" },
+        "computerId": { "$ref": "definitions.schema.json#/definitions/computerId" },
+        "message": { "type": ["string", "null"] },
+        "text": { "type": ["string", "null"] }
+      },
+      "required": ["ok", "duplicate", "requestId", "computerId"],
+      "additionalProperties": false
+    },
+    {
+      "description": "/api/dictation/start|stop ACK。",
+      "properties": {
+        "ok": { "const": true },
+        "duplicate": { "type": "boolean" },
+        "requestId": { "$ref": "definitions.schema.json#/definitions/requestId" },
+        "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+        "computerId": { "$ref": "definitions.schema.json#/definitions/computerId" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["ok", "duplicate", "requestId", "sessionId", "computerId", "active"],
+      "additionalProperties": false
+    },
+    {
+      "description": "/api/audio/stream 正常结束响应（EOF 完成）。",
+      "properties": {
+        "ok": { "const": true },
+        "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+        "mode": { "enum": ["managed", "shared"] },
+        "bytes": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["ok", "sessionId", "mode", "bytes"],
+      "additionalProperties": false
+    }
+  ]
+}

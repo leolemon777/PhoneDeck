@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "httpsPort": 8766,
+  "certificateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "pairingId": "33333333-3333-4333-8333-333333333333",
+  "oneTimeMaterial": "PLACEHOLDER-ONE-TIME-MATERIAL-32-CHARS-MIN",
+  "validSeconds": 120,
+  "maxFailuresPerWindow": 5
+}

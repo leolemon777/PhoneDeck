@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/request.config-desktop.schema.json",
+  "title": "POST /api/config/desktop/voice 与 /api/config/desktop/connection 请求体（配置域，能力 phoneManagedSettingsV1）",
+  "description": "手机集中写电脑配置：必须携带 targetComputerId 与当前 revision；voice/connection 两组独立（DesktopConfigurationEndpoints.cs:40-59、DesktopConfiguration.cs:31-41）。目标不匹配 → wrong_target；revision 过期 → config_conflict（409）；接收端忙碌（输入/供音中）→ busy（409）。快捷键覆盖值 ≤100 字符且必须可解析为受控组合键（DesktopConfiguration.cs:59-60）。",
+  "type": "object",
+  "properties": {
+    "targetComputerId": { "$ref": "definitions.schema.json#/definitions/targetComputerId" },
+    "revision": { "$ref": "definitions.schema.json#/definitions/revisionSha256" },
+    "activeEngine": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "voice 组：激活引擎 id（小写归一，DesktopConfiguration.cs:45-46）。必须是该电脑档案中的引擎，未知 id 由接收端拒绝。"
+    },
+    "shortcutOverrides": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9+` ]*$",
+          "description": "模式→快捷键绑定，如 \"CTRL+SHIFT+V\"；空串表示清除（DesktopConfiguration.cs:58-61）。"
+        }
+      },
+      "description": "voice 组：引擎→模式→绑定。引擎/模式键必须存在于接收端档案，超集由接收端拒绝（DesktopConfiguration.cs:50-57）。"
+    },
+    "usbWatchdog": { "type": "boolean", "description": "connection 组字段。" },
+    "lanDiscovery": { "type": "boolean", "description": "connection 组字段。" },
+    "autoStart": { "type": "boolean", "description": "connection 组字段（登录启动）。" }
+  },
+  "required": ["targetComputerId", "revision"],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "description": "voice 组写入：activeEngine 必填（DesktopConfiguration.cs:45-46）。",
+      "required": ["activeEngine"]
+    },
+    {
+      "description": "connection 组写入：至少一个连接项。",
+      "anyOf": [
+        { "required": ["usbWatchdog"] },
+        { "required": ["lanDiscovery"] },
+        { "required": ["autoStart"] }
+      ]
+    }
+  ]
+}

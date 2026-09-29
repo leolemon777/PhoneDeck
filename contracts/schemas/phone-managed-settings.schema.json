@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/phone-managed-settings.schema.json",
+  "title": "phoneManagedSettingsV1 手机侧托管设置缓存文档（配置域）",
+  "description": "手机端为每台电脑缓存的托管设置文档。schema/schemaVersion 是契约目标字段：未来 schema 版本必须拒绝覆写（规格 §11 CFG-03“未来 schema 拒绝覆写”、§16.2 配置“迁移/备份/导出秘密隔离”）。字段内容与 GET /api/config/desktop 快照（DesktopConfigurationEndpoints.cs:9-23）及两组写入请求对应。注意：当前源码快照本身未携带 schema 字段，此文档为契约夹具的目标形态（规格 §1：新增契约字段为目标设计）。",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "phoneManagedSettings" },
+    "schemaVersion": {
+      "const": 1,
+      "description": "当前唯一受支持版本。值 ≠1（如未来 2/99）必须拒绝，不得覆写（规格 §11 CFG-03 / §18 V49）。"
+    },
+    "computerId": { "$ref": "definitions.schema.json#/definitions/computerId" },
+    "voiceRevision": { "$ref": "definitions.schema.json#/definitions/revisionSha256" },
+    "connectionRevision": { "$ref": "definitions.schema.json#/definitions/revisionSha256" },
+    "voice": {
+      "type": "object",
+      "properties": {
+        "activeEngine": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "shortcutOverrides": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": { "type": "string", "maxLength": 100, "pattern": "^[A-Za-z0-9+` ]*$" }
+          }
+        }
+      },
+      "required": ["activeEngine"],
+      "additionalProperties": false
+    },
+    "connection": {
+      "type": "object",
+      "properties": {
+        "usbWatchdog": { "type": "boolean" },
+        "lanDiscovery": { "type": "boolean" },
+        "autoStart": { "type": "boolean" }
+      },
+      "required": ["usbWatchdog", "lanDiscovery"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema", "schemaVersion", "computerId", "voiceRevision", "connectionRevision", "voice", "connection"],
+  "additionalProperties": false
+}

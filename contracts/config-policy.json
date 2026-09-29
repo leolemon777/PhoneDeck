@@ -1,0 +1,46 @@
+{
+  "$comment": "§16.2 第 7 行『配置』剩余项：原子保存算法、崩溃恢复期望值、迁移/备份、导出秘密隔离。atomicWrite 为已证实源码事实；crashRecovery 为期望值夹具（由 §18 V59 故障注入在 L2 执行，本表是判定基准而非已执行证据）；exportForbiddenFields 由 tools/validate.py C7 对导出样本做全树键名扫描。",
+  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §11（CFG-02/CFG-03）", "§13 REL-09", "§12 SEC-05", "§18 V47/V49/V59"],
+  "atomicWrite": {
+    "status": "current",
+    "grounding": "DesktopConfiguration.cs:68-82 WriteAtomic（临时文件+独占写+Flush(true)+Move 覆盖+finally 清理临时文件）",
+    "steps": [
+      "写入 path+GUID.tmp（FileMode.CreateNew, FileShare.None）",
+      "序列化 JSON 后 file.Flush(true) 落盘",
+      "File.Move(tmp, path, overwrite:true) 原子替换",
+      "finally：若 tmp 仍存在则删除，不残留半成品"
+    ],
+    "guarantees": [
+      "写入中途失败/崩溃：原文件保持完整旧版本（不出现半写状态）",
+      "保存失败（权限/磁盘）返回 500 且原文件不变（DesktopConfigurationEndpoints.cs:36-37）",
+      "热应用互斥：写入排除新输入/音频请求，既有流持有使用租约直到尾音排空（ConfigurationGate，§16.3 R6）"
+    ]
+  },
+  "crashRecovery": {
+    "status": "expected-fixtures",
+    "executor": "§18 V59（L2 故障注入：在备份/替换/重启/校验/提交各阶段终止进程或断电）",
+    "vectors": [
+      { "stage": "tmp-write-crash", "expectedOutcome": "下次启动读到完整旧版配置；无 .tmp 残留或仅残留可清理的 .tmp；不出现混合版本" },
+      { "stage": "before-move-crash", "expectedOutcome": "同上：旧版完整，tmp 可被清理" },
+      { "stage": "after-move-crash", "expectedOutcome": "新版完整可读；版本一致，无回退需求" },
+      { "stage": "disk-full", "expectedOutcome": "保存失败返回 500；原文件不变；手机端保留草稿（V47）" },
+      { "stage": "file-locked", "expectedOutcome": "保存失败可诊断；不阻塞其它端点；原文件不变" }
+    ]
+  },
+  "migration": {
+    "futureSchema": "reject-without-overwrite",
+    "rule": "未知 schemaVersion 拒绝覆写（样本 phone-managed-settings-future-schema-version.json）；导入限制大小/类型并先预览（CFG-03/V49：截断 JSON、未来 schema、超大导入、导入含秘密均为负例）",
+    "rollback": "迁移取消/失败可回旧版本；配置备份恢复保留配对（V17）"
+  },
+  "backup": {
+    "corrupted": "配置文件损坏时回退默认并保留损坏备份供修复（CFG-03）；默认回退可用、不假称已恢复用户数据",
+    "identityPreserved": "恢复/迁移不得生成第二身份或覆盖其它目录（INS-03/V04）"
+  },
+  "exportIsolation": {
+    "exportSchema": "schemas/config-export.schema.json",
+    "containsSecretsConst": false,
+    "exportForbiddenFields": ["accessToken", "token", "sharedSecret", "privateKey", "password", "credential", "oneTimeMaterial", "pairingSecret"],
+    "rule": "普通导出/诊断不含任何配对秘密（SEC-05）；布局导出同样不得包含一次性配对材料（§7 NET-02）",
+    "enforcement": "tools/validate.py C7：对 samples/valid/config-export-no-secrets.json 做全树键名扫描，命中任一禁止字段即失败"
+  }
+}

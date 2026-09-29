@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/session-state.schema.json",
+  "title": "语音会话状态快照（会话域）",
+  "description": "会话状态文档：IDLE/STARTING/ACTIVE/STOPPING/ERROR 五态（规格 §9.1）。会话绑定 sessionId/所有者/代次（generation）（规格 §8 PRO-03；generation/ownerClientId 为契约目标字段）。过期会话的拒绝语义（迟到 stop 只清理旧会话、停止优先、迟到 start 不得复活）不在本 schema 表达，由 session-states.json 的转移表与 R1–R7 竞态轨迹可执行表达。engineCapturing 三态：null=探针未知，不得当作已停止（规格 §9.1、DictationSessionManager.cs:281-285）。",
+  "type": "object",
+  "properties": {
+    "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+    "state": {
+      "enum": ["IDLE", "STARTING", "ACTIVE", "STOPPING", "ERROR"],
+      "description": "五态枚举与 session-states.json 的 states 键一致（tools/validate.py 交叉校验）。"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "会话代次，从 0 单调递增；迟到旧代次请求不得复活会话（规格 §8 PRO-03、§16.3 R1）。"
+    },
+    "ownerClientId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "会话所有者手机身份（契约目标字段；单接收端同一时刻单音频所有者，规格 §8 DEV-04）。样本用 PLACEHOLDER。"
+    },
+    "targetComputerId": { "$ref": "definitions.schema.json#/definitions/targetComputerId" },
+    "mode": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+    },
+    "audioStreaming": {
+      "type": "boolean",
+      "description": "接收端供音层；audio.streaming=true 不等于引擎在识别（规格 §9.1 三层真实状态）。"
+    },
+    "engineCapturing": {
+      "type": ["boolean", "null"],
+      "description": "引擎采集三态：null=探针未知。"
+    },
+    "probeStale": {
+      "type": "boolean",
+      "description": "探针快照是否过期；过期快照显示未知，不凭一次波动误停新会话（规格 §9 MIC-09）。"
+    },
+    "lease": {
+      "type": "object",
+      "description": "会话租约（契约目标字段）：时钟回拨不得延长本地租约（规格 §8 PRO-03 / §18 V26）。",
+      "properties": {
+        "issuedAtMs": { "type": "integer", "minimum": 0 },
+        "expiresAtMs": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["issuedAtMs", "expiresAtMs"],
+      "additionalProperties": false
+    },
+    "updatedAtMs": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["sessionId", "state", "generation", "ownerClientId", "targetComputerId"],
+  "additionalProperties": false
+}

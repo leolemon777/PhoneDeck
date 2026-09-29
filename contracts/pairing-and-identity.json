@@ -1,0 +1,99 @@
+{
+  "$comment": "§16.2 第 1 行『发现与配对』与第 2 行『身份与授权』的参数与生命周期契约。status=current 为已证实源码事实（附 grounding）；status=candidate 为规格建议数值（须评审冻结，未冻结前不得当成已实现）；status=target 为契约目标设计。形态契约见 schemas/pairing.schema.json 与 schemas/identity.schema.json；tools/validate.py C7 校验本文件内部一致性与两者交叉一致。",
+  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §7（NET-01..NET-08）", "§12（SEC-02/SEC-03/SEC-05）", "§16.2 第 1、2 行", "D02"],
+  "discovery": {
+    "transport": "UDP 广播应答",
+    "discoveryPort": { "value": 8767, "status": "current", "grounding": "LanDiscoveryResponder.cs:8 DiscoveryPort=8767" },
+    "magic": { "value": "PHONEDECK-DISCOVER", "status": "current", "grounding": "LanDiscoveryResponder.cs:9 Magic" },
+    "serviceName": { "value": "phonedeck", "status": "current", "grounding": "LanDiscoveryResponder.cs:29 应答 service 字段" },
+    "responseContract": {
+      "schema": "schemas/pairing.schema.json#/definitions/discoveryAdvertisement",
+      "mustNotContain": ["accessToken", "certificateSha256"],
+      "status": "current",
+      "grounding": "LanDiscoveryResponder.cs:4-6 注释“绝不包含配对令牌或证书指纹”及 :27-40 应答字段",
+      "specRef": "NET-01：未经认证的发现结果不得触发输入或采音"
+    },
+    "futureMdns": { "status": "target", "specRef": "NET-01：mDNS/Bonjour 提供候选地址并保留旧 UDP 恢复；未实现前不得宣称", "note": "mDNS 服务名/ TXT 记录字段冻结于实现任务 M1-A（D02）" }
+  },
+  "httpsChannel": {
+    "port": { "value": 8766, "status": "current", "grounding": "LanIdentity.cs:9 Port=8766" },
+    "loopbackPort": { "value": 8765, "status": "current", "grounding": "AGENTS.md/Program.cs 启动横幅：无鉴权 HTTP 仅 127.0.0.1:8765（SEC-02）" },
+    "certificateBinding": {
+      "subject": "CN=PhoneDeck-{computerId}",
+      "key": "RSA-2048 自签名",
+      "fingerprintAlgorithm": "SHA-256（小写十六进制）",
+      "status": "current",
+      "grounding": "LanIdentity.cs:120-133 CreateCertificate、:16-17 CertificateSha256",
+      "specRef": "NET-04：指纹变化拒绝，不静默接受新证书"
+    }
+  },
+  "usbPairing": {
+    "endpoint": "/api/lan/pair",
+    "precondition": "仅 USB 回环配对端口来源可达；否则 404",
+    "status": "current",
+    "grounding": "Program.cs:381-401（IsUsbPairingRequest 判定 + 响应字段）",
+    "responseContract": "schemas/pairing.schema.json#/definitions/usbPairResponse"
+  },
+  "qrPairing": {
+    "status": "target",
+    "decision": "D02",
+    "payloadContract": "schemas/pairing.schema.json#/definitions/qrPairingPayload",
+    "qrVersion": { "value": 1, "status": "candidate", "note": "载荷版本 1；QR 符号版本/纠错级别由实现库决定，候选上限 D02 冻结" },
+    "maxPayloadBytes": { "value": 512, "status": "candidate", "decision": "D02", "note": "候选值：约束二维码密度与可扫性；评审可调整" },
+    "oneTimeMaterial": {
+      "minLengthChars": { "value": 32, "status": "candidate", "decision": "D02" },
+      "entropyBitsMin": { "value": 128, "status": "candidate", "decision": "D02", "note": "高熵一次性材料；具体密码协议在 D02 审查冻结，安全评审前不自创密码协议（§16.2 候选参数）" },
+      "singleUse": true,
+      "loggedOrExported": false,
+      "specRef": "NET-02：一次性材料不写日志、不进入布局导出；SEC-05"
+    },
+    "validSeconds": { "value": 120, "status": "candidate", "specRef": "§7：候选配对有效期 120 秒（时钟回拨/重启不延长窗口，V11）" },
+    "maxFailuresPerWindow": { "value": 5, "status": "candidate", "specRef": "§7：每窗口最多 5 次失败后须重新本机开启配对" },
+    "localConfirmation": { "required": true, "specRef": "NET-02：电脑本地确认；过期/已用材料拒绝（V09/V11）" },
+    "manualFallback": {
+      "available": true,
+      "description": "相机拒绝/无法扫码时使用手工流程：短码仍单次有效、限速同上，不得当永久令牌；不得先忽略证书错误再发送密钥",
+      "status": "target",
+      "decision": "D02",
+      "specRef": "§7：手工替代方案；§18 V09"
+    }
+  },
+  "pairingErrors": {
+    "$comment": "配对阶段错误映射：code 复用 error-codes.json 注册码；无独立产品码的 HTTP 行为登记于 supplementary。",
+    "expiredMaterial": { "code": "PD-ERR-400-02", "note": "复用错误目标类不合适时由 D02 增配独立码；当前按“材料过期=请求无效”映射 400" },
+    "alreadyUsedMaterial": { "code": "PD-ERR-401-01", "note": "已用/撤销材料按未授权拒绝，不提示可枚举信息" },
+    "rateLimited": { "httpStatus": 429, "status": "target", "decision": "D02", "note": "限速响应；§16.2 第 1 行要求错误/限速成契约。当前源码无 429 路径" },
+    "wrongComputer": { "code": "PD-ERR-400-02" },
+    "nonUsbPairRequest": { "httpStatus": 404, "status": "current", "grounding": "Program.cs:383-388（NotFound）" }
+  },
+  "identity": {
+    "status": "target",
+    "decision": "D02",
+    "recordContract": "schemas/identity.schema.json#/definitions/identityRecord",
+    "fields": {
+      "computerId": "接收端稳定身份；IP/名称/序号不得充当（DEV-01/NET-05）",
+      "clientId": "逐手机身份：每手机独立凭据，撤销按 clientId 生效（NET-03）",
+      "pairingId": "签发来源配对尝试标识（GUID，可追溯撤销）"
+    },
+    "credentialScopes": ["control", "audio", "settings", "update-request"],
+    "credentialScopeNote": "§7：新凭据建议区分控制/供音/设置/请求安装更新的授权；是否分权限凭据由 D02 决定；“已有输入权限”不等于“可替换信任根”",
+    "storage": {
+      "requirement": "平台安全存储或最小文件权限保护凭据；私钥/令牌不入 Git、不进普通导出（SEC-05）",
+      "tokenFormatCurrent": { "value": "base64(随机字节) 共享令牌", "status": "current", "grounding": "LanIdentity.cs:106-116 ReadOrCreateSecret+RandomNumberGenerator" }
+    },
+    "rotation": {
+      "rule": "证书/密钥轮换经已认证通道或重新本机配对；旧会话按撤销规则结束",
+      "specRef": "§7 NET-04；SEC-07"
+    },
+    "revocation": {
+      "rule": "电脑可撤销单手机并立即关闭其会话（含音频长流，不能只拦新 HTTP）；被撤销手机旧凭据/旧 session/新 session 请求全部拒绝；另一手机不受影响",
+      "effectivenessTargetMs": { "value": 1000, "status": "candidate", "decision": "D03", "specRef": "§18 V12：撤销生效 ≤1 秒为建议" },
+      "specRef": "NET-03、V12"
+    },
+    "migration": {
+      "contract": "schemas/identity.schema.json#/definitions/sharedTokenMigration",
+      "rule": "旧 USB 配对与 shared token 迁移有兼容窗口：窗口内旧凭据可用、关闭后拒绝；降级不得提升权限；取消迁移可回退（V17）",
+      "specRef": "NET-07、V17"
+    }
+  }
+}
