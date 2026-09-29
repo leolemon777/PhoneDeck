@@ -1,5 +1,30 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-29 D03 部分冻结 + M1-A A1 实现（最新）
+
+- **D03 冻结**（随 M1-A 设计评审，回写契约并通过 validate.py）：撤销生效 ≤1s、
+  键释放预算 ≤2s（进行中单个按键事件 ≤500ms 自然完成）、去重 TTL 30s（覆盖最长
+  合法重试预算，本为源码实证值）；租约/墓碑/宏总时长仍待冻结（规格 §22 D03 行已注）。
+- **M1-A A1 落地**（Windows 接收端，设计 §9 第 A1 步）：
+  - 新增 `ClientCredentials.cs`（clients.json：原子写 temp+Replace、损坏备份、
+    **只存令牌 SHA-256 哈希**、签发/认证/撤销；撤销**先持久化再生效**，写盘失败
+    内存回滚可安全重试）与 `ClientSessionRegistry.cs`（逐 clientId CTS，撤销即
+    Cancel 长流令牌）。
+  - `LanRequestAuthenticator.Resolve`：8766 双凭据——`Authorization: Bearer`（返回
+    clientId）或旧 `X-PhoneDeck-Token`（映射 legacy-shared）；无效 bearer 不回退旧头。
+  - Program.cs：中间件改用 Resolve 并写入 `HttpContext.Items["ClientId"]`；
+    `/api/input` 传递 clientId 归因；`/api/audio/stream` 链接"请求取消+客户端撤销令牌"；
+    回环 8765 新增 `GET /api/admin/clients`（脱敏列表）与 `POST /api/admin/clients/revoke`
+    （撤销编排：先持久化→Cancel 长流→中止当前宏）；KeyboardInput 增加执行归属追踪与
+    `RevokeClientInput`，宏步骤间检查撤销标记并中止（组合键在自身 finally 反向释放）。
+  - 验证：`ClientCredentialsTests` 7 用例（签发/认证/撤销往返含重启重载、令牌不落盘、
+    损坏备份、写盘失败一致性、Resolve 六态、**V12 子集 L2 假流：撤销 ≤1s 生效且
+    另一手机零影响**）；Server Release 0 警告 0 错误、**103/103** 通过、契约 validate exit 0。
+- 验证边界：宏撤销中止的按键释放依赖既有 SendChordSafely finally（单测无法注入真实
+  SendInput，留 V12 L3 真机）；管理端点未做 HTTP 集成测试（组件级 L1 覆盖，端到端随
+  A2/A4）；蓝牙输入路径维持无 clientId 归因（现状）；A2（QR 配对窗口）未开始。
+- 改动未含 lock 文件与他人 WIP。
+
 ## 2026-09-29 M1-A 配对与授权安全设计定稿（最新）
 
 - 按 D02 已确认方向（成熟加密实现+本机确认+逐手机凭据）完成

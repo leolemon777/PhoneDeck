@@ -53,7 +53,7 @@ public sealed class ContractsConformanceTests
             .ToArray();
     }
 
-    private static string GetString(JsonElement element, string name)
+    private static string? GetString(JsonElement element, string name)
     {
         return element.TryGetProperty(name, out var value)
             && value.ValueKind == JsonValueKind.String
@@ -201,7 +201,7 @@ public sealed class ContractsConformanceTests
         return root.GetProperty("steps").EnumerateArray().Select(step => new MacroStep(
             GetString(step, "type"),
             step.TryGetProperty("keys", out var keys)
-                ? keys.EnumerateArray().Select(key => key.GetString()).ToArray()
+                ? keys.EnumerateArray().Select(key => key.GetString() ?? "").ToArray()
                 : null,
             GetInt32(step, "holdMs"),
             GetString(step, "text"),

@@ -73,12 +73,19 @@ bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 usbWatchdog.SetEnabled(serverSettings.UsbWatchdog);
 lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
 
+var clientCredentials = new ClientCredentialsStore(
+    Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
+var clientSessions = new ClientSessionRegistry();
+
 app.Use(async (context, next) =>
 {
-    if (!LanRequestAuthenticator.IsAuthorized(
-            context.Connection.LocalPort,
-            context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
-            lanIdentity.AccessToken))
+    var auth = LanRequestAuthenticator.Resolve(
+        context.Connection.LocalPort,
+        context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
+        context.Request.Headers["Authorization"].FirstOrDefault(),
+        lanIdentity.AccessToken,
+        clientCredentials);
+    if (!auth.Authorized)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await context.Response.WriteAsJsonAsync(new
@@ -88,6 +95,7 @@ app.Use(async (context, next) =>
         });
         return;
     }
+    context.Items["ClientId"] = auth.ClientId;
     await next();
 });
 
@@ -400,6 +408,44 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
     });
 });
 
+// M1-A A1 回环管理端点（设计 §3 不变量：撤销属本机信任操作；仅 8765 回环可达，无鉴权面扩大）。
+app.MapGet("/api/admin/clients", (HttpContext context) =>
+{
+    if (context.Connection.LocalPort != 8765)
+    {
+        return Results.NotFound();
+    }
+    return Results.Ok(new { ok = true, clients = clientCredentials.ListRedacted() });
+});
+app.MapPost("/api/admin/clients/revoke", (HttpContext context, ClientRevokeRequest body) =>
+{
+    if (context.Connection.LocalPort != 8765)
+    {
+        return Results.NotFound();
+    }
+    var clientId = body.ClientId?.Trim();
+    if (string.IsNullOrWhiteSpace(clientId))
+    {
+        return Results.BadRequest(new { ok = false, error = "缺少 clientId" });
+    }
+    try
+    {
+        if (!clientCredentials.Revoke(clientId))
+        {
+            return Results.NotFound(new { ok = false, error = "未知 clientId" });
+        }
+    }
+    catch (Exception exception)
+    {
+        // 持久化失败：撤销中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 处置）。
+        Console.Error.WriteLine($"撤销持久化失败：{exception.Message}");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+    clientSessions.Cancel(clientId);
+    KeyboardInput.RevokeClientInput(clientId);
+    return Results.Ok(new { ok = true, clientId });
+});
+
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
 {
     var bodySizeFeature = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -458,6 +504,14 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
 
     try
     {
+        // 撤销联动（设计 §6）：该 clientId 的音频长流链接"请求取消 + 客户端撤销令牌"，
+        // 撤销经 ClientSessionRegistry.Cancel 即时终止长流（V12：不能只拦新 HTTP）。
+        var streamClientId = (string?)request.HttpContext.Items["ClientId"];
+        using var revocationCts = streamClientId is null
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, clientSessions.Register(streamClientId));
+        var streamToken = revocationCts?.Token ?? cancellationToken;
         var bytes = await audioBridge.StreamAsync(
             request.Body,
             sessionId,
@@ -469,7 +523,7 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
                     dictationSessions.AudioEnded(endedSessionId);
                 }
             },
-            cancellationToken);
+            streamToken);
         return Results.Ok(new
         {
             ok = true,
@@ -544,11 +598,14 @@ app.MapPost("/api/dictation/stop", (DictationCommand command) =>
         });
     }));
 
-app.MapPost("/api/input", (InputCommand command) =>
+app.MapPost("/api/input", (InputCommand command, HttpContext context) =>
 {
     try
     {
-        var result = InputCommandProcessor.Execute(command, receiverIdentity.ComputerId);
+        var result = InputCommandProcessor.Execute(
+            command,
+            receiverIdentity.ComputerId,
+            context.Items["ClientId"] as string);
         return Results.Ok(new
         {
             ok = true,
@@ -676,6 +733,7 @@ internal sealed record DictationCommand(
     string? RequestId,
     string? TargetComputerId,
     string? Mode);
+internal sealed record ClientRevokeRequest(string? ClientId);
 internal sealed record SharedMicrophoneRequest(bool Requested);
 internal sealed record VoiceEngineConfigRequest(
     string? ActiveEngine,
@@ -807,15 +865,16 @@ internal static class KeyboardInput
         ExecuteOnce(action, text, null);
     }
 
-    internal static bool ExecuteOnce(string action, string? text, string? requestId)
+    internal static bool ExecuteOnce(string action, string? text, string? requestId, string? clientId = null)
     {
-        return ExecuteOnceCore(requestId, () => ExecuteCore(action, text));
+        return ExecuteOnceCore(requestId, () => ExecuteCore(action, text), clientId);
     }
 
     internal static bool ExecuteKeyChordOnce(
         string[]? keyNames,
         int? requestedHoldMilliseconds,
         string? requestId,
+        string? clientId,
         out string description)
     {
         var keys = ParseKeyChord(keyNames, out description);
@@ -825,16 +884,17 @@ internal static class KeyboardInput
             throw new ArgumentException("holdMs 必须在 20–500 毫秒之间");
         }
         return ExecuteOnceCore(requestId,
-            () => SendChordSafely(holdMilliseconds, keys));
+            () => SendChordSafely(holdMilliseconds, keys), clientId);
     }
 
     internal static bool ExecuteMacroOnce(
         MacroStep[]? steps,
         string? requestId,
+        string? clientId,
         out string description)
     {
         var plan = ParseMacroSteps(steps, out description);
-        return ExecuteOnceCore(requestId, () => RunMacro(plan));
+        return ExecuteOnceCore(requestId, () => RunMacro(plan), clientId);
     }
 
     /// 仅供单元测试：完整校验宏步骤但不执行。
@@ -895,6 +955,12 @@ internal static class KeyboardInput
     {
         foreach (var step in plan)
         {
+            if (currentInputRevoked)
+            {
+                // 撤销=停止优先（设计 §6）：不再执行剩余步骤；
+                // 已按下的单个组合键在自身 finally 中反向释放（释放预算并入 D03 ≤2s）。
+                throw new ArgumentException("客户端凭据已被撤销，宏中止");
+            }
             if (step.DelayMs > 0)
             {
                 Thread.Sleep(step.DelayMs);
@@ -922,7 +988,27 @@ internal static class KeyboardInput
         string? Text,
         bool Submit);
 
-    private static bool ExecuteOnceCore(string? requestId, Action execute)
+    /// <summary>当前正在执行的输入归属 clientId（SyncRoot 下读写）；撤销据此定位。</summary>
+    private static string? currentInputClientId;
+    /// <summary>撤销中止标记：被撤销客户端的宏在步骤间检查并中止（设计 §6 M-3 处置）。</summary>
+    private static bool currentInputRevoked;
+
+    /// <summary>
+    /// 撤销某客户端的输入授权：若它此刻持有输入执行（宏/组合键串行队列），
+    /// 置中止标记让宏在下一步前停止；进行中的单个按键事件自然完成（≤500ms，预算 ≤2s，D03 冻结）。
+    /// </summary>
+    internal static void RevokeClientInput(string clientId)
+    {
+        lock (SyncRoot)
+        {
+            if (string.Equals(currentInputClientId, clientId, StringComparison.Ordinal))
+            {
+                currentInputRevoked = true;
+            }
+        }
+    }
+
+    private static bool ExecuteOnceCore(string? requestId, Action execute, string? clientId = null)
     {
         lock (SyncRoot)
         {
@@ -944,7 +1030,16 @@ internal static class KeyboardInput
                 }
             }
 
-            execute();
+            currentInputClientId = clientId;
+            currentInputRevoked = false;
+            try
+            {
+                execute();
+            }
+            finally
+            {
+                currentInputClientId = null;
+            }
             if (normalizedRequestId is not null)
             {
                 RecentRequestIds[normalizedRequestId] = now;
