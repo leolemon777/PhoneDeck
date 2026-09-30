@@ -9,7 +9,7 @@
   离线语义正确）、快捷网格文字可读、无截断重叠；底部"输入到"chip 排列正常。
 - 截图证据 `outputs/ui-redesign/console-v2-dark-walkthrough.png`（ignored 目录）；
   走查后已恢复浅色设置并清理临时文件。
-- 残留（记入 KNOWN_ISSUES #6）：深色在线绿点态建议复验、各语音状态（启动中/采音中/
+- 残留（记入 KNOWN_ISSUES #5）：深色在线绿点态建议复验、各语音状态（启动中/采音中/
   失败/共享）走查仍待做（需要真机交互或网络）、设置页 P2 未迁移。
 - 另：补交 A4 漏提交的 CredentialUpgraderTest.java（7 用例，c05c521）。
 
