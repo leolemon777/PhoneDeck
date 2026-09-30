@@ -60,7 +60,7 @@ int main() {
             std::_Exit(0);
         }).detach();
         publish(first == noErr && second == noErr ? "ready" : "shortcut-conflict");
-        RunApplicationEventLoop();
+        [NSApp run];
         if (first == noErr) UnregisterEventHotKey(toggleRef);
         if (second == noErr) UnregisterEventHotKey(holdRef);
         RemoveEventHandler(handler);
