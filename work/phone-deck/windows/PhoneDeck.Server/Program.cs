@@ -50,6 +50,7 @@ using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
     receiverIdentity,
     lanIdentity.HttpsPort);
+using var mdnsAdvertiser = new MdnsAdvertiser();
 using var diagnostics = new DiagnosticsMonitor(() =>
 {
     lock (VoiceEngines.ConfigurationLock)
@@ -72,6 +73,11 @@ await using var bluetoothReceiver = new BluetoothReceiver(
 bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 usbWatchdog.SetEnabled(serverSettings.UsbWatchdog);
 lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
+// mDNS 与 UDP 应答共用“局域网发现”开关；多播不可用时内部优雅降级到 UDP 回退。
+if (serverSettings.LanDiscovery)
+{
+    mdnsAdvertiser.Start(receiverIdentity, lanIdentity.HttpsPort);
+}
 
 var clientCredentials = new ClientCredentialsStore(
     Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
@@ -383,7 +389,8 @@ app.MapGet("/api/diagnostics", async () =>
             {
                 enabled = serverSettings.LanDiscovery,
                 portBound = lanDiscovery.PortBound,
-                running = lanDiscovery.Running
+                running = lanDiscovery.Running,
+                mdnsRunning = mdnsAdvertiser.Running
             }
         },
         usbWatchdog = new
@@ -884,6 +891,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
     Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（需先通过 USB 配对）");
     Console.WriteLine($"  局域网发现：UDP {LanDiscoveryResponder.DiscoveryPort}" +
+                    (mdnsAdvertiser.Running ? $" + mDNS {MdnsAdvertiser.ServiceName}.{MdnsAdvertiser.ServiceProtocol}" : "（mDNS 不可用，仅 UDP）") +
         (serverSettings.LanDiscovery ? "（应答中）" : "（已关闭）"));
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  蓝牙通道：正在查找已配对的手机");

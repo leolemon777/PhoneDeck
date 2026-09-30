@@ -22,4 +22,8 @@
       <_Parameter1>PhoneDeck.Server.Tests</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Makaretu.Dns" Version="2.0.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+  </ItemGroup>
 </Project>

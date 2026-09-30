@@ -1,6 +1,30 @@
 # PhoneDeck 项目交接说明
 
-## 2026-09-30 M1-A A4 凭据轮换 + legacy 应急撤销（最新）
+## 2026-09-30 M1-A A5 mDNS 发现层——M1-A 全部完成（最新）
+
+- **服务端**（新 `MdnsAdvertiser.cs`，依赖 Makaretu.Dns 2.0.1 + Makaretu.Dns.Multicast
+  0.27.0，均 MIT）：发布 `_phonedeck._tcp`，TXT 字段与 UDP 应答严格同集
+  （computerId/displayName/platform/port/capabilities），**无令牌无指纹**（NET-01/V10）；
+  多播不可用网络优雅降级（Running=false、UDP 8767 回退）；与"局域网发现"开关联动；
+  health 增加 mdnsRunning 字段；启动横幅同步。
+- **Android**（`LanDiscoveryClient`）：`discover()` 并行 UDP 广播与系统 NSD
+  （`_phonedeck._tcp.`），按 computerId 合并去重；`getTxtRecord()` 已在 API 33 移除，
+  走 `getAttributes()` + 纯函数 `decodeAttribute`（可单测）；地址仍过安全过滤；
+  候选一律须经 HTTPS 8766 钉扎+令牌校验。
+- **契约**：`pairing-and-identity.json` 的 futureMdns → **implemented**（库冻结、
+  TXT 字段集、UDP 回退与钉扎规则）；validate.py 通过。
+- **验证**：Windows **120/120**（新增 MdnsAdvertiserTests 三用例：字段同集/无敏感键/
+  无指纹形态值、空平台回退、DNS 标签约束）；Android 三门（新增 decodeAttribute 用例）。
+- **CI 修复**（同日早些）：D12 后未提交的 net8 lock 导致 PR #24 云端 NU1004 变红；
+  已提交 net10 lock 刷新（7628390），**全部检查真实通过**（含 B03 组装作业 2m12s，
+  为 CI 假绿修复后首次真实运行验证）。
+- **M1-A 里程碑**：A1 凭据/撤销 → A2 配对窗口/本机确认 → A3 扫码/Keystore 存储 →
+  A4 rotate/共存窗口/应急撤销 → **A5 mDNS 双通道发现**，配对与授权全链闭环。
+  遗留真机项：V09 真 Wi-Fi/相机扫码、V17 rotate 真机迁移、V10 mDNS 真机互通
+  （均待手机与 PC 同网段；代码路径已就绪零改动）。
+- 下一步：M1-B（会话与配置：停止优先、租约、目标隔离、共享组、V47 配置冲突）。
+
+## 2026-09-30 M1-A A4 凭据轮换 + legacy 应急撤销
 
 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §5/§9-A4 落地三端，并处置独立复核
 （approved=false，4 问题）。

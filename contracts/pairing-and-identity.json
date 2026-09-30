@@ -34,9 +34,21 @@
       "specRef": "NET-01：未经认证的发现结果不得触发输入或采音"
     },
     "futureMdns": {
-      "status": "target",
-      "specRef": "NET-01：mDNS/Bonjour 提供候选地址并保留旧 UDP 恢复；未实现前不得宣称",
-      "note": "mDNS 服务名/ TXT 记录字段冻结于实现任务 M1-A（D02）"
+      "status": "implemented",
+      "implementedAt": "2026-09-30",
+      "library": {
+        "server": "Makaretu.Dns 2.0.1 + Makaretu.Dns.Multicast 0.27.0（MIT）",
+        "android": "系统 NSD（NsdManager，_phonedeck._tcp.）"
+      },
+      "txtFields": [
+        "computerId",
+        "displayName",
+        "platform",
+        "port",
+        "capabilities"
+      ],
+      "rule": "TXT 与 UDP 应答同字段集；绝不携带令牌/证书指纹（NET-01/V10）；UDP 8767 保留为回退；候选仍须经 HTTPS 8766 钉扎+令牌校验",
+      "specRef": "NET-01：mDNS 提供候选地址并保留旧 UDP 恢复"
     }
   },
   "httpsChannel": {
