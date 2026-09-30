@@ -34,7 +34,7 @@ def verify_archive(archive, manifest):
                 if item.is_dir():
                     continue
                 name = safe_name(item.filename)
-                if not name.startswith(prefix) or name in actual:
+                if not name.startswith(prefix) or name[len(prefix):] in actual:
                     raise RuntimeError("Unexpected/duplicate ZIP member: " + name)
                 with content.open(item) as stream:
                     actual[name[len(prefix):]] = (item.file_size, digest(stream), None)
@@ -49,7 +49,7 @@ def verify_archive(archive, manifest):
                 with content.extractfile(item) as stream:
                     actual[name[len(prefix):]] = (item.size, digest(stream), item.mode)
     if actual.keys() != expected.keys():
-        raise RuntimeError("Archive file set differs from final manifest")
+        raise RuntimeError("Archive file set differs from final manifest: missing=" + repr(sorted(expected.keys() - actual.keys())) + "; extra=" + repr(sorted(actual.keys() - expected.keys())))
     for name, item in expected.items():
         size, sha, mode = actual[name]
         if (size, sha) != (item["bytes"], item["sha256"]):

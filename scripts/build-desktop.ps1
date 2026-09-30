@@ -105,7 +105,7 @@ if ($VerifySpeech) {
     if ($IsMacOS) { Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopHotkeys.py'),(Join-Path $package 'hotkey-runtime/phonedeck-hotkeys')) }
 }
 $manifest = [ordered]@{ version=$version; rid=$Rid; sourceCommit=(& git -C $repo rev-parse HEAD).Trim(); sourceDirty=[bool](& git -C $repo status --porcelain); whisperCommit=$commit; modelSha256=$modelHash.ToLowerInvariant(); modelBundled=[bool]$ModelPath; createdUtc=[DateTime]::UtcNow.ToString('O'); fileHashStage='published-payload-before-signing'; files=@() }
-foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) { $manifest.files += @{ path=[IO.Path]::GetRelativePath($package,$file.FullName).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
+foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse -Force) { $manifest.files += @{ path=[IO.Path]::GetRelativePath($package,$file.FullName).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $package 'build-manifest.json') -Encoding utf8NoBOM
 if ($IsWindows) {
     $archive = Join-Path $run "PhoneDeck-$version-$Rid.zip"
@@ -122,7 +122,7 @@ if ($IsWindows) {
     Invoke-Checked codesign @('--force','--sign','-',(Join-Path $macos 'hotkey-runtime/phonedeck-hotkeys'))
     Invoke-Checked codesign @('--force','--deep','--sign','-',$bundle)
     Invoke-Checked codesign @('--verify','--deep','--strict',$bundle)
-    $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('-czf',$archive,'-C',$run,'PhoneDeck.app')
+    $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('--disable-copyfile','-czf',$archive,'-C',$run,'PhoneDeck.app')
 } else {
     $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('-czf',$archive,'-C',$run,(Split-Path $package -Leaf))
     if (Get-Command dpkg-deb -ErrorAction SilentlyContinue) {
@@ -143,7 +143,7 @@ foreach ($key in $manifest.Keys) { if ($key -ne 'files') { $finalManifest[$key] 
 $finalManifest.fileHashStage = 'distributed-payload'
 $finalManifest.packageRoot = Split-Path $finalRoot -Leaf
 $finalManifest.files = @()
-foreach ($file in Get-ChildItem -LiteralPath $finalRoot -File -Recurse) { $finalManifest.files += @{ path=[IO.Path]::GetRelativePath($finalRoot,$file.FullName).Replace([char]92,[char]47); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
+foreach ($file in Get-ChildItem -LiteralPath $finalRoot -File -Recurse -Force) { $finalManifest.files += @{ path=[IO.Path]::GetRelativePath($finalRoot,$file.FullName).Replace([char]92,[char]47); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
 $finalManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $run "PhoneDeck-$version-$Rid.build.json") -Encoding utf8NoBOM
 Get-ChildItem -LiteralPath $run -File | Where-Object { $_.Extension -In '.zip','.gz','.exe','.deb' -or $_.Name -Like '*.build.json' } | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $run 'checksums.sha256') -Encoding utf8NoBOM
 if ($VerifySpeech) { Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopPackage.py'),$run,$manifest.sourceCommit) }

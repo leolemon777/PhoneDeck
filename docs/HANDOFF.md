@@ -13,6 +13,7 @@
 - 新渠道首次启动已在Samsung安装检查；默认扫码/TLS、不自动接入旧USB或弹蓝牙授权，未连接时指引扫码并显示“内置识别”，麦克风仅在用户开始时请求权限。原Luma及uiPreview保留旧USB/蓝牙路径。许可文本随新APK打包。
 - 尝试专用FocusSink窗口的实桌面自动填入验收：本机执行会话未获得测试窗口前台焦点，前置断言即停止，未启动该次听写、未向其他窗口输入；两个测试窗口均关闭。因此不计为Windows焦点填入实测通过，仍按DESKTOP_ACCEPTANCE人工验收。
 - Mac快捷键改由自带原生helper在OS主线程运行Cocoa应用循环接收Carbon热键；.NET仅接收固定toggle/start/stop，不再在后台线程调用无应用队列的CFRunLoop。64位SDK不提供旧RunApplicationEventLoop，使用NSApplication.run。helper退出/接收端退出释放快捷键，父进程异常结束时helper自行退出。Mac CI会验证初始化及事件循环不立即结束；物理键、权限和焦点输入仍待所有者验收。包外build.json记录Mac签名后的最终文件哈希，避免签名与包内清单自引用。
+- 下载产物校验实际读取ZIP/tar，对比签名后完整清单、每文件大小/哈希、Unix可执行位及外部归档校验值；Mac清单包含隐藏资源，归档禁止额外合成AppleDouble元数据。安装EXE/deb的整体哈希也覆盖，首次安装行为仍需真机验收。
 - **待办**：用户澄清没有当前可接入Mac，会回Mac自行操作，见 [DESKTOP_ACCEPTANCE.md](DESKTOP_ACCEPTANCE.md)。Linux SSH说明已读，但本机缺 `linux2` 别名/密钥，未连接；没有改网络/代理/SSH配置。仍需干净安装、真实中文麦克风、相机扫码/实网发现、不同物理电脑、焦点自动填入、Mac权限/快捷键、Linux X11/Wayland。不能把CI或两个同机进程写成上述真机验收。
 - 工件只作为alpha候选；Windows发布者签名、Mac Developer ID/notarization及最终公开Release仍未完成。构建、快速开始及可追溯验证分别见 BUILD_PIPELINE、DESKTOP_QUICK_START、CROSS_PLATFORM_EXECUTION。
 
