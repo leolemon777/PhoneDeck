@@ -1279,20 +1279,55 @@ public final class MainActivity extends Activity {
                     .setNegativeButton("知道了", null).show();
             return;
         }
-        String[] labels = new String[devices.size()];
+        String[] labels = new String[devices.size() + 1];
         for (int i = 0; i < devices.size(); i++) {
             TargetDeviceManager.Device device = devices.get(i);
             String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
                     ? "需重新配对" : isDeviceOnline(device.computerId) ? "在线" : "离线";
             // M1-A A4：legacy-only 设备仅展示「可升级」后缀，提示入口在主界面在线刷新。
             labels[i] = device.slot + "号 · " + device.displayName + "\n" + state
+                    + (device.sharedGroup ? " · 共享组" : "")
                     + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "")
                     + (CredentialUpgrader.needsUpgrade(device) ? " · 可升级" : "");
         }
+        // M1-B/DEV-03：共享组管理入口（显式集合；新增配对不自动入组）。
+        labels[devices.size()] = "⚙ 管理共享组（勾选接收共享麦克风的电脑）";
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
-                .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
+                .setItems(labels, (dialog, which) -> {
+                    if (which == devices.size()) {
+                        showSharedGroupDialog();
+                        return;
+                    }
+                    selectTargetDevice(devices.get(which), statusText);
+                })
                 .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
                 .setPositiveButton("扫码配对新电脑", (dialog, which) -> launchQrPairingScan())
+                .setNegativeButton("取消", null).show();
+    }
+
+    /// M1-B/DEV-03：共享组多选；切换即持久化，下一轮探测生效（移除即停发该目标流）。
+    private void showSharedGroupDialog() {
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            showActionFeedback("先配对至少一台电脑，再管理共享组", theme.muted);
+            return;
+        }
+        String[] labels = new String[devices.size()];
+        boolean[] checked = new boolean[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            labels[i] = device.slot + "号 · " + device.displayName;
+            checked[i] = device.sharedGroup;
+        }
+        new AlertDialog.Builder(this).setTitle("共享组（共享麦克风发送目标）")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) ->
+                        targetDeviceManager.setSharedGroup(
+                                devices.get(which).computerId, isChecked))
+                .setPositiveButton("完成", (dialog, which) -> showActionFeedback(
+                        WORK_SHARED.equals(voiceWorkMode)
+                                && PhoneAudioService.getSnapshot().running
+                                ? "✓ 共享组已更新，下一轮探测生效" : "✓ 共享组已更新",
+                        theme.success))
                 .setNegativeButton("取消", null).show();
     }
 

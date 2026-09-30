@@ -1,6 +1,27 @@
 # PhoneDeck 项目交接说明
 
-## 2026-09-30 M1-B 第一片：会话租约/墓碑/代次 + V47 配置冲突（最新）
+## 2026-09-30 M1-B 第二片：共享组显式集合（DEV-03）+ V21/V22 台架（最新）
+
+- **共享组语义**（手机端）：Device 增 `sharedGroup`（加密持久化，穿透全部重建点：
+  upsert/saveLanPairing/recordLastGood/mergeDiscovered/saveQrPairing/applyCredentialUpgrade）；
+  **迁移策略**——存量已配对设备首次加载默认入组（不破坏升级前共享使用），**新增配对
+  （扫码/USB/rotate）默认不入组**（DEV-03"新增配对不自动收到音频"）；`setSharedGroup`
+  即时持久化；切普通输入目标不改组（无代码路径触碰，天然成立）。
+- **PhoneAudioService**：LAN 目标循环按 `sharedGroup` 过滤（移除即停发该流——
+  updateTargets 增量语义）；**零目标 15s 停采窗口**（MIC-10 提案：`SharedAudioPolicies
+  .shouldStopForZeroTargets`，elapsedRealtime 单调时钟；用户主动停止即时生效不受影响；
+  USB 直连电脑保持旧兼容路径）。
+- **UI**：设备列表条目「· 共享组」标记 + "⚙ 管理共享组"多选对话框（显式勾选集合）。
+- **台架用例**：SharedGroupPolicyTest（V21 断言：零目标窗口 14.9s/15s/超窗三态）；
+  ConcurrentClientInputTests（V22 L1 可测部分：双客户端并发调用安全无丢失 + requestId
+  按 clientId 分区约定；组合键物理不交错由 SyncRoot 串行保证，真实 SendInput 无法单测
+  注入，属 L3/V27-V28）。
+- 验证：Windows **131/131**、Android 单测 20/20 + assembleDebug + lintDebug 0 error。
+- 边界：V21 完整形态（逐接收端字节计数与麦克风释放时刻）、V41 多机共享压力需真机/
+  多接收端；旧 shared.requested 联动开启保持兼容（D11 窗口内未动）。
+- 真机欠账不变：V09/V17/V10（手机仍在 192.168.0.x 跨网段，192.168.10.x 不可达）。
+
+## 2026-09-30 M1-B 第一片：会话租约/墓碑/代次 + V47 配置冲突
 
 - 按 contracts/session-states.json（M0 冻结夹具）实现 **SessionLeaseRegistry**（新文件）：
   代次递增（迟到 start 不复活已取消代次，R1）、租约用 **Stopwatch 单调时钟**

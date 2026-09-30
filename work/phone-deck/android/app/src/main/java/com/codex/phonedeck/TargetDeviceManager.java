@@ -23,18 +23,29 @@ final class TargetDeviceManager {
         final String clientId;
         final String certificateSha256;
         final String lastGoodAddress;
+        /// M1-B/DEV-03：共享供音组是用户显式选择的集合；新增配对默认不入组，
+        /// 存量已配对设备在首次迁移时默认入组（不破坏升级前的共享使用）。
+        final boolean sharedGroup;
 
         Device(String computerId, String displayName, String platform,
                int slot, long lastSeenAt, List<String> lanAddresses,
                int lanPort, String lanToken, String certificateSha256,
                String lastGoodAddress) {
             this(computerId, displayName, platform, slot, lastSeenAt, lanAddresses,
-                    lanPort, lanToken, null, certificateSha256, lastGoodAddress);
+                    lanPort, lanToken, null, false, certificateSha256, lastGoodAddress);
         }
 
         Device(String computerId, String displayName, String platform,
                int slot, long lastSeenAt, List<String> lanAddresses,
                int lanPort, String lanToken, String clientId,
+               String certificateSha256, String lastGoodAddress) {
+            this(computerId, displayName, platform, slot, lastSeenAt, lanAddresses,
+                    lanPort, lanToken, clientId, false, certificateSha256, lastGoodAddress);
+        }
+
+        Device(String computerId, String displayName, String platform,
+               int slot, long lastSeenAt, List<String> lanAddresses,
+               int lanPort, String lanToken, String clientId, boolean sharedGroup,
                String certificateSha256, String lastGoodAddress) {
             this.computerId = computerId;
             this.displayName = displayName;
@@ -45,6 +56,7 @@ final class TargetDeviceManager {
             this.lanPort = lanPort;
             this.lanToken = lanToken;
             this.clientId = clientId == null || clientId.isBlank() ? null : clientId.trim();
+            this.sharedGroup = sharedGroup;
             this.certificateSha256 = certificateSha256;
             this.lastGoodAddress = lastGoodAddress == null || lastGoodAddress.isBlank()
                     ? null : lastGoodAddress.trim();
@@ -135,6 +147,8 @@ final class TargetDeviceManager {
                 existing == null ? java.util.Collections.emptyList() : existing.lanAddresses,
                 existing == null ? 0 : existing.lanPort,
                 existing == null ? null : existing.lanToken,
+                existing == null ? null : existing.clientId,
+                existing != null && existing.sharedGroup,
                 existing == null ? null : existing.certificateSha256,
                 existing == null ? null : existing.lastGoodAddress);
         if (existing != null) {
@@ -191,7 +205,8 @@ final class TargetDeviceManager {
         Device paired = new Device(
                 base.computerId, base.displayName, base.platform,
                 base.slot, System.currentTimeMillis(), safeAddresses, port,
-                accessToken.trim(), certificateSha256.trim().toLowerCase(), lastGood);
+                accessToken.trim(), base.clientId, base.sharedGroup,
+                certificateSha256.trim().toLowerCase(), lastGood);
         devices.remove(base);
         devices.add(paired);
         save();
@@ -211,7 +226,8 @@ final class TargetDeviceManager {
         Device updated = new Device(
                 device.computerId, device.displayName, device.platform,
                 device.slot, device.lastSeenAt, device.lanAddresses,
-                device.lanPort, device.lanToken, device.certificateSha256, trimmed);
+                device.lanPort, device.lanToken, device.clientId, device.sharedGroup,
+                device.certificateSha256, trimmed);
         devices.remove(device);
         devices.add(updated);
         save();
@@ -233,8 +249,8 @@ final class TargetDeviceManager {
         Device updated = new Device(
                 device.computerId, device.displayName, device.platform,
                 device.slot, device.lastSeenAt, merged,
-                device.lanPort, device.lanToken, device.certificateSha256,
-                device.lastGoodAddress);
+                device.lanPort, device.lanToken, device.clientId, device.sharedGroup,
+                device.certificateSha256, device.lastGoodAddress);
         devices.remove(device);
         devices.add(updated);
         save();
@@ -247,6 +263,23 @@ final class TargetDeviceManager {
             return false;
         }
         activeComputerId = device.computerId;
+        save();
+        return true;
+    }
+
+    /// M1-B/DEV-03：显式共享组切换；下一轮探测循环即生效（移除即停发该目标流）。
+    synchronized boolean setSharedGroup(String computerId, boolean inGroup) {
+        Device device = find(computerId);
+        if (device == null || device.sharedGroup == inGroup) {
+            return device != null;
+        }
+        Device updated = new Device(
+                device.computerId, device.displayName, device.platform,
+                device.slot, device.lastSeenAt, device.lanAddresses,
+                device.lanPort, device.lanToken, device.clientId, inGroup,
+                device.certificateSha256, device.lastGoodAddress);
+        devices.remove(device);
+        devices.add(updated);
         save();
         return true;
     }
@@ -323,6 +356,14 @@ final class TargetDeviceManager {
                     }
                 }
                 String lastGood = item.optString("lastGoodAddress", null);
+                String lanToken = item.optString("lanToken", null);
+                String certificateSha256 = item.optString("certificateSha256", null);
+                // 迁移：旧记录无 sharedGroup 字段时，已配对设备默认入组（DEV-03 存量兼容）。
+                boolean sharedGroup = item.has("sharedGroup")
+                        ? item.optBoolean("sharedGroup")
+                        : lanToken != null && !lanToken.isBlank()
+                                && certificateSha256 != null && !certificateSha256.isBlank()
+                                && !addresses.isEmpty() && item.optInt("lanPort", 0) > 0;
                 devices.add(new Device(
                         computerId,
                         item.optString("displayName", "未命名电脑"),
@@ -331,9 +372,10 @@ final class TargetDeviceManager {
                         item.optLong("lastSeenAt", 0L),
                         addresses,
                         item.optInt("lanPort", 0),
-                        item.optString("lanToken", null),
+                        lanToken,
                         item.optString("clientId", null),
-                        item.optString("certificateSha256", null),
+                        sharedGroup,
+                        certificateSha256,
                         isAddressCandidateSafe(lastGood) ? lastGood : null));
             }
         } catch (Exception ignored) {
@@ -360,6 +402,7 @@ final class TargetDeviceManager {
                 item.put("lanPort", device.lanPort);
                 item.put("lanToken", device.lanToken);
                 item.put("clientId", device.clientId == null ? JSONObject.NULL : device.clientId);
+                item.put("sharedGroup", device.sharedGroup);
                 item.put("certificateSha256", device.certificateSha256);
                 item.put("lastGoodAddress", device.lastGoodAddress);
                 array.put(item);
@@ -421,7 +464,7 @@ final class TargetDeviceManager {
         Device paired = new Device(
                 base.computerId, base.displayName, base.platform, base.slot,
                 System.currentTimeMillis(), safeAddresses, port,
-                clientToken.trim(), clientId.trim(),
+                clientToken.trim(), clientId.trim(), false,
                 certificateSha256.trim().toLowerCase(),
                 safeAddresses.contains(base.lastGoodAddress) ? base.lastGoodAddress : null);
         devices.remove(base);
@@ -528,7 +571,8 @@ final class TargetDeviceManager {
         Device upgraded = new Device(
                 current.computerId, current.displayName, current.platform,
                 current.slot, System.currentTimeMillis(), current.lanAddresses,
-                current.lanPort, clientToken, clientId, current.certificateSha256,
+                current.lanPort, clientToken, clientId, current.sharedGroup,
+                current.certificateSha256,
                 current.lanAddresses.contains(verifiedHost)
                         ? verifiedHost : current.lastGoodAddress);
         devices.remove(current);

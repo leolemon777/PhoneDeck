@@ -6,6 +6,14 @@ import java.util.ArrayDeque;
 final class SharedAudioPolicies {
     private SharedAudioPolicies() {}
 
+    /// M1-B/MIC-10（V21 断言项）：共享组零可达目标的停采窗口（15s 提案，单调时钟）。
+    static final long ZERO_TARGET_STOP_WINDOW_MS = 15_000;
+
+    static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
+        return emptySinceElapsed > 0L
+                && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
+    }
+
     static final class FrameQueue {
         private final ArrayDeque<byte[]> frames = new ArrayDeque<>();
         private final int capacity;
