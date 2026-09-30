@@ -1,5 +1,22 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 UI P2 双主题走查全绿 + 预览渠道直启基建（最新）
+
+- 核实设置族六个 Activity 早已全部使用 Console v2 令牌（零硬编码色），文档中
+  "仍是旧令牌形态"的旧表述已纠正。
+- **走查基建**（真机限制倒逼）：该 Samsung 的 `input tap` 触摸注入被系统阻断
+  （keyevent 正常）；uiautomator dump 因搜狗无障碍服务常失败且返回旧文件假象。
+  解决：`app/src/uiPreview/AndroidManifest.xml`（manifest 覆盖，tools:replace 六页
+  exported=true，仅预览渠道）+ `SettingsActivity` 的 `phonedeck_page` 子页直启钩子，
+  全页面可 `am start` 直启自动化。
+- **多 agent 工作流验收**（dwfrun-82b83b2f）：深色九页采集（采集员）、四个 gradle
+  门（assembleDebug/assembleUiPreview/testDebugUnitTest/lintDebug 全过）、三组视觉
+  验收 + 每问题独立复核 + 报告独立通读。结果：**浅色 9/9、深色 9/9 通过**。
+- 唯一报告项（深色快捷列表副标题对比度约 4:1）复核未确认，代码核查销案：
+  副标题即 `theme.muted` #A7B0C0、卡片 `theme.surface` #1B1E24，WCAG 实算 7.64:1。
+- 走查后手机主题已恢复浅色。剩余 UI 欠账：语音各状态、按压/键盘弹出交互态、
+  横屏与其他机型（见 KNOWN_ISSUES #5）。
+
 ## 2026-09-30 UI P1 深色主题真机走查通过（最新）
 
 - 手机仍跨网段（192.168.0.195），但深色走查不需要同网段：preview 包为 debug 签名，

@@ -76,6 +76,16 @@ public final class SettingsActivity extends Activity {
         setContentView(createInterface());
         refreshSelection();
         refreshRootSummaries();
+        // 走查钩子：am start -e phonedeck_page theme|voice|shortcuts 直达子页（与预览渠道导出配合）。
+        String openPage = getIntent() == null ? null : getIntent().getStringExtra("phonedeck_page");
+        if (openPage != null) {
+            View target = "theme".equals(openPage) ? themePage
+                    : "voice".equals(openPage) ? voicePage
+                    : "shortcuts".equals(openPage) ? shortcutsPage : null;
+            if (target != null) {
+                pushPage(target, false);
+            }
+        }
     }
 
     @Override
