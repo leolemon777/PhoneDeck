@@ -1,7 +1,7 @@
 name: Cross-platform Desktop Preview
 on:
   pull_request:
-    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-DesktopSpeech.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
+    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
   workflow_dispatch:
     inputs:
       include_model:
@@ -59,6 +59,7 @@ jobs:
             ${{ steps.package.outputs.package_directory }}/*.gz
             ${{ steps.package.outputs.package_directory }}/*.exe
             ${{ steps.package.outputs.package_directory }}/*.deb
+            ${{ steps.package.outputs.package_directory }}/*.build.json
             ${{ steps.package.outputs.package_directory }}/checksums.sha256
           if-no-files-found: error
   android:

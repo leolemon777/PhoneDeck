@@ -51,6 +51,12 @@ Invoke-Checked dotnet @('publish',(Join-Path $repo 'work/phone-deck/desktop/Phon
 $runtime = Join-Path $package 'speech-runtime'; New-Item -ItemType Directory -Path $runtime | Out-Null
 $cli = if ($IsWindows) { Join-Path $native 'bin/Release/whisper-cli.exe' } else { Join-Path $native 'bin/whisper-cli' }
 Copy-Item -LiteralPath $cli -Destination $runtime
+if ($IsMacOS) {
+    Invoke-Checked cmake @('--build',$native,'--config','Release','--target','phonedeck-hotkeys','--parallel','4')
+    $hotkeys = Join-Path $package 'hotkey-runtime'
+    New-Item -ItemType Directory -Path $hotkeys | Out-Null
+    Copy-Item -LiteralPath (Join-Path $native 'bin/phonedeck-hotkeys') -Destination $hotkeys
+}
 if ($Rid.EndsWith('x64')) {
     $fastNative = Join-Path $run 'native-build-avx2'
     $fastOptions = $options | ForEach-Object {
@@ -96,8 +102,9 @@ if ($VerifySpeech) {
     if ($LASTEXITCODE -ne 0 -or $nativeName.Trim() -notin @('whisper-cli','whisper-cli.exe','whisper-cli-avx2','whisper-cli-avx2.exe')) { throw 'Published receiver failed to select a compatible native speech runtime.' }
     $python = if ($IsWindows) { 'python' } else { 'python3' }
     Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopSpeech.py'),$smoke,(Join-Path $WhisperSource 'samples/jfk.wav'),$nativeName.Trim())
+    if ($IsMacOS) { Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopHotkeys.py'),(Join-Path $package 'hotkey-runtime/phonedeck-hotkeys')) }
 }
-$manifest = [ordered]@{ version=$version; rid=$Rid; sourceCommit=(& git -C $repo rev-parse HEAD).Trim(); sourceDirty=[bool](& git -C $repo status --porcelain); whisperCommit=$commit; modelSha256=$modelHash.ToLowerInvariant(); modelBundled=[bool]$ModelPath; createdUtc=[DateTime]::UtcNow.ToString('O'); files=@() }
+$manifest = [ordered]@{ version=$version; rid=$Rid; sourceCommit=(& git -C $repo rev-parse HEAD).Trim(); sourceDirty=[bool](& git -C $repo status --porcelain); whisperCommit=$commit; modelSha256=$modelHash.ToLowerInvariant(); modelBundled=[bool]$ModelPath; createdUtc=[DateTime]::UtcNow.ToString('O'); fileHashStage='published-payload-before-signing'; files=@() }
 foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) { $manifest.files += @{ path=[IO.Path]::GetRelativePath($package,$file.FullName).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $package 'build-manifest.json') -Encoding utf8NoBOM
 if ($IsWindows) {
@@ -110,6 +117,9 @@ if ($IsWindows) {
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/desktop/Info.plist') -Destination (Join-Path $bundle 'Contents/Info.plist')
     Get-ChildItem -LiteralPath $package | Copy-Item -Destination $macos -Recurse
     # Ad-hoc preview only. Developer ID signing/notarization is a separate release gate.
+    # Custom runtime directories are not standard nested-code locations. Sign them explicitly.
+    Get-ChildItem -LiteralPath (Join-Path $macos 'speech-runtime') -File | Where-Object Name -Like 'whisper-cli*' | ForEach-Object { Invoke-Checked codesign @('--force','--sign','-', $_.FullName) }
+    Invoke-Checked codesign @('--force','--sign','-',(Join-Path $macos 'hotkey-runtime/phonedeck-hotkeys'))
     Invoke-Checked codesign @('--force','--deep','--sign','-',$bundle)
     Invoke-Checked codesign @('--verify','--deep','--strict',$bundle)
     $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('-czf',$archive,'-C',$run,'PhoneDeck.app')
@@ -125,6 +135,16 @@ if ($IsWindows) {
         Invoke-Checked dpkg-deb @('--build','--root-owner-group',$deb,(Join-Path $run "PhoneDeck-$version-$Rid.deb"))
     }
 }
-Get-ChildItem -LiteralPath $run -File | Where-Object Extension -In '.zip','.gz','.exe','.deb' | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $run 'checksums.sha256') -Encoding utf8NoBOM
+# An external manifest records final signed bytes. Putting these hashes inside a signed
+# Mac bundle would create a cycle between its code signature and its own manifest.
+$finalRoot = if ($IsMacOS) { $bundle } else { $package }
+$finalManifest = [ordered]@{}
+foreach ($key in $manifest.Keys) { if ($key -ne 'files') { $finalManifest[$key] = $manifest[$key] } }
+$finalManifest.fileHashStage = 'distributed-payload'
+$finalManifest.packageRoot = Split-Path $finalRoot -Leaf
+$finalManifest.files = @()
+foreach ($file in Get-ChildItem -LiteralPath $finalRoot -File -Recurse) { $finalManifest.files += @{ path=[IO.Path]::GetRelativePath($finalRoot,$file.FullName).Replace([char]92,[char]47); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
+$finalManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $run "PhoneDeck-$version-$Rid.build.json") -Encoding utf8NoBOM
+Get-ChildItem -LiteralPath $run -File | Where-Object { $_.Extension -In '.zip','.gz','.exe','.deb' -or $_.Name -Like '*.build.json' } | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $run 'checksums.sha256') -Encoding utf8NoBOM
 Write-Host "Package directory: $run"
 if ($env:GITHUB_OUTPUT) { "package_directory=$run" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 }

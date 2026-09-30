@@ -14,6 +14,8 @@
 
 本轮新增Desktop `2.0.0-alpha.1`、Android独立 `com.codex.phonedeck.desktoppreview` 固定签名渠道（versionCode1），不进入旧签名设备更新清单。Windows/Mac Intel/Mac ARM/Linux x64 CI已完成协议、原生识别公开样本与打包；Windows+Samsung已验证6份结果双向同步及点击/按住/电脑快捷键。Mac由用户回到电脑后自行验收；Linux SSH别名/密钥在当前机器缺失，未接入执行机。真实麦克风、焦点输入、相机扫码/实网发现、不同物理电脑和干净安装仍待验收，不代表立即公开正式Release。步骤见 docs/DESKTOP_ACCEPTANCE.md。
 
+Mac快捷键由内置原生helper在主线程接收，退出及父进程异常结束时释放；CI检查事件循环存活，物理操作仍由所有者验收。各桌面包同时提供外置build.json与SHA256，Mac清单记录签名后最终字节，不把签名前文件哈希当成签名后证据。
+
 ## 2026-09-30 M0/M1 执行进度快照（最新）
 
 本节是第 0 章路线对实际执行状态的对账快照（依据 docs/HANDOFF.md 各批次记录与 PR #24），

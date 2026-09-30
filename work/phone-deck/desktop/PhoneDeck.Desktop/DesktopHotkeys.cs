@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace PhoneDeck.Desktop;
@@ -8,8 +10,6 @@ internal sealed class DesktopHotkeys : IDisposable
     private readonly CancellationTokenSource cancellation = new();
     private readonly Thread worker;
     private uint windowsThread;
-    private nint macLoop;
-    private CarbonHandler? carbonHandler;
     private string status = "checking";
     internal string Status => status;
     internal DesktopHotkeys(SpeechSession speech)
@@ -27,7 +27,7 @@ internal sealed class DesktopHotkeys : IDisposable
             else if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))) RunX11();
             else status = "wayland-custom-shortcut";
         }
-        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException)
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException or Win32Exception or IOException)
         { status = "unavailable"; }
     }
     private void Toggle() { if (speech.Recording) _ = speech.StopLocalAsync(); else Start(); }
@@ -57,23 +57,41 @@ internal sealed class DesktopHotkeys : IDisposable
     }
     private void RunMac()
     {
-        var types = new[] { new CarbonEventType { Class = 0x6B657962, Kind = 6 }, new CarbonEventType { Class = 0x6B657962, Kind = 9 } };
-        carbonHandler = (_, ev, _) =>
+        // The helper owns a native application event loop on its OS main thread.
+        // Only fixed hotkey commands cross this pipe; it accepts no remote arguments.
+        using var helper = new Process { StartInfo = new ProcessStartInfo
         {
-            if (GetEventParameter(ev, 0x2D2D2D2D, 0x686B6964, 0, 8, out _, out var id) != 0) return 0;
-            var kind = GetEventKind(ev);
-            if (id.Id == 1 && kind == 6) Toggle();
-            if (id.Id == 2 && kind == 6) Start();
-            if (id.Id == 2 && kind == 9) _ = speech.StopLocalAsync();
-            return 0;
-        };
-        if (InstallApplicationEventHandler(carbonHandler, 2, types, 0, out var handler) != 0) { status = "unavailable"; return; }
-        var toggle = RegisterEventHotKey(49, 0x1800, new() { Signature = 0x5048444B, Id = 1 }, GetApplicationEventTarget(), 0, out var toggleRef);
-        var hold = RegisterEventHotKey(9, 0x1800, new() { Signature = 0x5048444B, Id = 2 }, GetApplicationEventTarget(), 0, out var holdRef);
-        status = toggle == 0 && hold == 0 ? "ready" : "shortcut-conflict";
-        macLoop = CFRunLoopGetCurrent();
-        try { CFRunLoopRun(); }
-        finally { if (toggle == 0) UnregisterEventHotKey(toggleRef); if (hold == 0) UnregisterEventHotKey(holdRef); RemoveEventHandler(handler); }
+            FileName = Path.Combine(AppContext.BaseDirectory, "hotkey-runtime", "phonedeck-hotkeys"),
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        } };
+        if (!helper.Start()) { status = "unavailable"; return; }
+        // Drain native framework diagnostics without retaining or logging them.
+        _ = helper.StandardError.BaseStream.CopyToAsync(Stream.Null);
+        void KillHelper() { try { if (!helper.HasExited) helper.Kill(true); } catch (InvalidOperationException) { } catch (Win32Exception) { } }
+        using var shutdown = cancellation.Token.Register(KillHelper);
+        var holding = false;
+        try
+        {
+            while (!cancellation.IsCancellationRequested && helper.StandardOutput.ReadLine() is { } command)
+            {
+                switch (command)
+                {
+                    case "ready": case "shortcut-conflict": case "unavailable": status = command; break;
+                    case "toggle": Toggle(); break;
+                    case "start": Start(); holding = speech.Recording; break;
+                    case "stop": holding = false; _ = speech.StopLocalAsync(); break;
+                    default: status = "unavailable"; return;
+                }
+            }
+        }
+        finally
+        {
+            KillHelper();
+            helper.WaitForExit(1000);
+            if (holding) _ = speech.StopLocalAsync(true);
+            if (!cancellation.IsCancellationRequested) status = "unavailable";
+        }
     }
     private void RunX11()
     {
@@ -106,15 +124,12 @@ internal sealed class DesktopHotkeys : IDisposable
     }
     public void Dispose()
     {
-        cancellation.Cancel(); if (macLoop != 0) CFRunLoopStop(macLoop);
+        cancellation.Cancel();
         if (windowsThread != 0) PostThreadMessage(windowsThread, 0, 0, 0);
         worker.Join(1000);
     }
     [StructLayout(LayoutKind.Sequential)] private struct WinMessage { public nint Window; public uint Message; public nuint WParam; public nint LParam; public uint Time; public int X, Y; public uint Private; }
-    [StructLayout(LayoutKind.Sequential)] private struct CarbonEventType { public uint Class, Kind; }
-    [StructLayout(LayoutKind.Sequential)] private struct CarbonHotkeyId { public uint Signature, Id; }
     [StructLayout(LayoutKind.Explicit, Size = 192)] private struct XEvent { [FieldOffset(0)] public int Type; [FieldOffset(84)] public uint KeyCode; }
-    private delegate int CarbonHandler(nint next, nint ev, nint data);
     private delegate int XErrorHandler(nint display, nint error);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(nint window, int id);
@@ -122,18 +137,6 @@ internal sealed class DesktopHotkeys : IDisposable
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint id, uint msg, nuint wparam, nint lparam);
-    private const string Carbon = "/System/Library/Frameworks/Carbon.framework/Carbon";
-    private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-    [DllImport(Carbon)] private static extern int InstallApplicationEventHandler(CarbonHandler callback, uint count, CarbonEventType[] types, nint data, out nint handler);
-    [DllImport(Carbon)] private static extern int RemoveEventHandler(nint handler);
-    [DllImport(Carbon)] private static extern int RegisterEventHotKey(uint code, uint modifiers, CarbonHotkeyId id, nint target, uint options, out nint reference);
-    [DllImport(Carbon)] private static extern int UnregisterEventHotKey(nint reference);
-    [DllImport(Carbon)] private static extern nint GetApplicationEventTarget();
-    [DllImport(Carbon)] private static extern uint GetEventKind(nint ev);
-    [DllImport(Carbon)] private static extern int GetEventParameter(nint ev, uint name, uint type, nint actualType, uint size, out uint actualSize, out CarbonHotkeyId id);
-    [DllImport(CoreFoundation)] private static extern nint CFRunLoopGetCurrent();
-    [DllImport(CoreFoundation)] private static extern void CFRunLoopRun();
-    [DllImport(CoreFoundation)] private static extern void CFRunLoopStop(nint loop);
     [DllImport("libX11.so.6")] private static extern nint XOpenDisplay(nint name);
     [DllImport("libX11.so.6")] private static extern nuint XDefaultRootWindow(nint display);
     [DllImport("libX11.so.6")] private static extern byte XKeysymToKeycode(nint display, nuint symbol);
