@@ -56,9 +56,8 @@ internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory)
                 await process.StandardInput.BaseStream.WriteAsync(Wave(pcm), timeout.Token);
                 process.StandardInput.Close();
                 await process.WaitForExitAsync(timeout.Token);
-                var text = (await output).Trim(); await errors;
+                var text = NormalizeTranscript(await output); await errors;
                 if (process.ExitCode != 0) throw new IOException("内置识别失败，请重试或检查模型");
-                if (text.Length > 4096) throw new InvalidDataException("识别内容超过长度限制");
                 return text;
             }
             finally
@@ -67,6 +66,15 @@ internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory)
             }
         }
         finally { gate.Release(); }
+    }
+    internal static string NormalizeTranscript(string output)
+    {
+        // CLI segment boundaries are presentation wrapping, not commands to press Enter.
+        // Normalize once before storing/syncing so all computers receive identical text.
+        var text = string.Join(' ', output.Split(['\r', '\n', '\t', '\u0085', '\u2028', '\u2029'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+        if (text.Length > 4096) throw new InvalidDataException("识别内容超过长度限制");
+        if (text.Any(char.IsControl)) throw new InvalidDataException("识别结果含无效控制字符，请重试");
+        return text;
     }
     private static Process StartProcess(ProcessStartInfo start)
     {

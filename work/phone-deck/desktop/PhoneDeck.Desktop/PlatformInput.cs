@@ -7,6 +7,17 @@ namespace PhoneDeck.Desktop;
 internal sealed class PlatformInput
 {
     private readonly object gate = new();
+    private static readonly Lazy<bool> X11Threads = new(() =>
+    {
+        try { return XInitThreads() != 0; }
+        catch (DllNotFoundException) { return false; }
+        catch (EntryPointNotFoundException) { return false; }
+    });
+    internal PlatformInput()
+    {
+        // Initialize Xlib locking before DesktopHotkeys opens its separate connection.
+        if (OperatingSystem.IsLinux() && !Wayland) _ = X11Threads.Value;
+    }
     internal bool Available => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() && AXIsProcessTrusted()
         || OperatingSystem.IsLinux() && LinuxTool is not null;
     internal string Backend => OperatingSystem.IsWindows() ? "SendInput" : OperatingSystem.IsMacOS() ? "CGEvent" : LinuxTool ?? "未安装输入辅助工具";
@@ -105,7 +116,7 @@ internal sealed class PlatformInput
                 if (offset + length < text.Length && char.IsHighSurrogate(text[offset + length - 1])) length--;
                 var value = text.Substring(offset, length); offset += length; var e = CGEventCreateKeyboardEvent(0, 0, true);
                 if (e == 0) throw new IOException("无法创建输入事件");
-                try { CGEventKeyboardSetUnicodeString(e, (nuint)value.Length, value); CGEventPost(0, e); CGEventSetType(e, 11); CGEventPost(0, e); }
+                try { CGEventSetFlags(e, 0); CGEventKeyboardSetUnicodeString(e, (nuint)value.Length, value); CGEventPost(0, e); CGEventSetType(e, 11); CGEventPost(0, e); }
                 finally { CFRelease(e); }
             }
         }
@@ -178,12 +189,36 @@ internal sealed class PlatformInput
         {
             lock (gate)
             {
+                ValidateVoiceInsertionText(text);
                 if (Focus() != before) throw new IOException("输入焦点已改变");
                 if (OperatingSystem.IsWindows() && new[] { 0x10, 0x11, 0x12, 0x5B, 0x5C }.Any(k => (GetAsyncKeyState(k) & 0x8000) != 0))
+                    throw new IOException("请松开电脑组合键后复制文字");
+                if (OperatingSystem.IsMacOS() && new ushort[] { 54, 55, 56, 58, 59, 60, 61, 62, 63 }.Any(k => CGEventSourceKeyState(1, k)))
+                    throw new IOException("请松开电脑组合键后复制文字");
+                if (OperatingSystem.IsLinux() && X11ModifiersHeld())
                     throw new IOException("请松开电脑组合键后复制文字");
                 Execute("text", text, null, null);
             }
         };
+    }
+    internal static void ValidateVoiceInsertionText(string text)
+    {
+        if (text.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029'))
+            throw new IOException("结果包含控制字符，请从记录复制文字");
+    }
+    internal static bool HasUnsafeX11Modifiers(uint mask) => (mask & (1U | 4U | 8U | 32U | 64U | 128U)) != 0;
+    private static bool X11ModifiersHeld()
+    {
+        if (!X11Threads.Value) throw new IOException("无法检查桌面组合键，请从记录复制文字");
+        var display = XOpenDisplay(0);
+        if (display == 0) throw new IOException("无法检查桌面组合键，请从记录复制文字");
+        try
+        {
+            if (XQueryPointer(display, XDefaultRootWindow(display), out _, out _, out _, out _, out _, out _, out var mask) == 0)
+                throw new IOException("无法检查桌面组合键，请从记录复制文字");
+            return HasUnsafeX11Modifiers(mask);
+        }
+        finally { XCloseDisplay(display); }
     }
     private static string? Focus()
     {
@@ -236,6 +271,12 @@ internal sealed class PlatformInput
     [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")] private static extern void CGEventKeyboardSetUnicodeString(nint e, nuint length, [MarshalAs(UnmanagedType.LPWStr)] string text);
     [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")] private static extern void CGEventPost(int tap, nint e);
     [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")] private static extern void CGEventSetType(nint e, uint type);
+    [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")] private static extern void CGEventSetFlags(nint e, ulong flags);
     [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CGEventSourceKeyState(int source, ushort key);
     [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")] private static extern void CFRelease(nint value);
+    [DllImport("libX11.so.6")] private static extern int XInitThreads();
+    [DllImport("libX11.so.6")] private static extern nint XOpenDisplay(nint name);
+    [DllImport("libX11.so.6")] private static extern nuint XDefaultRootWindow(nint display);
+    [DllImport("libX11.so.6")] private static extern int XQueryPointer(nint display, nuint window, out nuint root, out nuint child, out int rootX, out int rootY, out int windowX, out int windowY, out uint mask);
+    [DllImport("libX11.so.6")] private static extern int XCloseDisplay(nint display);
 }
