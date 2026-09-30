@@ -1,6 +1,13 @@
 using System.Diagnostics;
 using PhoneDeck.Desktop;
 
+if (args.Contains("--speech-runtime-name"))
+{
+    // Read-only packaging diagnostic: no server, user data or keyboard hooks are created.
+    Console.WriteLine(Path.GetFileName(WhisperEngine.SelectExecutable(Path.Combine(AppContext.BaseDirectory, "speech-runtime"))));
+    return;
+}
+
 if (args.Contains("--toggle") || args.Contains("--start") || args.Contains("--stop"))
 {
     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };

@@ -51,6 +51,18 @@ Invoke-Checked dotnet @('publish',(Join-Path $repo 'work/phone-deck/desktop/Phon
 $runtime = Join-Path $package 'speech-runtime'; New-Item -ItemType Directory -Path $runtime | Out-Null
 $cli = if ($IsWindows) { Join-Path $native 'bin/Release/whisper-cli.exe' } else { Join-Path $native 'bin/whisper-cli' }
 Copy-Item -LiteralPath $cli -Destination $runtime
+if ($Rid.EndsWith('x64')) {
+    $fastNative = Join-Path $run 'native-build-avx2'
+    $fastOptions = $options | ForEach-Object {
+        if ($_ -eq $native) { $fastNative }
+        elseif ($_ -match '^-DGGML_(AVX|AVX2|FMA|F16C|BMI2|SSE42)=OFF$') { $_.Replace('=OFF','=ON') }
+        else { $_ }
+    }
+    Invoke-Checked cmake $fastOptions
+    Invoke-Checked cmake @('--build',$fastNative,'--config','Release','--target','whisper-cli','--parallel','4')
+    $fastCli = if ($IsWindows) { Join-Path $fastNative 'bin/Release/whisper-cli.exe' } else { Join-Path $fastNative 'bin/whisper-cli' }
+    Copy-Item -LiteralPath $fastCli -Destination (Join-Path $runtime ('whisper-cli-avx2' + $(if ($IsWindows) { '.exe' } else { '' })))
+}
 Copy-Item -LiteralPath (Join-Path $WhisperSource 'LICENSE') -Destination (Join-Path $runtime 'LICENSE-whisper.cpp.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP_QUICK_START.md') -Destination (Join-Path $package 'START-HERE.md')
 Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP_THIRD_PARTY.md') -Destination (Join-Path $package 'THIRD-PARTY.md')
@@ -78,9 +90,12 @@ if ($VerifySpeech) {
     $smoke = Join-Path $run '语音验收'
     New-Item -ItemType Directory -Path (Join-Path $smoke 'models'),(Join-Path $smoke 'speech-runtime') -Force | Out-Null
     Copy-Item -LiteralPath $validationModel -Destination (Join-Path $smoke 'models/ggml-small-q5_1.bin')
-    Copy-Item -LiteralPath $cli -Destination (Join-Path $smoke 'speech-runtime')
+    Get-ChildItem -LiteralPath $runtime -File | Copy-Item -Destination (Join-Path $smoke 'speech-runtime')
+    $desktopExe = Join-Path $package ('PhoneDeck.Desktop' + $(if ($IsWindows) { '.exe' } else { '' }))
+    $nativeName = & $desktopExe --speech-runtime-name
+    if ($LASTEXITCODE -ne 0 -or $nativeName.Trim() -notin @('whisper-cli','whisper-cli.exe','whisper-cli-avx2','whisper-cli-avx2.exe')) { throw 'Published receiver failed to select a compatible native speech runtime.' }
     $python = if ($IsWindows) { 'python' } else { 'python3' }
-    Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopSpeech.py'),$smoke,(Join-Path $WhisperSource 'samples/jfk.wav'))
+    Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopSpeech.py'),$smoke,(Join-Path $WhisperSource 'samples/jfk.wav'),$nativeName.Trim())
 }
 $manifest = [ordered]@{ version=$version; rid=$Rid; sourceCommit=(& git -C $repo rev-parse HEAD).Trim(); sourceDirty=[bool](& git -C $repo status --porcelain); whisperCommit=$commit; modelSha256=$modelHash.ToLowerInvariant(); modelBundled=[bool]$ModelPath; createdUtc=[DateTime]::UtcNow.ToString('O'); files=@() }
 foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) { $manifest.files += @{ path=[IO.Path]::GetRelativePath($package,$file.FullName).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
@@ -96,6 +111,7 @@ if ($IsWindows) {
     Get-ChildItem -LiteralPath $package | Copy-Item -Destination $macos -Recurse
     # Ad-hoc preview only. Developer ID signing/notarization is a separate release gate.
     Invoke-Checked codesign @('--force','--deep','--sign','-',$bundle)
+    Invoke-Checked codesign @('--verify','--deep','--strict',$bundle)
     $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('-czf',$archive,'-C',$run,'PhoneDeck.app')
 } else {
     $archive = Join-Path $run "PhoneDeck-$version-$Rid.tar.gz"; Invoke-Checked tar @('-czf',$archive,'-C',$run,(Split-Path $package -Leaf))

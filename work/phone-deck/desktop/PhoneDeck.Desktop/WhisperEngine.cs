@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Runtime.Intrinsics.X86;
 
 namespace PhoneDeck.Desktop;
 
@@ -12,7 +13,17 @@ internal interface ISpeechEngine
 internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory) : ISpeechEngine
 {
     private readonly SemaphoreSlim gate = new(1);
-    internal string Executable => Path.Combine(runtimeDirectory, OperatingSystem.IsWindows() ? "whisper-cli.exe" : "whisper-cli");
+    internal string Executable => SelectExecutable(runtimeDirectory);
+    internal static string SelectExecutable(string directory)
+    {
+        var suffix = OperatingSystem.IsWindows() ? ".exe" : "";
+        var accelerated = Path.Combine(directory, "whisper-cli-avx2" + suffix);
+        // MSVC's AVX2 target may also emit FMA, F16C, BMI2 and SSE4.2 instructions.
+        // Require the complete feature set, including OS AVX state support, before selecting it.
+        if (Avx2.IsSupported && Fma.IsSupported && Bmi2.IsSupported && Sse42.IsSupported
+            && (X86Base.CpuId(1, 0).Ecx & (1 << 29)) != 0 && File.Exists(accelerated)) return accelerated;
+        return Path.Combine(directory, "whisper-cli" + suffix);
+    }
     public bool Ready => assets.Ready && File.Exists(Executable);
 
     public async Task<string> TranscribeAsync(byte[] pcm, CancellationToken cancellation)
