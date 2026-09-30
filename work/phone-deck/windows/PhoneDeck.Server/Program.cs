@@ -88,6 +88,28 @@ var pairingWindows = new PairingWindowManager(
     lanIdentity.CertificateSha256,
     lanIdentity.HttpsPort);
 
+// SEC-02/V13：8765 回环入口的 Host/Origin 防护——拦截本机恶意网页的跨站
+// 表单/fetch 触达有副作用的管理端点（配对开窗/撤销/设置写入）。仅约束非 GET。
+app.Use(async (context, next) =>
+{
+    if (context.Connection.LocalPort == 8765
+        && !HttpMethods.IsGet(context.Request.Method)
+        && !HttpMethods.IsHead(context.Request.Method))
+    {
+        var rejection = LoopbackOriginGuard.Validate(
+            context.Request.Headers.Host.ToString(),
+            context.Request.Headers.Origin.FirstOrDefault(),
+            context.Request.Headers.Referer.FirstOrDefault());
+        if (rejection is not null)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { ok = false, error = rejection });
+            return;
+        }
+    }
+    await next();
+});
+
 app.Use(async (context, next) =>
 {
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料即授权证明，不经令牌鉴权（设计 §3/§10）。

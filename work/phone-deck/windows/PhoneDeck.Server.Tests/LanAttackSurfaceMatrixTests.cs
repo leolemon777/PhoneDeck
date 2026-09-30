@@ -63,10 +63,9 @@ public sealed class LanAttackSurfaceMatrixTests
             Assert.IsTrue(loopback.Authorized);
             Assert.IsNull(loopback.ClientId, "回环请求不带客户端身份（管理面）");
 
-            // 如实记录的差距（KNOWN_ISSUES #3 / SEC-02）：8765 尚无 Host/Origin 校验，
-            // 恶意网页简单表单可触达管理端点。Resolve 签名（本测试实际调用）只有
-            // 端口/令牌/共享令牌/凭据库四个安全维度——无 Host/Origin 入参即差距本身。
-            // 修复（中间件加校验）后本注释处应补充正向断言。
+            // Host/Origin 防护已由 LoopbackOriginGuard 中间件实现（2026-09-30，
+            // 见 LoopbackOriginGuardTests 矩阵与真实服务器 evil-origin=403 实测）；
+            // Resolve 本身只管令牌维度，防护在中间件层。
         }
         finally { Cleanup(); }
     }
