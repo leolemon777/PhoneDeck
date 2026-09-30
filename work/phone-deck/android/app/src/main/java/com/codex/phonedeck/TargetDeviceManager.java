@@ -349,7 +349,7 @@ final class TargetDeviceManager {
                     for (int addressIndex = 0;
                          addressIndex < addressArray.length(); addressIndex++) {
                         String address = addressArray.optString(addressIndex, "").trim();
-                        if (!address.isEmpty() && isAddressCandidateSafe(address)
+                        if (!address.isEmpty() && hostAcceptable(address)
                                 && !addresses.contains(address)) {
                             addresses.add(address);
                         }
@@ -376,7 +376,7 @@ final class TargetDeviceManager {
                         item.optString("clientId", null),
                         sharedGroup,
                         certificateSha256,
-                        isAddressCandidateSafe(lastGood) ? lastGood : null));
+                        hostAcceptable(lastGood) ? lastGood : null));
             }
         } catch (Exception ignored) {
             devices.clear();

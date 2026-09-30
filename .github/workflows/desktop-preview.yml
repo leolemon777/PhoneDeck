@@ -30,12 +30,19 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - name: Install Windows package compiler
+      - name: Prepare verified portable Windows package compiler
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install innosetup --version=6.7.3 --no-progress -y
-          (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6') | Add-Content $env:GITHUB_PATH
+          $compilerRoot = Join-Path $env:RUNNER_TEMP 'phonedeck-inno'
+          New-Item -ItemType Directory -Path $compilerRoot -Force | Out-Null
+          $archive = Join-Path $compilerRoot 'tools.innosetup.6.7.3.nupkg'
+          Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/tools.innosetup/6.7.3/tools.innosetup.6.7.3.nupkg' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'F780898E402FF80612CC8D9FCB8C6E02932BD1CB4C900FFDAA31F9341CFB49F4') { throw 'Compiler archive hash mismatch' }
+          dotnet nuget verify $archive --all
+          if ($LASTEXITCODE -ne 0) { throw 'Compiler repository signature verification failed' }
+          [IO.Compression.ZipFile]::ExtractToDirectory($archive, (Join-Path $compilerRoot 'unpacked'))
+          (Join-Path $compilerRoot 'unpacked/tools') | Add-Content $env:GITHUB_PATH
       - name: Test and package native runtime
         id: package
         shell: pwsh
