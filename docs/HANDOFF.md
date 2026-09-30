@@ -1,5 +1,18 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 M1-B 收尾：会话状态机×租约登记集成台架（最新）
+
+- 新增 `SessionManagerLeaseIntegrationTests`（5 用例，**136/136 通过**）：把第一片的
+  SessionLeaseRegistry 真正挂上 DictationSessionManager（注入假引擎/假音频）走完整时序——
+  - V25/R1：Stop 后同 sessionId 迟到 start 在引擎触碰前被拒（ToggleCount 零增长）；
+  - V25/R2：旧会话迟到 stop 不清新会话（B 保持 Active）；
+  - V25/T03→T09：失败启动同 sessionId 可重试成功（Abandon 无墓碑接线验证）；
+  - V20/DEV-04：ACTIVE 态第二会话被拒不抢占；STARTING 态（StartGate 阻塞模拟慢引擎）
+    第二会话同样被拒；停旧后新会话可启动（目标切换先停语义）。
+- M1-B 台架覆盖至此：租约/墓碑/代次（孤立+集成）、V47 冲突、V21 零目标窗口、
+  V22 L1 部分。真机欠账不变（手机仍在 192.168.0.x 跨网段；V09/V17/V10/V21 完整形态
+  等待同网段）。
+
 ## 2026-09-30 M1-B 第二片：共享组显式集合（DEV-03）+ V21/V22 台架（最新）
 
 - **共享组语义**（手机端）：Device 增 `sharedGroup`（加密持久化，穿透全部重建点：
