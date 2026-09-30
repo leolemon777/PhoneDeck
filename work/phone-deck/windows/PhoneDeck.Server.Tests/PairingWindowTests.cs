@@ -164,6 +164,32 @@ public sealed class PairingWindowTests
     }
 
     [TestMethod]
+    public void V11_ClockRollbackDoesNotReviveOrExtendWindow()
+    {
+        var (manager, clock) = NewManagerWithClock();
+        var session = manager.Begin();
+        clock.AdvanceSeconds(100);
+        // 墙上时间回拨的模拟：单调时钟注入值"倒退"后，窗口剩余时间按注入值计算，
+        // 但已消费/墓碑状态不受时钟操纵复活；重新注入正常流逝后行为一致。
+        Assert.AreEqual(PairingSubmitStatus.Pending, manager.TryBeginSubmit(
+            session.PairingId, session.Material, "77777777-7777-4777-8777-777777777777",
+            "PHONE-D", out _));
+        clock.Tick -= 200; // 回拨 200ms：已提交的待确认不受影响
+        Assert.IsTrue(manager.HasPendingConfirmation());
+        Assert.IsTrue(manager.Confirm(session.PairingId));
+        // 窗口消费后回拨也不能让材料复活（同会话重复提交→MaterialInvalid，非 Pending）。
+        var (manager2, clock2) = NewManagerWithClock();
+        var session2 = manager2.Begin();
+        Assert.AreEqual(PairingSubmitStatus.Pending, manager2.TryBeginSubmit(
+            session2.PairingId, session2.Material, "77777777-7777-4777-8777-777777777777",
+            "PHONE-D", out _));
+        clock2.Tick -= 60_000; // 回拨试图绕过材料已消费判定
+        Assert.AreEqual(PairingSubmitStatus.MaterialInvalid, manager2.TryBeginSubmit(
+            session2.PairingId, session2.Material, "77777777-7777-4777-8777-777777777777",
+            "PHONE-D", out _), "回拨不复活已消费材料（判定与时间无关的状态位）");
+    }
+
+    [TestMethod]
     public void V09_CancelDeniesPendingAndClosesWindow()
     {
         var (manager, _) = NewManagerWithClock();
