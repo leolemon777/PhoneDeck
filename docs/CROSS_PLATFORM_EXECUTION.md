@@ -42,3 +42,5 @@
 本地诊断发现并修复了 Windows 中文模型路径的 UTF-8 argv 崩溃、stdin 默认不输出识别文字、Mac 不支持 EphemeralKeySet、新版 Windows runner 编译器选择、Android SDK obsolete tools 和预览渠道回环地址加载丢失。x64包同时携带通用与加速组件；CPU及OS支持全部所需指令才自动使用加速组件，旧CPU回退通用组件。
 
 自动化和跨平台构建不冒充真实桌面验收。剩余逐项操作见 [真机验收步骤](DESKTOP_ACCEPTANCE.md)。Windows干净安装/焦点自动填入、实网发现与相机扫码、真实中文麦克风、不同物理电脑、Mac权限/输入、Linux X11/Wayland仍是正式版门槛。候选保持alpha，不创建正式Release。
+
+Windows焦点输入尝试因执行会话没有获得专用测试窗口前台焦点而停止，未启动该次听写，没有向用户输入框注入；不能把测试窗口构建或热键模拟算作焦点自动填入验收。独立Android分发APK已在Samsung安装并检查干净启动：显示扫码指引及内置识别，不自动接入旧USB，也不弹蓝牙授权。

@@ -29,7 +29,7 @@
 
 本版本是 `2.0.0-alpha.1`。它不参与旧版签名设备更新流程；不要把这些新包放入旧设备更新清单。目前不能宣称所有 Mac/Linux 桌面已实机验收。发布正式版前需要 Windows/Mac/Linux 的首次安装、权限、输入、语音、同步及断线验收。
 
-Android分发渠道为 `com.codex.phonedeck.desktoppreview`，使用保存在所有者本地的固定签名；CI的 `.preview` APK只供开发验收，临时debug签名不用于公开持续更新。Mac自行验收可按 [真机步骤](DESKTOP_ACCEPTANCE.md) 操作。
+Android分发渠道为 `com.codex.phonedeck.desktoppreview`，使用保存在所有者本地的固定签名。这个渠道默认扫码/TLS连接，不自动接入旧USB接收端或在启动时请求蓝牙权限；原Luma保留旧USB/蓝牙入口。CI的 `.preview` APK只供开发验收，临时debug签名不用于公开持续更新。Mac自行验收可按 [真机步骤](DESKTOP_ACCEPTANCE.md) 操作。
 
 构建范围为 Windows x64、Mac Intel/Apple Silicon、Linux x64/arm64（匹配架构原生构建）。系统基线为 Windows 10/11 x64、macOS 14+、Ubuntu 22.04/24.04 桌面，其他 Linux 发行版先按技术预览对待；运行时支持范围参照 [Microsoft .NET 10 系统矩阵](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)。Android 最低8.0；iPhone 客户端尚未实现。
 

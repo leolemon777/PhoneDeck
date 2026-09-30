@@ -10,6 +10,8 @@
 - **验证**：新Desktop16/16（四OS runner均过，含真实Kestrel HTTPS/权限/目标/撤销/结果隔离）、旧Windows144/144、旧Mac23/23、Android27单测+Debug/uiPreview构建/lint。四种Desktop包的[CI 36734226772](https://github.com/leolemon777/PhoneDeck/actions/runs/36734226772)全绿，公开JFK/中文路径/PCM stdin/stdout/无新增录音结果文件实测：Windows16.4s、Linux14.5s、Mac Intel17.5s、Mac ARM38.7s；这些是CI样本时间，不代表用户硬件延迟。
 - **Samsung真实中继**：SM-G9880 + 同一台Windows上两个隔离接收端；公开样本生成6份结果，经真实手机固定TLS双向同步，结果编号/来源/会话/文字相同；无重复、无导入结果回传。验证managed协议、浏览器点击/指针按住/键盘按住、原生Ctrl+Alt+Space及Ctrl+Alt+V。测试用history-only、无麦克风，结束后恢复预览App配对/开关，只移除本轮adb反向端口。证据在ignored `outputs/cross-platform/relay-test`。
 - **Android可分发渠道**：新增不可调试、独立包名 `.desktoppreview`、alpha1/versionCode1、名称Luma Preview；使用新渠道固定RSA3072签名，不沿用CI临时debug签名。本地固定密钥及配置保留在两个工作树的ignored `work/phone-deck/signing/desktop-preview`，原本工作树的副本为长期保管位置；原发布密钥未更换。不得提交/上传私钥，所有者需离机备份并持续复用。通过 `PHONEDECK_SIGNING_PROPERTIES` 指定配置，无配置打包失败。
+- 新渠道首次启动已在Samsung安装检查；默认扫码/TLS、不自动接入旧USB或弹蓝牙授权，未连接时指引扫码并显示“内置识别”，麦克风仅在用户开始时请求权限。原Luma及uiPreview保留旧USB/蓝牙路径。许可文本随新APK打包。
+- 尝试专用FocusSink窗口的实桌面自动填入验收：本机执行会话未获得测试窗口前台焦点，前置断言即停止，未启动该次听写、未向其他窗口输入；两个测试窗口均关闭。因此不计为Windows焦点填入实测通过，仍按DESKTOP_ACCEPTANCE人工验收。
 - **待办**：用户澄清没有当前可接入Mac，会回Mac自行操作，见 [DESKTOP_ACCEPTANCE.md](DESKTOP_ACCEPTANCE.md)。Linux SSH说明已读，但本机缺 `linux2` 别名/密钥，未连接；没有改网络/代理/SSH配置。仍需干净安装、真实中文麦克风、相机扫码/实网发现、不同物理电脑、焦点自动填入、Mac权限/快捷键、Linux X11/Wayland。不能把CI或两个同机进程写成上述真机验收。
 - 工件只作为alpha候选；Windows发布者签名、Mac Developer ID/notarization及最终公开Release仍未完成。构建、快速开始及可追溯验证分别见 BUILD_PIPELINE、DESKTOP_QUICK_START、CROSS_PLATFORM_EXECUTION。
 
