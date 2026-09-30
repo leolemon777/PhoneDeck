@@ -1,5 +1,18 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 统一跨平台 Desktop alpha 与低配置候选（最新）
+
+- 用户授权执行Windows/Mac/Linux、点击/按住/电脑快捷键、最终文字同步与可下载分发；随后确定内置开源识别、首次下载模型。新增独立Desktop `2.0.0-alpha.1`，源码在 `work/phone-deck/desktop`，不修改旧外部输入法链路及固定三产物更新协议。
+- 工作树 `PhoneDeck-cross-platform`、分支 `agent/cross-platform-release`、[草稿PR #26](https://github.com/leolemon777/PhoneDeck/pull/26) 以 `agent/phone-managed-desktop` 为基线，依赖PR #24。原工作树状态窗口WIP未代提交。
+- 复用v2 PCM48、稳定身份、逐手机Bearer凭据、TLS/证书固定、扫码+本机确认、发现；localhost控制页有限定Host/Origin/FetchSite。模型固定commit/大小/SHA256，音频和结果仅内存；共享供音与managed听写共用会话，取消/撤销/断流不发布迟到结果。
+- 来源电脑仅在用户启动该段且输入焦点未变化时填入；其他电脑保留同步记录，不自动输入/回车。Android显式开启后通过手机中继同一resultId；每端最多100条/30分钟，重启清空，导入结果不回传。只保证仍运行且仍在保留窗口内的重试。
+- 修复公开样本发现的Windows中文argv崩溃、stdin结果不输出、Mac证书加载flag、CI新版VS/Android旧tools包、预览渠道回环地址加载丢失。x64包携带通用与独立AVX2版本，由.NET检测完整CPU/OS特性再选择；ARM64走对应CPU后端。Windows无额外VC++/.NET安装需求；Mac ad-hoc签名；Linux deb声明系统依赖。
+- **验证**：新Desktop16/16（四OS runner均过，含真实Kestrel HTTPS/权限/目标/撤销/结果隔离）、旧Windows144/144、旧Mac23/23、Android27单测+Debug/uiPreview构建/lint。四种Desktop包的[CI 36734226772](https://github.com/leolemon777/PhoneDeck/actions/runs/36734226772)全绿，公开JFK/中文路径/PCM stdin/stdout/无新增录音结果文件实测：Windows16.4s、Linux14.5s、Mac Intel17.5s、Mac ARM38.7s；这些是CI样本时间，不代表用户硬件延迟。
+- **Samsung真实中继**：SM-G9880 + 同一台Windows上两个隔离接收端；公开样本生成6份结果，经真实手机固定TLS双向同步，结果编号/来源/会话/文字相同；无重复、无导入结果回传。验证managed协议、浏览器点击/指针按住/键盘按住、原生Ctrl+Alt+Space及Ctrl+Alt+V。测试用history-only、无麦克风，结束后恢复预览App配对/开关，只移除本轮adb反向端口。证据在ignored `outputs/cross-platform/relay-test`。
+- **Android可分发渠道**：新增不可调试、独立包名 `.desktoppreview`、alpha1/versionCode1、名称Luma Preview；使用新渠道固定RSA3072签名，不沿用CI临时debug签名。本地固定密钥及配置保留在两个工作树的ignored `work/phone-deck/signing/desktop-preview`，原本工作树的副本为长期保管位置；原发布密钥未更换。不得提交/上传私钥，所有者需离机备份并持续复用。通过 `PHONEDECK_SIGNING_PROPERTIES` 指定配置，无配置打包失败。
+- **待办**：用户澄清没有当前可接入Mac，会回Mac自行操作，见 [DESKTOP_ACCEPTANCE.md](DESKTOP_ACCEPTANCE.md)。Linux SSH说明已读，但本机缺 `linux2` 别名/密钥，未连接；没有改网络/代理/SSH配置。仍需干净安装、真实中文麦克风、相机扫码/实网发现、不同物理电脑、焦点自动填入、Mac权限/快捷键、Linux X11/Wayland。不能把CI或两个同机进程写成上述真机验收。
+- 工件只作为alpha候选；Windows发布者签名、Mac Developer ID/notarization及最终公开Release仍未完成。构建、快速开始及可追溯验证分别见 BUILD_PIPELINE、DESKTOP_QUICK_START、CROSS_PLATFORM_EXECUTION。
+
 ## 2026-09-30 UI P2 双主题走查全绿 + 预览渠道直启基建（最新）
 
 - 核实设置族六个 Activity 早已全部使用 Console v2 令牌（零硬编码色），文档中

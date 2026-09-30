@@ -6,7 +6,11 @@
 
 默认测试后构建静态 whisper.cpp 和自包含 .NET，生成 ZIP、macOS app tar、Linux tar/deb、构建来源与文件哈希清单；`-IncludeModel` 为完整离线初用包，否则界面只需下载一次模型。新流水线 `.github/workflows/desktop-preview.yml` 只产预览工件，不创建 GitHub Release。Windows native C++ 不依赖另装 VC++ runtime，Windows UTF-8 入口覆盖中文路径。macOS 当前 ad-hoc 签名，正式 Developer ID/notarization 和真实设备验收仍是发布门槛。
 
+`-VerifySpeech` 使用固定哈希模型及upstream公开JFK样本，在中文绝对路径中验证内存stdin、stdout结果和没有新增录音/文字文件；轻量包不会混入测试模型。x64包包含通用与AVX2组件，接收端先检查全部CPU/OS特性后选择。CI的四平台构建均开启此项；macOS打包后验证ad-hoc签名完整性。Windows CI使用固定SHA-256和NuGet仓库签名验证的便携Inno Setup6.7.3，不安装编译器到系统。
+
 该路线独立版本 `2.0.0-alpha.1`，不修改旧固定三产物的签名设备更新链路。Android CI 仍生成独立包名 `.preview` 的 APK；这个渠道供开发验收，正式公开 APK 需要持续使用所有者保管的签名密钥。具体使用/依赖见 `DESKTOP_QUICK_START.md`、`DESKTOP_THIRD_PARTY.md`。
+
+Android可分发候选使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，包名 `.desktoppreview`、版本2.0.0-alpha.1/1、不可调试。通过进程环境 `PHONEDECK_SIGNING_PROPERTIES` 指定固定签名配置，keystore路径相对该文件解析；无固定配置时打包明确失败，不回退随机debug签名。本轮为这个新渠道生成单独的RSA3072长期密钥，放在所有者本地受限且Git忽略的signing目录中；原发布密钥未更换。私钥与密码配置必须备份并长期复用，绝不上传仓库或放入下载包。CI不持有这把私钥，只检查uiPreview构建/测试。
 
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
