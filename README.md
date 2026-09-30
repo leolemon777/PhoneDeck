@@ -1,5 +1,9 @@
 # PhoneDeck 手机控制台
 
+2026-09-30 新增 **2.0.0-alpha.1 跨平台 Desktop 接收端**：Windows/macOS/Linux 共用本地 Whisper 识别，手机点击、按住、电脑快捷键使用同一条语音链路。最终文字经配对手机同步到选定共享组；接收端保留临时记录，当前触发电脑仅在焦点未改变时自动填入。完整模型包自带 .NET、识别组件与中文/多语言模型，首次使用只需扫码确认，无需另外安装输入法或虚拟声卡。
+
+使用方法见 [跨平台快速开始](docs/DESKTOP_QUICK_START.md)，实施与验收状态见 [执行记录](docs/CROSS_PLATFORM_EXECUTION.md)。这是新增的预览路线，不能宣称三平台均已实机验收；Linux X11 与 Wayland 的输入能力不同，iPhone 客户端尚未实现。下面保留的 Windows/Mac 外部输入法说明适用于旧接收端，两种接收端需分别运行。
+
 > **English** — PhoneDeck turns a spare Android phone into a voice-input panel and a programmable shortcut console for Windows (macOS in preview): the phone supplies the microphone, your PC's dictation software does the transcription, and the phone can also send shortcuts like copy / paste / screenshot or custom macros. Grab the pre-built binaries from the [v1.6.0-beta.1 release](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.1) and follow its QUICKSTART. Docs are Chinese-first; English contributions welcome.
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。

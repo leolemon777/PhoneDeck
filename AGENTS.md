@@ -13,6 +13,8 @@
 
 ## 源码根目录
 
+2026-09-30 用户已授权执行跨平台、最终文字同步及低配置分发。新增 `work/phone-deck/desktop/PhoneDeck.Desktop` 为独立 `2.0.0-alpha.1` 路线，构建入口 `scripts/build-desktop.ps1`，具体状态见 `docs/CROSS_PLATFORM_EXECUTION.md`。旧接收端与签名设备更新链路继续保留；新包不能混入旧固定三产物更新清单。当前 .NET 项目使用 SDK 10（`global.json`），本页较早的 .NET 8 描述仅为历史基线。真实 Mac/Linux 权限和输入必须实机验证。
+
 真正的代码位于 `work/phone-deck`：
 
 - Android：`work/phone-deck/android`

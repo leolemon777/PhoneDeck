@@ -1,5 +1,13 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-09-30 跨平台 Desktop alpha 构建入口
+
+新增 `pwsh ./scripts/build-desktop.ps1 -Rid win-x64 -IncludeModel`（在目标OS/架构原生构建，支持 `linux-x64/linux-arm64/osx-x64/osx-arm64`）。依赖 .NET SDK `global.json`、CMake、Git 与 C++ 编译器；Windows Setup 另需 Inno Setup 的 ISCC。`-WhisperSource` 可使用已克隆但必须匹配固定提交且无修改的源码；`-ModelPath` 仅接受大小/哈希完全一致的模型。
+
+默认测试后构建静态 whisper.cpp 和自包含 .NET，生成 ZIP、macOS app tar、Linux tar/deb、构建来源与文件哈希清单；`-IncludeModel` 为完整离线初用包，否则界面只需下载一次模型。新流水线 `.github/workflows/desktop-preview.yml` 只产预览工件，不创建 GitHub Release。Windows native C++ 不依赖另装 VC++ runtime，Windows UTF-8 入口覆盖中文路径。macOS 当前 ad-hoc 签名，正式 Developer ID/notarization 和真实设备验收仍是发布门槛。
+
+该路线独立版本 `2.0.0-alpha.1`，不修改旧固定三产物的签名设备更新链路。Android CI 仍生成独立包名 `.preview` 的 APK；这个渠道供开发验收，正式公开 APK 需要持续使用所有者保管的签名密钥。具体使用/依赖见 `DESKTOP_QUICK_START.md`、`DESKTOP_THIRD_PARTY.md`。
+
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
 B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](MAC_HANDOVER.md)。
