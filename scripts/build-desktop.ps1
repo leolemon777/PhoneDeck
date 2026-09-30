@@ -146,5 +146,6 @@ $finalManifest.files = @()
 foreach ($file in Get-ChildItem -LiteralPath $finalRoot -File -Recurse) { $finalManifest.files += @{ path=[IO.Path]::GetRelativePath($finalRoot,$file.FullName).Replace([char]92,[char]47); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
 $finalManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $run "PhoneDeck-$version-$Rid.build.json") -Encoding utf8NoBOM
 Get-ChildItem -LiteralPath $run -File | Where-Object { $_.Extension -In '.zip','.gz','.exe','.deb' -or $_.Name -Like '*.build.json' } | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $run 'checksums.sha256') -Encoding utf8NoBOM
+if ($VerifySpeech) { Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopPackage.py'),$run,$manifest.sourceCommit) }
 Write-Host "Package directory: $run"
 if ($env:GITHUB_OUTPUT) { "package_directory=$run" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 }
