@@ -74,6 +74,8 @@ android {
 
 dependencies {
     testImplementation "junit:junit:4.13.2"
+    // M1-A A3：扫码配对（zxing-android-embedded，Apache-2.0，含核心解码库）。
+    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
 }
 
 // Gradle's Windows test worker can lose loose .class directories when the

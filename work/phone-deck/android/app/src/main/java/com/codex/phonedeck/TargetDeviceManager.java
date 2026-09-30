@@ -20,6 +20,7 @@ final class TargetDeviceManager {
         final List<String> lanAddresses;
         final int lanPort;
         final String lanToken;
+        final String clientId;
         final String certificateSha256;
         final String lastGoodAddress;
 
@@ -27,6 +28,14 @@ final class TargetDeviceManager {
                int slot, long lastSeenAt, List<String> lanAddresses,
                int lanPort, String lanToken, String certificateSha256,
                String lastGoodAddress) {
+            this(computerId, displayName, platform, slot, lastSeenAt, lanAddresses,
+                    lanPort, lanToken, null, certificateSha256, lastGoodAddress);
+        }
+
+        Device(String computerId, String displayName, String platform,
+               int slot, long lastSeenAt, List<String> lanAddresses,
+               int lanPort, String lanToken, String clientId,
+               String certificateSha256, String lastGoodAddress) {
             this.computerId = computerId;
             this.displayName = displayName;
             this.platform = platform;
@@ -35,6 +44,7 @@ final class TargetDeviceManager {
             this.lanAddresses = new ArrayList<>(lanAddresses);
             this.lanPort = lanPort;
             this.lanToken = lanToken;
+            this.clientId = clientId == null || clientId.isBlank() ? null : clientId.trim();
             this.certificateSha256 = certificateSha256;
             this.lastGoodAddress = lastGoodAddress == null || lastGoodAddress.isBlank()
                     ? null : lastGoodAddress.trim();
@@ -45,20 +55,30 @@ final class TargetDeviceManager {
                     && lanToken != null && !lanToken.isBlank()
                     && certificateSha256 != null && !certificateSha256.isBlank();
         }
+
+        /// M1-A 逐手机凭据（clientId 存在即新式凭据，Bearer 头；否则旧共享令牌）。
+        boolean hasClientCredential() {
+            return clientId != null && lanToken != null && !lanToken.isBlank();
+        }
     }
 
     private static final String PREFS_NAME = "PhoneDeckDevices";
     private static final String KEY_DEVICES = "known_devices";
+    private static final String KEY_DEVICES_ENCRYPTED = "known_devices_enc";
     private static final String KEY_ACTIVE = "active_computer_id";
     private static final int MAX_DEVICES = 8;
 
     private final SharedPreferences preferences;
     private final ArrayList<Device> devices = new ArrayList<>();
     private String activeComputerId;
+    /// uiPreview 验收通道（包名 .preview）允许把 adb 反向的回环地址存为配对地址，
+    /// 供网络受限环境的自动化协议验收；生产包保持严格地址过滤。
+    private final boolean previewChannel;
 
     TargetDeviceManager(Context context) {
         preferences = context.getApplicationContext().getSharedPreferences(
                 PREFS_NAME, Context.MODE_PRIVATE);
+        previewChannel = context.getPackageName().endsWith(".preview");
         load();
     }
 
@@ -265,7 +285,23 @@ final class TargetDeviceManager {
 
     private void load() {
         activeComputerId = preferences.getString(KEY_ACTIVE, null);
-        String raw = preferences.getString(KEY_DEVICES, "[]");
+        String raw = preferences.getString(KEY_DEVICES_ENCRYPTED, null);
+        boolean encrypted = raw != null;
+        if (!encrypted) {
+            raw = preferences.getString(KEY_DEVICES, "[]");
+        }
+        if (encrypted) {
+            try {
+                raw = new String(KeystoreCipher.decrypt(
+                        java.util.Base64.getDecoder().decode(raw)),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception exception) {
+                // 解密失败（如系统还原后 Keystore 密钥丢失）：视为无配对，
+                // 下次 save() 会以当前 Keystore 重新加密落盘。
+                android.util.Log.w("PhoneDeckDevices", "加密存储解密失败，重置配对", exception);
+                raw = "[]";
+            }
+        }
         try {
             JSONArray array = new JSONArray(raw);
             for (int index = 0; index < array.length() && devices.size() < MAX_DEVICES; index++) {
@@ -296,6 +332,7 @@ final class TargetDeviceManager {
                         addresses,
                         item.optInt("lanPort", 0),
                         item.optString("lanToken", null),
+                        item.optString("clientId", null),
                         item.optString("certificateSha256", null),
                         isAddressCandidateSafe(lastGood) ? lastGood : null));
             }
@@ -322,6 +359,7 @@ final class TargetDeviceManager {
                 item.put("lanAddresses", new JSONArray(device.lanAddresses));
                 item.put("lanPort", device.lanPort);
                 item.put("lanToken", device.lanToken);
+                item.put("clientId", device.clientId == null ? JSONObject.NULL : device.clientId);
                 item.put("certificateSha256", device.certificateSha256);
                 item.put("lastGoodAddress", device.lastGoodAddress);
                 array.put(item);
@@ -329,9 +367,66 @@ final class TargetDeviceManager {
         } catch (Exception ignored) {
             return;
         }
-        preferences.edit()
-                .putString(KEY_DEVICES, array.toString())
-                .putString(KEY_ACTIVE, activeComputerId)
-                .apply();
+        SharedPreferences.Editor editor = preferences.edit()
+                .putString(KEY_ACTIVE, activeComputerId);
+        // 设计 §7：凭据记录经 AndroidKeyStore AES-GCM 封装后落 SharedPreferences；
+        // Keystore 异常时回退旧明文键（可用性优先，降级记录在案）。
+        try {
+            byte[] sealed = KeystoreCipher.encrypt(
+                    array.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            editor.putString(KEY_DEVICES_ENCRYPTED,
+                    java.util.Base64.getEncoder().encodeToString(sealed))
+                    .remove(KEY_DEVICES);
+        } catch (Exception exception) {
+            android.util.Log.w("PhoneDeckDevices", "Keystore 加密失败，回退明文存储", exception);
+            editor.putString(KEY_DEVICES, array.toString())
+                    .remove(KEY_DEVICES_ENCRYPTED);
+        }
+        editor.apply();
+    }
+
+    /// M1-A A3：保存扫码配对得到的逐手机凭据（Bearer）。
+    synchronized Device saveQrPairing(
+            String computerId,
+            String displayName,
+            String platform,
+            List<String> addresses,
+            int port,
+            String clientToken,
+            String clientId,
+            String certificateSha256) {
+        Device base = upsert(computerId, displayName, platform);
+        if (base == null || addresses == null || addresses.isEmpty()
+                || port < 1 || port > 65535
+                || clientToken == null || clientToken.isBlank()
+                || clientId == null || clientId.isBlank()
+                || certificateSha256 == null || certificateSha256.isBlank()) {
+            return null;
+        }
+        ArrayList<String> safeAddresses = new ArrayList<>();
+        for (String address : addresses) {
+            boolean acceptable = previewChannel
+                    ? address != null && !address.trim().isEmpty()
+                    : isAddressCandidateSafe(address);
+            if (acceptable) {
+                String trimmed = address.trim();
+                if (trimmed.length() <= 255 && !safeAddresses.contains(trimmed)) {
+                    safeAddresses.add(trimmed);
+                }
+            }
+        }
+        if (safeAddresses.isEmpty()) {
+            return null;
+        }
+        Device paired = new Device(
+                base.computerId, base.displayName, base.platform, base.slot,
+                System.currentTimeMillis(), safeAddresses, port,
+                clientToken.trim(), clientId.trim(),
+                certificateSha256.trim().toLowerCase(),
+                safeAddresses.contains(base.lastGoodAddress) ? base.lastGoodAddress : null);
+        devices.remove(base);
+        devices.add(paired);
+        save();
+        return paired;
     }
 }

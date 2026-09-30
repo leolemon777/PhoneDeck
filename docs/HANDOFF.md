@@ -1,5 +1,34 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-29 M1-A A3 Android 扫码配对 + 首次真机协议闭环（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A3 落地 Android 端：
+  - 新依赖 `com.journeyapps:zxing-android-embedded:4.3.0`（Apache-2.0；注意
+    IntentIntegrator 实际包名是 `com.google.zxing.integration.android`）。
+  - 新增 `QrPairingClient`（QR 载荷严格校验：版本/指纹 64hex/GUID/材料 ≥32；
+    提交挂起 40s；401/403/404/408/429 用户文案；发现层 computerId 匹配）与
+    `KeystoreCipher`（AndroidKeyStore AES-256-GCM，IV‖密文，Keystore 不可导出）。
+  - `TargetDeviceManager`：设备记录新增 clientId 字段；存储整体迁
+    `known_devices_enc`（Keystore 封装，旧明文键读取时自动迁移；Keystore 异常
+    回退明文并告警）；新增 `saveQrPairing`；uiPreview 验收通道允许存 adb 反向的
+    回环地址（包名 .preview 门控，生产包保持严格过滤）。
+  - `PhoneDeckEndpoint/PhoneDeckHttp`：clientId 非空时改发 `Authorization: Bearer`
+    + `X-PhoneDeck-Client`（旧共享令牌头不变）；`MainActivity`：设备列表新增
+    "扫码配对"入口、扫码结果处理、发现→手动地址兜底、配对等待/确认/验证流程；
+    uiPreview 专用测试注入钩子（`phonedeck_qr_test_b64` extra，冷启动/复用两路径）。
+  - 三门通过：`testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+- **首次真机配对协议闭环（V09 通道证据，USB 隧道形态）**：开发版服务端+托盘在本机
+  运行，QR 载荷注入预览包 → TLS 钉扎（真证书）→ 材料提交 → 待确认（SM-G9880）→
+  本机确认 → **签发落库**（clients.json：clientId 9f9d55e3…、四作用域、仅 TokenHash）→
+  手机 Keystore 保存 → Bearer 凭据 health 验证 → 主界面显示已配对在线（截图
+  `outputs/ui-redesign/qr-pairing-after.png`）。测试期间生产托盘/服务端暂停，已恢复
+  并验证 health 200。
+- **V09 完整 L3（真 Wi-Fi + 真相机）待环境**：手机（192.168.0.x）与 PC（192.168.10.x）
+  跨网段且 ping/TCP 均不通，无法直连；相机对准屏幕需人工。补全方式：把手机接入
+  PC 同网段 Wi-Fi 后，托盘"配对新手机…"→ 手机扫码 → 点确认，即完成 V09 L3（全部
+  真实代码路径，无需任何改动）。
+- 下一步 A4：rotate（不重发语义）+ 手机迁移流程 + 共存窗口 + legacy 应急撤销。
+
 ## 2026-09-29 M1-A A2 扫码配对窗口实现（最新）
 
 - 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A2 落地 Windows 端配对闭环：

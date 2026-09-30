@@ -218,6 +218,7 @@ public final class MainActivity extends Activity {
         configRepository = new ShortcutConfigRepository(this);
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
+        maybeHandlePairingTestHook(getIntent());
         registerSharedAudioStatusReceiver();
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
             @Override
@@ -1268,8 +1269,9 @@ public final class MainActivity extends Activity {
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
         if (devices.isEmpty()) {
             new android.app.AlertDialog.Builder(this).setTitle("连接第一台电脑")
-                    .setMessage("在电脑上启动 PhoneDeck 接收端，再用 USB 连接并允许调试。首次配对后，可在同一局域网使用。")
-                    .setPositiveButton("知道了", null).show();
+                    .setMessage("方式一：在电脑托盘菜单选择「配对新手机…」，用本机扫码配对。\n方式二：用 USB 线连接电脑并允许调试，自动完成首次配对。")
+                    .setPositiveButton("扫码配对", (dialog, which) -> launchQrPairingScan())
+                    .setNegativeButton("知道了", null).show();
             return;
         }
         String[] labels = new String[devices.size()];
@@ -1283,7 +1285,184 @@ public final class MainActivity extends Activity {
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
                 .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
                 .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
+                .setPositiveButton("扫码配对新电脑", (dialog, which) -> launchQrPairingScan())
                 .setNegativeButton("取消", null).show();
+    }
+
+    /// M1-A A3：启动扫码（zxing-android-embedded 的 CaptureActivity 自行处理相机权限与取景）。
+    private void launchQrPairingScan() {
+        new com.google.zxing.integration.android.IntentIntegrator(this)
+                .setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE)
+                .setPrompt("对准电脑上的 PhoneDeck 配对二维码")
+                .setBeepEnabled(false)
+                .setOrientationLocked(true)
+                .initiateScan();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        com.google.zxing.integration.android.IntentResult scan =
+                com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(
+                        requestCode, resultCode, data);
+        if (scan != null) {
+            handleQrPairingScanResult(scan.getContents());
+        }
+    }
+
+    /// uiPreview 验收通道专用（包名 .preview 门槛，生产 debug/release 不响应）：
+    /// --es phonedeck_qr_test_b64 <base64(QR JSON)> [--es phonedeck_qr_address <host>]
+    /// 直接注入扫码结果，用于无相机或网络受限环境的自动化协议验收（真 TLS/材料/确认链路不变）。
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        maybeHandlePairingTestHook(intent);
+    }
+
+    private void maybeHandlePairingTestHook(android.content.Intent intent) {
+        if (intent == null || !getPackageName().endsWith(".preview")
+                || !intent.hasExtra("phonedeck_qr_test_b64")) {
+            return;
+        }
+        String qr;
+        try {
+            qr = new String(java.util.Base64.getDecoder().decode(
+                    intent.getStringExtra("phonedeck_qr_test_b64")),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  测试注入参数无效", theme.danger);
+            return;
+        }
+        try {
+            QrPairingClient.QrPayload payload = QrPairingClient.parseQr(qr);
+            String address = intent.getStringExtra("phonedeck_qr_address");
+            if (address == null || address.isBlank()) {
+                resolveAddressAndPair(payload, null);
+            } else {
+                runQrPairing(payload, address.trim());
+            }
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
+        }
+    }
+
+    private void handleQrPairingScanResult(String qrText) {
+        if (qrText == null || qrText.isBlank()) {
+            showActionFeedback("✕  未扫码或已取消", theme.muted);
+            return;
+        }
+        QrPairingClient.QrPayload payload;
+        try {
+            payload = QrPairingClient.parseQr(qrText);
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
+            return;
+        }
+        if (targetDeviceManager.find(payload.computerId) != null) {
+            new AlertDialog.Builder(this).setTitle("该电脑已配对")
+                    .setMessage("「" + payload.displayName + "」已在设备列表中。继续将签发新的独立凭据。")
+                    .setPositiveButton("继续", (dialog, which) -> resolveAddressAndPair(payload, null))
+                    .setNegativeButton("取消", null).show();
+            return;
+        }
+        resolveAddressAndPair(payload, null);
+    }
+
+    /// 发现层匹配 QR 的 computerId；不可用时提示手动输入地址（设计 §4）。
+    private void resolveAddressAndPair(QrPairingClient.QrPayload payload, String knownAddress) {
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("扫码配对")
+                .setMessage("正在定位「" + payload.displayName + "」…\n请在电脑上点击「确认配对」。")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            java.util.List<String> addresses = knownAddress != null
+                    ? java.util.Collections.singletonList(knownAddress)
+                    : QrPairingClient.matchDiscovery(this, payload.computerId);
+            runOnUiThread(() -> {
+                progress.dismiss();
+                if (addresses.isEmpty()) {
+                    promptManualAddressAndPair(payload);
+                    return;
+                }
+                runQrPairing(payload, addresses.get(0));
+            });
+        }, "qr-pairing-discovery").start();
+    }
+
+    private void promptManualAddressAndPair(QrPairingClient.QrPayload payload) {
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("例如 192.168.1.23");
+        new AlertDialog.Builder(this).setTitle("输入电脑地址")
+                .setMessage("未在局域网发现「" + payload.displayName
+                        + "」。请输入电脑的局域网 IP（电脑端状态窗可见）。")
+                .setView(input)
+                .setPositiveButton("连接", (dialog, which) -> {
+                    String address = input.getText().toString().trim();
+                    if (!TargetDeviceManager.isAddressCandidateSafe(address)) {
+                        showActionFeedback("✕  地址无效", theme.danger);
+                        return;
+                    }
+                    runQrPairing(payload, address);
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    /// 提交配对并保存凭据；请求最长挂起 30s 等待电脑本机确认。
+    private void runQrPairing(QrPairingClient.QrPayload payload, String host) {
+        String clientId = java.util.UUID.randomUUID().toString();
+        String label = android.os.Build.MODEL == null ? "Android 手机" : android.os.Build.MODEL;
+        AlertDialog waiting = new AlertDialog.Builder(this)
+                .setTitle("等待电脑确认")
+                .setMessage("已向「" + payload.displayName + "」提交配对。\n请在电脑上点击「确认配对」（30 秒内）。")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            String failure = null;
+            org.json.JSONObject issued = null;
+            try {
+                issued = QrPairingClient.submit(host, payload, clientId, label);
+            } catch (Exception exception) {
+                failure = exception.getMessage();
+            }
+            final org.json.JSONObject result = issued;
+            final String error = failure;
+            runOnUiThread(() -> {
+                waiting.dismiss();
+                if (error != null || result == null || !result.optBoolean("ok", false)) {
+                    showActionFeedback("✕  " + (error == null ? "配对失败" : error), theme.danger);
+                    return;
+                }
+                TargetDeviceManager.Device saved = targetDeviceManager.saveQrPairing(
+                        payload.computerId,
+                        payload.displayName,
+                        "windows",
+                        java.util.Collections.singletonList(host),
+                        payload.httpsPort,
+                        result.optString("clientToken"),
+                        result.optString("clientId", clientId),
+                        payload.certificateSha256);
+                if (saved == null) {
+                    showActionFeedback("✕  凭据保存失败", theme.danger);
+                    return;
+                }
+                new Thread(() -> {
+                    boolean verified = QrPairingClient.verifyCredential(
+                            host, payload.computerId, payload.httpsPort,
+                            result.optString("clientToken"),
+                            result.optString("clientId", clientId),
+                            payload.certificateSha256);
+                    runOnUiThread(() -> {
+                        new AlertDialog.Builder(this).setTitle(verified ? "配对成功" : "配对完成")
+                                .setMessage("「" + payload.displayName + "」已保存独立凭据"
+                                        + (verified ? "，并已通过连接验证。" : "。连接验证未通过，稍后可在设置中重试。"))
+                                .setPositiveButton("好的", null).show();
+                        refreshTargetSwitcher();
+                        testConnection();
+                    });
+                }, "qr-pairing-verify").start();
+            });
+        }, "qr-pairing-submit").start();
     }
 
     private void selectTargetDevice(TargetDeviceManager.Device device, View source) {
