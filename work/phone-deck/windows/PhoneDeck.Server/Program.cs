@@ -521,6 +521,13 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
     {
         return Results.NotFound();
     }
+    if (clientCredentials.LegacyRevoked)
+    {
+        // 设计 §5.6：旧入口关闭后此端点停止签发共享令牌（410），不再制造 legacy 凭据。
+        return Results.Json(
+            new { ok = false, error = "旧共享令牌入口已关闭，请在电脑上扫码配对获取独立凭据" },
+            statusCode: StatusCodes.Status410Gone);
+    }
     return Results.Ok(new
     {
         ok = true,
@@ -531,18 +538,105 @@ app.MapPost("/api/lan/pair", (HttpContext context) =>
         addresses = lanIdentity.GetCandidateAddresses(),
         port = lanIdentity.HttpsPort,
         certificateSha256 = lanIdentity.CertificateSha256,
-        accessToken = lanIdentity.AccessToken
+        accessToken = lanIdentity.AccessToken,
+        // 设计 §5.6/§5.2：提示旧共享令牌可在手机端升级为独立凭据，无需重新扫码。
+        upgradeHint = "共享令牌仅供旧版本使用；升级手机 App 后可用它换领该手机独立凭据，无需重新扫码"
     });
 });
 
-// M1-A A1 回环管理端点（设计 §3 不变量：撤销属本机信任操作；仅 8765 回环可达，无鉴权面扩大）。
+// M1-A A4 旧共享令牌升级（设计 §5.2）：仅 8766、仅旧共享令牌鉴权可调；手机无需重新扫码
+// 即获得该手机专属凭据。rotate 永不重发（G-1 处置）：同 clientId 重放只回 already-upgraded
+// 三字段状态，绝无令牌；revoked clientId 永不重发（403）；简单限速（同 clientId ≥3s）。
+app.MapPost("/api/lan/credential/rotate", (HttpContext context, RotateRequest body) =>
+{
+    if (context.Connection.LocalPort != 8766)
+    {
+        return Results.NotFound();
+    }
+    // Bearer/逐手机凭据调用者不获新能力（设计 §5.1）：新头不得重入签发。
+    if (!LanRequestAuthenticator.IsLegacySharedCaller(context.Items["ClientId"] as string))
+    {
+        return Results.Json(
+            new { ok = false, error = "请使用旧共享令牌升级" },
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+    var clientId = body.ClientId?.Trim();
+    if (string.IsNullOrWhiteSpace(clientId) || !Guid.TryParse(clientId, out _))
+    {
+        return Results.BadRequest(new { ok = false, error = "clientId 必须为手机生成的 GUID" });
+    }
+    RotateResult rotation;
+    try
+    {
+        rotation = clientCredentials.Rotate(clientId, "旧共享令牌升级手机");
+    }
+    catch (Exception exception)
+    {
+        // 签发持久化失败：中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 纪律）。
+        Console.Error.WriteLine($"rotate 签发持久化失败：{exception.Message}");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+    switch (rotation.Outcome)
+    {
+        case RotateOutcome.Revoked:
+            return Results.Json(
+                new { ok = false, error = "该 clientId 已撤销，凭据找回需重新扫码配对" },
+                statusCode: StatusCodes.Status403Forbidden);
+        case RotateOutcome.RateLimited:
+            return Results.Json(
+                new { ok = false, error = "rotate 请求过于频繁，请稍后重试" },
+                statusCode: StatusCodes.Status429TooManyRequests);
+        case RotateOutcome.AlreadyUpgraded:
+            // G-1 处置：该形态仅 {ok,status,clientId} 三字段，绝无令牌本体。
+            return Results.Ok(new
+            {
+                ok = true,
+                status = "already-upgraded",
+                clientId = rotation.Record!.ClientId,
+            });
+        default:
+            var record = rotation.Record!;
+            // issued 形态逐字对齐冻结契约 credentialRotateResponse（additionalProperties:false，
+            // 属性表无 ok 字段）；already-upgraded 形态则冻结为 {ok,status,clientId} 三字段。
+            return Results.Ok(new
+            {
+                status = "issued",
+                clientId = record.ClientId,
+                clientToken = rotation.Token,
+                scopes = record.Scopes,
+                pairingId = record.PairingId,
+                computerId = receiverIdentity.ComputerId,
+                displayName = receiverIdentity.DisplayName,
+                certificateSha256 = lanIdentity.CertificateSha256,
+            });
+    }
+});
+
+// M1-A A1/A4 回环管理端点（设计 §3 不变量：撤销属本机信任操作；仅 8765 回环可达，无鉴权面扩大）。
 app.MapGet("/api/admin/clients", (HttpContext context) =>
 {
     if (context.Connection.LocalPort != 8765)
     {
         return Results.NotFound();
     }
-    return Results.Ok(new { ok = true, clients = clientCredentials.ListRedacted() });
+    var clients = clientCredentials.ListRedacted().Select(record => (object)record).ToList();
+    if (!clientCredentials.LegacyRevoked)
+    {
+        // 设计 §5.3（M-4 处置）：legacy 未撤销时附加合成条目，显式列出旧入口，
+        // 供托盘"应急撤销旧入口"定位；撤销后该条目消失（入口已关闭）。
+        clients.Add(new
+        {
+            clientId = ClientCredentialsStore.LegacySharedClientId,
+            label = "未升级旧凭据（legacy 入口）",
+            legacy = true,
+        });
+    }
+    return Results.Ok(new
+    {
+        ok = true,
+        clients,
+        legacyRevokedAt = clientCredentials.LegacyRevokedAtUtc,
+    });
 });
 app.MapPost("/api/admin/clients/revoke", (HttpContext context, ClientRevokeRequest body) =>
 {
@@ -571,6 +665,35 @@ app.MapPost("/api/admin/clients/revoke", (HttpContext context, ClientRevokeReque
     clientSessions.Cancel(clientId);
     KeyboardInput.RevokeClientInput(clientId);
     return Results.Ok(new { ok = true, clientId });
+});
+
+// M1-A A4 legacy 应急撤销（设计 §5.3，M-4 处置）：仅 8765 回环。store 内先原子持久化
+// legacyRevokedAt 再生效，此后旧共享令牌一切请求 401（LanRequestAuthenticator legacy 分支拒签），
+// 逐手机凭据不受影响。一次性操作：无反向开关，重新打开旧入口只能手工删改 data/clients.json。
+app.MapPost("/api/admin/legacy/revoke", (HttpContext context) =>
+{
+    if (context.Connection.LocalPort != 8765)
+    {
+        return Results.NotFound();
+    }
+    try
+    {
+        clientCredentials.RevokeLegacy();
+    }
+    catch (Exception exception)
+    {
+        // 持久化失败：撤销中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 处置）。
+        Console.Error.WriteLine($"legacy 撤销持久化失败：{exception.Message}");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+    // 与逐手机撤销同一编排（设计 §6）：持久化成功后终止旧入口的长流与持有键。
+    clientSessions.Cancel(ClientCredentialsStore.LegacySharedClientId);
+    KeyboardInput.RevokeClientInput(ClientCredentialsStore.LegacySharedClientId);
+    return Results.Ok(new
+    {
+        ok = true,
+        legacyRevokedAt = clientCredentials.LegacyRevokedAtUtc,
+    });
 });
 
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
@@ -861,6 +984,7 @@ internal sealed record DictationCommand(
     string? TargetComputerId,
     string? Mode);
 internal sealed record ClientRevokeRequest(string? ClientId);
+internal sealed record RotateRequest(string? ClientId);
 internal sealed record QrPairRequest(
     string? PairingId,
     string? OneTimeMaterial,

@@ -197,6 +197,17 @@
     "migration": {
       "contract": "schemas/identity.schema.json#/definitions/sharedTokenMigration",
       "rule": "旧 USB 配对与 shared token 迁移有兼容窗口：窗口内旧凭据可用、关闭后拒绝；降级不得提升权限；取消迁移可回退（V17）",
+      "rotate": {
+        "status": "target",
+        "endpoint": "/api/lan/credential/rotate",
+        "requestContract": "schemas/pairing.schema.json#/definitions/credentialRotateRequest",
+        "responseContract": "schemas/pairing.schema.json#/definitions/credentialRotateResponse",
+        "singleIssue": "issued 形态单次签发：令牌本体只在该响应出现一次，服务端只存 SHA-256 哈希；同 clientId 再次 rotate 返回 already-upgraded，该形态仅 {ok,status,clientId} 三字段、绝无令牌字段（G-1 处置：永不重发，防冒领他人凭据与撤销旁路）；revoked clientId 永不重发，凭据找回唯一路径=重新扫码配对",
+        "bearerCaller": "rotate 仅接受旧共享令牌鉴权升级；已持 Authorization: Bearer 新凭据的调用者访问 rotate 一律 403（旧头不获得任何新能力，新头不得重入签发，设计 §5.1/§5.2）",
+        "legacyRevokeOrder": "legacy 应急撤销与逐手机撤销共用顺序（M-2 处置）：先原子持久化 revokedAt/会话墓碑，写盘成功后才删内存鉴权表并终止长流；写盘失败中止撤销并告警，不产生“崩溃可复活”窗口",
+        "auditAndRateLimit": "rotate 限速并逐条审计（脱敏，无令牌本体；审计含 pairingId 与结果）",
+        "specRef": "NET-07、V17；docs/M1A_PAIRING_DESIGN.md §5.1/§5.2/§5.3/§6"
+      },
       "specRef": "NET-07、V17"
     }
   }

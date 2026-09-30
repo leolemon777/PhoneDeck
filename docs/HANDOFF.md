@@ -1,5 +1,90 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 M1-A A4 凭据轮换 + legacy 应急撤销（最新）
+
+按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §5/§9-A4 落地三端，并处置独立复核
+（approved=false，4 问题）。
+
+**做了什么**
+
+- **契约**（contracts/ 三改三增，validate.py 全过）：
+  - `pairing.schema.json` 新增 `credentialRotateRequest`（仅 clientId GUID，
+    additionalProperties:false）与 `credentialRotateResponse`（oneOf 两形态：
+    issued 8 字段**无 ok**；already-upgraded 仅 {ok,status,clientId} 绝无令牌字段）。
+  - `samples/valid` 新增 pairing-rotate-request / -issued / -already-upgraded
+    三样本并登记 manifest；`pairing-and-identity.json` migration 段补 rotate 三语义
+    （already-upgraded 无令牌=G-1 永不重发；Bearer 调用者 403 仅旧头鉴权升级；
+    legacy revoke 先原子持久化再生效=M-2）。
+- **Windows 服务端**（PhoneDeck.Server + Tests 共 5 文件）：
+  - `POST /api/lan/credential/rotate`（Program.cs:550）：仅旧共享令牌头鉴权，
+    Bearer 调用者 403（LanRequestAuthenticator）；同 clientId **单次签发**、重放回
+    already-upgraded（绝无令牌）；per-clientId 3s 限速（单调时钟，内存态）；
+    issued 响应逐字对齐冻结契约、无 ok 字段。
+  - `POST /api/admin/legacy/revoke`（Program.cs:673）：先持久化 revokedAt/墓碑
+    再生效；撤销后旧头一律 401、逐手机凭据不受影响（含重启语义）。
+  - `ClientCredentials.cs`：rotate 签发/撤销/legacy 撤销逐条追加 clients-audit.log
+    （脱敏、500 行轮转）；裸数组旧 clients.json 自动升级为信封格式。
+  - `RotateLegacyTests.cs` 新建 9 用例（单次签发/重放无令牌/撤销后拒绝/Bearer 403
+    判定链/legacy 撤销后旧头全 401 且逐手机凭据不受影响含重启语义/审计脱敏/限速/
+    裸数组升级信封/审计 500 行轮转）。
+- **Android 手机端**：
+  - 新增 `CredentialUpgrader`：rotate 走旧共享令牌头+钉扎 TLS；因冻结契约 issued
+    形态不带 ok，不走强制 ok=true 的 PhoneDeckHttp.readResponse，按 HTTP 状态判定。
+  - `MainActivity.runCredentialUpgrade`：per-computerId 持久化**稳定升级 clientId**
+    （`credential_upgrade_client_id_<computerId>`，读-缺-生成-存），重试沿用同一
+    GUID——服务端只回 already-upgraded，消除孤儿全作用域凭据累积与限速绕过
+    （复核问题 3 修复）；注释写明凭据丢失找回仍走重新扫码配对（G-1/G-2）。
+  - `TargetDeviceManager.applyCredentialUpgrade` 先验证新凭据后替换，旧共享令牌
+    保留到验证成功；`CredentialUpgraderTest` 7 用例。
+
+**复核 4 问题处置**
+
+- 问题 1（issued 带 ok 违冻结契约）：服务端已去 ok（重验 Program.cs:597-610 issued
+  仅 8 冻结字段）；手机端解析本就容忍多余字段，两形态均兼容，无需改动。
+- 问题 3（孤儿凭据累积）：手机端稳定 GUID 修复（见上）。
+- 问题 4（仓库垃圾文件 %TEMP%vtiers.txt、根 nul、android/app/src/nul）：
+  经核实均不在当前工作树（交接员本轮实查 `find . -name nul -o -name *vtiers*`
+  无结果、git porcelain 无 TEMP/nul 匹配）。
+- 问题 2（§5.4 窗口关闭 + UI 消费）**未落地，留待主流程决策**：legacy 共存窗口
+  目前无限期开放直至手工 POST 127.0.0.1:8765/api/admin/legacy/revoke；该端点与
+  /api/admin/clients 的 legacy 条目在 windows 树无 UI 消费（ReceiverStatusWindow.cs
+  为他人未提交 WIP、禁改）。需把分期决策记入 spec plan/HANDOFF 或另立 UI/版本边界任务。
+
+**验证命令与逐门结果**（门由脚本统一执行，均 0 轮重试通过）
+
+| 门 | 命令 | 结果 |
+| --- | --- | --- |
+| Windows 构建+测试 | `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release` + `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release` | 通过（含 rotate 新用例） |
+| Android 单测+组装+lint | `gradlew :app:testDebugUnitTest` + `:app:assembleDebug` + `:app:lintDebug` | 通过 |
+| 契约 | `python contracts/tools/validate.py` | 通过 |
+
+- 契约门交接员本轮**实跑**复核：exit 0，C1–C7 全 PASS（36 合法样本，含 3 个
+  rotate 新样本）。
+- 复核者另跑 `dotnet test PhoneDeck.Server.Tests -c Release` = 117/117（复核时点
+  代码；其后服务端最终改动仅删 issued 响应 ok 一个字段，不在存储层测试覆盖内，
+  最终代码由上表脚本门重验）。
+- 手机端 Agent 另做手工等价验证（非 gradle 门）：javac（JDK17 + android-35 +
+  zxing 4.3.0/3.4.1 + R 桩）编译全部 35 个 main 源文件 OK；JUnitCore 纯 JVM 跑
+  CredentialUpgraderTest + ContractsConformanceTest = 11 tests OK。
+
+**边界（如实区分代码级与真机）**
+
+- **rotate 的手机端真机升级走查（V17 L3）未做**——需要真机连上接收端实测
+  「旧共享令牌 → rotate 签发 → 新凭据验证 → 替换 → already-upgraded 重放」全链路；
+  当前结论基于代码走读 + 单测，不能替代真机验证。
+- **legacy 撤销为代码级验证**（单测含重启语义），未在真机托盘/管理 UI 操作验证。
+- manifest 中 3 个 rotate 样本仍标【目标，A4 设计形态】；端点现已落地
+  （Program.cs:550），后续宜改为实现形态并附源码行号（A2 样本先例）。
+- 设计 §5.1「旧头不能 rotate」与 §5.2「rotate 旧 token 鉴权」文字矛盾（复核
+  非阻断备注 1）：实现与契约均按 §5.2 执行（rotate 仅旧头可调、新头 403），
+  判定正确，建议后续在 §5.1 括注澄清语义。
+- 限速/审计已知残余（复核非阻断备注 2，窗口内可接受）：legacy 持有者可用随机
+  GUID 连续触发签发（限速不跨 clientId）、对既有 clientId 反刷 already-upgraded
+  在限速前返回；如需收紧可加全局签发限速。
+- 工作树仍有其他 Agent 未提交改动（Android 其余文件、ReceiverStatusWindow.cs、
+  packages.lock.json 等），提交前需主流程核查未跟踪文件归属，防误产物混入。
+- 下一步：§5.4 分期决策记录、A5（mDNS 等）按主流程安排；V17 L3 真机验收排队。
+
 ## 2026-09-29 M1-A A3 Android 扫码配对 + 首次真机协议闭环（最新）
 
 - 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A3 落地 Android 端：

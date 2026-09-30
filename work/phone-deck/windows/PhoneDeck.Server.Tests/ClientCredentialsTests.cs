@@ -33,6 +33,10 @@ public sealed class ClientCredentialsTests
 
     private string StorePath => Path.Combine(directory, "clients.json");
 
+    /// <summary>M1-A A4：clients.json 为 {version, legacyRevokedAt, clients} 对象信封。</summary>
+    private ClientCredentialsFileEnvelope ReadPersistedEnvelope() =>
+        JsonSerializer.Deserialize<ClientCredentialsFileEnvelope>(File.ReadAllText(StorePath))!;
+
     [TestMethod]
     public void IssueAuthenticateAndRevokeRoundTripPersists()
     {
@@ -48,12 +52,12 @@ public sealed class ClientCredentialsTests
         Assert.AreEqual(4, authenticated.Scopes.Count);
 
         Assert.IsTrue(store.Revoke(record.ClientId));
-        // 持久化先行：撤销后文件里必须已带 revokedAt（M-2 处置）。
-        var persisted = JsonSerializer.Deserialize<List<ClientCredentialRecord>>(
-            File.ReadAllText(StorePath));
-        Assert.IsNotNull(persisted);
-        Assert.AreEqual(1, persisted.Count);
-        Assert.IsNotNull(persisted[0].RevokedAtUtc);
+        // 持久化先行：撤销后文件里必须已带 revokedAt（M-2 处置）；信封字段齐备（M1-A A4）。
+        var envelope = ReadPersistedEnvelope();
+        Assert.AreEqual(1, envelope.Version);
+        Assert.IsNull(envelope.LegacyRevokedAtUtc);
+        Assert.AreEqual(1, envelope.Clients.Count);
+        Assert.IsNotNull(envelope.Clients[0].RevokedAtUtc);
 
         Assert.IsNull(store.Authenticate(token));
         // 重启语义：从同一文件重建的实例仍拒绝该令牌。
@@ -108,9 +112,7 @@ public sealed class ClientCredentialsTests
         }
         // 写盘失败 → 内存回滚：令牌仍有效，磁盘仍无 revokedAt（设计 §6 M-2）。
         Assert.IsNotNull(store.Authenticate(token));
-        var persisted = JsonSerializer.Deserialize<List<ClientCredentialRecord>>(
-            File.ReadAllText(StorePath));
-        Assert.IsNotNull(persisted);
+        var persisted = ReadPersistedEnvelope().Clients;
         Assert.IsNull(persisted[0].RevokedAtUtc);
         // 锁释放后重试成功。
         Assert.IsTrue(store.Revoke(record.ClientId));

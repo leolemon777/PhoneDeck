@@ -429,4 +429,111 @@ final class TargetDeviceManager {
         save();
         return paired;
     }
+
+    /// M1-A A4 升级保存结果：device 非空=已替换为逐手机凭据；failure 为用户文案。
+    static final class CredentialUpgradeResult {
+        final Device device;
+        final String failure;
+
+        private CredentialUpgradeResult(Device device, String failure) {
+            this.device = device;
+            this.failure = failure;
+        }
+
+        static CredentialUpgradeResult success(Device device) {
+            return new CredentialUpgradeResult(device, null);
+        }
+
+        static CredentialUpgradeResult failure(String reason) {
+            return new CredentialUpgradeResult(null, reason);
+        }
+    }
+
+    /**
+     * M1-A A4：保存 rotate 签发的逐手机凭据（设计 §5.5 回退纪律）。
+     * 先用新凭据经 Bearer health 验证（QrPairingClient.verifyCredential，
+     * 首选 rotate 刚成功的主机，其次 last-good 与其余候选地址），验证成功
+     * 才替换设备记录；失败不动存储，旧共享令牌保持可用并返回失败原因。
+     * 验证含网络请求，且不能持有本类锁等网络（会卡 UI 线程的读操作），
+     * 必须在后台线程调用；替换本身在锁内重新读取当前记录，不覆盖并发改动。
+     */
+    CredentialUpgradeResult applyCredentialUpgrade(
+            String computerId, String clientToken, String clientId, String preferredHost) {
+        if (clientToken == null || clientToken.isBlank()
+                || clientId == null || clientId.isBlank()) {
+            return CredentialUpgradeResult.failure("升级响应缺少凭据");
+        }
+        Device device = find(computerId);
+        if (device == null) {
+            return CredentialUpgradeResult.failure("找不到该电脑的配对记录");
+        }
+        if (!device.hasLanPairing()) {
+            return CredentialUpgradeResult.failure("该电脑没有可用的局域网配对");
+        }
+        if (device.hasClientCredential()) {
+            // 并发路径（如重新扫码配对）已写入独立凭据：无需也不应覆盖。
+            return CredentialUpgradeResult.success(device);
+        }
+        String token = clientToken.trim();
+        String id = clientId.trim();
+        for (String host : upgradeVerifyHosts(device, preferredHost)) {
+            if (QrPairingClient.verifyCredential(
+                    host, device.computerId, device.lanPort,
+                    token, id, device.certificateSha256)) {
+                return commitCredentialUpgrade(device.computerId, token, id, host);
+            }
+        }
+        return CredentialUpgradeResult.failure("新凭据验证未通过，已保留原共享令牌");
+    }
+
+    /// 验证地址顺序：rotate 刚成功的主机 → last-good → 其余候选（去重）。
+    /// preview 验收通道沿用 saveQrPairing 的宽松地址规则（允许 adb 反向回环）。
+    private List<String> upgradeVerifyHosts(Device device, String preferredHost) {
+        ArrayList<String> hosts = new ArrayList<>();
+        String[] ordered = {preferredHost, device.lastGoodAddress};
+        for (String candidate : ordered) {
+            if (hostAcceptable(candidate) && !hosts.contains(candidate.trim())) {
+                hosts.add(candidate.trim());
+            }
+        }
+        for (String address : device.lanAddresses) {
+            if (hostAcceptable(address) && !hosts.contains(address.trim())) {
+                hosts.add(address.trim());
+            }
+        }
+        return hosts;
+    }
+
+    private boolean hostAcceptable(String host) {
+        if (host == null) {
+            return false;
+        }
+        String trimmed = host.trim();
+        return previewChannel ? !trimmed.isEmpty() : isAddressCandidateSafe(trimmed);
+    }
+
+    /// 验证成功后的落盘替换：锁内重读记录，配对被并发重置/删除时不覆盖。
+    private synchronized CredentialUpgradeResult commitCredentialUpgrade(
+            String computerId, String clientToken, String clientId, String verifiedHost) {
+        Device current = find(computerId);
+        if (current == null) {
+            return CredentialUpgradeResult.failure("配对记录已删除，升级未保存");
+        }
+        if (current.hasClientCredential()) {
+            return CredentialUpgradeResult.success(current);
+        }
+        if (!current.hasLanPairing()) {
+            return CredentialUpgradeResult.failure("该电脑的配对已被重置，升级未保存");
+        }
+        Device upgraded = new Device(
+                current.computerId, current.displayName, current.platform,
+                current.slot, System.currentTimeMillis(), current.lanAddresses,
+                current.lanPort, clientToken, clientId, current.certificateSha256,
+                current.lanAddresses.contains(verifiedHost)
+                        ? verifiedHost : current.lastGoodAddress);
+        devices.remove(current);
+        devices.add(upgraded);
+        save();
+        return CredentialUpgradeResult.success(upgraded);
+    }
 }

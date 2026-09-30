@@ -63,6 +63,11 @@ public final class MainActivity extends Activity {
     private static final String PREFS_NAME = "PhoneDeckSettings";
     private static final String PREF_VOICE_WORK_MODE = "voice_work_mode";
     private static final String PREF_VOICE_MODE = "voice_mode";
+    /// M1-A A4：legacy-only 电脑的升级提示 per-computerId 只弹一次（取消也算已提示）。
+    private static final String PREF_CREDENTIAL_UPGRADE_PROMPT = "credential_upgrade_prompted_";
+    /// M1-A A4：每台电脑的升级 clientId 持久化沿用，重试不再签发全新凭据
+    /// （rotate 对同 clientId 只回 already-upgraded；且 per-clientId 限速对本机重试生效）。
+    private static final String PREF_CREDENTIAL_UPGRADE_CLIENT_ID = "credential_upgrade_client_id_";
     private static final String WORK_MANAGED = "managed";
     private static final String WORK_SHARED = "shared";
     private static final String MODE_TAP = "tap";
@@ -1279,8 +1284,10 @@ public final class MainActivity extends Activity {
             TargetDeviceManager.Device device = devices.get(i);
             String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
                     ? "需重新配对" : isDeviceOnline(device.computerId) ? "在线" : "离线";
+            // M1-A A4：legacy-only 设备仅展示「可升级」后缀，提示入口在主界面在线刷新。
             labels[i] = device.slot + "号 · " + device.displayName + "\n" + state
-                    + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "");
+                    + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "")
+                    + (CredentialUpgrader.needsUpgrade(device) ? " · 可升级" : "");
         }
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
                 .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
@@ -1463,6 +1470,115 @@ public final class MainActivity extends Activity {
                 }, "qr-pairing-verify").start();
             });
         }, "qr-pairing-submit").start();
+    }
+
+    /// M1-A A4：当前目标 legacy-only 且 LAN 在线时，弹一次「升级为独立凭据」
+    /// （设计 §5.2 首连强提示）。取消也算已提示（per-computerId 标志），之后
+    /// 仍可经电脑端配对窗口扫码获得独立凭据。语音进行中不打断，留到下一轮。
+    private void maybePromptCredentialUpgrade() {
+        if (isFinishing() || isDestroyed() || targetComputerId == null) {
+            return;
+        }
+        LanTargetStatus lanStatus = lanTargets.get(targetComputerId);
+        if (lanStatus == null) {
+            return;
+        }
+        if (isVoiceStarting() || dictationActive || typelessInFlight
+                || audioStreamer != null && audioStreamer.isRunning()
+                || WORK_SHARED.equals(voiceWorkMode)
+                && PhoneAudioService.getSnapshot().running) {
+            return;
+        }
+        TargetDeviceManager.Device device = targetDeviceManager.find(targetComputerId);
+        if (!CredentialUpgrader.needsUpgrade(device)) {
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String promptKey = PREF_CREDENTIAL_UPGRADE_PROMPT + device.computerId;
+        if (preferences.getBoolean(promptKey, false)) {
+            return;
+        }
+        preferences.edit().putBoolean(promptKey, true).apply();
+        final TargetDeviceManager.Device target = device;
+        final PhoneDeckEndpoint endpoint = lanStatus.endpoint;
+        new AlertDialog.Builder(this)
+                .setTitle("升级为独立凭据")
+                .setMessage("「" + device.displayName + "」仍在使用旧版共享令牌。\n\n"
+                        + "升级为这台手机专属的独立凭据：\n"
+                        + "· 不影响现有使用，无需重新扫码\n"
+                        + "· 电脑端可按手机逐个撤销授权")
+                .setPositiveButton("升级", (dialog, which) -> runCredentialUpgrade(target, endpoint))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /// M1-A A4：后台执行 rotate → 新凭据验证 → 保存（设计 §5.2/§5.5）。
+    /// 旧共享令牌保留到新凭据验证成功（TargetDeviceManager.applyCredentialUpgrade
+    /// 负责先验证后替换）；结果回 UI 线程反馈「已升级为独立凭据」或失败原因。
+    private void runCredentialUpgrade(TargetDeviceManager.Device device, PhoneDeckEndpoint endpoint) {
+        String host = hostOf(endpoint);
+        // 稳定升级 GUID（schema credentialRotateRequest.clientId：“升级后凭据沿用”）：
+        // 首次升级生成并持久化，此后重试沿用同一 clientId——服务端对它只回
+        // already-upgraded 而不再签发新凭据，避免孤儿凭据累积，也让本机重试
+        // 落入 per-clientId 限速桶。凭据丢失的找回路径仍是重新扫码配对（G-1/G-2）。
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String upgradeKey = PREF_CREDENTIAL_UPGRADE_CLIENT_ID + device.computerId;
+        String clientId = preferences.getString(upgradeKey, null);
+        if (clientId == null || clientId.isBlank()) {
+            clientId = java.util.UUID.randomUUID().toString();
+            preferences.edit().putString(upgradeKey, clientId).apply();
+        }
+        final String rotateClientId = clientId;
+        new Thread(() -> {
+            String error = null;
+            CredentialUpgrader.RotateResult rotated = null;
+            TargetDeviceManager.CredentialUpgradeResult saved = null;
+            try {
+                rotated = CredentialUpgrader.rotate(endpoint, rotateClientId);
+                if (!rotated.alreadyUpgraded) {
+                    saved = targetDeviceManager.applyCredentialUpgrade(
+                            device.computerId, rotated.clientToken, rotated.clientId, host);
+                }
+            } catch (Exception exception) {
+                error = exception.getMessage() == null ? "升级失败" : exception.getMessage();
+            }
+            final CredentialUpgrader.RotateResult result = rotated;
+            final TargetDeviceManager.CredentialUpgradeResult saveResult = saved;
+            final String failure = error;
+            runOnUiThread(() -> {
+                if (failure != null) {
+                    showActionFeedback("✕  升级失败：" + failure, theme.danger);
+                    return;
+                }
+                if (result.alreadyUpgraded) {
+                    // rotate 永不重发（G-1）：凭据丢失只能重新扫码配对找回。
+                    showActionFeedback("该电脑已为此手机签发过独立凭据，不再重发；"
+                            + "如本机凭据丢失，请重新扫码配对", theme.warning);
+                    return;
+                }
+                if (saveResult == null || saveResult.device == null) {
+                    showActionFeedback("✕  升级失败：" + (saveResult != null
+                            && saveResult.failure != null ? saveResult.failure : "未知原因"),
+                            theme.danger);
+                    return;
+                }
+                showActionFeedback("✓  已升级为独立凭据", theme.success);
+                refreshTargetSwitcher();
+                requestImmediateLanCheck("凭据升级完成");
+            });
+        }, "credential-upgrade").start();
+    }
+
+    /// LAN 端点 baseUrl → 主机地址（供升级验证优先使用 rotate 刚成功的主机）。
+    private static String hostOf(PhoneDeckEndpoint endpoint) {
+        if (endpoint == null || endpoint.baseUrl == null) {
+            return null;
+        }
+        try {
+            return java.net.URI.create(endpoint.baseUrl).getHost();
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     private void selectTargetDevice(TargetDeviceManager.Device device, View source) {
@@ -3048,6 +3164,8 @@ public final class MainActivity extends Activity {
                 showConnection(targetDisplayName + " · Wi-Fi 在线" + foregroundSuffix(),
                         theme.success);
             }
+            // M1-A A4：legacy-only 目标在线时提示一次升级（rotate 走 LAN 旧令牌通道）。
+            maybePromptCredentialUpgrade();
         } else if (isUsbTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
                 showConnection(targetDisplayName + " · 虚拟麦克风未就绪", theme.warning);

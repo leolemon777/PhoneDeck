@@ -198,6 +198,24 @@
       "schema": "pairing.schema.json",
       "domain": "pairing",
       "covers": "扫码配对签发响应【目标，A2 实现形态】：令牌仅出现一次+四作用域+证书指纹绑定（本机确认后）"
+    },
+    {
+      "file": "pairing-rotate-request.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "covers": "凭据轮换请求【目标，A4 设计形态】：POST /api/lan/credential/rotate 仅旧共享令牌鉴权，手机自报 clientId（GUID，冲突时服务端重生成）；Bearer 调用者 403（设计 §5.1/§5.2）"
+    },
+    {
+      "file": "pairing-rotate-issued.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "covers": "轮换签发响应【目标，A4 设计形态】：单次签发——令牌本体仅此响应出现一次（服务端只存哈希），四作用域全授予，pairingId=rotate-+GUID 可追溯来源（G-1：永不重发）"
+    },
+    {
+      "file": "pairing-rotate-already-upgraded.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "covers": "轮换重放响应【目标，A4 设计形态】：同 clientId 再次 rotate 仅回 {ok,status,clientId}，绝无令牌字段（G-1：防冒领他人凭据与撤销旁路；additionalProperties=false 拒绝任何令牌字段）"
     }
   ]
 }

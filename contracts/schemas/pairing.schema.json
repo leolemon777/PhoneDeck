@@ -2,7 +2,7 @@
  "$schema": "http://json-schema.org/draft-07/schema#",
  "$id": "https://phonedeck.dev/contracts/schemas/pairing.schema.json",
  "title": "发现与配对契约（§16.2 第 1 行）",
- "description": "三份文档：UDP 发现应答【当前形态，LanDiscoveryResponder.cs:7-40：监听 8767、魔术串 PHONEDECK-DISCOVER、应答不含令牌/证书指纹】；USB 配对响应【当前形态，Program.cs:381-401：仅 USB 回环请求可达，否则 404】；扫码配对二维码载荷【目标设计，NET-02：QR 绑定电脑身份/证书与一次性高熵材料，短时窗口、限速、用后失效、电脑本地确认】。数值参数（有效期 120 秒、每窗口 5 次失败为规格候选值，材料长度/二维码大小为 D02 冻结候选）见 contracts/pairing-and-identity.json。",
+ "description": "各文档：UDP 发现应答【当前形态，LanDiscoveryResponder.cs:7-40：监听 8767、魔术串 PHONEDECK-DISCOVER、应答不含令牌/证书指纹】；USB 配对响应【当前形态，Program.cs:381-401：仅 USB 回环请求可达，否则 404】；扫码配对二维码载荷【目标设计，NET-02：QR 绑定电脑身份/证书与一次性高熵材料，短时窗口、限速、用后失效、电脑本地确认】；扫码配对提交/签发响应【目标，M1-A A2 实现形态】；凭据轮换请求/响应【目标，M1-A A4 设计形态：旧共享令牌经 /api/lan/credential/rotate 升级为逐手机凭据，单次签发、永不重发（G-1 处置），见 contracts/pairing-and-identity.json.migration.rotate】。数值参数（有效期 120 秒、每窗口 5 次失败为规格候选值，材料长度/二维码大小为 D02 冻结候选）见 contracts/pairing-and-identity.json。",
  "oneOf": [
   {
    "$ref": "#/definitions/discoveryAdvertisement"
@@ -18,6 +18,12 @@
   },
   {
    "$ref": "#/definitions/qrCredentialsResponse"
+  },
+  {
+   "$ref": "#/definitions/credentialRotateRequest"
+  },
+  {
+   "$ref": "#/definitions/credentialRotateResponse"
   }
  ],
  "definitions": {
@@ -279,6 +285,109 @@
     "certificateSha256"
    ],
    "additionalProperties": false
+  },
+  "credentialRotateRequest": {
+   "type": "object",
+   "description": "POST /api/lan/credential/rotate 请求【目标，M1-A A4 设计形态（docs/M1A_PAIRING_DESIGN.md §5.2）】：旧共享令牌持有者升级为逐手机凭据，无需重新扫码。仅接受旧 token 鉴权；已持 Authorization: Bearer 新凭据的调用者一律 403（旧头/新头不得互获额外能力，设计 §5.1）。",
+   "properties": {
+    "clientId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+     "description": "手机自生成 GUID，升级后凭据沿用；服务端校验格式与冲突后采用，否则重新生成（ClientCredentialsStore.Issue，ClientCredentials.cs:54-77 为 A1 已实现行为）。"
+    }
+   },
+   "required": [
+    "clientId"
+   ],
+   "additionalProperties": false
+  },
+  "credentialRotateResponse": {
+   "type": "object",
+   "description": "POST /api/lan/credential/rotate 响应【目标，M1-A A4 设计形态】oneOf 两形态：issued=单次签发（令牌本体仅此一次出现，服务端只存 SHA-256 哈希）；already-upgraded=同 clientId 重放（G-1 处置：rotate 永不重发，防冒领他人凭据与撤销旁路；绝无令牌字段，additionalProperties=false 使任何令牌字段成为可拒绝的形态违例）。revoked clientId 永不重发，凭据找回唯一路径=重新扫码配对（设计 §5.2/§6）。",
+   "oneOf": [
+    {
+     "type": "object",
+     "description": "首次成功轮换：该手机专属凭据签发一次。",
+     "properties": {
+      "status": {
+       "const": "issued"
+      },
+      "clientId": {
+       "type": "string",
+       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "clientToken": {
+       "type": "string",
+       "pattern": "^PLACEHOLDER",
+       "description": "≥192bit 随机 bearer（base64url）：只出现在本响应一次，永不重发；样本必须以 PLACEHOLDER 开头。"
+      },
+      "scopes": {
+       "type": "array",
+       "items": {
+        "enum": [
+         "control",
+         "audio",
+         "settings",
+         "update-request"
+        ]
+       },
+       "minItems": 4,
+       "maxItems": 4,
+       "uniqueItems": true,
+       "description": "M1-A 签发默认全授予并显式记录（设计 §2）。"
+      },
+      "pairingId": {
+       "type": "string",
+       "pattern": "^rotate-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+       "description": "轮换签发来源标识（rotate-+GUID）：与扫码配对 GUID 区分，审计与撤销可按来源追溯（设计 §5.2/§6）。"
+      },
+      "computerId": {
+       "$ref": "definitions.schema.json#/definitions/computerId"
+      },
+      "displayName": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 128
+      },
+      "certificateSha256": {
+       "$ref": "#/definitions/certificateSha256Lower"
+      }
+     },
+     "required": [
+      "status",
+      "clientId",
+      "clientToken",
+      "scopes",
+      "pairingId",
+      "computerId",
+      "displayName",
+      "certificateSha256"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "description": "同 clientId 再次 rotate：绝不重发令牌本体，仅回状态。该形态不含也不允许任何令牌字段。",
+     "properties": {
+      "ok": {
+       "const": true
+      },
+      "status": {
+       "const": "already-upgraded"
+      },
+      "clientId": {
+       "type": "string",
+       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      }
+     },
+     "required": [
+      "ok",
+      "status",
+      "clientId"
+     ],
+     "additionalProperties": false
+    }
+   ]
   }
  }
 }

@@ -30,6 +30,7 @@ internal static class LanRequestAuthenticator
     /// 新式 Authorization: Bearer + 逐手机令牌（返回其 clientId），
     /// 或旧式 X-PhoneDeck-Token 共享令牌（映射隐式 legacy-shared，迁移窗口内共存）。
     /// Bearer 出现但无效时直接拒绝，不回退旧头（防混淆降级）。非 8766 端口（回环）放行、无 clientId。
+    /// M1-A A4：legacy 应急撤销后（设计 §5.3/§5.4）旧头一律拒签 → 401，逐手机凭据不受影响。
     /// </summary>
     internal static LanAuthResult Resolve(
         int localPort,
@@ -51,12 +52,17 @@ internal static class LanRequestAuthenticator
                 : new LanAuthResult(true, record.ClientId);
         }
         if (legacyTokenHeader is not null
+            && !credentials.LegacyRevoked
             && IsAuthorized(localPort, legacyTokenHeader, expectedSharedToken))
         {
             return new LanAuthResult(true, ClientCredentialsStore.LegacySharedClientId);
         }
         return LanAuthResult.Denied;
     }
+
+    /// <summary>rotate 仅服务旧共享令牌升级（设计 §5.2）：Bearer/逐手机凭据调用者一律 403。</summary>
+    internal static bool IsLegacySharedCaller(string? resolvedClientId) =>
+        string.Equals(resolvedClientId, ClientCredentialsStore.LegacySharedClientId, StringComparison.Ordinal);
 
     private static string? ParseBearer(string? authorizationHeader)
     {
