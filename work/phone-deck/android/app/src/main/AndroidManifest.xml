@@ -29,6 +29,7 @@
             android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".ComputerSettingsActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+        <activity android:name=".TranscriptSyncActivity" android:exported="false" />
         <activity android:name=".FleetUpdateActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
         <service

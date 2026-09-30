@@ -18,7 +18,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
     private volatile bool enabled = true;
     internal void SetEnabled(bool value) { enabled = value; if (value) Start(); }
 
-    internal LanDiscoveryResponder(ReceiverIdentity identity, int httpsPort)
+    internal LanDiscoveryResponder(ReceiverIdentity identity, int httpsPort, string[]? advertisedCapabilities = null)
     {
         try
         {
@@ -38,7 +38,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
             displayName = identity.DisplayName,
             port = httpsPort,
             platform = identity.Platform,
-            capabilities = new[]
+            capabilities = advertisedCapabilities ?? new[]
             {
                 "fixedAction", "keyChord", "text", "macro", "phoneAudio",
                 "managedDictation", "secureLan"

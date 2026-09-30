@@ -106,6 +106,7 @@ public final class PhoneAudioService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        TranscriptRelay.acquire(this);
         deviceManager = new TargetDeviceManager(this);
         createNotificationChannel();
         broadcaster = new SharedAudioBroadcaster(this, new SharedAudioBroadcaster.Listener() {
@@ -505,6 +506,7 @@ public final class PhoneAudioService extends Service {
 
     @Override
     public void onDestroy() {
+        TranscriptRelay.release();
         desiredRunning = false;
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {

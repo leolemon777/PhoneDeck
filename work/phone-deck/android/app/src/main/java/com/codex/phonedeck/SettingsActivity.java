@@ -140,11 +140,14 @@ public final class SettingsActivity extends Activity {
         page.addView(navRow("devices", "电脑与输入法", computerSummary,
                 () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(8)));
         page.addView(keepAliveRow(), fullWidthMargins(dp(8)));
+        TextView syncSummary = summaryText(); syncSummary.setText("共享组内保持最终文字一致");
+        page.addView(navRow("devices", "同步文字", syncSummary,
+                () -> startActivity(new Intent(this, TranscriptSyncActivity.class))), fullWidthMargins(dp(8)));
         TextView updateSummary = summaryText();
         updateSummary.setText("一次发起，逐台查看结果");
         page.addView(navRow("↻", "设备更新", updateSummary,
                 () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(8)));
-        TextView privacy = text("PhoneDeck · 本地连接\n手机音频默认不保存；转写由电脑上的输入法处理。", 12, theme.muted, Typeface.NORMAL);
+        TextView privacy = text("PhoneDeck · 本地连接\n手机音频默认不保存；转写由电脑本地语音引擎或已选输入法处理。", 12, theme.muted, Typeface.NORMAL);
         privacy.setLineSpacing(dp(4), 1f);
         page.addView(privacy, topMargin(dp(24)));
         return wrapInScroll(page);

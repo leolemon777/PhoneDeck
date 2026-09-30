@@ -6,6 +6,8 @@
     <application>
         <activity android:name="com.codex.phonedeck.SettingsActivity"
             android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.TranscriptSyncActivity"
+            android:exported="true" tools:replace="android:exported" />
         <activity android:name="com.codex.phonedeck.ComputerSettingsActivity"
             android:exported="true" tools:replace="android:exported" />
         <activity android:name="com.codex.phonedeck.FleetUpdateActivity"

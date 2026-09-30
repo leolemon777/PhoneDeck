@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.20)
+project(PhoneDeckSpeechRuntime LANGUAGES C CXX)
+if(NOT WHISPER_SOURCE)
+  message(FATAL_ERROR "WHISPER_SOURCE must point to the verified upstream commit")
+endif()
+set(WHISPER_BUILD_EXAMPLES ON CACHE BOOL "Build pinned CLI" FORCE)
+add_subdirectory("${WHISPER_SOURCE}" upstream)
+if(WIN32)
+  # Keep upstream untouched; the model loader expects UTF-8 while MSVC main receives ACP.
+  set_source_files_properties("${WHISPER_SOURCE}/examples/cli/cli.cpp"
+    TARGET_DIRECTORY whisper-cli PROPERTIES COMPILE_DEFINITIONS main=phonedeck_utf8_main)
+  target_sources(whisper-cli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/windows-utf8-main.cpp")
+endif()

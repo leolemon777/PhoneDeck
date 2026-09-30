@@ -140,6 +140,7 @@ final class PhoneDeckHttp {
             String line;
             while ((line = reader.readLine()) != null) {
                 content.append(line);
+                if (content.length() > 2 * 1024 * 1024) throw new java.io.IOException("电脑响应超过允许大小");
             }
         }
         return new JSONObject(content.toString());

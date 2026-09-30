@@ -214,6 +214,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        TranscriptRelay.acquire(this);
         theme = PhoneDeckTheme.load(this);
         appliedThemeId = theme.id;
         theme.applyWindow(this);
@@ -2881,7 +2882,7 @@ public final class MainActivity extends Activity {
                     }
                     showConnection(transport + " 已连接", theme.success);
                     showActionFeedback(starting
-                                    ? "✓  Typeless 正在使用手机麦克风听写 · " + transport
+                                    ? "✓  " + activeEngineName() + " 正在使用手机麦克风听写 · " + transport
                                     : "✓  听写已停止 · 请在电脑确认文字 · " + transport,
                             theme.success);
                     performResultHaptic(typelessButton, true);
@@ -2910,7 +2911,7 @@ public final class MainActivity extends Activity {
                     disarmVoiceStartWatchdog();
                     holdReleasePending = false;
                     clearVoiceSessionState();
-                    showConnection("Typeless 指令发送失败", theme.danger);
+                    showConnection("语音指令发送失败", theme.danger);
                     showActionFeedback("✕  电脑没有确认，请检查 Wi-Fi/USB 连接后重试", theme.danger);
                     performResultHaptic(typelessButton, false);
                     flashResult(typelessButton, theme.danger);
@@ -2940,8 +2941,8 @@ public final class MainActivity extends Activity {
             clearVoiceSessionState();
             microphoneLevel.setText("手机麦克风  ✕ 启动超时");
             microphoneLevel.setTextColor(theme.danger);
-            showConnection("Typeless 启动超时", theme.danger);
-            showActionFeedback("✕  Typeless 长时间没有确认，已自动取消，请重试",
+            showConnection("语音启动超时", theme.danger);
+            showActionFeedback("✕  语音引擎长时间没有确认，已自动取消，请重试",
                     theme.danger);
             performResultHaptic(typelessButton, false);
             flashResult(typelessButton, theme.danger);
@@ -2981,7 +2982,7 @@ public final class MainActivity extends Activity {
         body.put("mode", currentSessionMode == null ? "dictation" : currentSessionMode);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
         if (!postEndpointWithRetry(sessionEndpoint, endpoint, body, 2)) {
-            throw new IllegalStateException("电脑端未确认 Typeless 会话");
+            throw new IllegalStateException("电脑端未确认语音会话");
         }
         return sessionEndpoint.label;
     }
@@ -3340,6 +3341,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
         if (sharedStatusReceiverRegistered) {
             unregisterReceiver(sharedStatusReceiver);
