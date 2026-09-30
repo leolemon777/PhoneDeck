@@ -23,6 +23,7 @@ internal sealed class DictationSessionManager : IDisposable
     private readonly object syncRoot = new();
     private readonly IPhoneAudioSessionController audioBridge;
     private readonly IVoiceEngineController engine;
+    private readonly SessionLeaseRegistry leaseRegistry;
 
     /// <summary>volatile：/api/health 等读端不得被启动/停止的慢路径阻塞。</summary>
     private volatile string? activeDictationSessionId;
@@ -36,20 +37,41 @@ internal sealed class DictationSessionManager : IDisposable
     internal DictationSessionManager(
         IPhoneAudioSessionController audioBridge,
         IVoiceEngineController engine)
+        : this(audioBridge, engine, new SessionLeaseRegistry())
+    {
+    }
+
+    internal DictationSessionManager(
+        IPhoneAudioSessionController audioBridge,
+        IVoiceEngineController engine,
+        SessionLeaseRegistry leaseRegistry)
     {
         this.audioBridge = audioBridge;
         this.engine = engine;
+        this.leaseRegistry = leaseRegistry;
     }
 
     internal bool IsActive => activeDictationSessionId is not null;
 
     internal string? ActiveSessionId => activeDictationSessionId;
 
-    internal bool Start(string? sessionId, string? requestId, string? mode)
+    internal bool Start(string? sessionId, string? requestId, string? mode, string? clientId = null)
     {
         var normalizedSessionId = ValidateSessionId(sessionId);
         var normalizedRequestId = ValidateRequestId(requestId);
         var normalizedMode = NormalizeMode(mode);
+        // M1-B：代次/租约/墓碑前置裁决（R1：迟到 start 不得复活已取消代次）。
+        switch (leaseRegistry.BeginStart(normalizedSessionId,
+            clientId ?? ClientCredentialsStore.LegacySharedClientId))
+        {
+            case SessionLeaseRegistry.StartOutcome.Idempotent:
+                return true;
+            case SessionLeaseRegistry.StartOutcome.RejectedTombstoned:
+                throw new InvalidOperationException(
+                    "该会话已终止，迟到的启动请求已被拒绝；请开启新会话");
+            case SessionLeaseRegistry.StartOutcome.RejectedOwned:
+                throw new InvalidOperationException("另一个语音听写会话仍在运行");
+        }
         if (!engine.IsModeConfigured(normalizedMode))
         {
             throw new InvalidOperationException(
@@ -144,6 +166,9 @@ internal sealed class DictationSessionManager : IDisposable
     {
         var normalizedSessionId = ValidateSessionId(sessionId);
         var normalizedRequestId = ValidateRequestId(requestId);
+        // 停止优先（R1）：先在租约登记簿写墓碑，此后同会话迟到 start 一律拒绝；
+        // 旧/未知会话返回 false（stale-ignored，不改任何状态）。
+        var stopOwnsSession = leaseRegistry.BeginStop(normalizedSessionId);
         bool duplicate = false;
         bool stopConfirmed = true;
         Exception? stopFailure = null;
@@ -158,6 +183,10 @@ internal sealed class DictationSessionManager : IDisposable
             if (!string.Equals(activeDictationSessionId, normalizedSessionId,
                     StringComparison.Ordinal))
             {
+                if (stopOwnsSession)
+                {
+                    leaseRegistry.Bury(normalizedSessionId);
+                }
                 throw new InvalidOperationException("请求的会话不是当前听写会话");
             }
 
@@ -340,6 +369,8 @@ internal sealed class DictationSessionManager : IDisposable
                 $"引擎启动失败后的复位也失败：{exception.Message}");
         }
         activeDictationSessionId = null;
+        // 启动失败不写墓碑（T03→T09）：同会话重试是合法新尝试。
+        leaseRegistry.Abandon(sessionId);
     }
 
     public void Dispose()

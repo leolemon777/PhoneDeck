@@ -810,7 +810,7 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
     }
 });
 
-app.MapPost("/api/dictation/start", (DictationCommand command) =>
+app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext context) =>
     ExecuteDictationCommand(() =>
     {
         TargetEnvelopeValidator.Validate(
@@ -822,7 +822,8 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
         var duplicate = dictationSessions.Start(
             command.SessionId,
             command.RequestId,
-            VoiceEngines.NormalizeMode(command.Mode));
+            VoiceEngines.NormalizeMode(command.Mode),
+            context.Items["ClientId"] as string);
         return Results.Ok(new
         {
             ok = true,

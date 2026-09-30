@@ -1,6 +1,27 @@
 # PhoneDeck 项目交接说明
 
-## 2026-09-30 M1-A A5 mDNS 发现层——M1-A 全部完成（最新）
+## 2026-09-30 M1-B 第一片：会话租约/墓碑/代次 + V47 配置冲突（最新）
+
+- 按 contracts/session-states.json（M0 冻结夹具）实现 **SessionLeaseRegistry**（新文件）：
+  代次递增（迟到 start 不复活已取消代次，R1）、租约用 **Stopwatch 单调时钟**
+  （墙上时间回拨免疫，PRO-03）、墓碑保留期（60s 提案）内拒绝同 sessionId 复用、
+  保留期后复用为合法新代次、**失败启动清理不写墓碑**（T03→T09，同会话重试合法——
+  与停止墓簿严格区分）、重连窗口（RC1/RC2 15s，MIC-10 提案）、过期租约后台回收。
+- 接线：DictationSessionManager.Start 前置裁决（Idempotent/RejectedTombstoned/
+  RejectedOwned → 对应用户文案）；Stop **先写墓碑再拆引擎**（停止优先）；AudioEnded/
+  Dispose 终结；/api/dictation/start 传 clientId（逐手机会话归属）。
+- **V47（L1 部分）**：ConfigConflictTests 三用例——voice/connection 双修订流独立
+  （内容哈希、同内容幂等）、过期修订显式冲突不自动合并、WriteAtomic 写失败
+  （目标被锁 → UnauthorizedAccessException，端点映射 500）原文件不变。
+- 验证：Windows **129/129**（新增 6 会话用例含 **V25 有界随机竞态矩阵 500 轮×40 步**
+  不变量保持；满额 1000 轮属 L2 台架项）；Server Release 0 警告 0 错误。
+- 边界：租约续期尚未挂到音频流心跳（当前租约为孤儿会话后备，30s 后允许接管——
+  正常会话由 Stop/AudioEnded 即时清理，不依赖租约过期）；重连窗口 CanResume 尚无
+  消费方（RC 续接随 V38/V41 实装）；V47 手机端草稿保留属 L3；共享组（DEV-03/R2）
+  未动。M1-B 剩余：目标隔离强化、共享组、V19–V28/V32–V40 相关实装。
+- 真机欠账不变：V09/V17/V10 待手机与 PC 同网段。
+
+## 2026-09-30 M1-A A5 mDNS 发现层——M1-A 全部完成
 
 - **服务端**（新 `MdnsAdvertiser.cs`，依赖 Makaretu.Dns 2.0.1 + Makaretu.Dns.Multicast
   0.27.0，均 MIT）：发布 `_phonedeck._tcp`，TXT 字段与 UDP 应答严格同集
