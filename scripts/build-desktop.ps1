@@ -34,7 +34,15 @@ if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Refusing modified native source.' }
 if (!$SkipTests) { Invoke-Checked dotnet @('test',(Join-Path $repo 'work/phone-deck/desktop/PhoneDeck.Desktop.Tests/PhoneDeck.Desktop.Tests.csproj'),'-c','Release') }
 $native = Join-Path $run 'native-build'
 $options = @('-S',(Join-Path $repo 'work/phone-deck/desktop/speech-runtime'),"-DWHISPER_SOURCE=$WhisperSource",'-B',$native,'-DCMAKE_BUILD_TYPE=Release','-DBUILD_SHARED_LIBS=OFF','-DGGML_NATIVE=OFF','-DGGML_AVX=OFF','-DGGML_AVX2=OFF','-DGGML_AVX512=OFF','-DGGML_FMA=OFF','-DGGML_F16C=OFF','-DGGML_BMI2=OFF','-DGGML_SSE42=OFF','-DGGML_OPENMP=OFF','-DGGML_METAL=OFF','-DGGML_BACKEND_DL=OFF','-DWHISPER_BUILD_TESTS=OFF','-DWHISPER_BUILD_SERVER=OFF','-DWHISPER_SDL2=OFF','-DWHISPER_BUILD_IS_DEV=OFF')
-if ($IsWindows) { $options += @('-G','Visual Studio 17 2022','-A','x64','-DCMAKE_POLICY_DEFAULT_CMP0091=NEW','-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded') }
+if ($IsWindows) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if (!(Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio C++ build tools are required.' }
+    $installations = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json)
+    if (!$installations) { throw 'No Visual Studio installation with the C++ compiler was found.' }
+    $major = ([Version]$installations[0].installationVersion).Major
+    $generator = switch ($major) { 17 { 'Visual Studio 17 2022' }; 18 { 'Visual Studio 18 2026' }; default { throw "Unsupported Visual Studio version: $major" } }
+    $options += @('-G',$generator,'-A','x64','-DCMAKE_POLICY_DEFAULT_CMP0091=NEW','-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')
+}
 if ($IsMacOS) { $options += '-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0' }
 Invoke-Checked cmake $options
 Invoke-Checked cmake @('--build',$native,'--config','Release','--target','whisper-cli','--parallel','4')

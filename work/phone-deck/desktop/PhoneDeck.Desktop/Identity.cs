@@ -42,8 +42,10 @@ internal sealed class DesktopTrust : IDisposable
         var passwordPath = Path.Combine(directory, "desktop-tls-password.txt");
         var password = File.Exists(passwordPath) ? File.ReadAllText(passwordPath) : Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         if (!File.Exists(passwordPath)) { File.WriteAllText(passwordPath, password); PrivateFiles.RestrictFile(passwordPath); }
-        // Windows Schannel requires a named user key; a purely ephemeral CNG key fails TLS.
-        var flags = OperatingSystem.IsWindows() ? X509KeyStorageFlags.UserKeySet : X509KeyStorageFlags.EphemeralKeySet;
+        // Schannel needs a named user key. Apple's keychain cannot load EphemeralKeySet;
+        // DefaultKeySet allows its temporary key, which is released with the certificate.
+        var flags = OperatingSystem.IsWindows() ? X509KeyStorageFlags.UserKeySet
+            : OperatingSystem.IsMacOS() ? X509KeyStorageFlags.DefaultKeySet : X509KeyStorageFlags.EphemeralKeySet;
         if (File.Exists(path)) Certificate = X509CertificateLoader.LoadPkcs12FromFile(path, password, flags);
         else
         {

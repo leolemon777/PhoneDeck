@@ -33,8 +33,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install innosetup --no-progress -y
-          'C:Program Files (x86)Inno Setup 6' | Add-Content $env:GITHUB_PATH
+          choco install innosetup --version=6.7.3 --no-progress -y
+          (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6') | Add-Content $env:GITHUB_PATH
       - name: Test and package native runtime
         id: package
         shell: pwsh
@@ -60,6 +60,8 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '17' }
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Build isolated Android preview
         working-directory: work/phone-deck/android
         run: bash gradlew :app:assembleUiPreview :app:lintUiPreview :app:testDebugUnitTest --console=plain
