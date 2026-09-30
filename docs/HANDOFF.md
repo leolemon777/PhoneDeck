@@ -1,5 +1,20 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 B01/B02 维护项：第三方声明基线 + 版本核对 + 规格进度快照（最新）
+
+- 手机仍跨网段（192.168.0.195），真机欠账继续搁置，本轮完成维护项：
+  - **docs/THIRD_PARTY_NOTICES.md 建立**（DOC-04/REL-11 人工基线）：NAudio 2.2.1/MIT、
+    Makaretu.Dns 2.0.1 + Multicast 0.27.0/MIT、QRCoder 1.6.0/MIT、
+    zxing-android-embedded 4.3.0/Apache-2.0（含 zxing core 3.4.1）全登记，
+    附维护规则（新增依赖同步清单、许可兼容性、发布包附带）。
+  - **版本一致性核对**：Test-ReleaseVersions.puredata 套件通过；M0/M1 系列提交
+    未动发布序号（dev.21/27、dev.16/28 维持）——发布序号只在 B03 打包批次推进
+    （REL-02 纪律）。
+  - **spec plan 第 0 章**新增"M0/M1 执行进度快照"节：八行对账表（M0 两批到
+    B01/B02）+ 协议影响对账（M1-A 落地附件 NET-01…07 目标形态、Bearer 头默认、
+    迁移窗口共存），满足 AGENTS 规则 5 的长期规格同步义务。
+- SBOM 自动化（REL-11）仍留 B03 批次。真机欠账不变（V09/V17/V10/V21 完整形态）。
+
 ## 2026-09-30 M1-B 收尾：会话状态机×租约登记集成台架（最新）
 
 - 新增 `SessionManagerLeaseIntegrationTests`（5 用例，**136/136 通过**）：把第一片的
