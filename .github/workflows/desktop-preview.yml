@@ -1,7 +1,7 @@
 name: Cross-platform Desktop Preview
 on:
   pull_request:
-    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','scripts/build-desktop.ps1','scripts/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
+    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-DesktopSpeech.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
   workflow_dispatch:
     inputs:
       include_model:
@@ -24,6 +24,7 @@ jobs:
           - { os: macos-15-intel, rid: osx-x64 }
           - { os: macos-latest, rid: osx-arm64 }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
@@ -41,7 +42,7 @@ jobs:
         env:
           INCLUDE_MODEL: ${{ inputs.include_model || false }}
         run: |
-          ./scripts/build-desktop.ps1 -Rid '${{ matrix.rid }}' -IncludeModel:($env:INCLUDE_MODEL -eq 'true')
+          ./scripts/build-desktop.ps1 -Rid '${{ matrix.rid }}' -IncludeModel:($env:INCLUDE_MODEL -eq 'true') -VerifySpeech
       - uses: actions/upload-artifact@v4
         with:
           name: PhoneDeck-Desktop-${{ matrix.rid }}

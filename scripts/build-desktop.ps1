@@ -5,6 +5,7 @@ param(
     [string]$WhisperSource,
     [string]$ModelPath,
     [switch]$IncludeModel,
+    [switch]$VerifySpeech,
     [string]$OutputDirectory = 'outputs/desktop-release',
     [switch]$SkipTests
 )
@@ -65,6 +66,21 @@ if ($ModelPath) {
     if ((Get-Item -LiteralPath $ModelPath).Length -ne 190085487 -or (Get-FileHash -LiteralPath $ModelPath -Algorithm SHA256).Hash -ne $modelHash) { throw 'Bundled model hash/size mismatch.' }
     New-Item -ItemType Directory -Path (Join-Path $package 'models') | Out-Null
     Copy-Item -LiteralPath $ModelPath -Destination (Join-Path $package 'models/ggml-small-q5_1.bin')
+}
+if ($VerifySpeech) {
+    $validationModel = $ModelPath
+    if (!$validationModel) {
+        $validationModel = Join-Path $run 'speech-validation-model.bin'
+        Invoke-WebRequest -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin' -OutFile $validationModel
+    }
+    # Exercise native argv encoding and stdin/stdout on every OS, using only upstream public audio.
+    # Keep the verification model outside the distributed package when first-run download is selected.
+    $smoke = Join-Path $run '语音验收'
+    New-Item -ItemType Directory -Path (Join-Path $smoke 'models'),(Join-Path $smoke 'speech-runtime') -Force | Out-Null
+    Copy-Item -LiteralPath $validationModel -Destination (Join-Path $smoke 'models/ggml-small-q5_1.bin')
+    Copy-Item -LiteralPath $cli -Destination (Join-Path $smoke 'speech-runtime')
+    $python = if ($IsWindows) { 'python' } else { 'python3' }
+    Invoke-Checked $python @((Join-Path $repo 'scripts/tests/Test-DesktopSpeech.py'),$smoke,(Join-Path $WhisperSource 'samples/jfk.wav'))
 }
 $manifest = [ordered]@{ version=$version; rid=$Rid; sourceCommit=(& git -C $repo rev-parse HEAD).Trim(); sourceDirty=[bool](& git -C $repo status --porcelain); whisperCommit=$commit; modelSha256=$modelHash.ToLowerInvariant(); modelBundled=[bool]$ModelPath; createdUtc=[DateTime]::UtcNow.ToString('O'); files=@() }
 foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) { $manifest.files += @{ path=[IO.Path]::GetRelativePath($package,$file.FullName).Replace('\','/'); sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); bytes=$file.Length } }
