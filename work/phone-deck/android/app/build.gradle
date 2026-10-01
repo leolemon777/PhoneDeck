@@ -89,7 +89,7 @@ androidComponents {
     onVariants(selector().withBuildType("desktopPreview")) { variant ->
         variant.outputs.each { output ->
             output.versionName.set("2.0.0-alpha.1")
-            output.versionCode.set(3)
+            output.versionCode.set(4)
         }
     }
 }

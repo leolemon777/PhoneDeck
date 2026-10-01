@@ -54,6 +54,7 @@ public final class SettingsActivity extends Activity {
     private TextView themeSummary;
     private TextView voiceSummary;
     private TextView shortcutSummary;
+    private TextView computerSummary;
 
     private LinearLayout managedOption;
     private LinearLayout sharedOption;
@@ -135,9 +136,10 @@ public final class SettingsActivity extends Activity {
                 () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(8)));
 
         page.addView(sectionLabel("连接与维护"), topMargin(dp(24)));
-        TextView computerSummary = summaryText();
-        computerSummary.setText("逐台管理输入法、快捷键与自动连接");
-        page.addView(navRow("devices", "电脑与输入法", computerSummary,
+        computerSummary = summaryText();
+        int computers = new TargetDeviceManager(this).list().size();
+        computerSummary.setText(getString(R.string.computer_settings_summary, computers));
+        page.addView(navRow("devices", "多电脑配置", computerSummary,
                 () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(8)));
         page.addView(keepAliveRow(), fullWidthMargins(dp(8)));
         TextView syncSummary = summaryText(); syncSummary.setText("共享组内保持最终文字一致");
@@ -158,7 +160,7 @@ public final class SettingsActivity extends Activity {
         addHeader(page, "外观主题", view -> popPage());
 
         TextView hint = text(
-                "暖白纸面与墨色线条，也可以切换深色。主题只改变外观，不改变电脑目标与快捷键。",
+                "选一套喜欢的配色，立即应用到整个手机界面。主题跟随手机，每台电脑的配置独立保存。",
                 13, theme.muted, Typeface.NORMAL);
         hint.setLineSpacing(0, 1.18f);
         page.addView(hint, topMargin(dp(14)));
@@ -166,6 +168,8 @@ public final class SettingsActivity extends Activity {
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
                 page.addView(sectionLabel("墨水屏系列"), topMargin(dp(20)));
+            } else if ("forest_light".equals(candidate.id)) {
+                page.addView(sectionLabel("彩色主题"), topMargin(dp(20)));
             }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
@@ -175,12 +179,12 @@ public final class SettingsActivity extends Activity {
     private View buildVoicePage() {
         LinearLayout page = pageShell();
         addHeader(page, "语音输入", view -> popPage());
-        TextView computerSummary = summaryText(); computerSummary.setText("为每台电脑选择输入法");
-        page.addView(navRow("devices", "电脑与输入法", computerSummary,
+        TextView computerSummary = summaryText(); computerSummary.setText("逐台设置语音引擎与电脑快捷键");
+        page.addView(navRow("devices", "多电脑配置", computerSummary,
                 () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(12)));
 
         managedOption = option("手机控制听写",
-                "手机按钮控制当前电脑的语音输入软件（在本页「电脑与输入法」选择），保留点击/按住操作", true);
+                "手机按钮控制当前电脑的语音引擎（在「多电脑配置」调整），保留点击/按住操作", true);
         managedCheck = (TextView) managedOption.getChildAt(1);
         managedOption.setOnClickListener(view -> selectWorkMode(WORK_MANAGED));
         page.addView(managedOption, fullWidthMargins(dp(14)));
@@ -488,6 +492,8 @@ public final class SettingsActivity extends Activity {
         voiceSummary.setText(sharedSelected ? "共享麦克风"
                 : "手机控制 · " + (holdSelected ? "按住说话" : "点击说话"));
         shortcutSummary.setText(repository.load().size() + " 个按钮");
+        computerSummary.setText(getString(R.string.computer_settings_summary,
+                new TargetDeviceManager(this).list().size()));
     }
 
     private TextView summaryText() {

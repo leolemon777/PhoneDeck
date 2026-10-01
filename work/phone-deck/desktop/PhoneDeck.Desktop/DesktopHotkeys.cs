@@ -7,14 +7,20 @@ namespace PhoneDeck.Desktop;
 internal sealed class DesktopHotkeys : IDisposable
 {
     private readonly SpeechSession speech;
+    private readonly string tapShortcut, holdShortcut;
     private readonly CancellationTokenSource cancellation = new();
+    private readonly ManualResetEventSlim initialized = new();
     private readonly Thread worker;
     private uint windowsThread;
-    private string status = "checking";
+    private volatile string status = "checking";
     internal string Status => status;
-    internal DesktopHotkeys(SpeechSession speech)
+    internal string WaitUntilReady() { initialized.Wait(TimeSpan.FromSeconds(3)); return status; }
+    internal DesktopHotkeys(SpeechSession speech, string tapShortcut = "Ctrl+Alt+Space", string holdShortcut = "Ctrl+Alt+V")
     {
         this.speech = speech;
+        if (!VoiceShortcutOptions.Contains(tapShortcut) || !VoiceShortcutOptions.Contains(holdShortcut) || tapShortcut == holdShortcut)
+            throw new ArgumentException("语音快捷键配置无效");
+        this.tapShortcut = tapShortcut; this.holdShortcut = holdShortcut;
         worker = new Thread(Run) { IsBackground = true, Name = "PhoneDeckDesktopKeys" };
         worker.Start();
     }
@@ -25,31 +31,35 @@ internal sealed class DesktopHotkeys : IDisposable
             if (OperatingSystem.IsWindows()) RunWindows();
             else if (OperatingSystem.IsMacOS()) RunMac();
             else if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))) RunX11();
-            else status = "wayland-custom-shortcut";
+            else { status = "wayland-custom-shortcut"; initialized.Set(); }
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException or Win32Exception or IOException)
         { status = "unavailable"; }
+        finally { initialized.Set(); }
     }
     private void Toggle() { if (speech.Recording) _ = speech.StopLocalAsync(); else Start(); }
-    private void Start() { try { speech.StartLocal(); } catch (InvalidOperationException) { } }
+    private bool Start() { try { speech.StartLocal(); return true; } catch (InvalidOperationException) { return false; } }
     private void RunWindows()
     {
         windowsThread = GetCurrentThreadId();
         PeekMessage(out _, 0, 0, 0, 0); // Create the thread message queue before registering/shutting down.
-        var toggle = RegisterHotKey(0, 1, 0x4003, 0x20); // Ctrl+Alt+Space, no repeat
-        var hold = RegisterHotKey(0, 2, 0x4003, 0x56); // Ctrl+Alt+V
+        var toggle = RegisterHotKey(0, 1, 0x4003, VoiceShortcutOptions.WindowsKey(tapShortcut));
+        var holdKey = (int)VoiceShortcutOptions.WindowsKey(holdShortcut);
+        var hold = RegisterHotKey(0, 2, 0x4003, (uint)holdKey);
         status = toggle && hold ? "ready" : "shortcut-conflict";
+        initialized.Set();
         var holding = false;
         try
         {
+            if (!toggle || !hold) return;
             while (!cancellation.IsCancellationRequested)
             {
                 while (PeekMessage(out var message, 0, 0, 0, 1))
                 {
                     if (message.Message == 0x312 && message.WParam == 1) Toggle();
-                    if (message.Message == 0x312 && message.WParam == 2 && !holding) { Start(); holding = speech.Recording; }
+                    if (message.Message == 0x312 && message.WParam == 2 && !holding) holding = Start();
                 }
-                if (holding && (GetAsyncKeyState(0x56) & 0x8000) == 0) { holding = false; _ = speech.StopLocalAsync(); }
+                if (holding && (GetAsyncKeyState(holdKey) & 0x8000) == 0) { holding = false; _ = speech.StopLocalAsync(); }
                 cancellation.Token.WaitHandle.WaitOne(20);
             }
         }
@@ -58,13 +68,14 @@ internal sealed class DesktopHotkeys : IDisposable
     private void RunMac()
     {
         // The helper owns a native application event loop on its OS main thread.
-        // Only fixed hotkey commands cross this pipe; it accepts no remote arguments.
+        // Arguments are identifiers from the controlled shortcut table, never executable paths or commands.
         using var helper = new Process { StartInfo = new ProcessStartInfo
         {
             FileName = Path.Combine(AppContext.BaseDirectory, "hotkey-runtime", "phonedeck-hotkeys"),
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true
         } };
+        helper.StartInfo.ArgumentList.Add(tapShortcut); helper.StartInfo.ArgumentList.Add(holdShortcut);
         if (!helper.Start()) { status = "unavailable"; return; }
         // Drain native framework diagnostics without retaining or logging them.
         _ = helper.StandardError.BaseStream.CopyToAsync(Stream.Null);
@@ -75,12 +86,17 @@ internal sealed class DesktopHotkeys : IDisposable
         {
             while (!cancellation.IsCancellationRequested && helper.StandardOutput.ReadLine() is { } command)
             {
+                if (command == "ready:" + tapShortcut + ":" + holdShortcut) { status = "ready"; initialized.Set(); continue; }
                 switch (command)
                 {
-                    case "ready": case "shortcut-conflict": case "unavailable": status = command; break;
+                    // Older packaged helpers only implement the two defaults.
+                    case "ready":
+                        status = tapShortcut == "Ctrl+Alt+Space" && holdShortcut == "Ctrl+Alt+V" ? "ready" : "runtime-upgrade-required";
+                        initialized.Set(); if (status != "ready") return; break;
+                    case "shortcut-conflict": case "unavailable": status = command; initialized.Set(); break;
                     case "toggle": Toggle(); break;
-                    case "start": Start(); holding = speech.Recording; break;
-                    case "stop": holding = false; _ = speech.StopLocalAsync(); break;
+                    case "start": holding = Start(); break;
+                    case "stop": if (holding) { holding = false; _ = speech.StopLocalAsync(); } break;
                     default: status = "unavailable"; return;
                 }
             }
@@ -90,7 +106,7 @@ internal sealed class DesktopHotkeys : IDisposable
             KillHelper();
             helper.WaitForExit(1000);
             if (holding) _ = speech.StopLocalAsync(true);
-            if (!cancellation.IsCancellationRequested) status = "unavailable";
+            if (!cancellation.IsCancellationRequested && status is not ("runtime-upgrade-required" or "shortcut-conflict")) status = "unavailable";
         }
     }
     private void RunX11()
@@ -101,21 +117,24 @@ internal sealed class DesktopHotkeys : IDisposable
         XErrorHandler errorHandler = (_, _) => { Interlocked.Exchange(ref conflict, 1); return 0; };
         var previousErrorHandler = XSetErrorHandler(errorHandler);
         var root = XDefaultRootWindow(display);
-        var toggleKey = XKeysymToKeycode(display, 0x20); var holdKey = XKeysymToKeycode(display, 0x76);
+        var toggleKey = XKeysymToKeycode(display, VoiceShortcutOptions.X11Keysym(tapShortcut)); var holdKey = XKeysymToKeycode(display, VoiceShortcutOptions.X11Keysym(holdShortcut));
+        if (toggleKey == 0 || holdKey == 0) { XCloseDisplay(display); XRestoreErrorHandler(previousErrorHandler); status = "unavailable"; return; }
         foreach (var modifier in new uint[] { 12, 14, 28, 30 }) { XGrabKey(display, toggleKey, modifier, root, false, 1, 1); XGrabKey(display, holdKey, modifier, root, false, 1, 1); }
         XSync(display, false); status = conflict == 0 ? "ready" : "shortcut-conflict";
+        initialized.Set();
         var toggleDown = false; var holdDown = false;
         try
         {
+            if (conflict != 0) return;
             while (!cancellation.IsCancellationRequested)
             {
                 while (XPending(display) > 0)
                 {
                     XNextEvent(display, out var ev);
                     if (ev.Type == 2 && ev.KeyCode == toggleKey && !toggleDown) { toggleDown = true; Toggle(); }
-                    if (ev.Type == 2 && ev.KeyCode == holdKey && !holdDown) { holdDown = true; Start(); }
+                    if (ev.Type == 2 && ev.KeyCode == holdKey && !holdDown) holdDown = Start();
                     if (ev.Type == 3 && ev.KeyCode == toggleKey) toggleDown = false;
-                    if (ev.Type == 3 && ev.KeyCode == holdKey) { holdDown = false; _ = speech.StopLocalAsync(); }
+                    if (ev.Type == 3 && ev.KeyCode == holdKey && holdDown) { holdDown = false; _ = speech.StopLocalAsync(); }
                 }
                 cancellation.Token.WaitHandle.WaitOne(20);
             }
@@ -126,7 +145,7 @@ internal sealed class DesktopHotkeys : IDisposable
     {
         cancellation.Cancel();
         if (windowsThread != 0) PostThreadMessage(windowsThread, 0, 0, 0);
-        worker.Join(1000);
+        if (!worker.Join(4000)) throw new IOException("快捷键工作线程仍在退出，请稍后重试");
     }
     [StructLayout(LayoutKind.Sequential)] private struct WinMessage { public nint Window; public uint Message; public nuint WParam; public nint LParam; public uint Time; public int X, Y; public uint Private; }
     [StructLayout(LayoutKind.Explicit, Size = 192)] private struct XEvent { [FieldOffset(0)] public int Type; [FieldOffset(84)] public uint KeyCode; }

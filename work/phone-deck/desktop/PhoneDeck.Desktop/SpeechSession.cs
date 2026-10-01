@@ -20,6 +20,20 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     private string state = "idle";
     private string? error;
     private Task pendingResult = Task.CompletedTask;
+    private bool applyingSettings;
+    internal bool Busy { get { lock (gate) return applyingSettings || streamSession is not null || recording is not null || !pendingResult.IsCompleted; } }
+    internal void WhileIdle(Action apply)
+    {
+        lock (gate)
+        {
+            if (applyingSettings || streamSession is not null || recording is not null || !pendingResult.IsCompleted)
+                throw new InvalidOperationException("正在供音、听写或识别，请停止并等待本段完成后保存设置");
+            applyingSettings = true;
+        }
+        // Native registrations can wait for their worker; do not hold the speech lock here.
+        try { apply(); }
+        finally { lock (gate) applyingSettings = false; }
+    }
     internal bool Streaming { get { lock (gate) return streamSession is not null; } }
     internal bool Recording { get { lock (gate) return recording is not null; } }
     internal string? StreamSession { get { lock (gate) return streamSession; } }
@@ -33,6 +47,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
         if (mode is not ("managed" or "shared")) throw new ArgumentException("音频模式无效");
         lock (gate)
         {
+            if (applyingSettings) throw new InvalidOperationException("正在应用设置，请稍后开始说话");
             if (streamSession is not null || (recordingOwner is not null && (recordingOwner != owner || (mode == "managed" && recordingSession != session))))
                 throw new InvalidOperationException("另一手机或会话正在供音");
             RejectStopped(session);
@@ -74,6 +89,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
         Validate(session);
         lock (gate)
         {
+            if (applyingSettings) throw new InvalidOperationException("正在应用设置，请稍后开始说话");
             RejectStopped(session);
             if (recordingSession == session && recordingOwner == owner) return true;
             if (!engine.Ready) throw new InvalidOperationException("请先在电脑完成语音模型下载");
@@ -90,6 +106,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     {
         lock (gate)
         {
+            if (applyingSettings) throw new InvalidOperationException("正在应用设置，请稍后开始说话");
             if (streamSession is null || streamMode != "shared" || streamOwner is null) throw new InvalidOperationException("先在手机开启共享麦克风，并将这台电脑加入共享组");
             if (!engine.Ready) throw new InvalidOperationException("请先下载语音模型");
             if (recording is not null || !pendingResult.IsCompleted) throw new InvalidOperationException("上一段语音仍在处理");

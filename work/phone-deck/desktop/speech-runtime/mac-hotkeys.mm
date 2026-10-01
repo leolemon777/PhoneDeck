@@ -2,6 +2,8 @@
 #include <Carbon/Carbon.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cstdint>
 #include <chrono>
 #include <thread>
 #include <unistd.h>
@@ -32,7 +34,21 @@ static OSStatus handle(EventHandlerCallRef, EventRef event, void *) {
     return noErr;
 }
 
-int main() {
+static UInt32 shortcutCode(const char * id) {
+    const char * names[] = {"Ctrl+Alt+Space", "Ctrl+Alt+V", "Ctrl+Alt+B", "Ctrl+Alt+N",
+        "Ctrl+Alt+F8", "Ctrl+Alt+F9", "Ctrl+Alt+F10", "Ctrl+Alt+F11"};
+    const UInt32 codes[] = {49, 9, 11, 45, 100, 101, 109, 103};
+    for (int i = 0; i < 8; ++i) if (std::strcmp(id, names[i]) == 0) return codes[i];
+    return UINT32_MAX;
+}
+
+int main(int argc, const char ** argv) {
+    const char * tap = argc == 3 ? argv[1] : "Ctrl+Alt+Space";
+    const char * holdKey = argc == 3 ? argv[2] : "Ctrl+Alt+V";
+    const UInt32 tapCode = shortcutCode(tap), holdCode = shortcutCode(holdKey);
+    if ((argc != 1 && argc != 3) || tapCode == UINT32_MAX || holdCode == UINT32_MAX || tapCode == holdCode) {
+        publish("unavailable"); return 1;
+    }
     @autoreleasepool {
         // Carbon's application event queue needs an application loop on the OS main thread.
         // The .NET HTTP process has no Cocoa loop, so this small, fixed-command helper owns it.
@@ -49,9 +65,9 @@ int main() {
         }
         EventHotKeyRef toggleRef = nullptr, holdRef = nullptr;
         EventHotKeyID toggle = {signature, 1}, hold = {signature, 2};
-        const OSStatus first = RegisterEventHotKey(49, controlKey | optionKey, toggle,
+        const OSStatus first = RegisterEventHotKey(tapCode, controlKey | optionKey, toggle,
             GetApplicationEventTarget(), 0, &toggleRef);
-        const OSStatus second = RegisterEventHotKey(9, controlKey | optionKey, hold,
+        const OSStatus second = RegisterEventHotKey(holdCode, controlKey | optionKey, hold,
             GetApplicationEventTarget(), 0, &holdRef);
         const pid_t parent = getppid();
         std::thread([parent] {
@@ -59,7 +75,14 @@ int main() {
             // A receiver crash must not leave its registered shortcuts behind.
             std::_Exit(0);
         }).detach();
-        publish(first == noErr && second == noErr ? "ready" : "shortcut-conflict");
+        if (first != noErr || second != noErr) {
+            if (first == noErr) UnregisterEventHotKey(toggleRef);
+            if (second == noErr) UnregisterEventHotKey(holdRef);
+            RemoveEventHandler(handler); publish("shortcut-conflict"); return 1;
+        }
+        // No-argument packaging probes keep their original ready token.
+        if (argc == 1) publish("ready");
+        else { std::printf("ready:%s:%s\n", tap, holdKey); std::fflush(stdout); }
         [NSApp run];
         if (first == noErr) UnregisterEventHotKey(toggleRef);
         if (second == noErr) UnregisterEventHotKey(holdRef);

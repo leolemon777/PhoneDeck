@@ -1,8 +1,16 @@
 # PhoneDeck 构建、打包与发布流程
 
-## 2026-10-01 墨水屏外观 APK code3
+## 2026-10-01 多主题、多电脑配置 APK code4（当前切片）
 
-当前 Android 固定签名外观候选为 `Yandu-2.0.0-alpha.1-code3-ink-android.apk`，原 `.desktoppreview` 包名、签名和版本名不变，versionCode 为 3。代码实施暖白/墨黑配色、深色版本和圆形语音按钮，使用同一 `assembleDesktopPreview / lintDesktopPreview` 构建入口。覆盖安装用 `adb install -r`，保留应用数据；code2 的图标包及其验证记录仍保留原字节。具体外观和真机范围见 UI_REFRESH。
+Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，包名 `com.codex.phonedeck.desktoppreview`、versionName `2.0.0-alpha.1` 保持兼容，versionCode 从 3 增至 4。源码新增六套主题及新版 Desktop 逐电脑设置入口，构建仍使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，同时运行 Debug 构建、lint 与单元测试。使用原固定签名覆盖安装（`adb install -r`），不卸载或清除数据；先核对 APK 证书、版本和候选 SHA-256，安装后读回 APK 核对字节及实际版本。是否已安装和通过真机走查以 HANDOFF 的本轮记录为准。
+
+新 Desktop 的 `desktopSettingsV1`、受控热键及本机多主题需要从本轮提交重新构建，并运行 `PhoneDeck.Desktop.Tests`；手机 code4 与 9 月 30 日旧 Desktop 候选搭配时不能获得新增设置接口。Windows/X11/Mac 原生快捷键分别在对应目标 OS 构建，Mac helper 的受控参数纳入同一包。Wayland 仍由系统绑定启动/停止命令，不用编译通过宣称通用热键支持。
+
+每批候选独立记录源码提交、版本、签名与最终字节哈希。旧 code2/code3 APK、四 OS 候选及草稿 Release 保留原来源和验证记录；本轮源码改变不等于桌面安装包已重打包、设备已更新或公开发布。真机范围与剩余门槛见 [UI_REFRESH](UI_REFRESH.md)、[DESKTOP_QUICK_START](DESKTOP_QUICK_START.md) 和 HANDOFF。
+
+## 2026-10-01 墨水屏外观 APK code3（历史切片）
+
+该批 Android 固定签名外观候选为 `Yandu-2.0.0-alpha.1-code3-ink-android.apk`，原 `.desktoppreview` 包名、签名和版本名不变，versionCode 为 3。代码实施暖白/墨黑配色、深色版本和圆形语音按钮，使用同一 `assembleDesktopPreview / lintDesktopPreview` 构建入口。覆盖安装用 `adb install -r`，保留应用数据；code2 的图标包及其验证记录仍保留原字节。具体外观和真机范围见 UI_REFRESH。
 
 ## 2026-10-01 言渡品牌与 APK code2
 

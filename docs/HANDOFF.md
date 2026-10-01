@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-01 多主题与多电脑独立配置（当前）
+
+- 用户明确要求「多主题，多电脑配置」。本轮分支 `agent/yandu-multi-theme-config` 基于 `agent/yandu-ink-ui`，保留言渡名称、黑白话筒图标和圆形入口，加入六套可持久化主题：墨水屏暖白/深色、森林松绿、瓷白淡紫、燕麦陶土、天空雾蓝。Android 页面、原生控件/弹窗和系统栏共用对应令牌；Desktop 浏览器独立保存主题，也可跟随系统。
+- 「设置 → 多电脑配置」按已配对电脑管理，新接收端通过 `desktopSettingsV1` / `GET/POST /api/settings` 保存本机名称、识别语言、自动填入和点击/按住快捷键；远程需 settings scope、匹配 targetComputerId 和原 revision。供音/听写/识别期间拒绝保存；原子写和快捷键注册失败保留旧配置，恢复失败报告真实状态。Windows/X11 使用受控候选；Mac helper 接收固定候选 ID；Wayland 继续通过系统自定义快捷键。
+- 手机外观与点击/按住偏好不随电脑切换，管理配置不切换输入目标。共享组仍同时用于供音和最终文字同步，开关保存在手机；修复 USB fallback 绕过共享组的问题。旧接收端的 `phoneManagedSettingsV1` 输入法配置保留。Desktop 控制页新增本机配置表单，轮询保留草稿、revision 冲突提示刷新、共享供音时暂停保存；错误忙状态不会被误判为配置冲突。
+- **验证**：Android Debug/desktopPreview 构建与 lint 通过（各 0 error / 44 warning），现有测试 27/27；Desktop Release 编译 0 warning / 0 error，测试 28/28、无跳过，包括配置目录/重启隔离、scope/目标/revision/忙状态、原子写回滚、关闭自动填入仍发布结果，以及真实 Windows 热键冲突与恢复。六主题 108 组文字对比度最低 4.579:1，72 项 XML 色值与 token 一致。浏览器模拟覆盖六主题、存储不可用、草稿/冲突/供音竞态和 360px 布局；另对真实隔离接收端做只读表单联调。
+- **Samsung**：已覆盖安装 code4 且保留应用数据，六主题逐一冷启动确认。独立 UI 预览渠道通过固定证书 TLS 读取两套本机接收端，从手机保存电脑1为日语后，电脑2仍为英语并保留不同快捷键，手机主题和默认电脑不变。测试凭据预置在独立预览渠道，不代表相机配对或两台物理电脑；原预览配置已恢复，测试进程和隧道已移除。证据在 ignored `outputs/yandu-multi-theme-config`。
+- **交付**：Android 固定签名渠道 `.desktoppreview` 仍为 `2.0.0-alpha.1`，versionCode 4，文件 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`；最终来源、安装读回哈希和签名记录在 ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code4-multi-20261001`。旧 code2/code3 及9月30日跨平台候选保持原字节，不覆盖历史来源。用户原工作树 `ReceiverStatusWindow.cs` WIP 未改。
+- **边界**：每台电脑需使用包含新设置能力的 Desktop 构建；旧四 OS 候选不会自动获得新接口。Mac helper 本次变更仍需对应 OS CI 编译及真机，Linux 原生按键、实际麦克风识别、不同物理电脑、干净安装验收继续按 DESKTOP_ACCEPTANCE 执行。本轮没有公开正式 Release。
+
 ## 2026-10-01 墨水屏主题与圆形话筒已落实到手机（最新）
 
 - 用户反馈主题配色没有进入手机，继续完成实际 UI。分支 `agent/yandu-ink-ui` 基于 `agent/yandu-brand` / PR #27；原工作树的用户 WIP 未改动。

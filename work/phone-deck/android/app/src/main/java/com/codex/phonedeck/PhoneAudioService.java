@@ -323,6 +323,11 @@ public final class PhoneAudioService extends Service {
                     JSONObject health = PhoneDeckHttp.getJson(
                             PhoneDeckEndpoint.USB, "/api/health", 600, 800);
                     String computerId = health.optString("computerId", "").trim();
+                    // USB is a transport fallback, never permission to expand the explicit group.
+                    TargetDeviceManager.Device usbDevice = deviceManager.find(computerId);
+                    if (usbDevice == null || !usbDevice.sharedGroup) {
+                        computerId = "";
+                    }
                     if (!computerId.isEmpty()) {
                         reachable++;
                         if (isSharedRequested(health)) {
