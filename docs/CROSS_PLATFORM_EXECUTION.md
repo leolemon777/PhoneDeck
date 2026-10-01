@@ -49,6 +49,8 @@ Mac原生快捷键helper在OS主线程运行应用事件循环，CI检查初始�
 
 ### 已准备的候选文件
 
-本地 `outputs/preview-delivery/PhoneDeck-2.0.0-alpha.1-safe-voice-20260930` 汇总四种桌面轻量包、Windows完整模型安装包/ZIP、固定签名Android APK、快速开始/真机清单/许可说明和SHA256。维护者[发布草稿](https://github.com/leolemon777/PhoneDeck/releases/tag/untagged-15cdabfbbb1d478a8a43)用于回Mac下载验收，尚未公开发布。
+本地 `outputs/preview-delivery/PhoneDeck-2.0.0-alpha.1-safe-voice-20260930` 汇总四种桌面轻量包、Windows完整模型安装包/ZIP、固定签名Android APK、快速开始/真机清单/许可说明和SHA256。维护者[发布草稿](https://github.com/leolemon777/PhoneDeck/releases/tag/untagged-80a4da2346374cad39ce)用于回Mac下载验收，尚未公开发布。
 
 候选评审源码为 `e46ca69769274db5b02fc96ddd72e026a5db7ac4`；本地Windows完整包与APK从该源码生成。PR CI实际使用临时合并提交 `23dfa4ab078346a1be31b98bdd9e357635e2076c`，两者Git源码树经GitHub API核对同为 `27587fc129257372fa2ec1447b39b9aa95701023`。保留各自真实build-manifest来源，不把合并提交伪写成分支head。下载后已重新验证各归档及清单，汇总 `verification.json` 记录范围。既有[回归CI 36752538028](https://github.com/leolemon777/PhoneDeck/actions/runs/36752538028)也全绿。后续交接文档提交不会改动这批固定来源工件。
+
+最终20项桌面测试包含分段合并、控制字符与修饰键保护。焦点保护使用系统可见的窗口/控件标识；Windows/X11某些应用的多个内部输入框共用标识，不能据此保证逐控件变化都能发现，仍需在实际使用的应用里切换输入框验收。
