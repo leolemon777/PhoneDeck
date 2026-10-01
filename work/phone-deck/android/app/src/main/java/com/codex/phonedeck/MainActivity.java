@@ -91,6 +91,7 @@ public final class MainActivity extends Activity {
     private TextView voiceModeText;
     private TextView targetTitleText;
     private Button typelessButton;
+    private TextView voiceButtonCaption;
     private MicrophoneGlyphDrawable voiceIcon;
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
@@ -461,7 +462,9 @@ public final class MainActivity extends Activity {
         pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        brandRow.addView(text(getString(R.string.app_name), 17, theme.text, Typeface.BOLD),
+        TextView brand = text(getString(R.string.brand_name), 26, theme.text, Typeface.BOLD);
+        brand.setTypeface(Typeface.create("serif", Typeface.BOLD));
+        brandRow.addView(brand,
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button settings = smallButton("设置");
         settings.setBackgroundColor(Color.TRANSPARENT);
@@ -477,8 +480,8 @@ public final class MainActivity extends Activity {
         connection.setGravity(Gravity.CENTER_VERTICAL);
         connection.setPadding(dp(12), dp(10), dp(4), dp(10));
         connection.setElevation(0);
-        // 状态 chip：底色随语义容器色，未定状态前先按“检测中”着色。
-        connection.setBackground(theme.shape(this, theme.warningContainer, 16));
+        // 纸面保持统一，连接状态由文字和状态点共同表达。
+        connection.setBackground(theme.shape(this, theme.surface, 10, 1, theme.outline));
         connection.setOnClickListener(view -> {
             showDeviceList();
         });
@@ -518,7 +521,7 @@ public final class MainActivity extends Activity {
         LinearLayout shortcutHeader = new LinearLayout(this);
         shortcutHeader.setOrientation(LinearLayout.HORIZONTAL);
         shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView shortcutTitle = text("快捷操作", 14, theme.text, Typeface.BOLD);
+        TextView shortcutTitle = text("快捷操作", 17, theme.text, Typeface.BOLD);
         shortcutHeader.addView(shortcutTitle, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         gridEditButton = smallButton(gridEditMode ? "完成" : "编辑");
@@ -550,7 +553,7 @@ public final class MainActivity extends Activity {
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
         voiceDock.setPadding(dp(16), dp(16), dp(16), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 20, 0, theme.outline));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 12, 1, theme.outline));
         voiceDock.setElevation(0);
 
         LinearLayout dockHeader = new LinearLayout(this);
@@ -559,7 +562,7 @@ public final class MainActivity extends Activity {
         voiceDock.addView(dockHeader, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        TextView voiceTitle = text("语音输入", 14, theme.text, Typeface.BOLD);
+        TextView voiceTitle = text("语音输入", 17, theme.text, Typeface.BOLD);
         dockHeader.addView(voiceTitle, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -575,25 +578,27 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        typelessButton = new Button(this);
-        typelessButton.setText("点击开始说话");
-        typelessButton.setTextSize(18);
+        voiceIcon = new MicrophoneGlyphDrawable(this, theme.onPrimary);
+        typelessButton = new RoundVoiceButton(this, voiceIcon);
         typelessButton.setTextColor(theme.onPrimary);
         typelessButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         typelessButton.setAllCaps(false);
         typelessButton.setGravity(Gravity.CENTER);
-        voiceIcon = new MicrophoneGlyphDrawable(this, theme.onPrimary);
-        typelessButton.setCompoundDrawablesWithIntrinsicBounds(voiceIcon, null, null, null);
-        typelessButton.setCompoundDrawablePadding(dp(12));
-        typelessButton.setPadding(dp(12), 0, dp(12), 0);
+        typelessButton.setPadding(0, 0, 0, 0);
         typelessButton.setBackground(pressableRoundRect(
-                theme.primary, theme.primaryPressed, 36));
+                theme.primary, theme.primaryPressed, 56));
         typelessButton.setElevation(0);
         typelessButton.setStateListAnimator(null);
         typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
-        voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
+        LinearLayout.LayoutParams voiceButtonParams = margins(0, dp(12), 0, 0, dp(112), dp(112));
+        voiceButtonParams.gravity = Gravity.CENTER_HORIZONTAL;
+        voiceDock.addView(typelessButton, voiceButtonParams);
+        voiceButtonCaption = text("点击开始说话", 16, theme.text, Typeface.BOLD);
+        voiceButtonCaption.setGravity(Gravity.CENTER);
+        voiceButtonCaption.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        voiceDock.addView(voiceButtonCaption, margins(0, dp(8), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout voiceEditRow = new LinearLayout(this);
         voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -2512,7 +2517,7 @@ public final class MainActivity extends Activity {
         if (typelessButton == null) {
             return;
         }
-        typelessButton.setText(voiceButtonLabel());
+        voiceButtonCaption.setText(voiceButtonLabel());
         refreshTypelessModeChips();
         if (WORK_SHARED.equals(voiceWorkMode)) {
             PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
@@ -2521,11 +2526,12 @@ public final class MainActivity extends Activity {
             int stopInk = theme.onLive;
             typelessButton.setBackground(stopState
                     ? pressableRoundRect(stopFill,
-                            theme.mix(theme.live, theme.onLive, 0.2f), 36)
-                    : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
+                            theme.mix(theme.live, theme.onLive, 0.2f), 56)
+                    : pressableRoundRect(theme.primary, theme.primaryPressed, 56));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
                 voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
+                voiceIcon.setStopGlyph(stopState);
             }
             typelessButton.setContentDescription(stopState
                     ? "关闭共享麦克风" : "开启共享麦克风");
@@ -2557,11 +2563,12 @@ public final class MainActivity extends Activity {
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
                         stopFill,
-                        theme.mix(theme.live, theme.onLive, 0.2f), 36)
-                : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
+                        theme.mix(theme.live, theme.onLive, 0.2f), 56)
+                : pressableRoundRect(theme.primary, theme.primaryPressed, 56));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
             voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
+            voiceIcon.setStopGlyph(stopState);
         }
         typelessButton.setContentDescription(holdMode
                 ? "按住开始手机语音输入，松开停止"
@@ -3243,21 +3250,7 @@ public final class MainActivity extends Activity {
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
         connectionCard.setBackground(theme.shape(
-                this, statusContainer(color), 16, 0, theme.outline));
-    }
-
-    /** 状态 chip 底色：按语义取容器色；8% 淡染在真机上不可辨识，验收已确认。 */
-    private int statusContainer(int semanticColor) {
-        if (semanticColor == theme.success) {
-            return theme.successContainer;
-        }
-        if (semanticColor == theme.warning) {
-            return theme.warningContainer;
-        }
-        if (semanticColor == theme.danger) {
-            return theme.dangerContainer;
-        }
-        return theme.surfaceRaised;
+                this, theme.surface, 10, 1, theme.outline));
     }
 
     private void showActionFeedback(String message, int color) {
@@ -3416,7 +3409,7 @@ public final class MainActivity extends Activity {
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setBackground(theme.pressable(
                 this, theme.surfaceRaised,
-                theme.mix(theme.surface, theme.primary, 0.16f), 23));
+                theme.mix(theme.surface, theme.primary, 0.16f), 8, 1, theme.outline));
         return button;
     }
 

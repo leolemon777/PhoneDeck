@@ -158,14 +158,14 @@ public final class SettingsActivity extends Activity {
         addHeader(page, "外观主题", view -> popPage());
 
         TextView hint = text(
-                "浅色清晰，深色柔和。主题只改变外观，不改变电脑目标与快捷键。",
+                "暖白纸面与墨色线条，也可以切换深色。主题只改变外观，不改变电脑目标与快捷键。",
                 13, theme.muted, Typeface.NORMAL);
         hint.setLineSpacing(0, 1.18f);
         page.addView(hint, topMargin(dp(14)));
 
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
-                page.addView(sectionLabel("简洁系列"), topMargin(dp(20)));
+                page.addView(sectionLabel("墨水屏系列"), topMargin(dp(20)));
             }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
@@ -400,7 +400,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), dp(16), dp(16), dp(16));
-        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 16));
+        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 10, 1, theme.outline));
         row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(32), dp(32)));
         row.setFocusable(true);
 

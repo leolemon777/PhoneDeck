@@ -14,17 +14,23 @@ final class MicrophoneGlyphDrawable extends Drawable {
     private final int width;
     private final int height;
     private int color;
+    private boolean stopGlyph;
 
     MicrophoneGlyphDrawable(Context context, int color) {
         this.color = color;
-        width = PhoneDeckTheme.dp(context, 28);
-        height = PhoneDeckTheme.dp(context, 34);
+        width = PhoneDeckTheme.dp(context, 44);
+        height = PhoneDeckTheme.dp(context, 54);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeJoin(Paint.Join.ROUND);
     }
 
     void setColor(int color) {
         this.color = color;
+        invalidateSelf();
+    }
+
+    void setStopGlyph(boolean stopGlyph) {
+        this.stopGlyph = stopGlyph;
         invalidateSelf();
     }
 
@@ -38,6 +44,13 @@ final class MicrophoneGlyphDrawable extends Drawable {
         paint.setColor(color);
 
         paint.setStyle(Paint.Style.FILL);
+        if (stopGlyph) {
+            float side = Math.min(w, h) * 0.6f;
+            float x = left + (w - side) / 2f;
+            float y = top + (h - side) / 2f;
+            canvas.drawRoundRect(new RectF(x, y, x + side, y + side), w * 0.06f, w * 0.06f, paint);
+            return;
+        }
         canvas.drawRoundRect(new RectF(
                 left + w * 0.34f, top + h * 0.05f,
                 left + w * 0.66f, top + h * 0.62f),

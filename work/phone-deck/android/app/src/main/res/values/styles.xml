@@ -2,18 +2,30 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="android:buttonStyle">@style/InkButton</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F0F2F5</item>
-        <item name="android:navigationBarColor">#F0F2F5</item>
-        <item name="android:colorAccent">#2E5BD7</item>
+        <item name="android:windowBackground">#F5F3EE</item>
+        <item name="android:colorBackground">#F5F3EE</item>
+        <item name="android:colorBackgroundFloating">#FAF9F6</item>
+        <item name="android:statusBarColor">#F5F3EE</item>
+        <item name="android:navigationBarColor">#F5F3EE</item>
+        <item name="android:colorAccent">#242320</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#A9C7FF</item>
+        <item name="android:buttonStyle">@style/InkButton</item>
+        <item name="android:colorAccent">#F1EDE4</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#121316</item>
-        <item name="android:navigationBarColor">#121316</item>
+        <item name="android:windowBackground">#1F1E1B</item>
+        <item name="android:colorBackground">#1F1E1B</item>
+        <item name="android:colorBackgroundFloating">#292824</item>
+        <item name="android:statusBarColor">#1F1E1B</item>
+        <item name="android:navigationBarColor">#1F1E1B</item>
         <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="InkButton" parent="android:style/Widget.Material.Button">
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 </resources>
