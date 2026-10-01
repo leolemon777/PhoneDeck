@@ -4,6 +4,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>PhoneDeck.Desktop</AssemblyName>
+    <Product>言渡 Yandu</Product>
+    <Title>言渡 Yandu</Title>
     <Version>2.0.0-alpha.1</Version>
     <RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
     <ServerGarbageCollection>false</ServerGarbageCollection>
@@ -24,6 +26,7 @@
     <Compile Include="../../windows/PhoneDeck.Server/MdnsAdvertiser.cs" Link="Discovery/MdnsAdvertiser.cs" />
     <Compile Include="../../windows/PhoneDeck.Server/LanDiscoveryResponder.cs" Link="Discovery/LanDiscoveryResponder.cs" />
     <EmbeddedResource Include="Ui.html" />
+    <EmbeddedResource Include="../../../../design/yandu-icon.svg" LogicalName="PhoneDeck.Desktop.Yandu.Icon.svg" />
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo"><_Parameter1>PhoneDeck.Desktop.Tests</_Parameter1></AssemblyAttribute>
   </ItemGroup>
 </Project>

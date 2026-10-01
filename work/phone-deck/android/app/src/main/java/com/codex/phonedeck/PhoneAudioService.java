@@ -486,7 +486,7 @@ public final class PhoneAudioService extends Service {
         String text = connectedCount + "/" + knownTotal + " 台电脑正在接收";
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("PhoneDeck 共享麦克风已开启")
+                .setContentTitle(getString(R.string.brand_name) + " 共享麦克风已开启")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)

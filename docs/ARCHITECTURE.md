@@ -65,7 +65,7 @@ Windows PhoneDeck.Server        │
 - `PhoneDeckHttp.java` / `PhoneDeckLanClient.java` / `LanDiscoveryClient.java`：并行探测候选
   地址并通过受限 UDP 广播发现接收端；任何发现结果仍需 HTTPS、密钥、证书固定与目标 ID
   校验后才可用于控制和音频。
-- `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
+- `design/yandu-icon.svg`、`android/artwork/yandu-app-icon-1024.png` 与 `res/mipmap-*`：黑白话筒 SVG 母版、mdpi–xxxhdpi 切图及自适应/单色图层，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
 

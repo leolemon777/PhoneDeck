@@ -48,7 +48,7 @@ public final class TranscriptSyncActivity extends Activity {
         for (String text : texts) {
             TextView value = new TextView(this); value.setText(text); value.setTextSize(16); value.setTextColor(theme.text); value.setTextIsSelectable(true); history.addView(value);
             Button copy = new Button(this); copy.setText("复制文字"); copy.setOnClickListener(v -> {
-                ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("PhoneDeck", text));
+                ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText(getString(R.string.brand_name), text));
                 Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
             }); history.addView(copy);
         }

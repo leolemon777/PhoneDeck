@@ -1,5 +1,9 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-01 言渡品牌与 APK code2
+
+新 Android 候选显示名称为「言渡」，使用黑白话筒图标；固定分发渠道的 versionCode 从 1 增至 2，versionName 保持 `2.0.0-alpha.1`，文件名为 `Yandu-2.0.0-alpha.1-code2-android.apk`。仍使用原 `.desktoppreview` 包名和同一长期签名配置，可覆盖同签名的 code1 包。图标原生 XML/PNG 已提交，各 OS 的 Android 构建无需安装图形生成工具；可选重绘脚本和母版见 [BRANDING.md](BRANDING.md)。9 月 30 日固定候选与草稿 Release 保留原来源，不用新 APK 覆盖旧候选的校验记录。
+
 ## 2026-09-30 跨平台 Desktop alpha 构建入口
 
 新增 `pwsh ./scripts/build-desktop.ps1 -Rid win-x64 -IncludeModel`（在目标OS/架构原生构建，支持 `linux-x64/linux-arm64/osx-x64/osx-arm64`）。依赖 .NET SDK `global.json`、CMake、Git 与 C++ 编译器；Windows Setup 另需 Inno Setup 的 ISCC。`-WhisperSource` 可使用已克隆但必须匹配固定提交且无修改的源码；`-ModelPath` 仅接受大小/哈希完全一致的模型。
