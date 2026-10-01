@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-/// 墨水屏外观的语义令牌：暖纸浅色与反转深色，沿用原主题 ID。
+/// 六套外观共用语义令牌，原墨水屏主题 ID 保持兼容。
 /// 槽位分四组：
 /// - 底面：background / surface / surfaceRaised（凹陷与按压）/ key（键帽）/ voiceDock / outline；
 /// - 内容：text / muted；
@@ -26,11 +26,19 @@ final class PhoneDeckTheme {
     static final String PREF_THEME_ID = "theme_id";
     static final String NATIVE_LIGHT = "native_light";
     static final String NATIVE_DARK = "native_dark";
+    static final String FOREST_LIGHT = "forest_light";
+    static final String VIOLET_LIGHT = "violet_light";
+    static final String TERRACOTTA_LIGHT = "terracotta_light";
+    static final String OCEAN_LIGHT = "ocean_light";
 
     /// 历史深色主题 ID：迁移时落深色，其余历史 ID 一律落浅色。
     private static final Set<String> LEGACY_DARK_IDS = new HashSet<>(Arrays.asList(
             "espresso", "cocoa", "mono", "ocean", "oled", "inkdark",
             "goldamber", "goldforest", "gptdark", "claudedark", "grokdark"));
+
+    private static final PhoneDeckTheme[] THEMES = {
+            nativeTheme(true), nativeTheme(false), forestTheme(), violetTheme(),
+            terracottaTheme(), oceanTheme()};
 
     final String id;
     final String name;
@@ -128,19 +136,23 @@ final class PhoneDeckTheme {
                 .apply();
     }
 
-    /** 用户选择仅保留简洁浅色与深色。 */
+    /** 返回稳定顺序的主题目录；调用方不会改动内部目录。 */
     static PhoneDeckTheme[] all() {
-        return new PhoneDeckTheme[]{
-                nativeTheme(true), nativeTheme(false)};
+        return THEMES.clone();
     }
 
     static PhoneDeckTheme byId(String id) {
-        return nativeTheme(!NATIVE_DARK.equals(validId(id)));
+        for (PhoneDeckTheme candidate : THEMES) {
+            if (candidate.id.equals(id)) {
+                return candidate;
+            }
+        }
+        return THEMES[0];
     }
 
     /**
      * 读取并一次性迁移历史存储（dev.10 品牌族两级存储、dev.8/9 及更早的单级 theme_id）。
-     * 历史主题已全部下线：暖深底族迁移到简洁深色，其余迁移到简洁浅色。
+     * 旧 ID 按明暗迁移；当前六套主题的选择优先于残留的历史品牌字段。
      */
     private static String ensureThemeId(Context context) {
         SharedPreferences preferences =
@@ -148,7 +160,10 @@ final class PhoneDeckTheme {
         String stored = preferences.getString(PREF_THEME_ID, null);
         boolean legacyPairPending = preferences.contains("theme_brand")
                 || preferences.contains("theme_mode");
-        if (stored != null && stored.equals(validId(stored)) && !legacyPairPending) {
+        if (stored != null && stored.equals(validId(stored))) {
+            if (legacyPairPending) {
+                preferences.edit().remove("theme_brand").remove("theme_mode").apply();
+            }
             return stored;
         }
         String migrated = NATIVE_LIGHT;
@@ -166,7 +181,7 @@ final class PhoneDeckTheme {
     }
 
     private static String validId(String id) {
-        for (PhoneDeckTheme candidate : all()) {
+        for (PhoneDeckTheme candidate : THEMES) {
             if (candidate.id.equals(id)) {
                 return id;
             }
@@ -183,9 +198,8 @@ final class PhoneDeckTheme {
     }
 
     void applyWindow(Activity activity) {
-        activity.setTheme(light ? R.style.AppTheme : R.style.AppThemeDark);
-        // XML 主题固定是 Material.Light；深色主题下提前把窗口背景刷成主题底色，
-        // 避免 onCreate 到 setContentView 之间闪一下白底。
+        activity.setTheme(nativeStyle());
+        // 原生对话框、输入框和开关使用同一套 XML 配色；窗口提前着色避免白底闪烁。
         activity.getWindow().setBackgroundDrawable(
                 new android.graphics.drawable.ColorDrawable(background));
         activity.getWindow().setStatusBarColor(background);
@@ -198,6 +212,23 @@ final class PhoneDeckTheme {
             flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         }
         activity.getWindow().getDecorView().setSystemUiVisibility(flags);
+    }
+
+    private int nativeStyle() {
+        switch (id) {
+            case NATIVE_DARK:
+                return R.style.AppThemeDark;
+            case FOREST_LIGHT:
+                return R.style.AppThemeForest;
+            case VIOLET_LIGHT:
+                return R.style.AppThemeViolet;
+            case TERRACOTTA_LIGHT:
+                return R.style.AppThemeTerracotta;
+            case OCEAN_LIGHT:
+                return R.style.AppThemeOcean;
+            default:
+                return R.style.AppTheme;
+        }
     }
 
     /// 快捷卡底：统一键帽底色，分类语义只进编辑器，不打扰主界面。
@@ -313,5 +344,69 @@ final class PhoneDeckTheme {
                 Color.parseColor(light ? "#EDE9E1" : "#36332C"),
                 Color.parseColor(light ? "#8E3535" : "#E7A49E"),
                 Color.parseColor(light ? "#F0E5E0" : "#3B2C28"));
+    }
+
+    private static PhoneDeckTheme forestTheme() {
+        return new PhoneDeckTheme(
+                FOREST_LIGHT, "森林 · 松绿", "浅绿纸面，沉静松绿", true,
+                Color.parseColor("#F2F5EE"), Color.parseColor("#FBFCF8"),
+                Color.parseColor("#E4ECDC"), Color.parseColor("#FBFCF8"),
+                Color.parseColor("#FBFCF8"), Color.parseColor("#C9D4C3"),
+                Color.parseColor("#26392D"), Color.parseColor("#586959"),
+                Color.parseColor("#2F6346"), Color.parseColor("#244E38"),
+                Color.parseColor("#FFFDF8"), Color.parseColor("#2F6346"),
+                Color.parseColor("#DEEBDF"), Color.parseColor("#244A32"),
+                Color.parseColor("#2F6346"), Color.parseColor("#FFFDF8"),
+                Color.parseColor("#2F6346"), Color.parseColor("#E0ECDD"),
+                Color.parseColor("#705521"), Color.parseColor("#F1E7D0"),
+                Color.parseColor("#963F3A"), Color.parseColor("#F7E5DE"));
+    }
+
+    private static PhoneDeckTheme violetTheme() {
+        return new PhoneDeckTheme(
+                VIOLET_LIGHT, "瓷白 · 淡紫", "柔白底色，低饱和紫", true,
+                Color.parseColor("#F4F1FA"), Color.parseColor("#FDFBFF"),
+                Color.parseColor("#E9E2F1"), Color.parseColor("#FDFBFF"),
+                Color.parseColor("#FDFBFF"), Color.parseColor("#D5CCE1"),
+                Color.parseColor("#302A3D"), Color.parseColor("#6C617A"),
+                Color.parseColor("#66508C"), Color.parseColor("#4C3C6C"),
+                Color.parseColor("#FFFCFF"), Color.parseColor("#66508C"),
+                Color.parseColor("#E7DEF3"), Color.parseColor("#46355F"),
+                Color.parseColor("#66508C"), Color.parseColor("#FFFCFF"),
+                Color.parseColor("#3E6450"), Color.parseColor("#E2EDE6"),
+                Color.parseColor("#765723"), Color.parseColor("#F4EAD7"),
+                Color.parseColor("#943C50"), Color.parseColor("#F5E3E9"));
+    }
+
+    private static PhoneDeckTheme terracottaTheme() {
+        return new PhoneDeckTheme(
+                TERRACOTTA_LIGHT, "燕麦 · 陶土", "燕麦暖底，陶土红棕", true,
+                Color.parseColor("#F6F0E8"), Color.parseColor("#FFFAF4"),
+                Color.parseColor("#EEE2D5"), Color.parseColor("#FFFAF4"),
+                Color.parseColor("#FFFAF4"), Color.parseColor("#DBCBBC"),
+                Color.parseColor("#3D3028"), Color.parseColor("#706151"),
+                Color.parseColor("#915038"), Color.parseColor("#733F2D"),
+                Color.parseColor("#FFFBF6"), Color.parseColor("#915038"),
+                Color.parseColor("#F0DDD0"), Color.parseColor("#713D2A"),
+                Color.parseColor("#915038"), Color.parseColor("#FFFBF6"),
+                Color.parseColor("#426247"), Color.parseColor("#E6ECDC"),
+                Color.parseColor("#785620"), Color.parseColor("#F2E6CC"),
+                Color.parseColor("#963C3C"), Color.parseColor("#F4E0DB"));
+    }
+
+    private static PhoneDeckTheme oceanTheme() {
+        return new PhoneDeckTheme(
+                OCEAN_LIGHT, "天空 · 雾蓝", "清浅蓝底，柔和雾蓝", true,
+                Color.parseColor("#EFF4F8"), Color.parseColor("#F9FCFE"),
+                Color.parseColor("#DFE9F1"), Color.parseColor("#F9FCFE"),
+                Color.parseColor("#F9FCFE"), Color.parseColor("#C6D4DF"),
+                Color.parseColor("#243746"), Color.parseColor("#586875"),
+                Color.parseColor("#365F7E"), Color.parseColor("#294A63"),
+                Color.parseColor("#FAFDFF"), Color.parseColor("#365F7E"),
+                Color.parseColor("#DEEAF3"), Color.parseColor("#284A63"),
+                Color.parseColor("#365F7E"), Color.parseColor("#FAFDFF"),
+                Color.parseColor("#37654F"), Color.parseColor("#DFEDE5"),
+                Color.parseColor("#775820"), Color.parseColor("#F3EBD6"),
+                Color.parseColor("#963F49"), Color.parseColor("#F6E4E6"));
     }
 }

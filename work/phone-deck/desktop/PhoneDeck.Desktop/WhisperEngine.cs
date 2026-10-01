@@ -10,7 +10,7 @@ internal interface ISpeechEngine
     Task<string> TranscribeAsync(byte[] pcm, CancellationToken cancellation);
 }
 
-internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory) : ISpeechEngine
+internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory, Func<string>? language = null) : ISpeechEngine
 {
     private readonly SemaphoreSlim gate = new(1);
     internal string Executable => SelectExecutable(runtimeDirectory);
@@ -45,7 +45,7 @@ internal sealed class WhisperEngine(ModelAssets assets, string runtimeDirectory)
             };
             // In v1.9.4 stdin's default output basename '-' suppresses segment callbacks.
             // A fixed non-stdout basename restores text on stdout; with no output-format flags it opens no file.
-            foreach (var arg in new[] { "-m", assets.ModelPath, "-f", "-", "-of", "PhoneDeck-memory", "-l", "auto", "-nt", "-np", "-ng", "-t", Math.Clamp(Environment.ProcessorCount / 2, 1, 6).ToString() })
+            foreach (var arg in new[] { "-m", assets.ModelPath, "-f", "-", "-of", "PhoneDeck-memory", "-l", language?.Invoke() ?? "auto", "-nt", "-np", "-ng", "-t", Math.Clamp(Environment.ProcessorCount / 2, 1, 6).ToString() })
                 start.ArgumentList.Add(arg);
             using var process = StartProcess(start);
             using var cancel = timeout.Token.Register(() => { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } });

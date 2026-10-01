@@ -10,12 +10,28 @@
         <item name="android:statusBarColor">#F5F3EE</item>
         <item name="android:navigationBarColor">#F5F3EE</item>
         <item name="android:colorAccent">#242320</item>
+        <item name="android:colorForeground">#242320</item>
+        <item name="android:textColorPrimary">#242320</item>
+        <item name="android:textColorSecondary">#69665F</item>
+        <item name="android:colorControlNormal">#69665F</item>
+        <item name="android:colorControlActivated">#242320</item>
+        <item name="android:colorControlHighlight">#33242320</item>
+        <item name="android:colorButtonNormal">#FAF9F6</item>
+        <item name="android:colorError">#8E3535</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:buttonStyle">@style/InkButton</item>
         <item name="android:colorAccent">#F1EDE4</item>
+        <item name="android:colorForeground">#F4F1EA</item>
+        <item name="android:textColorPrimary">#F4F1EA</item>
+        <item name="android:textColorSecondary">#B6B1A6</item>
+        <item name="android:colorControlNormal">#B6B1A6</item>
+        <item name="android:colorControlActivated">#F1EDE4</item>
+        <item name="android:colorControlHighlight">#33F1EDE4</item>
+        <item name="android:colorButtonNormal">#292824</item>
+        <item name="android:colorError">#E7A49E</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">#1F1E1B</item>
         <item name="android:colorBackground">#1F1E1B</item>
@@ -23,6 +39,70 @@
         <item name="android:statusBarColor">#1F1E1B</item>
         <item name="android:navigationBarColor">#1F1E1B</item>
         <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="AppThemeForest" parent="AppTheme">
+        <item name="android:windowBackground">#F2F5EE</item>
+        <item name="android:colorBackground">#F2F5EE</item>
+        <item name="android:colorBackgroundFloating">#FBFCF8</item>
+        <item name="android:statusBarColor">#F2F5EE</item>
+        <item name="android:navigationBarColor">#F2F5EE</item>
+        <item name="android:colorAccent">#2F6346</item>
+        <item name="android:colorForeground">#26392D</item>
+        <item name="android:textColorPrimary">#26392D</item>
+        <item name="android:textColorSecondary">#586959</item>
+        <item name="android:colorControlNormal">#586959</item>
+        <item name="android:colorControlActivated">#2F6346</item>
+        <item name="android:colorControlHighlight">#332F6346</item>
+        <item name="android:colorButtonNormal">#FBFCF8</item>
+        <item name="android:colorError">#963F3A</item>
+    </style>
+    <style name="AppThemeViolet" parent="AppTheme">
+        <item name="android:windowBackground">#F4F1FA</item>
+        <item name="android:colorBackground">#F4F1FA</item>
+        <item name="android:colorBackgroundFloating">#FDFBFF</item>
+        <item name="android:statusBarColor">#F4F1FA</item>
+        <item name="android:navigationBarColor">#F4F1FA</item>
+        <item name="android:colorAccent">#66508C</item>
+        <item name="android:colorForeground">#302A3D</item>
+        <item name="android:textColorPrimary">#302A3D</item>
+        <item name="android:textColorSecondary">#6C617A</item>
+        <item name="android:colorControlNormal">#6C617A</item>
+        <item name="android:colorControlActivated">#66508C</item>
+        <item name="android:colorControlHighlight">#3366508C</item>
+        <item name="android:colorButtonNormal">#FDFBFF</item>
+        <item name="android:colorError">#943C50</item>
+    </style>
+    <style name="AppThemeTerracotta" parent="AppTheme">
+        <item name="android:windowBackground">#F6F0E8</item>
+        <item name="android:colorBackground">#F6F0E8</item>
+        <item name="android:colorBackgroundFloating">#FFFAF4</item>
+        <item name="android:statusBarColor">#F6F0E8</item>
+        <item name="android:navigationBarColor">#F6F0E8</item>
+        <item name="android:colorAccent">#915038</item>
+        <item name="android:colorForeground">#3D3028</item>
+        <item name="android:textColorPrimary">#3D3028</item>
+        <item name="android:textColorSecondary">#706151</item>
+        <item name="android:colorControlNormal">#706151</item>
+        <item name="android:colorControlActivated">#915038</item>
+        <item name="android:colorControlHighlight">#33915038</item>
+        <item name="android:colorButtonNormal">#FFFAF4</item>
+        <item name="android:colorError">#963C3C</item>
+    </style>
+    <style name="AppThemeOcean" parent="AppTheme">
+        <item name="android:windowBackground">#EFF4F8</item>
+        <item name="android:colorBackground">#EFF4F8</item>
+        <item name="android:colorBackgroundFloating">#F9FCFE</item>
+        <item name="android:statusBarColor">#EFF4F8</item>
+        <item name="android:navigationBarColor">#EFF4F8</item>
+        <item name="android:colorAccent">#365F7E</item>
+        <item name="android:colorForeground">#243746</item>
+        <item name="android:textColorPrimary">#243746</item>
+        <item name="android:textColorSecondary">#586875</item>
+        <item name="android:colorControlNormal">#586875</item>
+        <item name="android:colorControlActivated">#365F7E</item>
+        <item name="android:colorControlHighlight">#33365F7E</item>
+        <item name="android:colorButtonNormal">#F9FCFE</item>
+        <item name="android:colorError">#963F49</item>
     </style>
     <style name="InkButton" parent="android:style/Widget.Material.Button">
         <item name="android:elevation">0dp</item>

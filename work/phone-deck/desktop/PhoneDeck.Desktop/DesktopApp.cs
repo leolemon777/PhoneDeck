@@ -18,21 +18,53 @@ internal sealed record InputStep(string? Type, string? Text, string[]? Keys, int
 internal static class DesktopApp
 {
     internal const string Version = "2.0.0-alpha.1";
-    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1"];
+    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1", "desktopSettingsV1"];
     internal static WebApplication Create(string[] args, ISpeechEngine? testEngine = null)
     {
         var identity = ReceiverIdentity.LoadOrCreate();
+        var settings = new DesktopSettingsStore(PhoneDeckDataDirectory.Get(), identity.ComputerId, identity.DisplayName);
+        identity = identity with { DisplayName = settings.Current.DisplayName };
         var trust = new DesktopTrust(identity.ComputerId);
         var credentials = new ClientCredentialsStore(Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
         var localPort = int.TryParse(Environment.GetEnvironmentVariable("PHONEDECK_LOCAL_PORT"), out var lp) ? lp : 8765;
         var lanPort = int.TryParse(Environment.GetEnvironmentVariable("PHONEDECK_LAN_PORT"), out var sp) ? sp : 8766;
         var pairing = new PairingWindowManager(identity.ComputerId, identity.DisplayName, trust.CertificateSha256, lanPort);
         var model = new ModelAssets(Path.Combine(PhoneDeckDataDirectory.Get(), "models"), Path.Combine(AppContext.BaseDirectory, "models"));
-        var engine = testEngine ?? new WhisperEngine(model, Path.Combine(AppContext.BaseDirectory, "speech-runtime"));
+        var engine = testEngine ?? new WhisperEngine(model, Path.Combine(AppContext.BaseDirectory, "speech-runtime"), () => settings.Current.Language);
         var history = new TranscriptStore(identity.ComputerId);
         var input = new PlatformInput();
-        var speech = new SpeechSession(engine, history, identity.ComputerId, testEngine is null && !args.Contains("--history-only") ? input.PrepareVoiceInsertion : null);
-        var hotkeys = args.Contains("--no-hotkeys") ? null : new DesktopHotkeys(speech);
+        var speech = new SpeechSession(engine, history, identity.ComputerId,
+            testEngine is null && !args.Contains("--history-only") ? () => settings.Current.AutoInsert ? input.PrepareVoiceInsertion() : null : null);
+        var hotkeys = args.Contains("--no-hotkeys") ? null : new DesktopHotkeys(speech, settings.Current.TapShortcut, settings.Current.HoldShortcut);
+        LanDiscoveryResponder? udp = null; MdnsAdvertiser? mdns = null;
+        Action ApplyShortcuts(DesktopSettings value)
+        {
+            var previous = settings.Current;
+            if (hotkeys is null || (value.TapShortcut == previous.TapShortcut && value.HoldShortcut == previous.HoldShortcut)) return () => { };
+            void Restore()
+            {
+                hotkeys?.Dispose(); hotkeys = new DesktopHotkeys(speech, previous.TapShortcut, previous.HoldShortcut);
+                var restored = hotkeys.WaitUntilReady();
+                if (restored is not ("ready" or "wayland-custom-shortcut"))
+                    throw new InvalidOperationException("文件设置未改，但原快捷键暂无法重新注册（" + restored + "）。请关闭占用程序或检查本机运行组件后重试。");
+            }
+            hotkeys.Dispose(); hotkeys = new DesktopHotkeys(speech, value.TapShortcut, value.HoldShortcut);
+            var status = hotkeys.WaitUntilReady();
+            if (status is not ("ready" or "wayland-custom-shortcut"))
+            {
+                Restore();
+                throw new InvalidOperationException("新快捷键无法注册（" + status + "），已恢复原配置。请改选其它组合或检查本机运行组件。");
+            }
+            return Restore;
+        }
+        void RefreshName()
+        {
+            if (identity.DisplayName == settings.Current.DisplayName) return;
+            identity = identity with { DisplayName = settings.Current.DisplayName };
+            pairing.Cancel(); pairing = new PairingWindowManager(identity.ComputerId, identity.DisplayName, trust.CertificateSha256, lanPort);
+            if (udp is not null) { udp.Dispose(); udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start(); }
+            mdns?.Start(identity, lanPort, Capabilities);
+        }
         var recentInputs = new RequestDeduplicator();
         var clientCancellation = new Dictionary<string, CancellationTokenSource>();
         var clientGate = new object();
@@ -70,7 +102,8 @@ internal static class DesktopApp
                 var record = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? credentials.Authenticate(authorization[7..].Trim()) : null;
                 if (record is null || context.Request.Headers["X-PhoneDeck-Client"].ToString() != record.ClientId)
                 { context.Response.StatusCode = 401; await context.Response.WriteAsJsonAsync(new { ok = false, error = "请重新扫码配对" }); return; }
-                var scope = context.Request.Path.StartsWithSegments("/api/audio") || context.Request.Path.StartsWithSegments("/api/dictation") ? "audio"
+                var scope = context.Request.Path.StartsWithSegments("/api/settings") ? "settings"
+                    : context.Request.Path.StartsWithSegments("/api/audio") || context.Request.Path.StartsWithSegments("/api/dictation") ? "audio"
                     : context.Request.Path.StartsWithSegments("/api/transcripts") ? "transcript-sync" : "control";
                 if (!record.Scopes.Contains(scope)) { context.Response.StatusCode = 403; return; }
                 context.Items["Owner"] = record.ClientId;
@@ -85,6 +118,8 @@ internal static class DesktopApp
             catch (ArgumentException e) when (!context.Response.HasStarted) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { ok = false, error = e.Message }); }
             catch (InvalidOperationException e) when (!context.Response.HasStarted) { context.Response.StatusCode = 409; await context.Response.WriteAsJsonAsync(new { ok = false, error = e.Message }); }
             catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
+            catch (OperationCanceledException) when (context.Items["Revocation"] is CancellationToken revoked && revoked.IsCancellationRequested)
+            { context.Response.StatusCode = 401; }
             catch (IOException) when (!context.Response.HasStarted) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { ok = false, error = "操作未完成，请重试或检查本机权限" }); }
         });
         app.MapGet("/", () =>
@@ -110,7 +145,34 @@ internal static class DesktopApp
             shared = new { requested = false }
         }));
         app.MapGet("/local/status", () => Results.Ok(new { ok = true, identity, model = model.Snapshot, runtimePresent = File.Exists(Path.Combine(AppContext.BaseDirectory, "speech-runtime", OperatingSystem.IsWindows() ? "whisper-cli.exe" : "whisper-cli")),
-            speech = speech.Snapshot, audioStreaming = speech.Streaming, hotkeys = hotkeys?.Status ?? "disabled", inputReady = input.Available, inputBackend = input.Backend, addresses = DesktopTrust.Addresses(), history = history.LocalHistory(), clients = credentials.ListRedacted() }));
+            speech = speech.Snapshot, audioStreaming = speech.Streaming, hotkeys = hotkeys?.Status ?? "disabled", inputReady = input.Available, inputBackend = input.Backend,
+            settings = settings.Current, settingsRevision = settings.Revision, addresses = DesktopTrust.Addresses(), history = history.LocalHistory(), clients = credentials.ListRedacted() }));
+        object SettingsSnapshot() => settings.Snapshot(speech.Busy, hotkeys?.Status ?? "disabled");
+        IResult ReadSettings(string? targetComputerId) { settings.RequireTarget(targetComputerId); return Results.Ok(SettingsSnapshot()); }
+        IResult SaveSettings(SettingsRequest r, HttpContext context)
+        {
+            speech.WhileIdle(() =>
+            {
+                if (pairing.HasPendingConfirmation()) throw new InvalidOperationException("请先确认或拒绝待配对的手机，再保存电脑设置");
+                settings.Save(r, value =>
+                {
+                    var rollback = ApplyShortcuts(value);
+                    try
+                    {
+                        context.RequestAborted.ThrowIfCancellationRequested();
+                        if (context.Items["Revocation"] is CancellationToken revoked) revoked.ThrowIfCancellationRequested();
+                        return rollback;
+                    }
+                    catch { rollback(); throw; }
+                });
+                RefreshName();
+            });
+            return Results.Ok(SettingsSnapshot());
+        }
+        app.MapGet("/api/settings", (string? targetComputerId) => ReadSettings(targetComputerId));
+        app.MapPost("/api/settings", (SettingsRequest r, HttpContext context) => SaveSettings(r, context));
+        app.MapGet("/local/settings", () => Results.Ok(SettingsSnapshot()));
+        app.MapPost("/local/settings", (SettingsRequest r, HttpContext context) => SaveSettings(r, context));
         app.MapPost("/local/model/download", () => { _ = model.DownloadAsync(app.Lifetime.ApplicationStopping); return Results.Accepted(value: new { ok = true }); });
         app.MapPost("/local/history/clear", () => { history.Clear(); return Results.Ok(new { ok = true }); });
         app.MapPost("/local/quit", () => { _ = Task.Run(async () => { await Task.Delay(200); app.Lifetime.StopApplication(); }); return Results.Ok(new { ok = true }); });
@@ -247,9 +309,9 @@ internal static class DesktopApp
         });
         if (!args.Contains("--no-discovery"))
         {
-            var udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start();
-            var mdns = new MdnsAdvertiser(); mdns.Start(identity, lanPort, Capabilities);
-            app.Lifetime.ApplicationStopped.Register(() => { udp.Dispose(); mdns.Dispose(); });
+            udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start();
+            mdns = new MdnsAdvertiser(); mdns.Start(identity, lanPort, Capabilities);
+            app.Lifetime.ApplicationStopped.Register(() => { udp?.Dispose(); mdns?.Dispose(); });
         }
         return app;
     }
