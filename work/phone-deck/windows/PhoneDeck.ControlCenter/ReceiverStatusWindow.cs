@@ -12,6 +12,7 @@ internal sealed class ReceiverStatusWindow : Form
     private readonly List<Font> fonts = new();
     private readonly Func<Task> connect;
     private readonly Image? logo;
+    private bool busy;
 
     internal ReceiverStatusWindow(Icon? icon, Func<Task> connect, bool? dark = null)
     {
@@ -32,7 +33,8 @@ internal sealed class ReceiverStatusWindow : Form
         brand.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
         brand.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         brand.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var mark = new SurfacePanel(palette.Surface, palette.Outline, 14) { Size = new Size(44, 44), Margin = Padding.Empty };
+        // The cream Luma ring disappears on a white surface, so the mark sits on an ink tile in both themes.
+        var mark = new SurfacePanel(palette.BrandTile, palette.BrandTile, 12) { Size = new Size(44, 44), Margin = Padding.Empty };
         using (var stream = typeof(ReceiverStatusWindow).Assembly.GetManifestResourceStream("PhoneDeck.ControlCenter.Assets.Luma.png"))
         {
             if (stream != null) { using var decoded = Image.FromStream(stream); logo = new Bitmap(decoded); }
@@ -73,11 +75,14 @@ internal sealed class ReceiverStatusWindow : Form
             var previous = reconnect.Region; reconnect.Region = new Region(path); previous?.Dispose();
         };
         reconnect.AccessibleDescription = "检查并恢复本机接收器，不中断正在进行的语音";
-        reconnect.Click += async (_, _) => { try { await this.connect(); } catch (Exception e) { ShowNotice("连接未完成", e.Message); } };
+        reconnect.Click += async (_, _) => { if (busy) return; try { await this.connect(); } catch (Exception e) { ShowNotice("连接未完成", e.Message); } };
         content.Controls.Add(reconnect); AcceptButton = reconnect;
-        var hint = Copy("设置在手机，连接留在这里", 10, palette.Text, true); content.Controls.Add(hint);
-        var path = Copy("手机 App → 设置 → 电脑与输入法\n关闭窗口后，接收器继续在托盘运行。", 9, palette.Muted);
-        path.Margin = new Padding(0, 6, 0, 0); content.Controls.Add(path);
+        var guide = new SurfacePanel(palette.Subtle, palette.Subtle, 12) { AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(18), Margin = Padding.Empty };
+        var guideCopy = Stack();
+        guideCopy.Controls.Add(Copy("设置在手机，连接留在这里", 10, palette.Text, true));
+        var path = Copy("手机 App → 设置 → 电脑与输入法\n关闭窗口后，接收器继续在托盘运行。", 9, palette.Hint);
+        path.Margin = new Padding(0, 6, 0, 0); guideCopy.Controls.Add(path);
+        guide.Controls.Add(guideCopy); content.Controls.Add(guide);
         scroll.Controls.Add(content); Controls.Add(scroll);
         if (palette.Dark && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
             HandleCreated += (_, _) => { var enabled = 1; DwmSetWindowAttribute(Handle, 20, ref enabled, sizeof(int)); };
@@ -91,7 +96,15 @@ internal sealed class ReceiverStatusWindow : Form
     internal void SetBusy(bool busy)
     {
         if (IsDisposed) return;
-        reconnect.Enabled = !busy; reconnect.Text = busy ? "正在重新连接…" : "重新连接";
+        this.busy = busy;
+        reconnect.Text = busy ? "正在重新连接…" : "重新连接";
+        // Restyle instead of Enabled=false: WinForms renders flat disabled buttons
+        // with system gray, which flashes on the dark theme.
+        reconnect.BackColor = busy ? palette.PrimaryDisabled : palette.Primary;
+        reconnect.ForeColor = busy ? palette.OnPrimaryDisabled : palette.OnPrimary;
+        reconnect.FlatAppearance.MouseOverBackColor = busy ? palette.PrimaryDisabled : palette.PrimaryHover;
+        reconnect.FlatAppearance.MouseDownBackColor = busy ? palette.PrimaryDisabled : palette.PrimaryHover;
+        reconnect.Cursor = busy ? Cursors.WaitCursor : Cursors.Hand;
     }
     internal void UpdateStatus(string name, string engineName, bool streaming, bool audioAvailable, string build)
     {
@@ -152,14 +165,18 @@ internal sealed class ReceiverStatusWindow : Form
     private sealed class Palette
     {
         internal readonly bool Dark;
-        internal readonly Color Background, Surface, Text, Muted, Outline, Primary, PrimaryHover, OnPrimary, Success, Warning;
+        internal readonly Color Background, Surface, Text, Muted, Outline, Primary, PrimaryHover, OnPrimary, PrimaryDisabled, OnPrimaryDisabled,
+            Success, Warning, Hint, Subtle, BrandTile;
         internal Palette(bool dark)
         {
             Dark = dark;
             Color C(string light, string night) => ColorTranslator.FromHtml(dark ? night : light);
-            Background = C("#F0F2F5", "#121316"); Surface = C("#FFFFFF", "#1B1E24"); Text = C("#18202D", "#F0F2F6");
-            Muted = C("#626D7C", "#A7B0C0"); Outline = C("#E1E5EB", "#343B48"); Primary = C("#285ED4", "#A9C7FF");
-            PrimaryHover = C("#204CAA", "#8BB2F2"); OnPrimary = C("#FFFFFF", "#142746"); Success = C("#157347", "#79D2A3"); Warning = C("#8A5B0A", "#EAC078");
+            Background = C("#EFF1F6", "#0E1015"); Surface = C("#FFFFFF", "#1B2029"); Text = C("#171E2C", "#EDF1F8");
+            Muted = C("#5C6678", "#A6AFC2"); Outline = C("#E3E7EF", "#313B4B");
+            Primary = C("#2E62E6", "#3A69E8"); PrimaryHover = C("#2450C6", "#3157D0"); OnPrimary = C("#FFFFFF", "#FFFFFF");
+            PrimaryDisabled = C("#C9D3EA", "#272F45"); OnPrimaryDisabled = C("#41506E", "#7E88A0");
+            Success = C("#0C7D45", "#5FD6A0"); Warning = C("#8A5B0A", "#E8C476");
+            Hint = C("#3E4859", "#C5CDDE"); Subtle = C("#EEF1FA", "#222A38"); BrandTile = C("#141B2C", "#273044");
         }
     }
 
