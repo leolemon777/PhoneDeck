@@ -8,7 +8,8 @@
 - 新固定签名 APK 为 `com.codex.phonedeck.desktoppreview`、`2.0.0-alpha.1` / versionCode **2**，显示名「言渡」，不可调试。`apksigner` 的 v2 校验通过，新旧 APK 的证书 SHA-256 同为 `3c3567f23b1754c881276595d67330afbd208ccd396302aba8875e78342c1a2b`；可覆盖同渠道 code1。签名私钥没有进入 Git 或交付包，旧三产物更新版本未变。
 - **本地验证**：Android Debug 与 desktopPreview 构建、lint 通过，两个 lint 报告均为 0 error / 44 warning；既有 Android 单元测试 27/27，Desktop 测试 20/20，新 Desktop Release 编译 0 warning / 0 error。实际 APK 资源包含日/夜自适应、单色图层及新名称。
 - **交付**：ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code2-20261001`，包含新 APK、图标与来源/哈希记录。9 月 30 日四 OS 候选及草稿 Release 保留原字节与来源；当前未替换已发布产物。
-- **待办**：本轮未安装到手机；安装/覆盖升级后的 launcher 实际显示仍需真机确认。跨平台语音和输入的既有真机待办继续按 DESKTOP_ACCEPTANCE 执行，本轮品牌检查不替代这些验收。后续 UI 风格以用户最终选定方案另行实施。
+- **Samsung 安装**：用户要求将新图标实际装到手机后，已在 Samsung SM-G9880 用 `adb install -r` 将同渠道 code1 覆盖为 code2，首次安装时间未变，未卸载或清除数据。手机读回 APK 的 SHA-256 为 `595f3bfe4b66fbb9a54f9b38efa6c1862ab18d10f968c886788e939d7d8fc123`，与交付包完全一致，安装名称为「言渡」，MainActivity 已打开并处于前台。安装证据在 ignored `outputs/yandu-brand/device-install-20261001/installation.json`。默认 ADB 服务发生 connection reset，使用独立本地端口 15037 完成操作，未重启默认服务。
+- **待办**：launcher 的实际裁切显示未单独走查。跨平台语音和输入的既有真机待办继续按 DESKTOP_ACCEPTANCE 执行，本轮品牌安装不替代这些验收。后续 UI 风格以用户最终选定方案另行实施。
 
 ## 2026-09-30 统一跨平台 Desktop alpha 与低配置候选（最新）
 
