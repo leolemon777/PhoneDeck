@@ -20,7 +20,8 @@ public final class FleetUpdateActivity extends Activity {
     static volatile boolean running;
     static volatile boolean opened;
     private TextView status;
-    private Button start, install;
+    private Button start, install, importBundle;
+    private boolean preferLocal;
     private final LinkedHashMap<String, String> states = new LinkedHashMap<>();
     private final Set<String> pending = new HashSet<>();
     private volatile boolean cancelled;
@@ -53,11 +54,16 @@ public final class FleetUpdateActivity extends Activity {
         title.setPadding(PhoneDeckTheme.dp(this, 12), 0, 0, 0);
         header.addView(title); page.addView(header);
         TextView hint = new TextView(this);
-        hint.setText("在任一已配对电脑导入签名更新包，然后点击下方按钮。其他电脑依次更新，手机最后安装。请保持此页打开；离线或失败的设备可稍后重试。\n正在听写时会等待，空闲后会暂停共享麦克风。安卓安装需按系统提示确认。");
+        hint.setText("在手机导入签名更新包，或读取已配对电脑缓存的更新。电脑依次更新，手机最后安装。请保持此页打开；离线或失败的设备可稍后重试。\n正在听写时会等待，空闲后会暂停共享麦克风。安卓安装需按系统提示确认。");
         hint.setTextColor(theme.muted); hint.setTextSize(14);
         hint.setLineSpacing(PhoneDeckTheme.dp(this, 3), 1f);
         hint.setPadding(0, spacing, 0, spacing); page.addView(hint);
         start = updateButton(page, theme, "检查并更新所有设备", true);
+        importBundle = updateButton(page, theme, "从手机导入签名更新包", false);
+        importBundle.setOnClickListener(v -> {
+            if (!running) startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip"), 7201);
+        });
         install = updateButton(page, theme, "安装手机更新", false); install.setEnabled(false);
         Button cancel = updateButton(page, theme, "停止后续更新", false);
         cancel.setTextColor(theme.danger);
@@ -97,16 +103,48 @@ public final class FleetUpdateActivity extends Activity {
     }
     @Override public void onDestroy() { cancelled = true; opened = false; super.onDestroy(); }
 
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != 7201 || result != RESULT_OK || data == null || data.getData() == null || running) return;
+        Uri uri = data.getData();
+        running = true; start.setEnabled(false); importBundle.setEnabled(false); install.setEnabled(false);
+        show("更新包", "正在导入并验证发布者签名…");
+        new Thread(() -> {
+            File temporary = new File(directory, "import.partial");
+            try {
+                try (InputStream input = getContentResolver().openInputStream(uri);
+                     OutputStream output = new FileOutputStream(temporary)) {
+                    if (input == null) throw new IOException("无法读取选择的文件");
+                    UpdateBundle.copy(input, output, UpdateBundle.MAX_BYTES);
+                }
+                String key;
+                try (InputStream input = getResources().openRawResource(R.raw.update_publisher);
+                     ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    UpdateBundle.copy(input, output, 4096); key = output.toString(StandardCharsets.UTF_8.name()).trim();
+                }
+                UpdateBundle verified = UpdateBundle.verify(temporary, key, null);
+                java.nio.file.Files.move(temporary.toPath(), new File(directory, "bundle.zip").toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                preferLocal = true; sourceId = null;
+                show("更新包", "已导入并验证 · " + verified.windowsVersion + "\n点击「检查并更新所有设备」开始");
+            } catch (Exception e) { show("更新包", "导入失败：" + e.getMessage()); }
+            finally {
+                temporary.delete(); running = false;
+                runOnUiThread(() -> { if (!isDestroyed()) { start.setEnabled(true); importBundle.setEnabled(true); } });
+            }
+        }, "PhoneDeck-ImportUpdate").start();
+    }
+
     private void begin() {
         if (running) return;
-        running = true; cancelled = false; start.setEnabled(false); install.setEnabled(false);
+        running = true; cancelled = false; start.setEnabled(false); install.setEnabled(false); importBundle.setEnabled(false);
         pending.clear();
         new Thread(() -> {
             try { rollout(); }
             catch (Exception e) { show("更新任务", "未完成：" + e.getMessage()); }
             finally {
                 running = false;
-                runOnUiThread(() -> { if (!isDestroyed()) start.setEnabled(true); });
+                runOnUiThread(() -> { if (!isDestroyed()) { start.setEnabled(true); importBundle.setEnabled(true); } });
             }
         }, "PhoneDeck-FleetUpdate").start();
     }
@@ -140,9 +178,9 @@ public final class FleetUpdateActivity extends Activity {
             }
             show(deviceLabel(device), "已连接 · " + state.optString("version"));
         }
-        if (source == null) {
+        if (source == null || preferLocal) {
             // A retained, verified bundle allows retry when the original source is offline.
-            if (!new File(directory, "bundle.zip").isFile()) throw new IOException("请先在电脑「设备 → 更新所有设备」导入签名更新包");
+            if (!new File(directory, "bundle.zip").isFile()) throw new IOException("请先在本页导入签名更新包");
             show("更新包", "使用上次已缓存的更新包");
         } else {
             show("更新包", "正在下载并校验…");

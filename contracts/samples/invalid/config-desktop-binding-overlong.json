@@ -1,0 +1,10 @@
+{
+  "targetComputerId": "computer-placeholder-01",
+  "revision": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "activeEngine": "typeless",
+  "shortcutOverrides": {
+    "typeless": {
+      "dictation": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    }
+  }
+}

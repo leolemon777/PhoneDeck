@@ -1,5 +1,518 @@
 # PhoneDeck 项目交接说明
 
+## 2026-09-30 UI P2 双主题走查全绿 + 预览渠道直启基建（最新）
+
+- 核实设置族六个 Activity 早已全部使用 Console v2 令牌（零硬编码色），文档中
+  "仍是旧令牌形态"的旧表述已纠正。
+- **走查基建**（真机限制倒逼）：该 Samsung 的 `input tap` 触摸注入被系统阻断
+  （keyevent 正常）；uiautomator dump 因搜狗无障碍服务常失败且返回旧文件假象。
+  解决：`app/src/uiPreview/AndroidManifest.xml`（manifest 覆盖，tools:replace 六页
+  exported=true，仅预览渠道）+ `SettingsActivity` 的 `phonedeck_page` 子页直启钩子，
+  全页面可 `am start` 直启自动化。
+- **多 agent 工作流验收**（dwfrun-82b83b2f）：深色九页采集（采集员）、四个 gradle
+  门（assembleDebug/assembleUiPreview/testDebugUnitTest/lintDebug 全过）、三组视觉
+  验收 + 每问题独立复核 + 报告独立通读。结果：**浅色 9/9、深色 9/9 通过**。
+- 唯一报告项（深色快捷列表副标题对比度约 4:1）复核未确认，代码核查销案：
+  副标题即 `theme.muted` #A7B0C0、卡片 `theme.surface` #1B1E24，WCAG 实算 7.64:1。
+- 走查后手机主题已恢复浅色。剩余 UI 欠账：语音各状态、按压/键盘弹出交互态、
+  横屏与其他机型（见 KNOWN_ISSUES #5）。
+
+## 2026-09-30 UI P1 深色主题真机走查通过（最新）
+
+- 手机仍跨网段（192.168.0.195），但深色走查不需要同网段：preview 包为 debug 签名，
+  经 `run-as` 直接改主题 SharedPreferences（theme_id→native_dark）零代码改动完成。
+- **视觉模型验收 5/5 通过**：深色三层结构（背景约 #0D1117/卡片 #1C2128/文字 #E6EDF3）、
+  饱和蓝主按钮 #5B8DEF 配深色文字（非旧淡蓝胶囊）、状态 chip 深色下可辨识（灰点=
+  离线语义正确）、快捷网格文字可读、无截断重叠；底部"输入到"chip 排列正常。
+- 截图证据 `outputs/ui-redesign/console-v2-dark-walkthrough.png`（ignored 目录）；
+  走查后已恢复浅色设置并清理临时文件。
+- 残留（记入 KNOWN_ISSUES #5）：深色在线绿点态建议复验、各语音状态（启动中/采音中/
+  失败/共享）走查仍待做（需要真机交互或网络）、设置页 P2 未迁移。
+- 另：补交 A4 漏提交的 CredentialUpgraderTest.java（7 用例，c05c521）。
+
+## 2026-09-30 SEC-02 修复：8765 回环 Host/Origin 防护上线（最新）
+
+- 用户不在线（决策问答未获回复），手机仍跨网段——转做已量化在案的纯软件安全差距：
+- **LoopbackOriginGuard**（新中间件 + 4 组单测矩阵）：8765 上非 GET 请求强制
+  Host 字面回环（127.0.0.1/localhost/[::1]:8765，拒 DNS 重绑定与端口伪装）+
+  Origin/Referer 同源校验（拒跨站/null origin/沙箱 iframe）。
+- **真实服务器实测**（隔离数据目录、临时停/恢复生产托盘）：恶意 Origin=**403**、
+  原生无 Origin=200、同源=200；生产恢复后 health 200。
+- Windows **144/144**；KNOWN_ISSUES #3、SECURITY.md 残留声明、V13 测试差距注释
+  三处同步翻转。
+- D01/D04–D11 与 B03 打包决策已通过问答提交用户（未获回复，保持待决）。
+
+## 2026-09-30 R0 六小项 + V11/V13 台架化完成（最新）
+
+- 授权执行 R0 前置纯软件项，全部落地：
+  1. **SECURITY.md**（根目录）：漏洞报告入口（私密渠道）、S0-S2 处理目标（建议值非
+     SLA）、安全设计边界与如实声明的残留（8765 Host/Origin 差距）。
+  2. **README 隐私说明**：语音去向（局域网 PCM→自装引擎）、默认不落盘、服务端只存
+     哈希、无遥测无云识别、第三方引擎自理。
+  3. **git 全历史秘密扫描**：自研脚本扫全部 2200 个 blob（gitleaks 核心模式子集：
+     PEM/JKS/AWS AKID/GitHub/Google/Slack token/硬编码长密钥），**零命中**；
+     二进制（PNG/JPEG）跳过。
+  4. **docs/KNOWN_ISSUES.md**：真机欠账、CI 假绿历史、8765 Host/Origin 差距、预览
+     签名、UI P2 未竟、Keystore 降级路径、迁移窗口开放态、跨网段限制，分级列出。
+  5. **docs/PAIRING_GUIDE.md**：扫码配对/共享组/凭据升级的图文流程（含校验码核对
+     防抢配、120s/5 次/15s 窗口语义、常见问题表）。
+  6. **docs/SUPPORT_MATRIX.md v0**：四端×网络×输入法×虚拟麦克风盘点，大部分组合
+     如实标"待验证"，实测设备唯一真机 SM-G9880。
+- **V11/V13 台架化**（Windows **140/140**，新增 4 用例）：
+  - V11 补时钟回拨用例：待确认态回拨不受影响；材料已消费后回拨不复活（消费判定
+    与时间无关）。
+  - V13 三用例：8766 无/错令牌/伪造 Bearer 全拒且不回退旧头；8765 回环语义+Host/
+    Origin 差距在案（注释记录，修复后补正向断言）；撤销 A 不影响 legacy 共享令牌
+    （身份隔离）+ 未知/已撤销令牌一律 null（抗枚举）。
+- R0 剩余（不可软件消除）：B03 打包候选（需发布序号决策）、V02 外部测试者、
+  最终放行决定。R0_GATE_CHECKLIST 对应行可据此更新。
+
+## 2026-09-30 R0 发布门自查清单（最新）
+
+- 手机仍跨网段（192.168.0.195），真机欠账搁置；用户不在线，选择纯软件核对项：
+  新建 [R0_GATE_CHECKLIST.md](R0_GATE_CHECKLIST.md)——按规格 §2.3 R0 行与 §20.2
+  七条硬检查逐条对照实际仓库状态（含本轮实查：当前树无明文密钥、signing/ 被
+  ignore、tracked 截图为自有 UI 截图、Issue 模板存在、Release QUICKSTART 在
+  v1.6.0-beta.1 时点）。
+- 结论：R0 距离 = 6 个文档/扫描小项（SECURITY.md、隐私说明、历史秘密扫描、
+  KNOWN_ISSUES.md、新能力用户文档、支持矩阵 v0）+ B03 打包候选 + V02 外部测试
+  + V11/V13 安全负例台架化 + 用户放行决定。前 6 项与安全负例可纯软件授权完成。
+- 本文档为核对产物，不构成放行。等用户决策。
+
+## 2026-09-30 B01/B02 维护项：第三方声明基线 + 版本核对 + 规格进度快照（最新）
+
+- 手机仍跨网段（192.168.0.195），真机欠账继续搁置，本轮完成维护项：
+  - **docs/THIRD_PARTY_NOTICES.md 建立**（DOC-04/REL-11 人工基线）：NAudio 2.2.1/MIT、
+    Makaretu.Dns 2.0.1 + Multicast 0.27.0/MIT、QRCoder 1.6.0/MIT、
+    zxing-android-embedded 4.3.0/Apache-2.0（含 zxing core 3.4.1）全登记，
+    附维护规则（新增依赖同步清单、许可兼容性、发布包附带）。
+  - **版本一致性核对**：Test-ReleaseVersions.puredata 套件通过；M0/M1 系列提交
+    未动发布序号（dev.21/27、dev.16/28 维持）——发布序号只在 B03 打包批次推进
+    （REL-02 纪律）。
+  - **spec plan 第 0 章**新增"M0/M1 执行进度快照"节：八行对账表（M0 两批到
+    B01/B02）+ 协议影响对账（M1-A 落地附件 NET-01…07 目标形态、Bearer 头默认、
+    迁移窗口共存），满足 AGENTS 规则 5 的长期规格同步义务。
+- SBOM 自动化（REL-11）仍留 B03 批次。真机欠账不变（V09/V17/V10/V21 完整形态）。
+
+## 2026-09-30 M1-B 收尾：会话状态机×租约登记集成台架（最新）
+
+- 新增 `SessionManagerLeaseIntegrationTests`（5 用例，**136/136 通过**）：把第一片的
+  SessionLeaseRegistry 真正挂上 DictationSessionManager（注入假引擎/假音频）走完整时序——
+  - V25/R1：Stop 后同 sessionId 迟到 start 在引擎触碰前被拒（ToggleCount 零增长）；
+  - V25/R2：旧会话迟到 stop 不清新会话（B 保持 Active）；
+  - V25/T03→T09：失败启动同 sessionId 可重试成功（Abandon 无墓碑接线验证）；
+  - V20/DEV-04：ACTIVE 态第二会话被拒不抢占；STARTING 态（StartGate 阻塞模拟慢引擎）
+    第二会话同样被拒；停旧后新会话可启动（目标切换先停语义）。
+- M1-B 台架覆盖至此：租约/墓碑/代次（孤立+集成）、V47 冲突、V21 零目标窗口、
+  V22 L1 部分。真机欠账不变（手机仍在 192.168.0.x 跨网段；V09/V17/V10/V21 完整形态
+  等待同网段）。
+
+## 2026-09-30 M1-B 第二片：共享组显式集合（DEV-03）+ V21/V22 台架（最新）
+
+- **共享组语义**（手机端）：Device 增 `sharedGroup`（加密持久化，穿透全部重建点：
+  upsert/saveLanPairing/recordLastGood/mergeDiscovered/saveQrPairing/applyCredentialUpgrade）；
+  **迁移策略**——存量已配对设备首次加载默认入组（不破坏升级前共享使用），**新增配对
+  （扫码/USB/rotate）默认不入组**（DEV-03"新增配对不自动收到音频"）；`setSharedGroup`
+  即时持久化；切普通输入目标不改组（无代码路径触碰，天然成立）。
+- **PhoneAudioService**：LAN 目标循环按 `sharedGroup` 过滤（移除即停发该流——
+  updateTargets 增量语义）；**零目标 15s 停采窗口**（MIC-10 提案：`SharedAudioPolicies
+  .shouldStopForZeroTargets`，elapsedRealtime 单调时钟；用户主动停止即时生效不受影响；
+  USB 直连电脑保持旧兼容路径）。
+- **UI**：设备列表条目「· 共享组」标记 + "⚙ 管理共享组"多选对话框（显式勾选集合）。
+- **台架用例**：SharedGroupPolicyTest（V21 断言：零目标窗口 14.9s/15s/超窗三态）；
+  ConcurrentClientInputTests（V22 L1 可测部分：双客户端并发调用安全无丢失 + requestId
+  按 clientId 分区约定；组合键物理不交错由 SyncRoot 串行保证，真实 SendInput 无法单测
+  注入，属 L3/V27-V28）。
+- 验证：Windows **131/131**、Android 单测 20/20 + assembleDebug + lintDebug 0 error。
+- 边界：V21 完整形态（逐接收端字节计数与麦克风释放时刻）、V41 多机共享压力需真机/
+  多接收端；旧 shared.requested 联动开启保持兼容（D11 窗口内未动）。
+- 真机欠账不变：V09/V17/V10（手机仍在 192.168.0.x 跨网段，192.168.10.x 不可达）。
+
+## 2026-09-30 M1-B 第一片：会话租约/墓碑/代次 + V47 配置冲突
+
+- 按 contracts/session-states.json（M0 冻结夹具）实现 **SessionLeaseRegistry**（新文件）：
+  代次递增（迟到 start 不复活已取消代次，R1）、租约用 **Stopwatch 单调时钟**
+  （墙上时间回拨免疫，PRO-03）、墓碑保留期（60s 提案）内拒绝同 sessionId 复用、
+  保留期后复用为合法新代次、**失败启动清理不写墓碑**（T03→T09，同会话重试合法——
+  与停止墓簿严格区分）、重连窗口（RC1/RC2 15s，MIC-10 提案）、过期租约后台回收。
+- 接线：DictationSessionManager.Start 前置裁决（Idempotent/RejectedTombstoned/
+  RejectedOwned → 对应用户文案）；Stop **先写墓碑再拆引擎**（停止优先）；AudioEnded/
+  Dispose 终结；/api/dictation/start 传 clientId（逐手机会话归属）。
+- **V47（L1 部分）**：ConfigConflictTests 三用例——voice/connection 双修订流独立
+  （内容哈希、同内容幂等）、过期修订显式冲突不自动合并、WriteAtomic 写失败
+  （目标被锁 → UnauthorizedAccessException，端点映射 500）原文件不变。
+- 验证：Windows **129/129**（新增 6 会话用例含 **V25 有界随机竞态矩阵 500 轮×40 步**
+  不变量保持；满额 1000 轮属 L2 台架项）；Server Release 0 警告 0 错误。
+- 边界：租约续期尚未挂到音频流心跳（当前租约为孤儿会话后备，30s 后允许接管——
+  正常会话由 Stop/AudioEnded 即时清理，不依赖租约过期）；重连窗口 CanResume 尚无
+  消费方（RC 续接随 V38/V41 实装）；V47 手机端草稿保留属 L3；共享组（DEV-03/R2）
+  未动。M1-B 剩余：目标隔离强化、共享组、V19–V28/V32–V40 相关实装。
+- 真机欠账不变：V09/V17/V10 待手机与 PC 同网段。
+
+## 2026-09-30 M1-A A5 mDNS 发现层——M1-A 全部完成
+
+- **服务端**（新 `MdnsAdvertiser.cs`，依赖 Makaretu.Dns 2.0.1 + Makaretu.Dns.Multicast
+  0.27.0，均 MIT）：发布 `_phonedeck._tcp`，TXT 字段与 UDP 应答严格同集
+  （computerId/displayName/platform/port/capabilities），**无令牌无指纹**（NET-01/V10）；
+  多播不可用网络优雅降级（Running=false、UDP 8767 回退）；与"局域网发现"开关联动；
+  health 增加 mdnsRunning 字段；启动横幅同步。
+- **Android**（`LanDiscoveryClient`）：`discover()` 并行 UDP 广播与系统 NSD
+  （`_phonedeck._tcp.`），按 computerId 合并去重；`getTxtRecord()` 已在 API 33 移除，
+  走 `getAttributes()` + 纯函数 `decodeAttribute`（可单测）；地址仍过安全过滤；
+  候选一律须经 HTTPS 8766 钉扎+令牌校验。
+- **契约**：`pairing-and-identity.json` 的 futureMdns → **implemented**（库冻结、
+  TXT 字段集、UDP 回退与钉扎规则）；validate.py 通过。
+- **验证**：Windows **120/120**（新增 MdnsAdvertiserTests 三用例：字段同集/无敏感键/
+  无指纹形态值、空平台回退、DNS 标签约束）；Android 三门（新增 decodeAttribute 用例）。
+- **CI 修复**（同日早些）：D12 后未提交的 net8 lock 导致 PR #24 云端 NU1004 变红；
+  已提交 net10 lock 刷新（7628390），**全部检查真实通过**（含 B03 组装作业 2m12s，
+  为 CI 假绿修复后首次真实运行验证）。
+- **M1-A 里程碑**：A1 凭据/撤销 → A2 配对窗口/本机确认 → A3 扫码/Keystore 存储 →
+  A4 rotate/共存窗口/应急撤销 → **A5 mDNS 双通道发现**，配对与授权全链闭环。
+  遗留真机项：V09 真 Wi-Fi/相机扫码、V17 rotate 真机迁移、V10 mDNS 真机互通
+  （均待手机与 PC 同网段；代码路径已就绪零改动）。
+- 下一步：M1-B（会话与配置：停止优先、租约、目标隔离、共享组、V47 配置冲突）。
+
+## 2026-09-30 M1-A A4 凭据轮换 + legacy 应急撤销
+
+按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §5/§9-A4 落地三端，并处置独立复核
+（approved=false，4 问题）。
+
+**做了什么**
+
+- **契约**（contracts/ 三改三增，validate.py 全过）：
+  - `pairing.schema.json` 新增 `credentialRotateRequest`（仅 clientId GUID，
+    additionalProperties:false）与 `credentialRotateResponse`（oneOf 两形态：
+    issued 8 字段**无 ok**；already-upgraded 仅 {ok,status,clientId} 绝无令牌字段）。
+  - `samples/valid` 新增 pairing-rotate-request / -issued / -already-upgraded
+    三样本并登记 manifest；`pairing-and-identity.json` migration 段补 rotate 三语义
+    （already-upgraded 无令牌=G-1 永不重发；Bearer 调用者 403 仅旧头鉴权升级；
+    legacy revoke 先原子持久化再生效=M-2）。
+- **Windows 服务端**（PhoneDeck.Server + Tests 共 5 文件）：
+  - `POST /api/lan/credential/rotate`（Program.cs:550）：仅旧共享令牌头鉴权，
+    Bearer 调用者 403（LanRequestAuthenticator）；同 clientId **单次签发**、重放回
+    already-upgraded（绝无令牌）；per-clientId 3s 限速（单调时钟，内存态）；
+    issued 响应逐字对齐冻结契约、无 ok 字段。
+  - `POST /api/admin/legacy/revoke`（Program.cs:673）：先持久化 revokedAt/墓碑
+    再生效；撤销后旧头一律 401、逐手机凭据不受影响（含重启语义）。
+  - `ClientCredentials.cs`：rotate 签发/撤销/legacy 撤销逐条追加 clients-audit.log
+    （脱敏、500 行轮转）；裸数组旧 clients.json 自动升级为信封格式。
+  - `RotateLegacyTests.cs` 新建 9 用例（单次签发/重放无令牌/撤销后拒绝/Bearer 403
+    判定链/legacy 撤销后旧头全 401 且逐手机凭据不受影响含重启语义/审计脱敏/限速/
+    裸数组升级信封/审计 500 行轮转）。
+- **Android 手机端**：
+  - 新增 `CredentialUpgrader`：rotate 走旧共享令牌头+钉扎 TLS；因冻结契约 issued
+    形态不带 ok，不走强制 ok=true 的 PhoneDeckHttp.readResponse，按 HTTP 状态判定。
+  - `MainActivity.runCredentialUpgrade`：per-computerId 持久化**稳定升级 clientId**
+    （`credential_upgrade_client_id_<computerId>`，读-缺-生成-存），重试沿用同一
+    GUID——服务端只回 already-upgraded，消除孤儿全作用域凭据累积与限速绕过
+    （复核问题 3 修复）；注释写明凭据丢失找回仍走重新扫码配对（G-1/G-2）。
+  - `TargetDeviceManager.applyCredentialUpgrade` 先验证新凭据后替换，旧共享令牌
+    保留到验证成功；`CredentialUpgraderTest` 7 用例。
+
+**复核 4 问题处置**
+
+- 问题 1（issued 带 ok 违冻结契约）：服务端已去 ok（重验 Program.cs:597-610 issued
+  仅 8 冻结字段）；手机端解析本就容忍多余字段，两形态均兼容，无需改动。
+- 问题 3（孤儿凭据累积）：手机端稳定 GUID 修复（见上）。
+- 问题 4（仓库垃圾文件 %TEMP%vtiers.txt、根 nul、android/app/src/nul）：
+  经核实均不在当前工作树（交接员本轮实查 `find . -name nul -o -name *vtiers*`
+  无结果、git porcelain 无 TEMP/nul 匹配）。
+- 问题 2（§5.4 窗口关闭 + UI 消费）**未落地，留待主流程决策**：legacy 共存窗口
+  目前无限期开放直至手工 POST 127.0.0.1:8765/api/admin/legacy/revoke；该端点与
+  /api/admin/clients 的 legacy 条目在 windows 树无 UI 消费（ReceiverStatusWindow.cs
+  为他人未提交 WIP、禁改）。需把分期决策记入 spec plan/HANDOFF 或另立 UI/版本边界任务。
+
+**验证命令与逐门结果**（门由脚本统一执行，均 0 轮重试通过）
+
+| 门 | 命令 | 结果 |
+| --- | --- | --- |
+| Windows 构建+测试 | `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release` + `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release` | 通过（含 rotate 新用例） |
+| Android 单测+组装+lint | `gradlew :app:testDebugUnitTest` + `:app:assembleDebug` + `:app:lintDebug` | 通过 |
+| 契约 | `python contracts/tools/validate.py` | 通过 |
+
+- 契约门交接员本轮**实跑**复核：exit 0，C1–C7 全 PASS（36 合法样本，含 3 个
+  rotate 新样本）。
+- 复核者另跑 `dotnet test PhoneDeck.Server.Tests -c Release` = 117/117（复核时点
+  代码；其后服务端最终改动仅删 issued 响应 ok 一个字段，不在存储层测试覆盖内，
+  最终代码由上表脚本门重验）。
+- 手机端 Agent 另做手工等价验证（非 gradle 门）：javac（JDK17 + android-35 +
+  zxing 4.3.0/3.4.1 + R 桩）编译全部 35 个 main 源文件 OK；JUnitCore 纯 JVM 跑
+  CredentialUpgraderTest + ContractsConformanceTest = 11 tests OK。
+
+**边界（如实区分代码级与真机）**
+
+- **rotate 的手机端真机升级走查（V17 L3）未做**——需要真机连上接收端实测
+  「旧共享令牌 → rotate 签发 → 新凭据验证 → 替换 → already-upgraded 重放」全链路；
+  当前结论基于代码走读 + 单测，不能替代真机验证。
+- **legacy 撤销为代码级验证**（单测含重启语义），未在真机托盘/管理 UI 操作验证。
+- manifest 中 3 个 rotate 样本仍标【目标，A4 设计形态】；端点现已落地
+  （Program.cs:550），后续宜改为实现形态并附源码行号（A2 样本先例）。
+- 设计 §5.1「旧头不能 rotate」与 §5.2「rotate 旧 token 鉴权」文字矛盾（复核
+  非阻断备注 1）：实现与契约均按 §5.2 执行（rotate 仅旧头可调、新头 403），
+  判定正确，建议后续在 §5.1 括注澄清语义。
+- 限速/审计已知残余（复核非阻断备注 2，窗口内可接受）：legacy 持有者可用随机
+  GUID 连续触发签发（限速不跨 clientId）、对既有 clientId 反刷 already-upgraded
+  在限速前返回；如需收紧可加全局签发限速。
+- 工作树仍有其他 Agent 未提交改动（Android 其余文件、ReceiverStatusWindow.cs、
+  packages.lock.json 等），提交前需主流程核查未跟踪文件归属，防误产物混入。
+- 下一步：§5.4 分期决策记录、A5（mDNS 等）按主流程安排；V17 L3 真机验收排队。
+
+## 2026-09-29 M1-A A3 Android 扫码配对 + 首次真机协议闭环（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A3 落地 Android 端：
+  - 新依赖 `com.journeyapps:zxing-android-embedded:4.3.0`（Apache-2.0；注意
+    IntentIntegrator 实际包名是 `com.google.zxing.integration.android`）。
+  - 新增 `QrPairingClient`（QR 载荷严格校验：版本/指纹 64hex/GUID/材料 ≥32；
+    提交挂起 40s；401/403/404/408/429 用户文案；发现层 computerId 匹配）与
+    `KeystoreCipher`（AndroidKeyStore AES-256-GCM，IV‖密文，Keystore 不可导出）。
+  - `TargetDeviceManager`：设备记录新增 clientId 字段；存储整体迁
+    `known_devices_enc`（Keystore 封装，旧明文键读取时自动迁移；Keystore 异常
+    回退明文并告警）；新增 `saveQrPairing`；uiPreview 验收通道允许存 adb 反向的
+    回环地址（包名 .preview 门控，生产包保持严格过滤）。
+  - `PhoneDeckEndpoint/PhoneDeckHttp`：clientId 非空时改发 `Authorization: Bearer`
+    + `X-PhoneDeck-Client`（旧共享令牌头不变）；`MainActivity`：设备列表新增
+    "扫码配对"入口、扫码结果处理、发现→手动地址兜底、配对等待/确认/验证流程；
+    uiPreview 专用测试注入钩子（`phonedeck_qr_test_b64` extra，冷启动/复用两路径）。
+  - 三门通过：`testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+- **首次真机配对协议闭环（V09 通道证据，USB 隧道形态）**：开发版服务端+托盘在本机
+  运行，QR 载荷注入预览包 → TLS 钉扎（真证书）→ 材料提交 → 待确认（SM-G9880）→
+  本机确认 → **签发落库**（clients.json：clientId 9f9d55e3…、四作用域、仅 TokenHash）→
+  手机 Keystore 保存 → Bearer 凭据 health 验证 → 主界面显示已配对在线（截图
+  `outputs/ui-redesign/qr-pairing-after.png`）。测试期间生产托盘/服务端暂停，已恢复
+  并验证 health 200。
+- **V09 完整 L3（真 Wi-Fi + 真相机）待环境**：手机（192.168.0.x）与 PC（192.168.10.x）
+  跨网段且 ping/TCP 均不通，无法直连；相机对准屏幕需人工。补全方式：把手机接入
+  PC 同网段 Wi-Fi 后，托盘"配对新手机…"→ 手机扫码 → 点确认，即完成 V09 L3（全部
+  真实代码路径，无需任何改动）。
+- 下一步 A4：rotate（不重发语义）+ 手机迁移流程 + 共存窗口 + legacy 应急撤销。
+
+## 2026-09-29 M1-A A2 扫码配对窗口实现（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) §9-A2 落地 Windows 端配对闭环：
+  - **服务端**（新增 `PairingWindow.cs`）：窗口 120s 单调时钟、材料 32 字符 base32（160bit）
+    常量时间比对、单次使用、失败 5 次关窗、未知 pairingId=404 不计数（防 LAN 关窗 DoS）；
+    `POST /api/lan/pair/qr` 挂起等待本机确认（30s，单次往返免轮询鉴权），确认后经
+    A1 的 ClientCredentialsStore 签发四作用域凭据（支持手机自带 GUID clientId，冲突重生）；
+    回环 8765 新增 begin/cancel/confirm/deny/status 五个管理端点（配对窗口只经本地 UI）。
+    鉴权中间间对 pair/qr 显式豁免（TLS+材料即授权证明）。
+  - **ControlCenter**（新增 `PairingForm.cs`，新依赖 QRCoder 1.6.0/MIT）：QR 渲染 +
+    手工码 + 材料校验码 + 倒计时 + 确认/拒绝/重新生成；托盘菜单新增"配对新手机…"入口
+    （ReceiverTray.cs，未触碰他人 WIP 的 ReceiverStatusWindow.cs）；窗口关闭自动 cancel。
+  - **契约**：pairing.schema.json 新增 `qrPairRequest`/`qrCredentialsResponse` 定义，
+    两个样本入 manifest，validate.py 全过。
+  - **验收**：`PairingWindowTests` 5 用例（V11：单调时钟过期/单次/5 次关窗/未知
+    pairingId 不计数；V09：确认→签发→可认证、拒绝、取消收束、快照不含凭据字段）；
+    **108/108** 通过、Server 与 ControlCenter 构建 0 警告 0 错误。
+- 验证边界：pair/qr 的 HTTP 端到端（挂起/超时/429 状态码）与托盘确认卡为代码级实现，
+  真机闭环待 A3 手机端就绪后按 V09（L3）执行；QRCoder 依赖已入 ControlCenter
+  packages.lock.json（该 lock 按既定约定未提交，随 lock 批量决策处理）。
+- 下一步 A3：Android 扫码（zxing-android-embedded）+ 配对 UI + Keystore 封装存储。
+
+## 2026-09-29 D03 部分冻结 + M1-A A1 实现（最新）
+
+- **D03 冻结**（随 M1-A 设计评审，回写契约并通过 validate.py）：撤销生效 ≤1s、
+  键释放预算 ≤2s（进行中单个按键事件 ≤500ms 自然完成）、去重 TTL 30s（覆盖最长
+  合法重试预算，本为源码实证值）；租约/墓碑/宏总时长仍待冻结（规格 §22 D03 行已注）。
+- **M1-A A1 落地**（Windows 接收端，设计 §9 第 A1 步）：
+  - 新增 `ClientCredentials.cs`（clients.json：原子写 temp+Replace、损坏备份、
+    **只存令牌 SHA-256 哈希**、签发/认证/撤销；撤销**先持久化再生效**，写盘失败
+    内存回滚可安全重试）与 `ClientSessionRegistry.cs`（逐 clientId CTS，撤销即
+    Cancel 长流令牌）。
+  - `LanRequestAuthenticator.Resolve`：8766 双凭据——`Authorization: Bearer`（返回
+    clientId）或旧 `X-PhoneDeck-Token`（映射 legacy-shared）；无效 bearer 不回退旧头。
+  - Program.cs：中间件改用 Resolve 并写入 `HttpContext.Items["ClientId"]`；
+    `/api/input` 传递 clientId 归因；`/api/audio/stream` 链接"请求取消+客户端撤销令牌"；
+    回环 8765 新增 `GET /api/admin/clients`（脱敏列表）与 `POST /api/admin/clients/revoke`
+    （撤销编排：先持久化→Cancel 长流→中止当前宏）；KeyboardInput 增加执行归属追踪与
+    `RevokeClientInput`，宏步骤间检查撤销标记并中止（组合键在自身 finally 反向释放）。
+  - 验证：`ClientCredentialsTests` 7 用例（签发/认证/撤销往返含重启重载、令牌不落盘、
+    损坏备份、写盘失败一致性、Resolve 六态、**V12 子集 L2 假流：撤销 ≤1s 生效且
+    另一手机零影响**）；Server Release 0 警告 0 错误、**103/103** 通过、契约 validate exit 0。
+- 验证边界：宏撤销中止的按键释放依赖既有 SendChordSafely finally（单测无法注入真实
+  SendInput，留 V12 L3 真机）；管理端点未做 HTTP 集成测试（组件级 L1 覆盖，端到端随
+  A2/A4）；蓝牙输入路径维持无 clientId 归因（现状）；A2（QR 配对窗口）未开始。
+- 改动未含 lock 文件与他人 WIP。
+
+## 2026-09-29 M1-A 配对与授权安全设计定稿（最新）
+
+- 按 D02 已确认方向（成熟加密实现+本机确认+逐手机凭据）完成
+  [M1A_PAIRING_DESIGN.md](M1A_PAIRING_DESIGN.md) **v1.0**，并经全新上下文独立评审
+  （17 项意见：高 2/中 6/低 6）全部处置后定稿，结论"修改后可进入实现"。
+- 核心设计：钉扎 TLS 承担全部机密性（无自创密码协议）；QR 配对（120s 单调时钟窗口、
+  一次性材料 ≥32 字符/128bit、5 次失败关窗、托盘本机确认+材料校验码、手工码同源同熵）；
+  clientId+作用域 bearer（control/audio/settings/update-request），**服务端只存令牌哈希、
+  rotate 永不重发**（评审 G-1/G-2 修复：防旧共享令牌持有者冒领）；撤销先持久化后生效、
+  关闭音频长流并反向释放持有键；旧 shared token 迁移窗口含 legacy 应急撤销；
+  USB pair 端点窗口关闭后停发 legacy 凭据。
+- 已知残留：data 克隆冲突检测交 V14；V13 回环 Origin/Host 加固另立任务；mDNS 留 A5。
+- 实现切分 A1–A5 与各步契约任务已定（设计 §9）；A1（Windows 端 clientId/存储/撤销）
+  为下一步，开工前须确认 D03 冻结项（≤1s、键释放预算、去重 TTL）。
+- 本轮无代码改动；设计文档为唯一新增。
+
+## 2026-09-29 D12 执行：.NET 8→10 迁移（最新）
+
+- 用户批准 D12 立项并当日执行：`global.json` 钉 SDK 8.0.425→**10.0.400**（CI 经
+  `global-json-file` 自动跟随）；六个活项目 TargetFramework 迁 **net10.0**
+  （Server、Server.Tests、ControlCenter、Receiver、Receiver.Tests、FocusSink）；
+  artiacts/dist 历史打包副本未动。`X509Certificate2` 构造器过时（SYSLIB0057）三处
+  迁移 `X509CertificateLoader.LoadPkcs12 / LoadPkcs12FromFile`（Windows 两处、Mac 一处）。
+- 重验结果：仓库内直接 dotnet 构建恢复（无需 C:\\ 绕行）；Windows Server Release
+  **0 警告 0 错误、97/97 测试**；Receiver 编译 + **23/23 测试**；ControlCenter 与
+  FocusSink 构建通过。自包含 win-x64 发布还原成功（运行时包可用）。
+- 未免除项：最低 OS 实机矩阵、正式发布打包（自包含/裁剪产物验证）、真机 NAudio
+  回归仍属 R1 候选前必做（规格 §22 D12 行已记录）。
+- 同轮获用户批准：四笔提交已推送并入 PR #24（含本 D12 提交共五笔）；D02 方向确认为
+  “成熟加密实现+本机确认+逐手机凭据”（M1-A 设计据此推进）；UI 预览包安装走查已授权。
+
+## 2026-09-29 M0-B 契约双端消费 + UI 重设计 P1（最新）
+
+- **M0-B 收尾（跨语言消费）**：contracts/ 样本接入两端测试工程并通过构建门。
+  - Windows：新增 `PhoneDeck.Server.Tests/ContractsConformanceTests.cs`（MSTest，6 用例）——
+    全样本严格 JSON 解析；合法请求样本经真实 `TargetEnvelopeValidator.Validate` 通过；
+    4 个非法信封样本被拒绝；宏样本经真实 `KeyboardInput.ValidateMacroSteps`（1 合法通过 +
+    4 非法拒绝）；音频流头样本走与 Program.cs 端点一致的校验链（协议头 0 的
+    “记录在案契约收紧差异”用合法/非 GUID/协议 0 三态固化）。合计 **97/97 通过**。
+  - Android：新增 `app/src/test/.../ContractsConformanceTest.java`（JUnit4，4 用例，内置
+    零依赖 MiniJson 解析器，避开单测环境无 org.json 实现）——全样本解析、v2 信封不变量
+    （含 legacy paste 仅 requestId 的遗留路径）、动作拼写与 `ShortcutButtonConfig` 常量逐字
+    对齐、组合键边界（1–4 键/无重复/holdMs 20–500）接受合法并拒绝 6 个越界样本。
+    `testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+  - 跨语言发现并固化：宏步骤 type 大小写不敏感（接收端 `ToLowerInvariant` 归一），
+    样本 "keychord" 拼写与产品常量 "keyChord" 的差异被确认为合法而非缺陷。
+- **UI 重设计 P1**（用户另行授权“重新设计整个界面”，方案见 [UI_REDESIGN.md](UI_REDESIGN.md)）：
+  `PhoneDeckTheme` 重写 733→约 280 行（令牌 v2：live/onLive 录音红、三组语义容器、
+  primaryContainer 选中、9 套遗留主题实现与 FrostedBackdropView 删除、历史 ID 迁移保留）；
+  深色主按钮改饱和蓝；`VoiceLevelView`（ACTIVE→live、CONNECTING→warning）、
+  `ShortcutKeyView`、`styles.xml` 浅色状态栏残留修正；主控台状态 chip 化、语音主钮 72dp、
+  目标 chip 容器选中态。两轮 `assembleDebug`+`lintDebug` 通过。真机视觉走查待用户同意
+  安装 UI 预览包（独立包名，不动原应用）。
+- 验证边界：以上为代码通过构建/单测；无任何真机输入/音频/走查验收；改动全部未提交。
+- 待办：D01–D12 决策清单与提交切分方案已提交用户待拍板；根目录 `nul` 与
+  `%TEMP%vtiers.txt` 待清理授权；M0-C（需真机 Mac）与 M1 起阶段未开始。
+
+## 2026-09-29 按规格执行·M0 第一批
+
+- 用户授权按 [开源发布规格 1.1](OPEN_SOURCE_RELEASE_SPEC.md) 执行 M0 第一批，基线 HEAD a5ade04。
+  本轮六个子任务：现场盘点、规格修订 1.1、文档同步、CI 假绿修复、契约测试台、USB 只读冒烟。
+  全部改动均未提交（已核 `git status`：仅 M/??，无暂存）。
+- 现场盘点（全程只读）：README/HANDOFF/spec plan 三处 diff 为上一轮规格文档遗留，可继续编辑；
+  `ReceiverStatusWindow.cs` 与三个 `packages.lock.json`（ILLink.Tasks 8.0.31→8.0.30，疑 restore
+  环境差异自动产生，已核 diff）为他人源码 WIP，本轮全程 off-limits 未触碰。
+- 规格修订：OPEN_SOURCE_RELEASE_SPEC.md 升 1.1（:3），六项评审结论落档——REVIEW-001/002/003/004/005
+  采纳（§22 新增 D12 .NET 8→10 迁移决策含 2026-09-29 工具链复现事实 :609；§1 行内数值明确为提案值、
+  以 D03/D04 冻结为准；D10 补外测招募；§3.3 补 PhoneDeckDataDirectory.cs；§5 明确 N/A 审批角色），
+  REVIEW-006 部分采纳仅入 §26 修订记录（:671），待 §17/§19 落实，事项仍开放。
+- 文档同步：按规格 §3.2 清理 README/ARCHITECTURE/PROJECT_HANDOVER 共 15 处过时描述
+  （WPF→WinForms 轻量托盘、九主题→浅/深两套、“Mac 未真机”→2026-09-14 两轮真实 Wi-Fi 听写闭环
+  但不等于全场景通过、“缺 LICENSE”→根目录 MIT LICENSE），README 新增「数据目录说明」小节（:145）。
+  发现未改：README.md:59 仍写“蓝紫渐变麦克风”图标（实为 Luma 暖白环体）、PROJECT_HANDOVER/
+  ARCHITECTURE 多处版本号漂移、AGENTS.md 同类过时描述，超出本轮范围可另行安排。
+- CI 修复：ci.yml 消除 B03 假绿——断言步骤移除 continue-on-error，任一上游工件下载失败时降级必写
+  `$GITHUB_STEP_SUMMARY`『B03 SKIPPED (DEGRADED)』并发 `::warning::`（ci.yml:214-241），不再静默通过；
+  其余 11 处 continue-on-error 逐一确认（9 处上传告警 + 2 处下载降级入口）。静态复核通过，
+  未在云端触发实际运行验证。
+- 契约测试台：新增未跟踪 `contracts/`（8 域策略契约、schema、合法/非法样本、tools/validate.py），
+  补齐评审缺口 §16.2 全部 8 行；`X-PhoneDeck-Protocol` 头 `^[1-2]$` 标为契约收紧目标态，
+  description 写明接收端现状（仅拒 >2），新增非法样本固化差异。
+- USB 冒烟：PHONE-A（SM-G9880 / Android 12 / SDK 31）只读 ADB 检查，未安装、卸载或清理任何包；
+  设备现装 `com.codex.phonedeck.preview` 1.6.0-dev.18-ui-preview (versionCode 24)，正式包
+  `com.codex.phonedeck` 未安装。报告 `release-evidence/usb-smoke-2026-09-29/phone-a-report.md`。
+  8 项 NOT_RUN：USB 音频实测、输入注入、配对/授权/撤销、安装/渠道迁移、运行态 dumpsys、
+  蓝牙/LAN 8766/mDNS、Typeless 与三输入法矩阵、锁屏/TLS/iOS。
+- 验证门（各子任务执行并报告，均通过、0 轮返工）：
+  `.\gradlew.bat :app:assembleDebug`；`.\gradlew.bat :app:lintDebug`；
+  `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release`；
+  `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release`（91 项）；
+  `dotnet build work\phone-deck\macos\PhoneDeck.Receiver\PhoneDeck.Receiver.csproj -c Release`（跨平台编译）；
+  `dotnet test work\phone-deck\macos\PhoneDeck.Receiver.Tests\PhoneDeck.Receiver.Tests.csproj -c Release`（跨平台）。
+  以上仅代表“代码通过构建/测试”；USB 冒烟为只读检查，未安装任何包，渠道迁移决策 D05 未决，
+  两者均不构成 60 组验证中的真机/外部验收。
+- 交接撰写轮亲自复跑：`python tools/validate.py`（contracts/ 下）exit 0——101 个 JSON、31 合法/
+  47 非法样本、24 转移、7+2 规则、16 轨迹全部通过；`dotnet --list-sdks` 仅 9.0.311 / 10.0.400。
+  注：契约子任务汇总字段 `validateExit:2` 与其摘要文字 exit 0 矛盾，以本轮复跑 exit 0 为准，
+  字段疑为中间值笔误；6 组变异测试为子任务报告，本轮未复跑。
+- 环境事实：global.json 钉死 SDK 8.0.425 且 rollForward=disable（global.json:3-4），本机仅存
+  9.0.311/10.0.400，仓库内直接 `dotnet` 构建不可用，本轮以 SDK 10 从 C:\ 目录构建 net8.0 通过；
+  Android 构建须 `JAVA_HOME=E:\Android\Jdk17\jdk-17.0.20.1+1`（见 HANDOFF:972 既有记录）。
+  根目录异常未跟踪文件（仅记录未删，均不应入库）：`nul`（现 51 字节、09-29 13:01，较盘点时的
+  0 字节 12:15 有变化，疑又一 stray 重定向写入；cmd 下 `del nul` 命中设备，清理须用
+  `del \\?\E:\...\nul` 并经用户确认）、`%TEMP%vtiers.txt`（669 字节，规格编写草稿遗留）。
+- 未做与待办：M0-B 剩余消费端接线；M0-C 及 M1 起各阶段；60 组验证中的真机/外部验收（L3/L4）；
+  D01–D12 决策待用户拍板（D05 手机正式安装通道直接阻塞 Samsung 迁移）；REVIEW-006 在 §17/§19 落实；
+  云端 CI 实跑验证 B03 修复；README:59 等遗留过时文案清理；`contracts/`、`docs/OPEN_SOURCE_RELEASE_SPEC.md`、
+  `release-evidence/` 及本轮全部改动入库（提交时须一并纳入，避免规格链接悬空）。
+  会话开始前已存在的未跟踪 `docs/UI_REDESIGN.md` 非本轮产物，未触碰。
+
+## 2026-09-29 开源可用性与全端兼容规格（最新文档）
+
+- 用户要求完整 spec，加入各方面验证，供其他模型审查；本轮仅文档，无产品实现/安装/发布。
+- 新增 [开源可用性、全端兼容与发布验收规格 1.0](OPEN_SOURCE_RELEASE_SPEC.md)：
+  当前事实与证据边界、R0–R3 分档、完整需求、60 组验证及高风险详细步骤、证据模板、
+  放行标准、实施依赖、待决策和独立模型评审提示。新增设计/性能参数待评审，不冒充批准方案。
+- 基线 HEAD a5ade04；读取时 Windows ReceiverStatusWindow.cs 与 packages.lock.json 已有未提交修改，
+  本轮保留。文档同时说明托盘/直接启动服务的数据目录差异及 B03 CI continue-on-error 的发布门风险。
+- 同步长期规格入口，纠正旧“Mac 未真机/缺 LICENSE/WPF/九主题”摘要的使用边界，保留历史记录。
+- 验证：文档结构校验识别 26 章、80 项唯一需求、60 组完整测试编号；需求均有用例引用，
+  附件本地链接、表格列数、代码围栏、示例 JSON 和空白检查通过，git diff --check 通过。
+  本轮未重跑产品构建、硬件、签名或云端 CI；文档覆盖率不等于产品验证通过率。
+- 待办：其他模型按附件第 24 节独立评审；处理评审意见并冻结 D01–D11 中对应阶段所需决策，
+  再按用户选择的任务实施。手机正式渠道迁移与其他真机验收继续保持原未完成状态。
+
+## 2026-09-21 UI 升级
+
+- 用户追加要求升级 UI，继续沿用 `agent/phone-managed-desktop`；Windows dev.16 / sequence 28，Android dev.21 / code 27。
+- 手机电脑设置加入设备卡片、输入法/连接分页与固定保存，切页保留草稿，离开/刷新提醒；
+  保存仅更新本组 revision，防止另一组远端修改被悄悄覆盖。横屏压缩摘要，保留电脑名称和操作。
+- Windows 原生状态面板采用 Luma 图标、浅/深色卡片和明确状态层级，保持按需创建/关闭释放，不增加常驻渲染器。
+- 最终 Windows 发布、91 项测试与 Android Debug/Preview 构建、14 项测试通过；lint 0 error / 44 warning。
+  Windows 四种状态/主题在 150% DPI 下无文字越界，10 次关闭释放验证通过。
+- Samsung 独立临时包真机验证浅/深色、横屏、150% 字体、读取错误和两组草稿保留；
+  受控接口验证保存一组后另一组仍携带旧 revision，409 时不丢草稿。示例设备明确标注，未读写用户配对。
+  临时包 `com.codex.phonedeck.uireview`、专用 8878 反向端口、测试服务已清理，系统字体保持原 1.1。
+  最终 APK 包名与版本正确，不含验收类。手机正式安装仍因原 Mac 预览证书不可用而待用户选择，不视为完成迁移。
+- 本机 Windows 经签名包 28 更新成功，状态 completed，版本/序号/稳定 computerId 和两份 EXE 哈希匹配。
+  窗口关闭后 12 次只读样本：托盘私有提交 13.96–14.20 MiB，工作集 57.29–58.33 MiB；
+  接收服务另为 25.14–26.03 MiB / 81.01–82.20 MiB。这是现场观测，不是严格同负载性能基准。
+- 产物/证据：ignored `outputs/ui-upgrade/PhoneDeck-28.zip`、`final/memory.json`、
+  `desktop/layout-report.json` 与 `android/verified-final`。截图含示例标记，不冒充真实在线设备。
+- 待办：选择手机正式安装通道并保留五台配对，验收真实配置读写/听写/长时共享/断线；多屏 DPI 切换和其他电脑继续验收。
+  详细界面规则见 [UI 翻新](UI_REFRESH.md)，配置协议仍见 [手机统一设置](PHONE_MANAGED_DESKTOP.md)。
+
+## 2026-09-21 手机统一设置与精简桌面
+
+- 用户确认手机集中配置、桌面只负责显示和重连；在 `agent/phone-managed-desktop` 实现。
+  Windows dev.15 / sequence 27，Android dev.20 / code 26。此次实现取代上轮 WPF 优化方案。
+- 新手机「电脑与输入法」逐台管理引擎、键位、USB 恢复、LAN 发现和登录启动。接收端校验目标、revision、忙碌状态与白名单，原子保存并热应用，不重启。
+- WPF 设置/主题/Agent 编辑器及桌面录音热键移除，改为 WinForms 小窗口与托盘；关闭窗口释放控件。保留程序旁 data 默认目录和显式环境变量，避免重启后丢失原电脑身份。
+- 手机布局不再自动接受电脑覆盖；共享麦克风从手机主动启停，不跟随遗留 shared.requested。手机可导入并验证签名更新 ZIP。
+- Windows 构建/发布与 91 项测试通过；Android Debug/Preview、14 项单测与 lint 通过（45 warning、0 error）。配置 API 实测热切换/恢复及无效请求拒绝通过，10 次窗口释放探针通过。
+- Windows 已通过签名更新流程安装，固定产物版本/哈希与身份检查通过。输入法恢复 Typeless，原配对令牌与手机备份一致。
+  私有提交现场观察：旧 UI 185.7 MiB → 新托盘约 13–14 MiB；服务另约 27–29 MiB。工作集和自包含体积另计，不把短时采样当严格性能保证。
+- 手机尚未安装：当前 Samsung 预览包由 Mac 证书签名，本机 Windows 证书不能覆盖。
+  当前 APK、设置和 5 台电脑已备份在 ignored outputs/phone-managed/backup；没有卸载或清理手机数据。
+  已询问用户选择迁回原通道并保留配置，或等待 Mac 原签名。须取得选择再继续迁移和新页面实机走查。
+- 待办：完成手机安装通道选择与迁移；实测手机设置读写、离线/旧 Mac 提示、保存时忙碌保护；真实听写/共享音频/断线/跨 DPI 验收。Mac/iOS 配置接口尚未实现。
+- 具体协议、测量口径与产物路径见 [手机统一设置与精简桌面](PHONE_MANAGED_DESKTOP.md)。
+
+
+## 2026-09-21 Windows 控制台内存优化
+
+- 用户要求降低约 200 MB 的后台占用，同时保持性能；本轮仅修改 Windows 控制台，
+  沿用 1.6 开发线，不修改音频、手机端、协议或发布序号。
+- 排查发现大面积卡片阴影和整窗透明合成占用显著；改用已有细边框与 Windows 11 DWM 圆角，
+  合并重复主题资源。托盘/最小化暂停界面刷新，恢复按原 2.5 秒新鲜度立即补读；网卡枚举移出 UI 线程。
+  热键改为读取实时服务状态，防止后台停止轮询后缓存失效。关闭日志撤销历史、释放资源流/进程/托盘句柄，
+  移除只改变驻留统计的 EmptyWorkingSet。
+- 同机探针对比：旧版隐藏私有提交 210–231 MiB，新版 108.8 MiB；反复恢复后 98.6 MiB。
+  显示工作集 171–178 → 150 MiB；首帧约 730–736 → 584 ms，恢复均值约 8 ms。
+  不把私有提交和任务管理器私有工作集混为同一口径，EXE 体积仍约 154 MiB。
+- 验证：Windows 接收端 Release 构建、86/86 既有测试通过；控制台单文件发布通过。
+  隔离桌面探针已通过隐藏/恢复/最小化、内存 HTTP 热键用例、500 条日志限额和页面/编辑器走查。
+  测试入口不进入普通发行产物；当前安装进程未替换，未触发真实录音或改变配对数据。
+- 待办：长时驻留、多屏/DPI/旧 Windows 与真实手机听写回归；正式发版需递增版本并走既有发行流程。
+  原始数据、复现脚本和限制见 [Windows 内存优化记录](WINDOWS_MEMORY_OPTIMIZATION.md)。
+
 ## 2026-09-14 Luma 图标白底确认
 
 - 用户对比实机后明确选择之前的白色背景。日/夜自适应图标统一改为白底，保留暖白环体、

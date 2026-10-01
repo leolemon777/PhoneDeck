@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "1.4.0",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-02",
+  "displayName": "PLACEHOLDER-OLD-DESKTOP",
+  "platform": "windows",
+  "capabilities": [
+    "fixedAction",
+    "keyChord",
+    "text",
+    "macro",
+    "phoneAudio",
+    "managedDictation",
+    "sharedMicrophone",
+    "secureLan"
+  ],
+  "audio": {
+    "available": true,
+    "streaming": false,
+    "stale": false
+  },
+  "dictation": { "active": false },
+  "voiceEngine": {
+    "experimental": true,
+    "capturing": null
+  }
+}

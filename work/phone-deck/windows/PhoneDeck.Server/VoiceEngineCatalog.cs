@@ -78,6 +78,9 @@ internal sealed class VoiceEngineCatalog
 
     internal VoiceEngineSettings Settings { get; }
 
+    internal VoiceEngineCatalog WithSettings(VoiceEngineSettings settings) =>
+        new(profiles, Find(settings.ActiveEngine) ?? throw new ArgumentException("未知输入法"), settings);
+
     internal IReadOnlyCollection<VoiceEngineProfile> Profiles =>
         profiles.Values.OrderBy(profile => profile.Id).ToArray();
 
@@ -152,7 +155,18 @@ internal static class VoiceEngines
     private static readonly Lazy<VoiceEngineCatalog> LazyCatalog =
         new(VoiceEngineCatalog.Load);
 
-    internal static VoiceEngineCatalog Catalog => LazyCatalog.Value;
+    private static VoiceEngineCatalog? configured;
+    internal static readonly object ConfigurationLock = new();
+    internal static VoiceEngineCatalog Catalog => Volatile.Read(ref configured) ?? LazyCatalog.Value;
+    internal static void ApplySettings(VoiceEngineSettings settings)
+    {
+        lock (ConfigurationLock)
+        {
+            var next = Catalog.WithSettings(settings);
+            DesktopConfiguration.WriteAtomic(VoiceEngineSettings.SettingsPath, settings);
+            Volatile.Write(ref configured, next);
+        }
+    }
 
     internal static VoiceEngineProfile Active => Catalog.Active;
 

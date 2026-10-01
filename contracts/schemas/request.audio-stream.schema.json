@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/request.audio-stream.schema.json",
+  "title": "POST /api/audio/stream 建流描述（音频域）",
+  "description": "音频上传走请求头而非 JSON 体（Program.cs:403-499）。本 schema 把建流所需头与 PCM 基线固化为可跨语言断言的描述文档。PCM 基线 48 kHz / PCM16 / mono / 20 ms 帧（规格 §9 MIC-04；AGENTS“USB 音频维持 48 kHz / PCM16 / mono 基线”）。X-PhoneDeck-Token 为 LAN 鉴权头（Program.cs:78-89）。样本值一律占位。",
+  "type": "object",
+  "properties": {
+    "endpoint": { "const": "/api/audio/stream" },
+    "headers": {
+      "type": "object",
+      "properties": {
+        "X-PhoneDeck-Audio": {
+          "const": "pcm-s16le",
+          "description": "音频格式头，固定 pcm-s16le（小端 PCM16，Program.cs:410-414）。"
+        },
+        "X-PhoneDeck-Protocol": {
+          "type": "string",
+          "pattern": "^[1-2]$",
+          "description": "协议版本（字符串数字）。可省略（遗留）。【契约收紧，目标态】本 pattern 把合法头值钉为 1|2；当前接收端实现更宽：解析任意整数后仅拒绝 >2，0/负数值按遗留放行（Program.cs:416-423 + TargetEnvelopeValidator.cs:29-51，protocolVersion is > 2 才抛错、!= 2 即视为遗留）。该差异与 definitions.sessionId 的 GUID 钉死同理，是有意收紧而非当前事实；是否放宽到与源码一致由 D03 评审决定（样本 audio-stream-protocol-header-zero.json 固化该差异）。"
+        },
+        "X-PhoneDeck-Computer-Id": {
+          "$ref": "definitions.schema.json#/definitions/targetComputerId",
+          "description": "目标电脑身份头（Program.cs:428-431）。"
+        },
+        "X-PhoneDeck-Session": {
+          "$ref": "definitions.schema.json#/definitions/sessionId",
+          "description": "音频会话 GUID；缺省由接收端新建，但契约样本必须显式携带（Program.cs:438-446）。"
+        },
+        "X-PhoneDeck-Audio-Mode": {
+          "enum": ["managed", "shared"],
+          "description": "音频模式：managed=受管听写（控制引擎），shared=共享供音（不操纵引擎）。AudioStreamMode.cs:9-26。"
+        },
+        "X-PhoneDeck-Token": {
+          "$ref": "definitions.schema.json#/definitions/placeholderToken",
+          "description": "LAN 配对令牌；缺失/错误 → 401（Program.cs:78-89）。契约样本必须以 PLACEHOLDER 开头。"
+        }
+      },
+      "required": [
+        "X-PhoneDeck-Audio",
+        "X-PhoneDeck-Session",
+        "X-PhoneDeck-Audio-Mode",
+        "X-PhoneDeck-Token"
+      ],
+      "additionalProperties": false
+    },
+    "audio": {
+      "type": "object",
+      "description": "PCM 载荷基线（规格 §9 MIC-04）。字节序 little-endian 由格式头 pcm-s16le 表达；EOF 由 HTTP 请求体结束表达。",
+      "properties": {
+        "format": { "const": "pcm-s16le" },
+        "sampleRateHz": { "const": 48000 },
+        "channels": { "const": 1 },
+        "frameMs": { "const": 20 },
+        "deviceSampleRateHz": {
+          "enum": [8000, 16000, 44100, 48000],
+          "description": "【目标字段】实际采集设备采样率（诊断用）。设备采样率≠48000 时必须在上传前重采样到 48000/mono 再发送（规格 §9 MIC-04“实际设备采样率转换明确”）；数值预算见 contracts/audio-budgets.json。"
+        }
+      },
+      "required": ["format", "sampleRateHz", "channels", "frameMs"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["endpoint", "headers", "audio"],
+  "additionalProperties": false
+}

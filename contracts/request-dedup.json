@@ -1,0 +1,63 @@
+{
+  "$comment": "§16.2 第 3 行『请求确认』剩余项的可执行契约：requestId 作用域、规范化载荷哈希、去重 TTL/容量/驱逐、并发互斥、响应丢失后的查询/重试策略。TTL 为已证实源码事实；容量/哈希/查询为契约目标（D03 冻结）。tools/validate.py C7 校验字段齐全性与策略互斥性。",
+  "specRefs": [
+    "docs/OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-02",
+    "§16.2 请求确认行及候选参数段",
+    "§18 V24",
+    "D03"
+  ],
+  "requestIdScope": {
+    "partitionKey": [
+      "clientId",
+      "computerId"
+    ],
+    "rule": "去重缓存按 clientId 分区：跨手机同 requestId 互不污染（V24“跨手机同 ID”）；单手机内 requestId 唯一标识一次操作意图",
+    "sameIdDifferentPayload": "rejected",
+    "specRef": "§16.2 候选参数：去重缓存至少覆盖最长重试预算并按 clientId 分区"
+  },
+  "canonicalPayloadHash": {
+    "status": "target",
+    "decision": "D03",
+    "algorithm": "sha256",
+    "canonicalization": "载荷按字段名排序、UTF-8、无空白的标准 JSON 序列化后取哈希；用于“同 ID 不同载荷”判定与执行记录比对（不记录敏感正文，§16.2：需要持久化时不得因此记录敏感正文）"
+  },
+  "dedupCache": {
+    "ttlMs": {
+      "value": 30000,
+      "status": "current",
+      "grounding": "Program.cs:689 RequestIdLifetimeMilliseconds=30_000（KeyboardInput 去重缓存寿命）",
+      "frozenBy": "D03 冻结 2026-09-29：TTL 30s 覆盖最长合法重试预算（docs/M1A_PAIRING_DESIGN.md §12）"
+    },
+    "ttlRule": "TTL 必须覆盖最长合法重试预算；对过期输入不得再次执行（§16.2 候选参数）",
+    "capacity": {
+      "strategy": "reject-or-throttle",
+      "forbiddenStrategies": [
+        "evict-recent"
+      ],
+      "rule": "缓存耗尽必须拒绝或限流，不能通过驱逐近期请求制造重复执行（§16.2 候选参数原文）",
+      "status": "target",
+      "decision": "D03"
+    },
+    "crashAcrossProcess": {
+      "rule": "接收端重启后不自动补发可能已执行的输入，明确显示结果未知；需要时引入持久化记录但不能记录敏感正文",
+      "specRef": "§16.2：Exactly-once 跨进程崩溃不能仅靠内存 requestId 保证"
+    }
+  },
+  "concurrency": {
+    "rule": "同 requestId 并发重复执行最多一次；并发互斥由接收端串行化执行（当前实现：KeyboardInput 同步锁 + ExecuteOnceCore 去重）",
+    "status": "current",
+    "grounding": "Program.cs:686-965（SyncRoot + RecentRequestIds）"
+  },
+  "retryAndQuery": {
+    "inputRetry": "仅允许短时网络重试且必须复用同 requestId；重试预算 ≤ 去重 TTL",
+    "sideEffectRetry": "未知错误/超时不得自动重试有副作用操作（§8 错误段：未知错误不自动重试）",
+    "ackSemantics": "ACK 仅表示接收端已接受/执行请求，不代表目标应用已处理（§8 INP-02）",
+    "lostResponseQuery": {
+      "strategy": "prompt-reread-or-show-unknown",
+      "description": "响应丢失后：读操作（health/配置快照）可直接重读；按键/文本类操作没有幂等查询端点，必须向用户显示“结果未知”，禁止自动重放（§16.2 请求确认行“响应丢失后的查询/重试策略”）",
+      "status": "target",
+      "decision": "D03",
+      "evidenceV24": "接收端执行后崩溃 → 结果未知，不自动重放（§18 V24 通过标准）"
+    }
+  }
+}

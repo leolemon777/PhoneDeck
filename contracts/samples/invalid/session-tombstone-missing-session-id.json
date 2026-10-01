@@ -1,0 +1,7 @@
+{
+  "generation": 0,
+  "targetComputerId": "computer-placeholder-01",
+  "reason": "user-stop",
+  "recordedAtMs": 5200,
+  "retentionMs": 30000
+}

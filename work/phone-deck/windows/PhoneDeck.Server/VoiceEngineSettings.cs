@@ -1,7 +1,7 @@
 using System.Text.Json;
 
 /// <summary>语音引擎选择与手动快捷键覆盖，持久化到 data\voice-engine-settings.json。
-/// 改动后需重启 PhoneDeck.Server.exe 生效；控制台界面会直接写入本文件。</summary>
+/// 手机通过带目标与版本校验的配置 API 保存并热应用；手工改文件仍需重启。</summary>
 internal sealed class VoiceEngineSettings
 {
     /// <summary>激活引擎 id（如 typeless、doubao、wetype 或扩展档案的 id）。</summary>

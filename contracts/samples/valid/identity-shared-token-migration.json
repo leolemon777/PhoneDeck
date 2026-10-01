@@ -1,0 +1,16 @@
+{
+  "from": {
+    "kind": "legacySharedToken",
+    "tokenFingerprint": "PLACEHOLDER-TOKEN-FINGERPRINT"
+  },
+  "to": {
+    "kind": "perPhoneCredential",
+    "scopes": ["control", "audio", "settings"]
+  },
+  "window": {
+    "opensAtVersion": "PLACEHOLDER-1.6.0",
+    "closesAtVersion": "PLACEHOLDER-2.0.0",
+    "rollbackAllowed": true
+  },
+  "noPrivilegeEscalation": true
+}

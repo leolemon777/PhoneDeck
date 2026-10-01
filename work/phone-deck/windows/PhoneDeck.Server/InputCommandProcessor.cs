@@ -2,7 +2,10 @@ internal sealed record InputExecutionResult(bool Duplicate, string Message);
 
 internal static class InputCommandProcessor
 {
-    internal static InputExecutionResult Execute(InputCommand command, string computerId)
+    internal static InputExecutionResult Execute(
+        InputCommand command,
+        string computerId,
+        string? clientId = null)
     {
         if (string.IsNullOrWhiteSpace(command.Action))
         {
@@ -30,6 +33,7 @@ internal static class InputCommandProcessor
                 command.Keys,
                 command.HoldMs,
                 command.RequestId,
+                clientId,
                 out var description);
             return new InputExecutionResult(duplicate, $"已发送 {description}");
         }
@@ -43,6 +47,7 @@ internal static class InputCommandProcessor
             var macroDuplicate = KeyboardInput.ExecuteMacroOnce(
                 command.Steps,
                 command.RequestId,
+                clientId,
                 out var macroDescription);
             return new InputExecutionResult(macroDuplicate, $"已执行宏：{macroDescription}");
         }
@@ -50,7 +55,8 @@ internal static class InputCommandProcessor
         var fixedDuplicate = KeyboardInput.ExecuteOnce(
             command.Action,
             command.Text,
-            command.RequestId);
+            command.RequestId,
+            clientId);
         return new InputExecutionResult(fixedDuplicate, $"已执行 {command.Action}");
     }
 

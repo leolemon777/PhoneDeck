@@ -24,7 +24,7 @@
 
 ## 当前基线
 
-- 当前源码版本：Android 1.6.0-dev.18；Windows 接收端 1.6.0-dev.12（发布序号 24）；macOS 接收端预览 2.0.0-dev.3；iOS 尚待开发；上一实机稳定基线为 1.4.0。本机与Samsung已覆盖更新，具体边界见docs/WINDOWS_ANDROID_DELIVERY.md。
+- 当前源码版本：Android 1.6.0-dev.21；Windows 接收端 1.6.0-dev.16（发布序号 28）；macOS 接收端预览 2.0.0-dev.3；iOS 尚待开发；上一实机稳定基线为 1.4.0。本机 Windows 已覆盖更新；Samsung 新版因预览签名不同，待用户选择安装通道，见 docs/PHONE_MANAGED_DESKTOP.md。
 - Windows/Android 统一更新已加入，协议与发布要求见 docs/FLEET_UPDATES.md。签名包只允许固定三个产物，禁止引入远程命令/脚本或跳过发布者验证。Android APK 签名和更新清单签名独立，私钥不能入 Git。
 - 当前规格版本：v0.6。第 0 章是面向开源的当前总规划，后续章节保留历史决策；与第 0 章冲突的旧范围、状态和排期不再作为执行依据。用户已确认四端、多设备、多输入法、多模式与主题方向，技术选型与工期仍是建议。
 - 1.5.0 已完成源码、构建/协议、长期签名、Samsung 安装和一轮 ADB 恢复验证；快捷键

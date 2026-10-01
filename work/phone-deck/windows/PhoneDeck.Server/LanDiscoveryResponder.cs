@@ -15,6 +15,8 @@ internal sealed class LanDiscoveryResponder : IDisposable
     private readonly byte[] responsePayload;
     private readonly CancellationTokenSource cancellation = new();
     private readonly Thread worker;
+    private volatile bool enabled = true;
+    internal void SetEnabled(bool value) { enabled = value; if (value) Start(); }
 
     internal LanDiscoveryResponder(ReceiverIdentity identity, int httpsPort)
     {
@@ -50,7 +52,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
     }
 
     internal bool PortBound => client is not null;
-    internal bool Running => worker.IsAlive;
+    internal bool Running => enabled && worker.IsAlive;
 
     internal void Start()
     {
@@ -85,7 +87,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
             {
                 break;
             }
-            if (remote is null || data.Length > 64)
+            if (!enabled || remote is null || data.Length > 64)
             {
                 continue;
             }

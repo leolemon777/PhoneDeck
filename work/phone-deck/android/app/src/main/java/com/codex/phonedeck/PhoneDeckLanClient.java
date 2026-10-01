@@ -146,7 +146,10 @@ final class PhoneDeckLanClient {
                     device.lanToken,
                     device.certificateSha256,
                     "Wi-Fi",
-                    device.computerId);
+                    device.computerId,
+                    // M1-A：有 clientId 的设备（扫码配对/rotate 升级）必须走
+                    // Bearer + X-PhoneDeck-Client；旧共享令牌头只服务 legacy 设备。
+                    device.clientId);
             JSONObject health = PhoneDeckHttp.getJson(
                     endpoint, "/api/health",
                     PROBE_CONNECT_TIMEOUT_MS, PROBE_READ_TIMEOUT_MS);

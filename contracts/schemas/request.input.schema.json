@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/request.input.schema.json",
+  "title": "POST /api/input 请求体（协议请求域）",
+  "description": "输入请求契约：v2 组合键/宏必须携带完整信封（protocolVersion=2 + requestId + sessionId + targetComputerId）；遗留固定动作允许省略信封但受白名单限制（规格 §8 PRO-01/INP-01；InputCommandProcessor.cs、TargetEnvelopeValidator.cs、Program.cs ParseKeyChord/ParseMacroSteps）。LAN 调用另需 X-PhoneDeck-Token 头（请求头契约见 request.audio-stream.schema.json 与 README）。",
+  "type": "object",
+  "properties": {
+    "protocolVersion": { "$ref": "definitions.schema.json#/definitions/protocolVersionOptional" },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "description": "动作名。受控白名单：遗留固定动作 + v2 的 keyChord/macro（Program.cs:1069-1124）。任意 shell/脚本类动作被 SEC-04 禁止，枚举见下方 anyOf。"
+    },
+    "text": { "$ref": "definitions.schema.json#/definitions/text4096" },
+    "requestId": { "$ref": "definitions.schema.json#/definitions/requestId" },
+    "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+    "targetComputerId": { "$ref": "definitions.schema.json#/definitions/targetComputerId" },
+    "keys": { "$ref": "definitions.schema.json#/definitions/chordKeys" },
+    "holdMs": { "$ref": "definitions.schema.json#/definitions/holdMs" },
+    "steps": { "$ref": "definitions.schema.json#/definitions/macroSteps" }
+  },
+  "required": ["action"],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "description": "v2 动作分支：keyChord/macro 必须使用协议 v2 并携带完整信封（InputCommandProcessor.cs:25-26、38-39；TargetEnvelopeValidator.cs:11-26）。",
+      "properties": {
+        "action": { "enum": ["keyChord", "macro"] },
+        "protocolVersion": { "$ref": "definitions.schema.json#/definitions/protocolVersionV2" }
+      },
+      "required": ["protocolVersion", "requestId", "sessionId", "targetComputerId"]
+    },
+    {
+      "description": "遗留固定动作分支：白名单来自 Program.cs:1069-1124 ExecuteCore。协议 v2 下仍需完整信封（由下方 if/then 强制）。",
+      "properties": {
+        "action": {
+          "enum": [
+            "text",
+            "copy",
+            "paste",
+            "cut",
+            "undo",
+            "redo",
+            "selectAll",
+            "save",
+            "altTab",
+            "taskView",
+            "desktop",
+            "screenshot",
+            "typeless",
+            "switchInputMethod",
+            "enter",
+            "backspace",
+            "delete",
+            "escape",
+            "space",
+            "left",
+            "right",
+            "up",
+            "down",
+            "volumeMute",
+            "volumeDown",
+            "volumeUp"
+          ]
+        }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "protocolVersion": { "const": 2 } }, "required": ["protocolVersion"] },
+      "then": { "required": ["requestId", "sessionId", "targetComputerId"] }
+    },
+    {
+      "if": { "properties": { "action": { "const": "keyChord" } }, "required": ["action"] },
+      "then": { "required": ["keys"] }
+    },
+    {
+      "if": { "properties": { "action": { "const": "macro" } }, "required": ["action"] },
+      "then": { "required": ["steps"] }
+    }
+  ]
+}

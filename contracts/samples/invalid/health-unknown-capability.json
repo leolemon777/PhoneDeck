@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "1.6.0-dev.16",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "capabilities": [
+    "fixedAction",
+    "keyChord",
+    "text",
+    "macro",
+    "phoneAudio",
+    "managedDictation",
+    "sharedMicrophone",
+    "remoteShell"
+  ],
+  "audio": { "available": true, "streaming": false, "stale": false },
+  "dictation": { "active": false }
+}

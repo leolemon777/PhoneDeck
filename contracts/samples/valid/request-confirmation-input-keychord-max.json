@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 2,
+  "action": "keyChord",
+  "requestId": "req-placeholder-0003",
+  "sessionId": "11111111-1111-4111-8111-111111111113",
+  "targetComputerId": "computer-placeholder-01",
+  "keys": ["PRIMARY", "SHIFT", "ALT", "SPACE"],
+  "holdMs": 500
+}

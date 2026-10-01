@@ -52,7 +52,13 @@ final class PhoneDeckHttp {
         connection.setReadTimeout(readTimeout);
         connection.setUseCaches(false);
         if (endpoint.accessToken != null) {
-            connection.setRequestProperty("X-PhoneDeck-Token", endpoint.accessToken);
+            if (endpoint.clientId != null) {
+                // M1-A 逐手机凭据：Bearer + 客户端标识（设计 §5.1）。
+                connection.setRequestProperty("Authorization", "Bearer " + endpoint.accessToken);
+                connection.setRequestProperty("X-PhoneDeck-Client", endpoint.clientId);
+            } else {
+                connection.setRequestProperty("X-PhoneDeck-Token", endpoint.accessToken);
+            }
         }
         if (connection instanceof HttpsURLConnection) {
             if (endpoint.certificateSha256 == null

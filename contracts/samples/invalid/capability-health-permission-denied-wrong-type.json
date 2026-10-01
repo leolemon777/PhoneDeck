@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "PLACEHOLDER-9.9.9",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-03",
+  "displayName": "PLACEHOLDER-MAC",
+  "capabilities": ["fixedAction"],
+  "audio": {
+    "available": true,
+    "streaming": false,
+    "permissionDenied": "yes",
+    "stale": false
+  },
+  "dictation": { "active": false }
+}

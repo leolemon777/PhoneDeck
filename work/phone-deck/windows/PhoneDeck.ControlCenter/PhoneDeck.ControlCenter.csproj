@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <ImplicitUsings>disable</ImplicitUsings>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Nullable>enable</Nullable>
     <AssemblyName>PhoneDeck.ControlCenter</AssemblyName>
     <RootNamespace>PhoneDeck.ControlCenter</RootNamespace>
@@ -18,14 +18,16 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="Program.cs" />
-    <Compile Remove="ControlCenterForm.cs" />
-    <Compile Remove="AgentShortcutEditorForm.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="ReceiverTray.cs" />
+    <Compile Include="ReceiverStatusWindow.cs" />
+    <Compile Include="PairingForm.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Assets\PhoneDeck.Light.ico" />
-    <Resource Include="Assets\PhoneDeck.Dark.ico" />
-    <Resource Include="Assets\PhoneDeck.Light.png" />
-    <Resource Include="Assets\PhoneDeck.Dark.png" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\PhoneDeck.Light.ico" />
+    <EmbeddedResource Include="Assets\Luma.png" />
   </ItemGroup>
 </Project>

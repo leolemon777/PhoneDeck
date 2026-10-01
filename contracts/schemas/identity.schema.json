@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/identity.schema.json",
+  "title": "身份与授权契约（§16.2 第 2 行）",
+  "description": "两种文档：① 逐手机身份/凭据记录【目标设计，NET-03：每手机独立 clientId/凭据；电脑可撤销单手机并关闭其会话】——凭据作用域（control/audio/settings/update-request）为 §7 目标建议，是否分权限凭据由 D02 决定；② 旧共享令牌迁移计划【NET-07：兼容窗口、降级不得提升权限】。撤销语义（生效时延、会话关闭）与存储/轮换规则见 contracts/pairing-and-identity.json。",
+  "oneOf": [
+    { "$ref": "#/definitions/identityRecord" },
+    { "$ref": "#/definitions/sharedTokenMigration" }
+  ],
+  "definitions": {
+    "credentialScope": {
+      "enum": ["control", "audio", "settings", "update-request"],
+      "description": "凭据作用域【目标/D02】：控制（输入/会话）、供音、设置写入、请求安装更新。不能把“已有输入权限”等同“可替换信任根”（§7）。"
+    },
+    "credential": {
+      "type": "object",
+      "properties": {
+        "scope": { "$ref": "#/definitions/credentialScope" },
+        "issuedAtMs": { "type": "integer", "minimum": 0 },
+        "rotatedAtMs": { "type": "integer", "minimum": 0 },
+        "revokedAtMs": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["scope", "issuedAtMs"],
+      "additionalProperties": false
+    },
+    "identityRecord": {
+      "type": "object",
+      "properties": {
+        "computerId": { "$ref": "definitions.schema.json#/definitions/computerId", "description": "接收端稳定身份（不能用 IP/名称/序号充当，DEV-01）。" },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^PLACEHOLDER",
+          "description": "逐手机客户端身份【目标】：与凭据一一对应，撤销按 clientId 生效（NET-03）。样本占位。"
+        },
+        "pairingId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "description": "签发该凭据的配对尝试标识（可追溯撤销来源）。"
+        },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "credentials": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/credential" } },
+        "createdAtMs": { "type": "integer", "minimum": 0 },
+        "trusted": { "type": "boolean" }
+      },
+      "required": ["computerId", "clientId", "pairingId", "credentials", "createdAtMs", "trusted"],
+      "additionalProperties": false
+    },
+    "sharedTokenMigration": {
+      "type": "object",
+      "description": "旧共享 LAN 令牌 → 逐手机凭据迁移计划【目标，NET-07】：窗口期内旧 token 仍可用，窗口关闭后拒绝；降级不得提升权限；取消迁移可回旧版本。",
+      "properties": {
+        "from": {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "legacySharedToken" },
+            "tokenFingerprint": { "type": "string", "pattern": "^PLACEHOLDER", "description": "旧令牌指纹（非令牌本体，SEC-05 脱敏）。" }
+          },
+          "required": ["kind", "tokenFingerprint"],
+          "additionalProperties": false
+        },
+        "to": {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "perPhoneCredential" },
+            "scopes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/credentialScope" } }
+          },
+          "required": ["kind", "scopes"],
+          "additionalProperties": false
+        },
+        "window": {
+          "type": "object",
+          "properties": {
+            "opensAtVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "closesAtVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "rollbackAllowed": { "type": "boolean" }
+          },
+          "required": ["opensAtVersion", "closesAtVersion", "rollbackAllowed"],
+          "additionalProperties": false
+        },
+        "noPrivilegeEscalation": { "const": true, "description": "迁移不得把旧共享权限扩大为新凭据的额外作用域（NET-07“降级不得提升权限”）。" }
+      },
+      "required": ["from", "to", "window", "noPrivilegeEscalation"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,538 @@
+{
+  "$comment": "PhoneDeck 语音会话状态机与 §16.3 七条竞态规则的可执行表达。状态机：IDLE → STARTING → ACTIVE → STOPPING → IDLE，失败进入 ERROR 并清理资源（docs/OPEN_SOURCE_RELEASE_SPEC.md §9.1）。转移表 transitions + 竞态轨迹 traces 由 tools/validate.py 逐条模拟执行：每条 trace 从 start 状态起按事件序列走转移表，终态必须等于 expect。session 选择器语义：new=开启新会话并接管所有者；match=事件会话必须等于当前活动会话；stale=事件会话与当前活动会话不同（含无活动会话）→ 只允许被标记为 stale-ignored/rejected 的转移；any=不限；none=与会话无关的事件。",
+  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §9.1", "§16.3"],
+  "evidence": {
+    "receiverStateMachine": "work/phone-deck/windows/PhoneDeck.Server/DictationSessionManager.cs（Start/Stop/ResetFailedStart/AudioEnded/Dispose）",
+    "audioBridge": "work/phone-deck/windows/PhoneDeck.Server/PhoneAudioBridge.cs（单音频所有者；AudioStreamConflictException → 409）",
+    "configGate": "work/phone-deck/windows/PhoneDeck.Server/DesktopConfiguration.cs ConfigurationGate + Program.cs:94-120（更新/配置写入与输入/音频互斥）"
+  },
+  "states": {
+    "IDLE": {
+      "description": "无活动会话；仅此状态接受新 start。",
+      "acceptsStart": true
+    },
+    "STARTING": {
+      "description": "启动中：录音/建流/引擎唤醒可并行，受总看门狗约束（规格 §9 MIC-02，当前内部预算 DictationSessionManager.cs:11-12）。",
+      "acceptsStart": false
+    },
+    "ACTIVE": {
+      "description": "引擎已确认采集且音频会话有效；单接收端同一时刻单音频所有者（规格 §8 DEV-04）。",
+      "acceptsStart": false
+    },
+    "STOPPING": {
+      "description": "停止等待：本地采音已停，可继续传已采尾帧；不得启动新会话抢占旧尾音（规格 §9.1）。",
+      "acceptsStart": false
+    },
+    "ERROR": {
+      "description": "失败态：本会话资源已尽力清理；引擎可能仍在采集时上报未知，不假报停止（规格 §16.3 R4）。",
+      "acceptsStart": false
+    }
+  },
+  "initial": "IDLE",
+  "transitions": [
+    {
+      "id": "T01",
+      "from": "IDLE",
+      "event": "start",
+      "session": "new",
+      "to": "STARTING",
+      "effects": ["校验协议信封与目标", "检查单所有者与引擎模式配置"],
+      "ruleRefs": []
+    },
+    {
+      "id": "T02",
+      "from": "STARTING",
+      "event": "startConfirmed",
+      "session": "match",
+      "to": "ACTIVE",
+      "effects": ["引擎确认采集", "音频会话有效后放行 pre-roll"],
+      "ruleRefs": []
+    },
+    {
+      "id": "T03",
+      "from": "STARTING",
+      "event": "startFailure",
+      "session": "match",
+      "to": "ERROR",
+      "effects": ["清理本会话音频与引擎资源", "探针不可用时上报未知，不假报已停止"],
+      "ruleRefs": ["R4"]
+    },
+    {
+      "id": "T04",
+      "from": "STARTING",
+      "event": "stop",
+      "session": "match",
+      "to": "STOPPING",
+      "effects": ["stop 获得本代次终止语义", "取消中的会话不再接受迟到 start"],
+      "ruleRefs": ["R1"]
+    },
+    {
+      "id": "T05",
+      "from": "ACTIVE",
+      "event": "stop",
+      "session": "match",
+      "to": "STOPPING",
+      "effects": ["先停本地采音", "有界排空已采尾音后再停引擎"],
+      "ruleRefs": []
+    },
+    {
+      "id": "T06",
+      "from": "ACTIVE",
+      "event": "streamBreak",
+      "session": "match",
+      "to": "STOPPING",
+      "effects": ["释放本会话持有的引擎键", "尽力复位引擎；未确认时记为未知"],
+      "ruleRefs": ["R5"]
+    },
+    {
+      "id": "T07",
+      "from": "STOPPING",
+      "event": "stopConfirmed",
+      "session": "match",
+      "to": "IDLE",
+      "effects": ["音频已排空", "引擎停止已确认", "释放持有的键"],
+      "ruleRefs": ["R5"]
+    },
+    {
+      "id": "T08",
+      "from": "STOPPING",
+      "event": "stopUnconfirmed",
+      "session": "match",
+      "to": "ERROR",
+      "effects": ["释放所有权与会话", "引擎仍可能采集：上报未知/需本机处理"],
+      "ruleRefs": ["R4", "R5"]
+    },
+    {
+      "id": "T09",
+      "from": "ERROR",
+      "event": "cleanupDone",
+      "session": "match",
+      "to": "IDLE",
+      "effects": ["资源清理完成，可接受新会话"],
+      "ruleRefs": []
+    },
+    {
+      "id": "T10",
+      "from": "STOPPING",
+      "event": "start",
+      "session": "any",
+      "to": "STOPPING",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["STOPPING 期间不得启动新会话抢占旧尾音（规格 §9.1）", "已取消代次的迟到 start 一律拒绝，不得复活"],
+      "ruleRefs": ["R1"]
+    },
+    {
+      "id": "T11",
+      "from": "ACTIVE",
+      "event": "stop",
+      "session": "stale",
+      "to": "ACTIVE",
+      "classification": "stale-ignored",
+      "emits": ["PD-ERR-409-03"],
+      "effects": ["旧 stop 只清理对应旧会话，不得停止新会话"],
+      "ruleRefs": ["R2"]
+    },
+    {
+      "id": "T12",
+      "from": "IDLE",
+      "event": "stop",
+      "session": "stale",
+      "to": "IDLE",
+      "classification": "stale-ignored",
+      "emits": ["PD-ERR-409-03"],
+      "effects": ["无活动会话时 stop 记录为幂等成功（DictationSessionManager.cs:153-157）"],
+      "ruleRefs": ["R2"]
+    },
+    {
+      "id": "T13",
+      "from": "ACTIVE",
+      "event": "newConnection",
+      "session": "stale",
+      "to": "ACTIVE",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["先验证所有者与代次", "不以“最新连接”自动夺权；单音频所有者保持"],
+      "ruleRefs": ["R3"]
+    },
+    {
+      "id": "T14",
+      "from": "STARTING",
+      "event": "newConnection",
+      "session": "stale",
+      "to": "STARTING",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["同 T13：启动中的会话不被未验证的新连接抢占"],
+      "ruleRefs": ["R3"]
+    },
+    {
+      "id": "T15",
+      "from": "ACTIVE",
+      "event": "configWrite",
+      "session": "none",
+      "to": "ACTIVE",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["更新/配置写入与输入/音频活动统一互斥：使用计数非零即拒绝（ConfigurationGate）"],
+      "ruleRefs": ["R6"]
+    },
+    {
+      "id": "T16",
+      "from": "STARTING",
+      "event": "configWrite",
+      "session": "none",
+      "to": "STARTING",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["检查空闲后新会话不得穿入写入窗口"],
+      "ruleRefs": ["R6"]
+    },
+    {
+      "id": "T17",
+      "from": "STOPPING",
+      "event": "configWrite",
+      "session": "none",
+      "to": "STOPPING",
+      "classification": "rejected",
+      "emits": ["PD-ERR-409-01"],
+      "effects": ["尾音排空占用的使用租约同样阻塞写入"],
+      "ruleRefs": ["R6"]
+    },
+    {
+      "id": "T18",
+      "from": "*",
+      "event": "appRestart",
+      "session": "none",
+      "to": "IDLE",
+      "effects": ["清除运行授权与会话", "保留设备目录/布局；尽力释放引擎键"],
+      "ruleRefs": ["R7"]
+    },
+    {
+      "id": "T19",
+      "from": "IDLE",
+      "event": "persistedSharedRequested",
+      "session": "none",
+      "to": "IDLE",
+      "classification": "rejected",
+      "effects": ["持久化 shared.requested 不开麦（规格 §9 MIC-06；D11 默认禁用远程开麦）"],
+      "ruleRefs": ["R7"]
+    },
+    {
+      "id": "T20",
+      "from": "IDLE",
+      "event": "expiredLeaseResume",
+      "session": "stale",
+      "to": "IDLE",
+      "classification": "stale-ignored",
+      "emits": ["PD-ERR-409-03"],
+      "effects": ["过期租约不得恢复采音；时钟回拨不延长租约（规格 §8 PRO-03）"],
+      "ruleRefs": ["R2"]
+    },
+    {
+      "id": "T21",
+      "from": "STOPPING",
+      "event": "reconnectAuthorized",
+      "session": "match",
+      "to": "ACTIVE",
+      "effects": ["仅 shared 会话：用户仍授权、未过期、非用户主动停止", "恢复窗口有界（候选 15000ms，MIC-10 提案，D03/D04 冻结；数值见 contracts/audio-budgets.json）", "恢复旧链路不继承另一手机的所有权"],
+      "ruleRefs": ["RC2"]
+    },
+    {
+      "id": "T22",
+      "from": "STOPPING",
+      "event": "recoveryWindowExpired",
+      "session": "match",
+      "to": "IDLE",
+      "effects": ["共享组最后目标离线超过恢复窗口 → 停止采集（MIC-10）"],
+      "ruleRefs": ["RC2"]
+    },
+    {
+      "id": "T23",
+      "from": "IDLE",
+      "event": "reconnectAttempted",
+      "session": "stale",
+      "to": "IDLE",
+      "classification": "stale-ignored",
+      "emits": ["PD-ERR-409-03"],
+      "effects": ["用户停止后恢复资格立即取消（§9 断开恢复）"],
+      "ruleRefs": ["RC1"]
+    },
+    {
+      "id": "T24",
+      "from": "STOPPING",
+      "event": "reconnectDenied",
+      "session": "match",
+      "to": "IDLE",
+      "classification": "rejected",
+      "effects": ["managed 会话断流默认失败收尾，由用户重试；不偷偷重放快捷键（§9 断开恢复）"],
+      "ruleRefs": ["RC1"]
+    }
+  ],
+  "tombstoneContract": {
+    "$comment": "§16.2 会话行“终止墓碑”的可执行契约：结构见 schemas/session-tombstone.schema.json；reasons 枚举与本表强一致（tools/validate.py C5 交叉校验）。迟到 stop/start 按墓碑代次判 stale（T10–T12、T20），超期清除后按未知/过期会话拒绝（PD-ERR-409-03），不得复活。",
+    "schema": "schemas/session-tombstone.schema.json",
+    "reasons": ["user-stop", "cancelled", "superseded", "expired", "revoked", "error", "stream-break"],
+    "retentionMs": { "value": 30000, "status": "candidate", "decision": "D03", "note": "候选值：至少覆盖去重 TTL（30s，request-dedup.json）与最长重试预算；墓碑缓存耗尽同样不得驱逐近期记录制造复活（对齐 §16.2 候选参数）" },
+    "rules": [
+      "迟到 start/stop 按墓碑 sessionId+generation 判定为 stale，一律拒绝/忽略，不得复活会话",
+      "保留期有界；到期清除后同 sessionId 请求按未知/过期会话拒绝（expired_session）",
+      "撤销（revoked）手机对应的墓碑保留至撤销流程完成（V12：含已建长流的关闭轨迹）"
+    ]
+  },
+  "reconnectRules": [
+    {
+      "id": "RC1",
+      "rule": 1,
+      "title": "仅用户仍授权、未过期、未主动停止的会话可自动恢复；用户停止立即取消恢复资格，managed 默认失败收尾",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §9 断开恢复段（MIC-10/§16.2 会话行“重连窗口”）",
+      "traces": ["RC1-a-user-stopped-no-resume", "RC1-b-managed-fails-closed"]
+    },
+    {
+      "id": "RC2",
+      "rule": 2,
+      "title": "shared 会话在有限恢复窗口内自动重连（候选 15s，MIC-10）；窗口耗尽停采；恢复不继承另一手机所有权",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §9 MIC-10、§15 PERF-05",
+      "traces": ["RC2-a-authorized-shared-resumes"]
+    }
+  ],
+  "raceRules": [
+    {
+      "id": "R1",
+      "rule": 1,
+      "title": "start 与 stop 同时到达：stop 获得本代次终止语义；已取消 session 不再被迟到 start 建立",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 1",
+      "traces": ["R1-a-start-then-stop-wins", "R1-b-late-start-not-resurrect"]
+    },
+    {
+      "id": "R2",
+      "rule": 2,
+      "title": "旧 stop 晚到：只能清理对应旧 session，不能停止新 session",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 2",
+      "traces": ["R2-a-old-stop-after-new-session", "R2-b-old-stop-when-idle"]
+    },
+    {
+      "id": "R3",
+      "rule": 3,
+      "title": "新连接替换旧 socket：先验证所有者和代次，不以“最新连接”自动夺权",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 3",
+      "traces": ["R3-a-second-phone-connection-rejected"]
+    },
+    {
+      "id": "R4",
+      "rule": 4,
+      "title": "启动部分成功：音频/引擎任一失败清理本会话；引擎仍可能采集时上报未知/需本机处理，不假报停止",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 4",
+      "traces": ["R4-a-partial-start-failure", "R4-b-stop-unconfirmed-reports-unknown"]
+    },
+    {
+      "id": "R5",
+      "rule": 5,
+      "title": "引擎 hold：正常停止与异常断流都释放本会话持有键；进程强杀不能依赖 finally，须单列测试与恢复设计",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 5",
+      "traces": ["R5-a-stream-break-releases-keys", "R5-b-abnormal-stop-still-releases"],
+      "nonFinallyScenarios": ["接收端进程强杀：由测试与恢复设计单独覆盖（规格 §18 V28），不得以 finally 覆盖此规则"]
+    },
+    {
+      "id": "R6",
+      "rule": 6,
+      "title": "软件更新/配置写入：准入与输入/音频活动使用统一互斥规则，避免检查空闲后新会话穿入",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 6",
+      "traces": ["R6-a-config-write-rejected-while-active", "R6-b-config-write-rejected-during-starting"]
+    },
+    {
+      "id": "R7",
+      "rule": 7,
+      "title": "App 重启：清除运行授权，保留设备/布局；不会因为持久化 shared 请求或过期租约开麦",
+      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 7",
+      "traces": ["R7-a-restart-clears-authorization", "R7-b-persisted-shared-request-no-mic"]
+    }
+  ],
+  "traces": [
+    {
+      "id": "R1-a-start-then-stop-wins",
+      "start": "IDLE",
+      "ruleRefs": ["R1"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stopConfirmed", "session": "SESSION-PLACEHOLDER-1" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R1-b-late-start-not-resurrect",
+      "start": "IDLE",
+      "ruleRefs": ["R1"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1", "note": "已取消代次的迟到 start：必须被拒绝（T10），不得复活" },
+        { "event": "start", "session": "SESSION-PLACEHOLDER-2", "note": "STOPPING 中的新 start 同样拒绝（规格 §9.1）" }
+      ],
+      "expect": { "state": "STOPPING", "activeSession": "SESSION-PLACEHOLDER-1" }
+    },
+    {
+      "id": "R2-a-old-stop-after-new-session",
+      "start": "IDLE",
+      "ruleRefs": ["R2"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stopConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "start", "session": "SESSION-PLACEHOLDER-2" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-2" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1", "note": "旧会话迟到 stop：stale-ignored（T11），新会话继续" }
+      ],
+      "expect": { "state": "ACTIVE", "activeSession": "SESSION-PLACEHOLDER-2" }
+    },
+    {
+      "id": "R2-b-old-stop-when-idle",
+      "start": "IDLE",
+      "ruleRefs": ["R2"],
+      "events": [
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-0", "note": "无活动会话：幂等记成功（T12），不产生副作用" },
+        { "event": "expiredLeaseResume", "session": "SESSION-PLACEHOLDER-0", "note": "过期租约不得恢复采音（T20）" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R3-a-second-phone-connection-rejected",
+      "start": "IDLE",
+      "ruleRefs": ["R3"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "newConnection", "session": "SESSION-PLACEHOLDER-2", "note": "第二手机未验证所有者/代次的连接：拒绝（T13），映射 409 busy/AudioStreamConflict" }
+      ],
+      "expect": { "state": "ACTIVE", "activeSession": "SESSION-PLACEHOLDER-1" }
+    },
+    {
+      "id": "R4-a-partial-start-failure",
+      "start": "IDLE",
+      "ruleRefs": ["R4"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startFailure", "session": "SESSION-PLACEHOLDER-1", "note": "音频/引擎任一失败：清理本会话进入 ERROR（T3），上报未知而非假报停止" },
+        { "event": "cleanupDone", "session": "SESSION-PLACEHOLDER-1" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R4-b-stop-unconfirmed-reports-unknown",
+      "start": "IDLE",
+      "ruleRefs": ["R4"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stopUnconfirmed", "session": "SESSION-PLACEHOLDER-1", "note": "探针无法确认停止：进入 ERROR（T8），探针未知不当成 stopped（PD-ERR-409-04）" }
+      ],
+      "expect": { "state": "ERROR", "activeSession": "SESSION-PLACEHOLDER-1" }
+    },
+    {
+      "id": "R5-a-stream-break-releases-keys",
+      "start": "IDLE",
+      "ruleRefs": ["R5"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "streamBreak", "session": "SESSION-PLACEHOLDER-1", "note": "异常断流与正常停止同样释放本会话持有键（T6）" },
+        { "event": "stopConfirmed", "session": "SESSION-PLACEHOLDER-1" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R5-b-abnormal-stop-still-releases",
+      "start": "IDLE",
+      "ruleRefs": ["R5"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stopUnconfirmed", "session": "SESSION-PLACEHOLDER-1", "note": "停止未确认也必须释放所有权与持有键（T8）" },
+        { "event": "cleanupDone", "session": "SESSION-PLACEHOLDER-1" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R6-a-config-write-rejected-while-active",
+      "start": "IDLE",
+      "ruleRefs": ["R6"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "configWrite", "note": "活跃使用中的配置写入：409 busy（T15）" }
+      ],
+      "expect": { "state": "ACTIVE", "activeSession": "SESSION-PLACEHOLDER-1" }
+    },
+    {
+      "id": "R6-b-config-write-rejected-during-starting",
+      "start": "IDLE",
+      "ruleRefs": ["R6"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "configWrite", "note": "启动中的写入同样拒绝（T16）：检查空闲后新会话不得穿入写入窗口" }
+      ],
+      "expect": { "state": "STARTING", "activeSession": "SESSION-PLACEHOLDER-1" }
+    },
+    {
+      "id": "R7-a-restart-clears-authorization",
+      "start": "IDLE",
+      "ruleRefs": ["R7"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "appRestart", "note": "清除运行授权，保留设备/布局（T18）" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "R7-b-persisted-shared-request-no-mic",
+      "start": "IDLE",
+      "ruleRefs": ["R7"],
+      "events": [
+        { "event": "persistedSharedRequested", "note": "持久化 shared.requested / 过期租约不得自动开麦（T19，规格 §9 MIC-06、D11）" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "RC1-a-user-stopped-no-resume",
+      "start": "IDLE",
+      "ruleRefs": ["RC1"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "stop", "session": "SESSION-PLACEHOLDER-1", "note": "用户主动停止" },
+        { "event": "stopConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "reconnectAttempted", "session": "SESSION-PLACEHOLDER-1", "note": "用户停止后网络恢复：恢复资格已取消（T23），stale-ignored" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "RC1-b-managed-fails-closed",
+      "start": "IDLE",
+      "ruleRefs": ["RC1"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "streamBreak", "session": "SESSION-PLACEHOLDER-1", "note": "managed 断流：默认失败收尾" },
+        { "event": "reconnectDenied", "session": "SESSION-PLACEHOLDER-1", "note": "不自动重连、不偷偷重放快捷键（T24）" }
+      ],
+      "expect": { "state": "IDLE", "activeSession": null }
+    },
+    {
+      "id": "RC2-a-authorized-shared-resumes",
+      "start": "IDLE",
+      "ruleRefs": ["RC2"],
+      "events": [
+        { "event": "start", "session": "SESSION-PLACEHOLDER-1", "note": "前置：shared 模式、用户仍授权、租约未过期" },
+        { "event": "startConfirmed", "session": "SESSION-PLACEHOLDER-1" },
+        { "event": "streamBreak", "session": "SESSION-PLACEHOLDER-1", "note": "网络断开进入恢复窗口（候选 15s，audio-budgets.json）" },
+        { "event": "reconnectAuthorized", "session": "SESSION-PLACEHOLDER-1", "note": "窗口内重连：恢复原所有者会话（T21），不换所有者" }
+      ],
+      "expect": { "state": "ACTIVE", "activeSession": "SESSION-PLACEHOLDER-1" }
+    }
+  ]
+}

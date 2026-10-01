@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "PLACEHOLDER-9.9.9",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-03",
+  "displayName": "PLACEHOLDER-MAC",
+  "platform": "macos",
+  "capabilities": [
+    "fixedAction",
+    "keyChord",
+    "text",
+    "macro",
+    "phoneAudio",
+    "managedDictation",
+    "sharedMicrophone",
+    "secureLan"
+  ],
+  "audio": {
+    "available": true,
+    "streaming": false,
+    "permissionDenied": false,
+    "stale": false
+  },
+  "dictation": { "active": false },
+  "voiceEngine": {
+    "experimental": false,
+    "capturing": null,
+    "permissionDenied": true
+  }
+}

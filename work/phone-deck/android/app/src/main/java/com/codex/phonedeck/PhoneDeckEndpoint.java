@@ -9,6 +9,8 @@ final class PhoneDeckEndpoint {
     final String certificateSha256;
     final String label;
     final String computerId;
+    /** M1-A：非空表示逐手机凭据，请求用 Bearer 头；空则用旧共享令牌头。 */
+    final String clientId;
 
     PhoneDeckEndpoint(
             String baseUrl,
@@ -16,11 +18,22 @@ final class PhoneDeckEndpoint {
             String certificateSha256,
             String label,
             String computerId) {
+        this(baseUrl, accessToken, certificateSha256, label, computerId, null);
+    }
+
+    PhoneDeckEndpoint(
+            String baseUrl,
+            String accessToken,
+            String certificateSha256,
+            String label,
+            String computerId,
+            String clientId) {
         this.baseUrl = baseUrl;
         this.accessToken = accessToken;
         this.certificateSha256 = certificateSha256;
         this.label = label;
         this.computerId = computerId;
+        this.clientId = clientId == null || clientId.isBlank() ? null : clientId.trim();
     }
 
     boolean isLan() {

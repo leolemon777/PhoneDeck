@@ -1,0 +1,188 @@
+{
+  "$comment": "PhoneDeck 错误分类 → HTTP/产品错误码映射。分类来源 docs/OPEN_SOURCE_RELEASE_SPEC.md §8（错误分为未授权、错误目标、能力不支持、忙碌、配置冲突、过期会话、输入权限不足、音频设备缺失、探针未知、超时；请求格式/大小错误在进入输入或音频状态机前拒绝）。status=current 表示映射已由当前源码行为证实（附 grounding 路径）；status=target 表示契约目标映射，冻结于 D03（规格 §22）。tools/validate.py 校验本文件与 schemas/response.error.schema.json 的 errorCode 枚举完全一致。",
+  "productCodePrefix": "PD-ERR",
+  "categories": [
+    {
+      "category": "bad_request",
+      "labelZh": "请求格式/大小错误",
+      "code": "PD-ERR-400-01",
+      "httpStatus": 400,
+      "retryable": false,
+      "retryPolicy": "修正请求后重发；不得原样重试（请求格式/大小错误必须在进入输入或音频状态机前拒绝，规格 §8）。",
+      "status": "current",
+      "grounding": "TargetEnvelopeValidator.cs 抛 ArgumentException → Program.cs:562-564/434-435/632-634 返回 400",
+      "messages": {
+        "zh": "请求格式或大小不符合协议（占位文案，按字段细分）",
+        "en": "Request format or size violates the protocol (placeholder; per-field detail)"
+      },
+      "redaction": ["请求体中除 action 外的字段按需脱敏；不得回显令牌"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 错误段", "SEC-03"]
+    },
+    {
+      "category": "wrong_target",
+      "labelZh": "错误目标",
+      "code": "PD-ERR-400-02",
+      "httpStatus": 400,
+      "retryable": false,
+      "retryPolicy": "手机重新选择正确目标后重发；不得自动改发其它电脑（规格 §8 NET-05）。",
+      "status": "current",
+      "grounding": "TargetEnvelopeValidator.cs:49 “请求目标不是当前电脑”；DesktopConfiguration.cs:34；均为 ArgumentException → 400",
+      "messages": {
+        "zh": "请求目标不是当前电脑",
+        "en": "Request targets a different computer"
+      },
+      "redaction": ["不回显 computerId 完整列表"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 DEV/NET", "SEC-03"]
+    },
+    {
+      "category": "capability_unsupported",
+      "labelZh": "能力不支持",
+      "code": "PD-ERR-400-03",
+      "httpStatus": 400,
+      "retryable": false,
+      "retryPolicy": "读取 /api/health 能力协商后降级或提示升级；不静默装作成功（规格 §11 CFG-04）。",
+      "status": "current",
+      "grounding": "InputCommandProcessor.cs:26/39 “keyChord/macro 必须使用协议 v2”→ 400；未知宏步骤类型 Program.cs:887 → 400",
+      "messages": {
+        "zh": "该接收端不支持此能力或协议版本",
+        "en": "Receiver lacks this capability or protocol version"
+      },
+      "redaction": [],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-01", "§16.2 能力", "V48"]
+    },
+    {
+      "category": "unauthorized",
+      "labelZh": "未授权",
+      "code": "PD-ERR-401-01",
+      "httpStatus": 401,
+      "retryable": false,
+      "retryPolicy": "禁止自动重试；需重新配对/重新授权（撤销后的旧凭据一律拒绝，规格 §7 NET-03）。",
+      "status": "current",
+      "grounding": "Program.cs:78-89 X-PhoneDeck-Token 校验失败 → 401 {ok:false,error:\"局域网连接尚未配对或密钥无效\"}",
+      "messages": {
+        "zh": "局域网连接尚未配对或密钥无效",
+        "en": "LAN connection not paired or token invalid"
+      },
+      "redaction": ["绝不回显令牌本体；日志不记录令牌值"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8", "SEC-02", "SEC-03"]
+    },
+    {
+      "category": "input_permission_denied",
+      "labelZh": "输入权限不足",
+      "code": "PD-ERR-403-01",
+      "httpStatus": 403,
+      "retryable": false,
+      "retryPolicy": "提示权限差异排查，不自动重试、不默认提权（规格 §8 SendInput/UIPI 段）。",
+      "status": "target",
+      "grounding": "当前源码无 403 路径（UIPI 阻止系统不保证显式返回，无法精确识别，规格 §8 明示）；映射冻结于 D03",
+      "messages": {
+        "zh": "输入被系统权限拒绝或无法确认（占位文案）",
+        "en": "Input denied or unconfirmable due to OS permissions (placeholder)"
+      },
+      "redaction": ["不回显目标窗口标题"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 UIPI 段", "D03"]
+    },
+    {
+      "category": "busy",
+      "labelZh": "忙碌",
+      "code": "PD-ERR-409-01",
+      "httpStatus": 409,
+      "retryable": true,
+      "retryPolicy": "仅允许短时有界重试；第二手机不得夺取会话（规格 §8 DEV-04）；更新/配置写入与输入/音频活动互斥（§16.3 R6）。",
+      "status": "current",
+      "grounding": "DictationSessionManager.cs:86 “另一个语音听写会话仍在运行”→ 409（Program.cs:636-639）；ConfigurationGate Program.cs:113-118 与 DesktopConfigurationEndpoints.cs:31 “正在输入或供音，请停止后保存” → 409",
+      "messages": {
+        "zh": "接收端忙碌（已有会话/正在保存或更新），请停止后重试",
+        "en": "Receiver busy (active session / save or update in progress); stop it first"
+      },
+      "redaction": ["不回显其它会话的 owner 信息"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 DEV-04", "§16.3 R6", "V22", "V47"]
+    },
+    {
+      "category": "config_conflict",
+      "labelZh": "配置冲突",
+      "code": "PD-ERR-409-02",
+      "httpStatus": 409,
+      "retryable": false,
+      "retryPolicy": "手机必须重新读取快照比较后再保存，不得用响应中的 revision 覆盖本地草稿（规格 §18 V47）。",
+      "status": "current",
+      "grounding": "DesktopConfiguration.cs:40 revision 不匹配 → InvalidOperationException → DesktopConfigurationEndpoints.cs:35 → 409",
+      "messages": {
+        "zh": "设置已变化，请重新读取后再保存",
+        "en": "Settings changed; re-read before saving"
+      },
+      "redaction": [],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §11 CFG-02", "V47"]
+    },
+    {
+      "category": "expired_session",
+      "labelZh": "过期会话",
+      "code": "PD-ERR-409-03",
+      "httpStatus": 409,
+      "retryable": false,
+      "retryPolicy": "迟到/过期会话请求只做清理记录，不得停掉新会话或复活旧会话（§16.3 R1/R2）；过期输入不得再次执行（§16.2 请求确认）。",
+      "status": "current",
+      "grounding": "DictationSessionManager.cs:158-162 “请求的会话不是当前听写会话” → InvalidOperationException → 409",
+      "messages": {
+        "zh": "请求的会话已过期或不是当前会话",
+        "en": "Session expired or not the active one"
+      },
+      "redaction": [],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-03", "§16.2 会话", "§16.3 R1/R2"]
+    },
+    {
+      "category": "probe_unknown",
+      "labelZh": "探针未知",
+      "code": "PD-ERR-409-04",
+      "httpStatus": 409,
+      "retryable": false,
+      "retryPolicy": "探针 unknown 不当成 stopped（规格 §9.1）；手机按“需本机处理/未知”展示，不得自动重发有副作用操作（§8：未知错误不自动重试）。",
+      "status": "current",
+      "grounding": "DictationSessionManager.cs:118-120 “无法确认 … 是否开始听写” 与 :189-193 “仍在听写，停止指令未被确认” → InvalidOperationException → 409",
+      "messages": {
+        "zh": "引擎状态未知，停止/启动未被确认",
+        "en": "Engine state unknown; stop/start not confirmed"
+      },
+      "redaction": ["不回显引擎进程命令行"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 错误段", "§9.1", "MIC-09", "V36"]
+    },
+    {
+      "category": "audio_device_missing",
+      "labelZh": "音频设备缺失",
+      "code": "PD-ERR-503-01",
+      "httpStatus": 503,
+      "retryable": true,
+      "retryPolicy": "允许用户安装/选择虚拟设备后重试；不得静默把音频改送其它设备（规格 §10 ENG-04）。",
+      "status": "current",
+      "grounding": "Program.cs:490-493 音频建流 InvalidOperationException → 503（Results.Problem）",
+      "messages": {
+        "zh": "音频设备不可用或虚拟声卡缺失",
+        "en": "Audio device unavailable or virtual cable missing"
+      },
+      "redaction": ["设备名可展示，不含用户路径则不脱敏"],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §10 ENG-04", "V46"]
+    },
+    {
+      "category": "timeout",
+      "labelZh": "超时",
+      "code": "PD-ERR-504-01",
+      "httpStatus": 504,
+      "retryable": true,
+      "retryPolicy": "仅无副作用操作可短时重试；按键/会话类超时必须先查询结果未知状态，不得自动重放（§16.2 请求确认“响应丢失后的查询/重试策略”）。",
+      "status": "target",
+      "grounding": "当前源码未区分独立超时码（听写内部预算见 DictationSessionManager.cs:11-12；音频客户端断开返回 499，Program.cs:481-483）；独立超时码冻结于 D03",
+      "messages": {
+        "zh": "操作超时，结果未知（占位文案）",
+        "en": "Operation timed out; outcome unknown (placeholder)"
+      },
+      "redaction": [],
+      "specRefs": ["OPEN_SOURCE_RELEASE_SPEC.md §8 超时", "D03", "V24"]
+    }
+  ],
+  "supplementaryStatuses": {
+    "$comment": "非 §8 分类的既有 HTTP 行为，仅登记供对照，不占用产品错误码。",
+    "499": "音频流被客户端关闭（Program.cs:481-483），无独立产品码",
+    "500": "接收端内部错误（Program.cs:495-499、566-570），无独立产品码，禁止自动重试副作用操作",
+    "404": "非 USB 请求打到 /api/lan/pair（Program.cs:383-388）"
+  }
+}

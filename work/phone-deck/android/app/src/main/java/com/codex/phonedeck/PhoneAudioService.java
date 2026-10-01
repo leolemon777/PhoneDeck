@@ -85,6 +85,8 @@ public final class PhoneAudioService extends Service {
     private volatile boolean probeInFlight;
     private volatile int knownTotal;
     private volatile int connectedCount;
+    /// M1-B/MIC-10：共享组零可达目标的起始时刻（elapsedRealtime；0=组内有目标）。
+    private volatile long emptyTargetsSinceElapsed;
     private volatile int lastLevel;
     private volatile String statusDetail = "正在准备";
     private final ConcurrentHashMap<String, String> receiverStates =
@@ -209,6 +211,7 @@ public final class PhoneAudioService extends Service {
         stopping = true;
         desiredRunning = false;
         startedByLinkage = false;
+        emptyTargetsSinceElapsed = 0L;
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
             broadcaster.stop();
@@ -259,6 +262,10 @@ public final class PhoneAudioService extends Service {
                 int reachable = 0;
                 boolean anyRequested = false;
                 for (TargetDeviceManager.Device device : devices) {
+                    if (!device.sharedGroup) {
+                        // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
+                        continue;
+                    }
                     states.put(device.computerId, "离线");
                     if (!device.hasLanPairing()) {
                         continue;
@@ -354,10 +361,25 @@ public final class PhoneAudioService extends Service {
                     return;
                 }
                 if (targets.isEmpty()) {
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (emptyTargetsSinceElapsed == 0L) {
+                        emptyTargetsSinceElapsed = now;
+                    } else if (SharedAudioPolicies.shouldStopForZeroTargets(
+                            emptyTargetsSinceElapsed, now)) {
+                        // MIC-10：组内最后目标离线超过 15s 恢复窗口，停止采集；
+                        // 用户主动停止不受此路径影响（stopShared 即时生效）。
+                        statusDetail = "共享组电脑全部离线，已停止供音";
+                        publishStatus();
+                        handler.post(this::stopShared);
+                        return;
+                    }
                     statusDetail = incompatible > 0
                             ? "在线电脑需要更新接收端或配置虚拟麦克风"
                             : "正在等待在线电脑";
-                } else if (connectedCount > 0) {
+                } else {
+                    emptyTargetsSinceElapsed = 0L;
+                }
+                if (targets.size() > 0 && connectedCount > 0) {
                     statusDetail = "正在向 " + connectedCount + " 台电脑供音";
                 } else {
                     statusDetail = "已发现 " + targets.size() + " 台音频接收端";

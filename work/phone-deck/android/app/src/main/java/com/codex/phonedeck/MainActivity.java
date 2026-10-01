@@ -63,6 +63,11 @@ public final class MainActivity extends Activity {
     private static final String PREFS_NAME = "PhoneDeckSettings";
     private static final String PREF_VOICE_WORK_MODE = "voice_work_mode";
     private static final String PREF_VOICE_MODE = "voice_mode";
+    /// M1-A A4：legacy-only 电脑的升级提示 per-computerId 只弹一次（取消也算已提示）。
+    private static final String PREF_CREDENTIAL_UPGRADE_PROMPT = "credential_upgrade_prompted_";
+    /// M1-A A4：每台电脑的升级 clientId 持久化沿用，重试不再签发全新凭据
+    /// （rotate 对同 clientId 只回 already-upgraded；且 per-clientId 限速对本机重试生效）。
+    private static final String PREF_CREDENTIAL_UPGRADE_CLIENT_ID = "credential_upgrade_client_id_";
     private static final String WORK_MANAGED = "managed";
     private static final String WORK_SHARED = "shared";
     private static final String MODE_TAP = "tap";
@@ -154,7 +159,6 @@ public final class MainActivity extends Activity {
     private BluetoothTransport bluetoothTransport;
     private AudioStreamer audioStreamer;
     private ShortcutConfigRepository configRepository;
-    private AgentSyncManager agentSyncManager;
     private TargetDeviceManager targetDeviceManager;
     private final ConcurrentHashMap<String, LanTargetStatus> lanTargets =
             new ConcurrentHashMap<>();
@@ -175,27 +179,11 @@ public final class MainActivity extends Activity {
     private static final long DISCOVERY_COOLDOWN_MS = 10_000;
     private ConnectivityManager.NetworkCallback networkCallback;
 
-    /// 电脑联动：当前仍在请求共享麦克风的电脑集合；空 = 没有任何电脑请求。
-    private final java.util.Set<String> sharedRequestedComputerIds = new java.util.HashSet<>();
-    /// 用户在手机上手动停止后抑制联动自动重启，直到所有电脑取消请求再重新允许。
-    private boolean sharedLinkageSuppressed;
-    private boolean sharedStatusWasRunning;
-
+    // Microphone activation is owned by explicit actions on the phone.
     private final BroadcastReceiver sharedStatusReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction())) {
-                boolean nowRunning = intent.getBooleanExtra(
-                        PhoneAudioService.EXTRA_RUNNING, false);
-                if (sharedStatusWasRunning && !nowRunning
-                        && !sharedRequestedComputerIds.isEmpty()) {
-                    // 运行中停止且电脑仍在请求：视为用户手动停止，暂时抑制联动，
-                    // 下一次轮询观察到电脑取消请求后自动解除抑制。
-                    sharedLinkageSuppressed = true;
-                }
-                sharedStatusWasRunning = nowRunning;
+        @Override public void onReceive(Context context, Intent intent) {
+            if (PhoneAudioService.ACTION_STATUS.equals(intent.getAction()))
                 renderSharedAudioStatus(PhoneAudioService.getSnapshot());
-            }
         }
     };
 
@@ -233,12 +221,9 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
-        agentSyncManager = new AgentSyncManager(configRepository, () -> {
-            refreshShortcutGrid();
-            showActionFeedback("✓  Agent 操作已从电脑同步", theme.success);
-        });
         targetDeviceManager = new TargetDeviceManager(this);
         setContentView(createInterface());
+        maybeHandlePairingTestHook(getIntent());
         registerSharedAudioStatusReceiver();
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
             @Override
@@ -454,11 +439,6 @@ public final class MainActivity extends Activity {
     private View createInterface() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
-        if (theme.isFrost()) {
-            root.addView(new FrostedBackdropView(this), new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        }
 
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
@@ -480,7 +460,7 @@ public final class MainActivity extends Activity {
         pinnedHeader.setPadding(dp(20), dp(8), dp(20), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        brandRow.addView(text(getString(R.string.app_name), 19, theme.text, Typeface.BOLD),
+        brandRow.addView(text(getString(R.string.app_name), 17, theme.text, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button settings = smallButton("设置");
         settings.setBackgroundColor(Color.TRANSPARENT);
@@ -494,8 +474,10 @@ public final class MainActivity extends Activity {
         connectionCard = connection;
         connection.setOrientation(LinearLayout.HORIZONTAL);
         connection.setGravity(Gravity.CENTER_VERTICAL);
-        connection.setPadding(0, dp(6), 0, dp(6));
+        connection.setPadding(dp(12), dp(10), dp(4), dp(10));
         connection.setElevation(0);
+        // 状态 chip：底色随语义容器色，未定状态前先按“检测中”着色。
+        connection.setBackground(theme.shape(this, theme.warningContainer, 16));
         connection.setOnClickListener(view -> {
             showDeviceList();
         });
@@ -506,9 +488,9 @@ public final class MainActivity extends Activity {
 
         statusDot = new View(this);
         statusDot.setBackground(roundRect(theme.muted, 20));
-        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
+        connection.addView(statusDot, new LinearLayout.LayoutParams(dp(8), dp(8)));
 
-        statusText = text("正在检测电脑端…", 13, theme.text, Typeface.BOLD);
+        statusText = text("正在检测电脑端…", 14, theme.text, Typeface.BOLD);
         statusText.setSingleLine(true);
         statusText.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
@@ -567,7 +549,7 @@ public final class MainActivity extends Activity {
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
         voiceDock.setPadding(dp(16), dp(16), dp(16), dp(12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 24, 0, theme.outline));
+        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 20, 0, theme.outline));
         voiceDock.setElevation(0);
 
         LinearLayout dockHeader = new LinearLayout(this);
@@ -576,7 +558,7 @@ public final class MainActivity extends Activity {
         voiceDock.addView(dockHeader, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        TextView voiceTitle = text("语音输入", 15, theme.text, Typeface.BOLD);
+        TextView voiceTitle = text("语音输入", 14, theme.text, Typeface.BOLD);
         dockHeader.addView(voiceTitle, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -610,7 +592,7 @@ public final class MainActivity extends Activity {
         typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
         voiceDock.addView(typelessButton, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
 
         LinearLayout voiceEditRow = new LinearLayout(this);
         voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1260,13 +1242,13 @@ public final class MainActivity extends Activity {
             chip.setTextSize(10);
             chip.setMinWidth(dp(48));
             chip.setMinimumWidth(dp(48));
-            chip.setTextColor(selected ? theme.onPrimary : theme.text);
+            chip.setTextColor(selected ? theme.onPrimaryContainer : theme.text);
             chip.setBackground(theme.shape(
                     this,
-                    selected ? theme.primary : theme.surfaceRaised,
+                    selected ? theme.primaryContainer : theme.surfaceRaised,
                     10,
                     0,
-                    selected ? theme.primary : theme.outline));
+                    selected ? theme.primaryContainer : theme.outline));
             chip.setAlpha(1f);
             // Offline entries remain actionable for diagnosis and removal.
             chip.setEnabled(true);
@@ -1292,21 +1274,346 @@ public final class MainActivity extends Activity {
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
         if (devices.isEmpty()) {
             new android.app.AlertDialog.Builder(this).setTitle("连接第一台电脑")
-                    .setMessage("在电脑上启动 PhoneDeck 接收端，再用 USB 连接并允许调试。首次配对后，可在同一局域网使用。")
-                    .setPositiveButton("知道了", null).show();
+                    .setMessage("方式一：在电脑托盘菜单选择「配对新手机…」，用本机扫码配对。\n方式二：用 USB 线连接电脑并允许调试，自动完成首次配对。")
+                    .setPositiveButton("扫码配对", (dialog, which) -> launchQrPairingScan())
+                    .setNegativeButton("知道了", null).show();
             return;
         }
-        String[] labels = new String[devices.size()];
+        String[] labels = new String[devices.size() + 1];
         for (int i = 0; i < devices.size(); i++) {
             TargetDeviceManager.Device device = devices.get(i);
             String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
                     ? "需重新配对" : isDeviceOnline(device.computerId) ? "在线" : "离线";
+            // M1-A A4：legacy-only 设备仅展示「可升级」后缀，提示入口在主界面在线刷新。
             labels[i] = device.slot + "号 · " + device.displayName + "\n" + state
-                    + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "");
+                    + (device.sharedGroup ? " · 共享组" : "")
+                    + (sameComputer(device.computerId, targetComputerId) ? " · 当前目标" : "")
+                    + (CredentialUpgrader.needsUpgrade(device) ? " · 可升级" : "");
         }
+        // M1-B/DEV-03：共享组管理入口（显式集合；新增配对不自动入组）。
+        labels[devices.size()] = "⚙ 管理共享组（勾选接收共享麦克风的电脑）";
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
-                .setItems(labels, (dialog, which) -> selectTargetDevice(devices.get(which), statusText))
+                .setItems(labels, (dialog, which) -> {
+                    if (which == devices.size()) {
+                        showSharedGroupDialog();
+                        return;
+                    }
+                    selectTargetDevice(devices.get(which), statusText);
+                })
+                .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
+                .setPositiveButton("扫码配对新电脑", (dialog, which) -> launchQrPairingScan())
                 .setNegativeButton("取消", null).show();
+    }
+
+    /// M1-B/DEV-03：共享组多选；切换即持久化，下一轮探测生效（移除即停发该目标流）。
+    private void showSharedGroupDialog() {
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            showActionFeedback("先配对至少一台电脑，再管理共享组", theme.muted);
+            return;
+        }
+        String[] labels = new String[devices.size()];
+        boolean[] checked = new boolean[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            labels[i] = device.slot + "号 · " + device.displayName;
+            checked[i] = device.sharedGroup;
+        }
+        new AlertDialog.Builder(this).setTitle("共享组（共享麦克风发送目标）")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) ->
+                        targetDeviceManager.setSharedGroup(
+                                devices.get(which).computerId, isChecked))
+                .setPositiveButton("完成", (dialog, which) -> showActionFeedback(
+                        WORK_SHARED.equals(voiceWorkMode)
+                                && PhoneAudioService.getSnapshot().running
+                                ? "✓ 共享组已更新，下一轮探测生效" : "✓ 共享组已更新",
+                        theme.success))
+                .setNegativeButton("取消", null).show();
+    }
+
+    /// M1-A A3：启动扫码（zxing-android-embedded 的 CaptureActivity 自行处理相机权限与取景）。
+    private void launchQrPairingScan() {
+        new com.google.zxing.integration.android.IntentIntegrator(this)
+                .setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE)
+                .setPrompt("对准电脑上的 PhoneDeck 配对二维码")
+                .setBeepEnabled(false)
+                .setOrientationLocked(true)
+                .initiateScan();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        com.google.zxing.integration.android.IntentResult scan =
+                com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(
+                        requestCode, resultCode, data);
+        if (scan != null) {
+            handleQrPairingScanResult(scan.getContents());
+        }
+    }
+
+    /// uiPreview 验收通道专用（包名 .preview 门槛，生产 debug/release 不响应）：
+    /// --es phonedeck_qr_test_b64 <base64(QR JSON)> [--es phonedeck_qr_address <host>]
+    /// 直接注入扫码结果，用于无相机或网络受限环境的自动化协议验收（真 TLS/材料/确认链路不变）。
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        maybeHandlePairingTestHook(intent);
+    }
+
+    private void maybeHandlePairingTestHook(android.content.Intent intent) {
+        if (intent == null || !getPackageName().endsWith(".preview")
+                || !intent.hasExtra("phonedeck_qr_test_b64")) {
+            return;
+        }
+        String qr;
+        try {
+            qr = new String(java.util.Base64.getDecoder().decode(
+                    intent.getStringExtra("phonedeck_qr_test_b64")),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  测试注入参数无效", theme.danger);
+            return;
+        }
+        try {
+            QrPairingClient.QrPayload payload = QrPairingClient.parseQr(qr);
+            String address = intent.getStringExtra("phonedeck_qr_address");
+            if (address == null || address.isBlank()) {
+                resolveAddressAndPair(payload, null);
+            } else {
+                runQrPairing(payload, address.trim());
+            }
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
+        }
+    }
+
+    private void handleQrPairingScanResult(String qrText) {
+        if (qrText == null || qrText.isBlank()) {
+            showActionFeedback("✕  未扫码或已取消", theme.muted);
+            return;
+        }
+        QrPairingClient.QrPayload payload;
+        try {
+            payload = QrPairingClient.parseQr(qrText);
+        } catch (IllegalArgumentException exception) {
+            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
+            return;
+        }
+        if (targetDeviceManager.find(payload.computerId) != null) {
+            new AlertDialog.Builder(this).setTitle("该电脑已配对")
+                    .setMessage("「" + payload.displayName + "」已在设备列表中。继续将签发新的独立凭据。")
+                    .setPositiveButton("继续", (dialog, which) -> resolveAddressAndPair(payload, null))
+                    .setNegativeButton("取消", null).show();
+            return;
+        }
+        resolveAddressAndPair(payload, null);
+    }
+
+    /// 发现层匹配 QR 的 computerId；不可用时提示手动输入地址（设计 §4）。
+    private void resolveAddressAndPair(QrPairingClient.QrPayload payload, String knownAddress) {
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("扫码配对")
+                .setMessage("正在定位「" + payload.displayName + "」…\n请在电脑上点击「确认配对」。")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            java.util.List<String> addresses = knownAddress != null
+                    ? java.util.Collections.singletonList(knownAddress)
+                    : QrPairingClient.matchDiscovery(this, payload.computerId);
+            runOnUiThread(() -> {
+                progress.dismiss();
+                if (addresses.isEmpty()) {
+                    promptManualAddressAndPair(payload);
+                    return;
+                }
+                runQrPairing(payload, addresses.get(0));
+            });
+        }, "qr-pairing-discovery").start();
+    }
+
+    private void promptManualAddressAndPair(QrPairingClient.QrPayload payload) {
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("例如 192.168.1.23");
+        new AlertDialog.Builder(this).setTitle("输入电脑地址")
+                .setMessage("未在局域网发现「" + payload.displayName
+                        + "」。请输入电脑的局域网 IP（电脑端状态窗可见）。")
+                .setView(input)
+                .setPositiveButton("连接", (dialog, which) -> {
+                    String address = input.getText().toString().trim();
+                    if (!TargetDeviceManager.isAddressCandidateSafe(address)) {
+                        showActionFeedback("✕  地址无效", theme.danger);
+                        return;
+                    }
+                    runQrPairing(payload, address);
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    /// 提交配对并保存凭据；请求最长挂起 30s 等待电脑本机确认。
+    private void runQrPairing(QrPairingClient.QrPayload payload, String host) {
+        String clientId = java.util.UUID.randomUUID().toString();
+        String label = android.os.Build.MODEL == null ? "Android 手机" : android.os.Build.MODEL;
+        AlertDialog waiting = new AlertDialog.Builder(this)
+                .setTitle("等待电脑确认")
+                .setMessage("已向「" + payload.displayName + "」提交配对。\n请在电脑上点击「确认配对」（30 秒内）。")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            String failure = null;
+            org.json.JSONObject issued = null;
+            try {
+                issued = QrPairingClient.submit(host, payload, clientId, label);
+            } catch (Exception exception) {
+                failure = exception.getMessage();
+            }
+            final org.json.JSONObject result = issued;
+            final String error = failure;
+            runOnUiThread(() -> {
+                waiting.dismiss();
+                if (error != null || result == null || !result.optBoolean("ok", false)) {
+                    showActionFeedback("✕  " + (error == null ? "配对失败" : error), theme.danger);
+                    return;
+                }
+                TargetDeviceManager.Device saved = targetDeviceManager.saveQrPairing(
+                        payload.computerId,
+                        payload.displayName,
+                        "windows",
+                        java.util.Collections.singletonList(host),
+                        payload.httpsPort,
+                        result.optString("clientToken"),
+                        result.optString("clientId", clientId),
+                        payload.certificateSha256);
+                if (saved == null) {
+                    showActionFeedback("✕  凭据保存失败", theme.danger);
+                    return;
+                }
+                new Thread(() -> {
+                    boolean verified = QrPairingClient.verifyCredential(
+                            host, payload.computerId, payload.httpsPort,
+                            result.optString("clientToken"),
+                            result.optString("clientId", clientId),
+                            payload.certificateSha256);
+                    runOnUiThread(() -> {
+                        new AlertDialog.Builder(this).setTitle(verified ? "配对成功" : "配对完成")
+                                .setMessage("「" + payload.displayName + "」已保存独立凭据"
+                                        + (verified ? "，并已通过连接验证。" : "。连接验证未通过，稍后可在设置中重试。"))
+                                .setPositiveButton("好的", null).show();
+                        refreshTargetSwitcher();
+                        testConnection();
+                    });
+                }, "qr-pairing-verify").start();
+            });
+        }, "qr-pairing-submit").start();
+    }
+
+    /// M1-A A4：当前目标 legacy-only 且 LAN 在线时，弹一次「升级为独立凭据」
+    /// （设计 §5.2 首连强提示）。取消也算已提示（per-computerId 标志），之后
+    /// 仍可经电脑端配对窗口扫码获得独立凭据。语音进行中不打断，留到下一轮。
+    private void maybePromptCredentialUpgrade() {
+        if (isFinishing() || isDestroyed() || targetComputerId == null) {
+            return;
+        }
+        LanTargetStatus lanStatus = lanTargets.get(targetComputerId);
+        if (lanStatus == null) {
+            return;
+        }
+        if (isVoiceStarting() || dictationActive || typelessInFlight
+                || audioStreamer != null && audioStreamer.isRunning()
+                || WORK_SHARED.equals(voiceWorkMode)
+                && PhoneAudioService.getSnapshot().running) {
+            return;
+        }
+        TargetDeviceManager.Device device = targetDeviceManager.find(targetComputerId);
+        if (!CredentialUpgrader.needsUpgrade(device)) {
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String promptKey = PREF_CREDENTIAL_UPGRADE_PROMPT + device.computerId;
+        if (preferences.getBoolean(promptKey, false)) {
+            return;
+        }
+        preferences.edit().putBoolean(promptKey, true).apply();
+        final TargetDeviceManager.Device target = device;
+        final PhoneDeckEndpoint endpoint = lanStatus.endpoint;
+        new AlertDialog.Builder(this)
+                .setTitle("升级为独立凭据")
+                .setMessage("「" + device.displayName + "」仍在使用旧版共享令牌。\n\n"
+                        + "升级为这台手机专属的独立凭据：\n"
+                        + "· 不影响现有使用，无需重新扫码\n"
+                        + "· 电脑端可按手机逐个撤销授权")
+                .setPositiveButton("升级", (dialog, which) -> runCredentialUpgrade(target, endpoint))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /// M1-A A4：后台执行 rotate → 新凭据验证 → 保存（设计 §5.2/§5.5）。
+    /// 旧共享令牌保留到新凭据验证成功（TargetDeviceManager.applyCredentialUpgrade
+    /// 负责先验证后替换）；结果回 UI 线程反馈「已升级为独立凭据」或失败原因。
+    private void runCredentialUpgrade(TargetDeviceManager.Device device, PhoneDeckEndpoint endpoint) {
+        String host = hostOf(endpoint);
+        // 稳定升级 GUID（schema credentialRotateRequest.clientId：“升级后凭据沿用”）：
+        // 首次升级生成并持久化，此后重试沿用同一 clientId——服务端对它只回
+        // already-upgraded 而不再签发新凭据，避免孤儿凭据累积，也让本机重试
+        // 落入 per-clientId 限速桶。凭据丢失的找回路径仍是重新扫码配对（G-1/G-2）。
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String upgradeKey = PREF_CREDENTIAL_UPGRADE_CLIENT_ID + device.computerId;
+        String clientId = preferences.getString(upgradeKey, null);
+        if (clientId == null || clientId.isBlank()) {
+            clientId = java.util.UUID.randomUUID().toString();
+            preferences.edit().putString(upgradeKey, clientId).apply();
+        }
+        final String rotateClientId = clientId;
+        new Thread(() -> {
+            String error = null;
+            CredentialUpgrader.RotateResult rotated = null;
+            TargetDeviceManager.CredentialUpgradeResult saved = null;
+            try {
+                rotated = CredentialUpgrader.rotate(endpoint, rotateClientId);
+                if (!rotated.alreadyUpgraded) {
+                    saved = targetDeviceManager.applyCredentialUpgrade(
+                            device.computerId, rotated.clientToken, rotated.clientId, host);
+                }
+            } catch (Exception exception) {
+                error = exception.getMessage() == null ? "升级失败" : exception.getMessage();
+            }
+            final CredentialUpgrader.RotateResult result = rotated;
+            final TargetDeviceManager.CredentialUpgradeResult saveResult = saved;
+            final String failure = error;
+            runOnUiThread(() -> {
+                if (failure != null) {
+                    showActionFeedback("✕  升级失败：" + failure, theme.danger);
+                    return;
+                }
+                if (result.alreadyUpgraded) {
+                    // rotate 永不重发（G-1）：凭据丢失只能重新扫码配对找回。
+                    showActionFeedback("该电脑已为此手机签发过独立凭据，不再重发；"
+                            + "如本机凭据丢失，请重新扫码配对", theme.warning);
+                    return;
+                }
+                if (saveResult == null || saveResult.device == null) {
+                    showActionFeedback("✕  升级失败：" + (saveResult != null
+                            && saveResult.failure != null ? saveResult.failure : "未知原因"),
+                            theme.danger);
+                    return;
+                }
+                showActionFeedback("✓  已升级为独立凭据", theme.success);
+                refreshTargetSwitcher();
+                requestImmediateLanCheck("凭据升级完成");
+            });
+        }, "credential-upgrade").start();
+    }
+
+    /// LAN 端点 baseUrl → 主机地址（供升级验证优先使用 rotate 刚成功的主机）。
+    private static String hostOf(PhoneDeckEndpoint endpoint) {
+        if (endpoint == null || endpoint.baseUrl == null) {
+            return null;
+        }
+        try {
+            return java.net.URI.create(endpoint.baseUrl).getHost();
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     private void selectTargetDevice(TargetDeviceManager.Device device, View source) {
@@ -1736,7 +2043,7 @@ public final class MainActivity extends Activity {
                     String activeComputerId = targetDeviceManager.getActiveComputerId();
                     if (activeComputerId == null
                             || sameComputer(healthComputerId, activeComputerId)) {
-                        syncAgentShortcuts(PhoneDeckEndpoint.USB);
+                        // Layout is owned by the phone; a PC must not overwrite it.
                     }
                     mainHandler.post(() -> {
                         targetDeviceManager.upsert(
@@ -1748,7 +2055,7 @@ public final class MainActivity extends Activity {
                                 PhoneDeckEndpoint.USB,
                                 healthComputerId,
                                 remoteVoiceState);
-                        maybeFollowSharedRequest(healthComputerId, health);
+                        maybeFollowUpdateRequest(healthComputerId, health);
                         if (recoveredAfterVoiceDisconnect
                                 && !audioStartPending && !dictationActive) {
                             showActionFeedback("✓  USB 已恢复，可以继续使用", theme.success);
@@ -1835,7 +2142,7 @@ public final class MainActivity extends Activity {
                     JSONObject health = result.health;
                     if (sameComputer(device.computerId,
                             targetDeviceManager.getActiveComputerId())) {
-                        syncAgentShortcuts(result.endpoint);
+                        // Keep the phone layout when moving between computers.
                     }
                     boolean supportsManagedDictation = false;
                     org.json.JSONArray capabilities = health.optJSONArray("capabilities");
@@ -1866,7 +2173,7 @@ public final class MainActivity extends Activity {
                     mainHandler.post(() -> {
                         reconcileRemoteVoiceState(
                                 healthEndpoint, healthComputerId, remoteVoiceState);
-                        maybeFollowSharedRequest(healthComputerId, health);
+                        maybeFollowUpdateRequest(healthComputerId, health);
                     });
                 }
                 lanCheckFailStreak = anyPaired && !anySuccess
@@ -1886,12 +2193,6 @@ public final class MainActivity extends Activity {
                 lanCheckInFlight = false;
             }
         });
-    }
-
-    private void syncAgentShortcuts(PhoneDeckEndpoint endpoint) {
-        if (agentSyncManager != null) {
-            agentSyncManager.sync(endpoint);
-        }
     }
 
     /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动语音引擎
@@ -2206,14 +2507,11 @@ public final class MainActivity extends Activity {
         if (WORK_SHARED.equals(voiceWorkMode)) {
             PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
             boolean stopState = state.running;
-            boolean monoVoice = theme.isMonochrome();
-            int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
-                    : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-            int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
-                    : monoVoice ? theme.onPrimary : theme.text;
+            int stopFill = theme.live;
+            int stopInk = theme.onLive;
             typelessButton.setBackground(stopState
                     ? pressableRoundRect(stopFill,
-                            monoVoice ? theme.primaryPressed : theme.danger, 36)
+                            theme.mix(theme.live, theme.onLive, 0.2f), 36)
                     : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
@@ -2244,15 +2542,12 @@ public final class MainActivity extends Activity {
                     ? VoiceLevelView.CONNECTING
                     : VoiceLevelView.IDLE);
         }
-        boolean monoVoice = theme.isMonochrome();
-        int stopFill = theme.isNative() ? theme.danger : monoVoice ? theme.primary
-                : theme.mix(theme.voiceDock, theme.danger, 0.72f);
-        int stopInk = theme.isNative() ? (theme.light ? Color.WHITE : theme.background)
-                : monoVoice ? theme.onPrimary : theme.text;
+        int stopFill = theme.live;
+        int stopInk = theme.onLive;
         typelessButton.setBackground(stopState
                 ? pressableRoundRect(
                         stopFill,
-                        monoVoice ? theme.primaryPressed : theme.danger, 36)
+                        theme.mix(theme.live, theme.onLive, 0.2f), 36)
                 : pressableRoundRect(theme.primary, theme.primaryPressed, 36));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
@@ -2278,10 +2573,8 @@ public final class MainActivity extends Activity {
         button.setAlpha(enabled ? 1f : 0.45f);
     }
 
-    /// 电脑端联动：健康轮询观察到 shared.requested 后自动开启共享麦克风。
-    /// 手机正忙（managed 听写等）时本轮跳过，下一轮轮询会重试；
-    /// 手动停止后的抑制由本方法在观察到电脑取消请求时解除。
-    private void maybeFollowSharedRequest(String computerId, JSONObject health) {
+    /// 保留旧电脑的更新请求兼容；共享麦克风只能从手机主动开启。
+    private void maybeFollowUpdateRequest(String computerId, JSONObject health) {
         if (computerId == null || computerId.isBlank() || health == null) {
             return;
         }
@@ -2308,37 +2601,6 @@ public final class MainActivity extends Activity {
                 startActivity(new Intent(this, FleetUpdateActivity.class).putExtra("sourceId", computerId));
                 return;
             }
-        }
-        JSONObject shared = health.optJSONObject("shared");
-        boolean requested = shared != null && shared.optBoolean("requested", false);
-        if (!requested) {
-            sharedRequestedComputerIds.remove(computerId);
-            if (sharedRequestedComputerIds.isEmpty()) {
-                sharedLinkageSuppressed = false;
-            }
-            return;
-        }
-        sharedRequestedComputerIds.add(computerId);
-        PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
-        if (state.running || sharedStartPending || sharedLinkageSuppressed
-                || isVoiceStarting() || dictationActive || typelessInFlight
-                || (audioStreamer != null && audioStreamer.isRunning())) {
-            return;
-        }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            // 缺权限时保持安静；手动开启共享按钮会发起权限请求。
-            return;
-        }
-        Log.i("PhoneDeckShared", "电脑请求共享麦克风，自动开启：" + computerId);
-        showActionFeedback("●  电脑请求共享麦克风，正在开启…", theme.muted);
-        Intent start = new Intent(this, PhoneAudioService.class)
-                .setAction(PhoneAudioService.ACTION_START)
-                .putExtra(PhoneAudioService.EXTRA_LINKED, true);
-        try {
-            startForegroundService(start);
-        } catch (Exception exception) {
-            Log.w("PhoneDeckShared", "联动启动共享失败：" + exception.getMessage());
         }
     }
 
@@ -2937,6 +3199,8 @@ public final class MainActivity extends Activity {
                 showConnection(targetDisplayName + " · Wi-Fi 在线" + foregroundSuffix(),
                         theme.success);
             }
+            // M1-A A4：legacy-only 目标在线时提示一次升级（rotate 走 LAN 旧令牌通道）。
+            maybePromptCredentialUpgrade();
         } else if (isUsbTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
                 showConnection(targetDisplayName + " · 虚拟麦克风未就绪", theme.warning);
@@ -2962,6 +3226,22 @@ public final class MainActivity extends Activity {
                 + "。点击查看全部电脑");
         statusText.setTextColor(theme.text);
         statusDot.setBackground(roundRect(color, 20));
+        connectionCard.setBackground(theme.shape(
+                this, statusContainer(color), 16, 0, theme.outline));
+    }
+
+    /** 状态 chip 底色：按语义取容器色；8% 淡染在真机上不可辨识，验收已确认。 */
+    private int statusContainer(int semanticColor) {
+        if (semanticColor == theme.success) {
+            return theme.successContainer;
+        }
+        if (semanticColor == theme.warning) {
+            return theme.warningContainer;
+        }
+        if (semanticColor == theme.danger) {
+            return theme.dangerContainer;
+        }
+        return theme.surfaceRaised;
     }
 
     private void showActionFeedback(String message, int color) {
@@ -3081,9 +3361,6 @@ public final class MainActivity extends Activity {
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
-        if (agentSyncManager != null) {
-            agentSyncManager.shutdown();
-        }
         super.onDestroy();
     }
 

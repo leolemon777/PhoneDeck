@@ -12,6 +12,8 @@ internal sealed class UsbWatchdog : IDisposable
     private readonly Mutex mutex;
     private readonly bool ownsMutex;
     private Thread? worker;
+    private volatile bool enabled = true;
+    internal void SetEnabled(bool value) { enabled = value; if (value) Start(); }
 
     internal UsbWatchdog(string? configuredAdbPath)
     {
@@ -24,7 +26,7 @@ internal sealed class UsbWatchdog : IDisposable
     internal string? LastRestoredAt { get; private set; }
     internal int RestoreCount { get; private set; }
 
-    internal bool Running => worker?.IsAlive == true;
+    internal bool Running => enabled && worker?.IsAlive == true;
 
     internal void Start()
     {
@@ -60,7 +62,7 @@ internal sealed class UsbWatchdog : IDisposable
         {
             try
             {
-                CheckAndRestore();
+                if (enabled) CheckAndRestore();
             }
             catch (Exception exception)
             {

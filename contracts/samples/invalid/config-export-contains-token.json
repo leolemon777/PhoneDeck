@@ -1,0 +1,15 @@
+{
+  "schema": "phoneManagedSettingsExport",
+  "schemaVersion": 1,
+  "containsSecrets": false,
+  "computerId": "computer-placeholder-01",
+  "exportedAtMs": 200000,
+  "accessToken": "PLACEHOLDER-LEAKED-TOKEN",
+  "voice": {
+    "activeEngine": "typeless"
+  },
+  "connection": {
+    "usbWatchdog": true,
+    "lanDiscovery": false
+  }
+}

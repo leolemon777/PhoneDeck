@@ -1,0 +1,9 @@
+{
+  "schema": "phoneManagedSettings",
+  "schemaVersion": 99,
+  "computerId": "computer-placeholder-01",
+  "voiceRevision": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "connectionRevision": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "voice": { "activeEngine": "typeless" },
+  "connection": { "usbWatchdog": true, "lanDiscovery": false }
+}

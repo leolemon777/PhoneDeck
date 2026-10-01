@@ -29,6 +29,11 @@ final class DeckIconView extends View {
         canvas.translate((getWidth() - 24 * scale) / 2, (getHeight() - 24 * scale) / 2);
         canvas.scale(scale, scale);
         switch (kind) {
+            case "devices":
+                canvas.drawRoundRect(3, 4, 21, 16, 2, 2, paint);
+                canvas.drawLine(12, 16, 12, 20, paint);
+                canvas.drawLine(8, 20, 16, 20, paint);
+                break;
             case "appearance":
                 canvas.drawCircle(12, 12, 8, paint);
                 canvas.drawLine(12, 4, 12, 20, paint);

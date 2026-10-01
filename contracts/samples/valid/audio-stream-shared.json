@@ -1,0 +1,10 @@
+{
+  "endpoint": "/api/audio/stream",
+  "headers": {
+    "X-PhoneDeck-Audio": "pcm-s16le",
+    "X-PhoneDeck-Session": "22222222-2222-4222-8222-222222222222",
+    "X-PhoneDeck-Audio-Mode": "shared",
+    "X-PhoneDeck-Token": "PLACEHOLDER-LAN-TOKEN"
+  },
+  "audio": { "format": "pcm-s16le", "sampleRateHz": 48000, "channels": 1, "frameMs": 20 }
+}
