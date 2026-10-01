@@ -92,15 +92,20 @@ internal static class DesktopApp
             using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.Ui.html")!;
             using var reader = new StreamReader(resource); return Results.Content(reader.ReadToEnd(), "text/html", Encoding.UTF8);
         });
+        app.MapGet("/brand/yandu.svg", () =>
+        {
+            using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.Yandu.Icon.svg")!;
+            using var reader = new StreamReader(resource); return Results.Content(reader.ReadToEnd(), "image/svg+xml", Encoding.UTF8);
+        });
         app.MapGet("/api/health", () => Results.Ok(new
         {
             ok = true, name = "PhoneDeck", version = Version, protocolVersion = 2, computerId = identity.ComputerId, displayName = identity.DisplayName,
             platform = identity.Platform, architecture = identity.Architecture, capabilities = Capabilities,
             input = new { available = input.Available, backend = input.Backend },
-            audio = new { available = engine.Ready, streaming = speech.Streaming, sessionId = speech.StreamSession, mode = speech.Mode, device = "PhoneDeck 内置识别" },
+            audio = new { available = engine.Ready, streaming = speech.Streaming, sessionId = speech.StreamSession, mode = speech.Mode, device = "言渡 内置识别" },
             dictation = new { active = speech.Recording, sessionId = speech.RecordingSession },
             typeless = new { capturing = speech.Recording, virtualCableSelected = (bool?)null },
-            voiceEngine = new { id = "phonedeck-whisper", displayName = "PhoneDeck 本地语音", experimental = true, capturing = speech.Recording,
+            voiceEngine = new { id = "phonedeck-whisper", displayName = "言渡 本地语音", experimental = true, capturing = speech.Recording,
                 virtualCableSelected = (bool?)null, modes = new[] { new { id = "dictation", label = "听写", configured = engine.Ready, trigger = "toggle", keys = Array.Empty<string>() } } },
             shared = new { requested = false }
         }));

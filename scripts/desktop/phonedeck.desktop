@@ -1,6 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=PhoneDeck
+Name=Yandu
+Name[zh_CN]=言渡
 Comment=Local voice and synchronized final text
 Exec=/opt/phonedeck/PhoneDeck.Desktop
 Terminal=false

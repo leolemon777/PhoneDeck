@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-01 言渡名称与黑白话筒 APK 图标（最新）
+
+- 用户选定「言渡 · Yandu」，随后明确只要 Notion 风格的话筒 APK 图标。最终图标为原创暖白底、墨黑话筒与细框，无字母；墨水屏首页与圆形语音按钮仍是效果图，本轮未实施布局改版。
+- 工作树继续使用 `PhoneDeck-cross-platform`，独立分支 `agent/yandu-brand` 基于 `agent/cross-platform-release`。Android launcher、首页名称与相关显示文案、新 Desktop 控制页和安装菜单改用新品牌；程序集、包名、协议、配置和证书身份保留兼容。原工作树中的用户 WIP 未修改。
+- 图标母版 `design/yandu-icon.svg`，可选贡献者脚本 `scripts/branding/Build-YanduIcons.ps1`；提交五档日/夜 PNG、API 26 自适应与 API 33 单色图层，以及 1024 px 母版。Desktop favicon 直接嵌入同一 SVG。删除已无引用的旧大底板图片。
+- 新固定签名 APK 为 `com.codex.phonedeck.desktoppreview`、`2.0.0-alpha.1` / versionCode **2**，显示名「言渡」，不可调试。`apksigner` 的 v2 校验通过，新旧 APK 的证书 SHA-256 同为 `3c3567f23b1754c881276595d67330afbd208ccd396302aba8875e78342c1a2b`；可覆盖同渠道 code1。签名私钥没有进入 Git 或交付包，旧三产物更新版本未变。
+- **本地验证**：Android Debug 与 desktopPreview 构建、lint 通过，两个 lint 报告均为 0 error / 44 warning；既有 Android 单元测试 27/27，Desktop 测试 20/20，新 Desktop Release 编译 0 warning / 0 error。实际 APK 资源包含日/夜自适应、单色图层及新名称。
+- **交付**：ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code2-20261001`，包含新 APK、图标与来源/哈希记录。9 月 30 日四 OS 候选及草稿 Release 保留原字节与来源；当前未替换已发布产物。
+- **待办**：本轮未安装到手机；安装/覆盖升级后的 launcher 实际显示仍需真机确认。跨平台语音和输入的既有真机待办继续按 DESKTOP_ACCEPTANCE 执行，本轮品牌检查不替代这些验收。后续 UI 风格以用户最终选定方案另行实施。
+
 ## 2026-09-30 统一跨平台 Desktop alpha 与低配置候选（最新）
 
 - 用户授权执行Windows/Mac/Linux、点击/按住/电脑快捷键、最终文字同步与可下载分发；随后确定内置开源识别、首次下载模型。新增独立Desktop `2.0.0-alpha.1`，源码在 `work/phone-deck/desktop`，不修改旧外部输入法链路及固定三产物更新协议。

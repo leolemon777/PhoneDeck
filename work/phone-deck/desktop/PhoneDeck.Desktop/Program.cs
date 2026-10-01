@@ -13,7 +13,7 @@ if (args.Contains("--toggle") || args.Contains("--start") || args.Contains("--st
     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
     var action = args.Contains("--toggle") ? "toggle" : args.Contains("--start") ? "start" : "stop";
     try { using var result = await http.PostAsync("http://127.0.0.1:8765/local/dictation/" + action, null); result.EnsureSuccessStatusCode(); }
-    catch (HttpRequestException) { Console.Error.WriteLine("请先启动 PhoneDeck Desktop，并在手机开启共享麦克风"); Environment.ExitCode = 1; }
+    catch (HttpRequestException) { Console.Error.WriteLine("请先启动言渡 Yandu，并在手机开启共享麦克风"); Environment.ExitCode = 1; }
     return;
 }
 
@@ -31,6 +31,6 @@ try
 }
 catch (Exception e) when (e is IOException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
 {
-    Console.Error.WriteLine("启动未完成：请检查是否已有 PhoneDeck 接收端运行，以及数据目录是否可写。");
+    Console.Error.WriteLine("启动未完成：请检查是否已有言渡接收端运行，以及数据目录是否可写。");
     Environment.ExitCode = 1;
 }

@@ -1,7 +1,7 @@
 name: Cross-platform Desktop Preview
 on:
   pull_request:
-    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
+    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','design/yandu-icon.svg','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
   workflow_dispatch:
     inputs:
       include_model:

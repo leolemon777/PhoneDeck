@@ -147,7 +147,7 @@ public final class SettingsActivity extends Activity {
         updateSummary.setText("一次发起，逐台查看结果");
         page.addView(navRow("↻", "设备更新", updateSummary,
                 () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(8)));
-        TextView privacy = text("PhoneDeck · 本地连接\n手机音频默认不保存；转写由电脑本地语音引擎或已选输入法处理。", 12, theme.muted, Typeface.NORMAL);
+        TextView privacy = text(getString(R.string.brand_name) + " · Yandu · 本地连接\n手机音频默认不保存；转写由电脑本地语音引擎或已选输入法处理。", 12, theme.muted, Typeface.NORMAL);
         privacy.setLineSpacing(dp(4), 1f);
         page.addView(privacy, topMargin(dp(24)));
         return wrapInScroll(page);

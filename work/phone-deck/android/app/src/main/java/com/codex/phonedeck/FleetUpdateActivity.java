@@ -349,7 +349,7 @@ public final class FleetUpdateActivity extends Activity {
             if (release == null) throw new IOException("请先检查更新");
             validateApk();
             if (!getPackageManager().canRequestPackageInstalls()) {
-                show("这台手机", "请允许 PhoneDeck 安装应用，返回后点击「安装手机更新」");
+                show("这台手机", "请允许" + getString(R.string.brand_name) + "安装应用，返回后点击「安装手机更新」");
                 startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()))); return;
             }
             Intent intent = new Intent(Intent.ACTION_VIEW);
