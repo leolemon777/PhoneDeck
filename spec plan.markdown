@@ -16,7 +16,7 @@
 
 Mac快捷键由内置原生helper在主线程接收，退出及父进程异常结束时释放；CI检查事件循环存活，物理操作仍由所有者验收。各桌面包同时提供外置build.json与SHA256，Mac清单记录签名后最终字节，不把签名前文件哈希当成签名后证据。
 
-四OS轻量包、Windows完整模型包与固定签名APK已汇总为候选；Desktop CI36747907856和旧回归CI36747907695全绿，下载后再次核对归档哈希和权限。GitHub维护者发布草稿仅供当前验收，未公开正式Release。工件固定来源d33373e及源码树相同的PR合并快照b57105f；具体来源与验收边界见CROSS_PLATFORM_EXECUTION和候选verification.json。
+四OS轻量包、Windows完整模型包与固定签名APK已汇总为候选；Desktop CI36752538026和旧回归CI36752538028全绿，下载后再次核对归档哈希和权限。GitHub维护者发布草稿仅供当前验收，未公开正式Release。工件固定来源e46ca69及源码树相同的PR合并快照23dfa4a；具体来源与验收边界见CROSS_PLATFORM_EXECUTION和候选verification.json。
 
 ## 2026-09-30 M0/M1 执行进度快照（最新）
 

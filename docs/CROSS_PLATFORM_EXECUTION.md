@@ -31,10 +31,10 @@
 
 | 范围 | 证据 | 实际证明的边界 |
 |---|---|---|
-| 新 Desktop | 16/16；真实 Kestrel HTTPS、凭据/权限范围、目标、撤销、同源限制、结果隔离、去重、30分钟期限、会话中断 | 协议和状态机；自动化中不向用户输入框注入 |
+| 新 Desktop | 20/20；真实 Kestrel HTTPS、凭据/权限范围、目标、撤销、同源限制、结果隔离、去重、30分钟期限、会话中断 | 协议和状态机；自动化中不向用户输入框注入 |
 | 旧接收端 | Windows 144/144、Mac 23/23；既有 PhoneDeck CI 全绿 | 旧路径回归；不替代 Mac 真机 |
 | Android | Debug/uiPreview 构建、lint、27项单元测试；独立 desktopPreview 构建/lint及APK签名核验 | Java实现与可安装候选；测试渠道和分发渠道分别保管签名 |
-| 四种桌面包 | [CI 36747907856](https://github.com/leolemon777/PhoneDeck/actions/runs/36747907856)：Windows x64、Ubuntu22.04 x64、Mac Intel/Apple Silicon 全部通过16项测试、原生构建、真实公开样本识别、自包含打包、归档逐文件哈希/执行权限；两个Mac均通过原生热键事件循环初始化/存活 | 对应OS运行组件真实可执行；不证明桌面权限、焦点输入或真实麦克风表现；Linux arm64仅有原生构建入口 |
+| 四种桌面包 | [CI 36752538026](https://github.com/leolemon777/PhoneDeck/actions/runs/36752538026)：Windows x64、Ubuntu22.04 x64、Mac Intel/Apple Silicon 全部通过20项测试、原生构建、真实公开样本识别、自包含打包、归档逐文件哈希/执行权限；两个Mac均通过原生热键事件循环初始化/存活 | 对应OS运行组件真实可执行；不证明桌面权限、焦点输入或真实麦克风表现；Linux arm64仅有原生构建入口 |
 | Windows + Samsung | SM-G9880 经 adb 反向TLS连接两个隔离Windows接收端；公开JFK样本；6份结果双向同步，GUID/来源/会话/文字相同；重复轮询不重复、不回传导入结果 | 真实手机中继、内置识别及Windows协议；两个接收端在同一台物理电脑，未调用麦克风 |
 | Windows入口 | 真实浏览器点击、指针按住、键盘按住；原生Ctrl+Alt+Space与Ctrl+Alt+V；所有结果经手机同步 | Windows入口共用真实识别链路；验收使用history-only保护用户输入焦点 |
 | 控制页 | Chromium浅色/深色、390px窄屏无横向溢出、二维码显隐、结果HTML按纯文字呈现、无JS错误 | 桌面控制页；不替代真实手机相机扫码 |
@@ -49,6 +49,6 @@ Mac原生快捷键helper在OS主线程运行应用事件循环，CI检查初始�
 
 ### 已准备的候选文件
 
-本地 `outputs/preview-delivery/PhoneDeck-2.0.0-alpha.1-candidate-20260930` 汇总四种桌面轻量包、Windows完整模型安装包/ZIP、固定签名Android APK、快速开始/真机清单/许可说明和SHA256。维护者[发布草稿](https://github.com/leolemon777/PhoneDeck/releases/tag/untagged-15cdabfbbb1d478a8a43)用于回Mac下载验收，尚未公开发布。
+本地 `outputs/preview-delivery/PhoneDeck-2.0.0-alpha.1-safe-voice-20260930` 汇总四种桌面轻量包、Windows完整模型安装包/ZIP、固定签名Android APK、快速开始/真机清单/许可说明和SHA256。维护者[发布草稿](https://github.com/leolemon777/PhoneDeck/releases/tag/untagged-15cdabfbbb1d478a8a43)用于回Mac下载验收，尚未公开发布。
 
-候选评审源码为 `d33373eaeded508818b5ba7b956eb48ddd1087a3`；本地Windows完整包与APK从该源码生成。PR CI实际使用临时合并提交 `b57105faa7f3be7f26916ecee73d244e5d6e87a9`，两者Git源码树经GitHub API核对同为 `79353e15f2cd3e95ebe41ff17278c1b8e7497f2f`。保留各自真实build-manifest来源，不把合并提交伪写成分支head。下载后已重新验证各归档及清单，汇总 `verification.json` 记录范围。既有[回归CI 36747907695](https://github.com/leolemon777/PhoneDeck/actions/runs/36747907695)也全绿。后续交接文档提交不会改动这批固定来源工件。
+候选评审源码为 `e46ca69769274db5b02fc96ddd72e026a5db7ac4`；本地Windows完整包与APK从该源码生成。PR CI实际使用临时合并提交 `23dfa4ab078346a1be31b98bdd9e357635e2076c`，两者Git源码树经GitHub API核对同为 `27587fc129257372fa2ec1447b39b9aa95701023`。保留各自真实build-manifest来源，不把合并提交伪写成分支head。下载后已重新验证各归档及清单，汇总 `verification.json` 记录范围。既有[回归CI 36752538028](https://github.com/leolemon777/PhoneDeck/actions/runs/36752538028)也全绿。后续交接文档提交不会改动这批固定来源工件。
