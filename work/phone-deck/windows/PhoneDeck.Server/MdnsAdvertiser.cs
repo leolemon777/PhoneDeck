@@ -52,13 +52,13 @@ internal sealed class MdnsAdvertiser : IDisposable
         return cleaned.Length > 63 ? cleaned[..63] : cleaned;
     }
 
-    internal void Start(ReceiverIdentity identity, int httpsPort)
+    internal void Start(ReceiverIdentity identity, int httpsPort, string[]? capabilities = null)
     {
         Stop();
         try
         {
             var fields = BuildTxtFields(
-                identity.ComputerId, identity.DisplayName, identity.Platform, httpsPort);
+                identity.ComputerId, identity.DisplayName, identity.Platform, httpsPort, capabilities);
             var profile = new ServiceProfile(
                 SanitizeInstanceName(identity.ComputerId),
                 ServiceName,

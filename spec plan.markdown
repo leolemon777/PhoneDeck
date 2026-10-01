@@ -6,6 +6,18 @@
 > 总体规划更新：2026-09-10
 > 文档用途：作为 PhoneDeck 后续产品设计、技术实现、验收和讨论的唯一长期计划文档。
 
+## 2026-09-30 用户授权：跨平台、最终文字同步与低配置安装
+
+用户要求执行 Windows/macOS/Linux 多电脑、统一输入法与三种入口（按住、点击、各电脑快捷键），并在电脑提交后同步最终文字，供 GitHub 用户下载使用，尽量减少配置。Linux 从原暂缓范围移入本轮；旧档位定义不自动覆盖本轮新增平台。执行记录见 docs/CROSS_PLATFORM_EXECUTION.md。
+
+用户已选定默认内置开源识别、首次下载模型，无需安装输入法和虚拟声卡。来源电脑仅在用户开启该段且焦点未变化时自动填入；其他共享组电脑保留同一份临时结果，任何听写不自动回车。现有 Typeless 路径保留。
+
+本轮新增Desktop `2.0.0-alpha.1`、Android独立 `com.codex.phonedeck.desktoppreview` 固定签名渠道（versionCode1），不进入旧签名设备更新清单。Windows/Mac Intel/Mac ARM/Linux x64 CI已完成协议、原生识别公开样本与打包；Windows+Samsung已验证6份结果双向同步及点击/按住/电脑快捷键。Mac由用户回到电脑后自行验收；Linux SSH别名/密钥在当前机器缺失，未接入执行机。真实麦克风、焦点输入、相机扫码/实网发现、不同物理电脑和干净安装仍待验收，不代表立即公开正式Release。步骤见 docs/DESKTOP_ACCEPTANCE.md。
+
+Mac快捷键由内置原生helper在主线程接收，退出及父进程异常结束时释放；CI检查事件循环存活，物理操作仍由所有者验收。各桌面包同时提供外置build.json与SHA256，Mac清单记录签名后最终字节，不把签名前文件哈希当成签名后证据。
+
+四OS轻量包、Windows完整模型包与固定签名APK已汇总为候选；Desktop CI36752538026和旧回归CI36752538028全绿，下载后再次核对归档哈希和权限。GitHub维护者发布草稿仅供当前验收，未公开正式Release。工件固定来源e46ca69及源码树相同的PR合并快照23dfa4a；具体来源与验收边界见CROSS_PLATFORM_EXECUTION和候选verification.json。
+
 ## 2026-09-30 M0/M1 执行进度快照（最新）
 
 本节是第 0 章路线对实际执行状态的对账快照（依据 docs/HANDOFF.md 各批次记录与 PR #24），

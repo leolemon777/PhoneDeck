@@ -214,6 +214,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        TranscriptRelay.acquire(this);
         theme = PhoneDeckTheme.load(this);
         appliedThemeId = theme.id;
         theme.applyWindow(this);
@@ -1724,6 +1725,10 @@ public final class MainActivity extends Activity {
         return usbConnected && sameComputer(targetComputerId, usbComputerId);
     }
 
+    private boolean isDesktopPreviewChannel() {
+        return "com.codex.phonedeck.desktoppreview".equals(getPackageName());
+    }
+
     private boolean isBluetoothTargetOnline() {
         return bluetoothConnected && bluetoothTransport != null
                 && bluetoothTransport.isConnected()
@@ -1766,7 +1771,8 @@ public final class MainActivity extends Activity {
         if (lanStatus != null && lanStatus.engineName != null) {
             return lanStatus.engineName;
         }
-        return isUsbTargetOnline() && usbEngineName != null ? usbEngineName : "语音引擎";
+        return isUsbTargetOnline() && usbEngineName != null ? usbEngineName
+                : isDesktopPreviewChannel() ? "内置识别" : "语音引擎";
     }
 
     private boolean activeManagedDictationSupported() {
@@ -1944,6 +1950,9 @@ public final class MainActivity extends Activity {
     }
 
     private void prepareBluetooth() {
+        // This standalone channel starts with QR + TLS. Optional legacy transport permissions
+        // must not interrupt first use or attach the new app to an unrelated old USB receiver.
+        if (isDesktopPreviewChannel()) return;
         bluetoothTransport = new BluetoothTransport(this, (connected, detail) -> mainHandler.post(() -> {
             bluetoothConnected = connected;
             bluetoothDetail = detail;
@@ -1974,6 +1983,7 @@ public final class MainActivity extends Activity {
     }
 
     private void testConnection() {
+        if (isDesktopPreviewChannel()) return;
         if (!usbConnected && !bluetoothConnected && lanTargets.isEmpty()) {
             showConnection("正在检测电脑端…", theme.muted);
         }
@@ -2715,8 +2725,9 @@ public final class MainActivity extends Activity {
             if (targetComputerId != null && Boolean.TRUE.equals(
                     lanPairingRejected.get(targetComputerId))) {
                 showConnection(targetDisplayName + " · 需要重新配对", theme.warning);
-                showActionFeedback("✕  配对已失效；用 USB 连接 " + targetDisplayName
-                        + " 一次即可自动修复", theme.danger);
+                showActionFeedback(isDesktopPreviewChannel()
+                        ? "✕  配对已失效，请重新扫描电脑二维码"
+                        : "✕  配对已失效；用 USB 连接 " + targetDisplayName + " 一次即可自动修复", theme.danger);
             } else if (isBluetoothTargetOnline()) {
                 showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
                 showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；请连接 Wi-Fi 或 USB",
@@ -2730,11 +2741,15 @@ public final class MainActivity extends Activity {
             return;
         }
         if (!activePhoneAudioAvailable()) {
-            showConnection(targetDisplayName + " · 虚拟麦克风未就绪", theme.warning);
-            showActionFeedback("✕  电脑未检测到 VB-CABLE，未启动语音输入", theme.danger);
+            showConnection(targetDisplayName + (isDesktopPreviewChannel()
+                    ? " · 语音模型未就绪" : " · 虚拟麦克风未就绪"), theme.warning);
+            showActionFeedback(isDesktopPreviewChannel()
+                    ? "✕  请先在电脑下载语音模型并等待就绪"
+                    : "✕  电脑未检测到 VB-CABLE，未启动语音输入", theme.danger);
             microphoneLevel.setText("手机麦克风  ○ 未启动");
             microphoneLevel.setTextColor(theme.muted);
             testConnection();
+            if (isDesktopPreviewChannel()) testLanConnections();
             return;
         }
         // 引擎无可读配置时（virtualCableSelected 为 null）不阻断：
@@ -2881,7 +2896,7 @@ public final class MainActivity extends Activity {
                     }
                     showConnection(transport + " 已连接", theme.success);
                     showActionFeedback(starting
-                                    ? "✓  Typeless 正在使用手机麦克风听写 · " + transport
+                                    ? "✓  " + activeEngineName() + " 正在使用手机麦克风听写 · " + transport
                                     : "✓  听写已停止 · 请在电脑确认文字 · " + transport,
                             theme.success);
                     performResultHaptic(typelessButton, true);
@@ -2910,7 +2925,7 @@ public final class MainActivity extends Activity {
                     disarmVoiceStartWatchdog();
                     holdReleasePending = false;
                     clearVoiceSessionState();
-                    showConnection("Typeless 指令发送失败", theme.danger);
+                    showConnection("语音指令发送失败", theme.danger);
                     showActionFeedback("✕  电脑没有确认，请检查 Wi-Fi/USB 连接后重试", theme.danger);
                     performResultHaptic(typelessButton, false);
                     flashResult(typelessButton, theme.danger);
@@ -2940,8 +2955,8 @@ public final class MainActivity extends Activity {
             clearVoiceSessionState();
             microphoneLevel.setText("手机麦克风  ✕ 启动超时");
             microphoneLevel.setTextColor(theme.danger);
-            showConnection("Typeless 启动超时", theme.danger);
-            showActionFeedback("✕  Typeless 长时间没有确认，已自动取消，请重试",
+            showConnection("语音启动超时", theme.danger);
+            showActionFeedback("✕  语音引擎长时间没有确认，已自动取消，请重试",
                     theme.danger);
             performResultHaptic(typelessButton, false);
             flashResult(typelessButton, theme.danger);
@@ -2981,7 +2996,7 @@ public final class MainActivity extends Activity {
         body.put("mode", currentSessionMode == null ? "dictation" : currentSessionMode);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
         if (!postEndpointWithRetry(sessionEndpoint, endpoint, body, 2)) {
-            throw new IllegalStateException("电脑端未确认 Typeless 会话");
+            throw new IllegalStateException("电脑端未确认语音会话");
         }
         return sessionEndpoint.label;
     }
@@ -3192,7 +3207,8 @@ public final class MainActivity extends Activity {
     private void updateConnectionDisplay() {
         if (isLanTargetOnline()) {
             if (!activePhoneAudioAvailable()) {
-                showConnection(targetDisplayName + " · Wi-Fi · 虚拟麦克风未就绪", theme.warning);
+                showConnection(targetDisplayName + (isDesktopPreviewChannel()
+                        ? " · 语音模型未就绪，请在电脑下载" : " · Wi-Fi · 虚拟麦克风未就绪"), theme.warning);
             } else if (Boolean.FALSE.equals(activeTypelessVirtualCableSelected())) {
                 showConnection(targetDisplayName + " · Wi-Fi · 麦克风未配置", theme.warning);
             } else {
@@ -3215,7 +3231,7 @@ public final class MainActivity extends Activity {
         } else if (targetComputerId != null) {
             showConnection(targetDisplayName + " · 当前离线", theme.muted);
         } else {
-            showConnection("等待电脑连接", theme.muted);
+            showConnection(isDesktopPreviewChannel() ? "点击这里扫码连接电脑" : "等待电脑连接", theme.muted);
         }
     }
 
@@ -3340,6 +3356,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
         if (sharedStatusReceiverRegistered) {
             unregisterReceiver(sharedStatusReceiver);

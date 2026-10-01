@@ -1,5 +1,13 @@
 # PhoneDeck 架构说明
 
+## 2026-09-30 新增统一 Desktop 接收端（alpha）
+
+`desktop/PhoneDeck.Desktop` 使用 .NET 10/Kestrel，内嵌本机控制页；HTTP 仅回环，HTTPS 局域网入口沿用逐手机 Bearer、证书固定与扫码双端确认。身份/授权目录独立于旧接收端。受控输入通过 Windows SendInput、macOS CGEvent 或 Linux X11/Wayland 固定输入工具，不接受命令行程序、脚本或任意 shell。
+
+手机 managed start/stop 与共享 PCM 上的电脑本机按键，共用 `SpeechSession`。音频48k PCM16 mono仅在内存中，单段最多两分钟；停止需先收完 PCM，异常/撤销/超时取消；迟到启动由停止墓碑拒绝。Whisper 子进程只收到内存 WAV stdin，最终文本收集完后发布一次。固定 v1.9.4 与模型哈希；Windows 构建增加独立 UTF-8 参数入口以支持中文安装/用户目录，上游源码保持原样。
+
+结果携带 `resultId/sourceComputerId/sessionId/text/createdUtc`，每端内存上限100条、30分钟。`GET /api/transcripts` 只返回供音手机名下、本机新生成的结果；`POST /api/transcripts/receive` 只接收已授权手机的去重结果，接收的记录不会再次对外中继。Android `TranscriptRelay` 显式开启，按共享组转发、离线重试，不存储音频或转写文件。撤销授权只取消对应手机，处理过程中撤销也不会产生文字。源电脑可在焦点仍相同且修饰键已松开时填入文本；被同步的电脑只保留记录。
+
 ## 当前实现与目标架构的边界
 
 源码基线：Android 1.6.0-dev.20 / Windows 接收端 1.6.0-dev.15 /

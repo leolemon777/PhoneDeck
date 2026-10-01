@@ -2,7 +2,9 @@ plugins {
     id "com.android.application"
 }
 
-def phoneDeckSigningPropertiesFile = rootProject.file("../signing/signing.properties")
+def phoneDeckSigningPropertiesPath = System.getenv("PHONEDECK_SIGNING_PROPERTIES")
+def phoneDeckSigningPropertiesFile = phoneDeckSigningPropertiesPath
+        ? new File(phoneDeckSigningPropertiesPath) : rootProject.file("../signing/signing.properties")
 def phoneDeckSigningProperties = new Properties()
 def hasPhoneDeckSigning = phoneDeckSigningPropertiesFile.exists()
 
@@ -33,7 +35,8 @@ android {
     signingConfigs {
         if (hasPhoneDeckSigning) {
             phoneDeck {
-                storeFile rootProject.file("../signing/${phoneDeckSigningProperties["storeFile"]}")
+                storeFile new File(phoneDeckSigningPropertiesFile.parentFile,
+                        phoneDeckSigningProperties["storeFile"])
                 storePassword phoneDeckSigningProperties["storePassword"]
                 keyAlias phoneDeckSigningProperties["keyAlias"]
                 keyPassword phoneDeckSigningProperties["keyPassword"]
@@ -64,6 +67,16 @@ android {
             signingConfig signingConfigs.debug
             resValue "string", "app_name", "Luma"
         }
+
+        // Stable owner-signed candidate, separate from both legacy fleet updates and ADB UI fixtures.
+        desktopPreview {
+            initWith release
+            applicationIdSuffix ".desktoppreview"
+            versionNameSuffix ""
+            debuggable false
+            resValue "string", "app_name", "Luma Preview"
+            matchingFallbacks = ["release"]
+        }
     }
 
     lint {
@@ -72,10 +85,29 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().withBuildType("desktopPreview")) { variant ->
+        variant.outputs.each { output ->
+            output.versionName.set("2.0.0-alpha.1")
+            output.versionCode.set(1)
+        }
+    }
+}
+
 dependencies {
     testImplementation "junit:junit:4.13.2"
     // M1-A A3：扫码配对（zxing-android-embedded，Apache-2.0，含核心解码库）。
     implementation "com.journeyapps:zxing-android-embedded:4.3.0"
+}
+
+tasks.configureEach {
+    if (name == "packageDesktopPreview") {
+        doFirst {
+            if (!hasPhoneDeckSigning) {
+                throw new GradleException("Desktop preview distribution requires the owner's fixed signing.properties. Use uiPreview for development only.")
+            }
+        }
+    }
 }
 
 // Gradle's Windows test worker can lose loose .class directories when the
