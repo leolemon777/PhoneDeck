@@ -28,7 +28,7 @@ final class ShortcutKeyView extends FrameLayout {
                 context,
                 theme.shortcutColor(config.color),
                 theme.shortcutPressedColor(config.color),
-                12));
+                8, 1, theme.outline));
         setElevation(0);
 
         content = new LinearLayout(context);

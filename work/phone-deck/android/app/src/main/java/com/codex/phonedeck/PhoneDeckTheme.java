@@ -12,15 +12,15 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-/// 主题仓库：Console v2 语义令牌，仅简洁浅/深两套（用户已确认方向）。
+/// 墨水屏外观的语义令牌：暖纸浅色与反转深色，沿用原主题 ID。
 /// 槽位分四组：
 /// - 底面：background / surface / surfaceRaised（凹陷与按压）/ key（键帽）/ voiceDock / outline；
 /// - 内容：text / muted；
 /// - 品牌：primary（交互填充）/ primaryPressed / onPrimary / accent（仅文字与焦点）/
 ///   primaryContainer / onPrimaryContainer（选中容器）；
-/// - 状态：live / onLive（"正在采音"专用红，与错误 danger 分离）及
+/// - 状态：live / onLive（"正在采音"的墨色，与错误 danger 分离）及
 ///   success / warning / danger 的容器色。
-/// 设计令牌数值与 docs/UI_REDESIGN.md §4 一致，对比度实测全部 ≥4.5:1。
+/// 当前外观及验证记录见 docs/UI_REFRESH.md。
 final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";
@@ -255,7 +255,13 @@ final class PhoneDeckTheme {
     /// 比整块变色更接近系统应用的手感（minSdk 26，RippleDrawable 可用）。
     android.graphics.drawable.Drawable pressable(
             Context context, int normalColor, int pressedColor, int radiusDp) {
-        GradientDrawable content = shape(context, normalColor, radiusDp);
+        return pressable(context, normalColor, pressedColor, radiusDp, 0, Color.TRANSPARENT);
+    }
+
+    android.graphics.drawable.Drawable pressable(
+            Context context, int normalColor, int pressedColor, int radiusDp,
+            int strokeWidthDp, int strokeColor) {
+        GradientDrawable content = shape(context, normalColor, radiusDp, strokeWidthDp, strokeColor);
         return new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(withAlpha(pressedColor, 170)),
                 content,
@@ -282,30 +288,30 @@ final class PhoneDeckTheme {
     private static PhoneDeckTheme nativeTheme(boolean light) {
         return new PhoneDeckTheme(
                 light ? NATIVE_LIGHT : NATIVE_DARK,
-                light ? "简洁 · 浅色" : "简洁 · 深色",
-                light ? "清晰留白，蓝色强调" : "柔和深灰，舒适低光",
+                light ? "墨水屏 · 暖白" : "墨水屏 · 深色",
+                light ? "暖白纸面，墨黑线条" : "柔和墨底，暖白文字",
                 light,
-                Color.parseColor(light ? "#F0F2F5" : "#121316"),
-                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"),
-                Color.parseColor(light ? "#F5F7FA" : "#14161B"),
-                Color.parseColor(light ? "#FFFFFF" : "#22262E"),
-                Color.parseColor(light ? "#FFFFFF" : "#1B1E24"),
-                Color.parseColor(light ? "#E1E5EB" : "#343B48"),
-                Color.parseColor(light ? "#18202D" : "#F0F2F6"),
-                Color.parseColor(light ? "#626D7C" : "#A7B0C0"),
-                Color.parseColor(light ? "#2E5BD7" : "#5B8DEF"),
-                Color.parseColor(light ? "#204CAA" : "#7BA1F2"),
-                Color.parseColor(light ? "#FFFFFF" : "#101725"),
-                Color.parseColor(light ? "#285ED4" : "#A9C7FF"),
-                Color.parseColor(light ? "#E7EDFB" : "#2A3560"),
-                Color.parseColor(light ? "#23408F" : "#D6E2FF"),
-                Color.parseColor(light ? "#C22B3B" : "#FF6369"),
-                Color.parseColor(light ? "#FFFFFF" : "#20090C"),
-                Color.parseColor(light ? "#157347" : "#79D2A3"),
-                Color.parseColor(light ? "#E3F3EA" : "#1D2B24"),
-                Color.parseColor(light ? "#8A5B0A" : "#EAC078"),
-                Color.parseColor(light ? "#FBF1DF" : "#33290F"),
-                Color.parseColor(light ? "#BA3044" : "#FFA0AA"),
-                Color.parseColor(light ? "#FBE7EA" : "#38181E"));
+                Color.parseColor(light ? "#F5F3EE" : "#1F1E1B"),
+                Color.parseColor(light ? "#FAF9F6" : "#292824"),
+                Color.parseColor(light ? "#E9E6DF" : "#34322D"),
+                Color.parseColor(light ? "#FAF9F6" : "#292824"),
+                Color.parseColor(light ? "#FAF9F6" : "#292824"),
+                Color.parseColor(light ? "#D1CCC2" : "#4C4941"),
+                Color.parseColor(light ? "#242320" : "#F4F1EA"),
+                Color.parseColor(light ? "#69665F" : "#B6B1A6"),
+                Color.parseColor(light ? "#242320" : "#F1EDE4"),
+                Color.parseColor(light ? "#42403A" : "#D3CEC3"),
+                Color.parseColor(light ? "#F9F7F2" : "#242320"),
+                Color.parseColor(light ? "#242320" : "#F1EDE4"),
+                Color.parseColor(light ? "#E7E3DA" : "#38362F"),
+                Color.parseColor(light ? "#242320" : "#F2EEE7"),
+                Color.parseColor(light ? "#242320" : "#F1EDE4"),
+                Color.parseColor(light ? "#F9F7F2" : "#242320"),
+                Color.parseColor(light ? "#474640" : "#C5C3B9"),
+                Color.parseColor(light ? "#EAE8E1" : "#35342F"),
+                Color.parseColor(light ? "#625E56" : "#D3C9B6"),
+                Color.parseColor(light ? "#EDE9E1" : "#36332C"),
+                Color.parseColor(light ? "#8E3535" : "#E7A49E"),
+                Color.parseColor(light ? "#F0E5E0" : "#3B2C28"));
     }
 }

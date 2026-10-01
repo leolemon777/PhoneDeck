@@ -1,5 +1,9 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-01 墨水屏外观 APK code3
+
+当前 Android 固定签名外观候选为 `Yandu-2.0.0-alpha.1-code3-ink-android.apk`，原 `.desktoppreview` 包名、签名和版本名不变，versionCode 为 3。代码实施暖白/墨黑配色、深色版本和圆形语音按钮，使用同一 `assembleDesktopPreview / lintDesktopPreview` 构建入口。覆盖安装用 `adb install -r`，保留应用数据；code2 的图标包及其验证记录仍保留原字节。具体外观和真机范围见 UI_REFRESH。
+
 ## 2026-10-01 言渡品牌与 APK code2
 
 新 Android 候选显示名称为「言渡」，使用黑白话筒图标；固定分发渠道的 versionCode 从 1 增至 2，versionName 保持 `2.0.0-alpha.1`，文件名为 `Yandu-2.0.0-alpha.1-code2-android.apk`。仍使用原 `.desktoppreview` 包名和同一长期签名配置，可覆盖同签名的 code1 包。图标原生 XML/PNG 已提交，各 OS 的 Android 构建无需安装图形生成工具；可选重绘脚本和母版见 [BRANDING.md](BRANDING.md)。9 月 30 日固定候选与草稿 Release 保留原来源，不用新 APK 覆盖旧候选的校验记录。

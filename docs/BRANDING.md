@@ -1,12 +1,12 @@
 # 言渡 · Yandu
 
-2026-10-01：用户确认名称「言渡 · Yandu」，随后指定 APK 图标采用 Notion 风格的黑白话筒。本轮落实名称与图标；墨水屏首页、圆形语音按钮仍是设计效果图。
+2026-10-01：用户确认名称「言渡 · Yandu」，指定 APK 图标采用 Notion 风格的黑白话筒。code2 落实名称与图标；随后根据用户反馈，code3 进一步落实暖白/墨黑的墨水屏配色与圆形话筒入口，见 [UI_REFRESH.md](UI_REFRESH.md)。
 
 ## 显示名称与升级
 
 Android launcher、首页、设置说明、共享麦克风通知及新 Desktop 控制页使用「言渡」。Desktop 的副标题为「Yandu · 多设备语音输入」，桌面安装菜单显示新名称。
 
-Android 的固定签名分发渠道仍为 `com.codex.phonedeck.desktoppreview`，versionName 为 `2.0.0-alpha.1`，versionCode 从 1 增至 2；新包可覆盖同签名的上一预览包。「言渡 UI 预览」是独立开发渠道。
+Android 的固定签名分发渠道仍为 `com.codex.phonedeck.desktoppreview`，versionName 为 `2.0.0-alpha.1`，当前 versionCode 为 3（code2 为图标改名版）；可覆盖同签名的 code1/code2。「言渡 UI 预览」是独立开发渠道。
 
 PhoneDeck 的包名、协议名、偏好键、证书、数据目录、程序集和执行文件名作为兼容标识继续使用，避免改名产生新设备身份或丢失配对。GitHub 仓库当前仍为 PhoneDeck。旧接收端和旧固定三产物更新的版本没有更改。
 

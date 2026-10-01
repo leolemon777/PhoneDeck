@@ -1,5 +1,7 @@
 # PhoneDeck 界面重设计方案（Console v2）
 
+> 2026-10-01：当前外观改为言渡墨水屏配色和圆形话筒入口，见 [UI_REFRESH.md](UI_REFRESH.md)。本页保留原 Console v2 的设计背景和实施记录，旧颜色及长按钮尺寸不再是当前默认。
+
 > 版本 1.1 · 日期 2026-09-29 · 状态：**P1 部分已实施**（见文末实施记录），P2 待做。
 > 依据：浅色截图视觉分析、`docs/UI_REFRESH.md`、`PhoneDeckTheme.java`、`MainActivity.createInterface()`
 > 及 `updateVoiceControls()` 实读、`OPEN_SOURCE_RELEASE_SPEC.md` §11（UI-01…UI-04）与 AGENTS.md 行为约束。
