@@ -120,7 +120,18 @@ public final class SettingsActivity extends Activity {
         LinearLayout page = pageShell();
         addHeader(page, "设置", view -> finish());
 
-        page.addView(text("按你的习惯，调整控制台", 14, theme.muted, Typeface.NORMAL), topMargin(dp(12)));
+        LinearLayout introduction = new LinearLayout(this);
+        introduction.setOrientation(LinearLayout.VERTICAL);
+        introduction.setPadding(dp(20), dp(20), dp(20), dp(20));
+        introduction.setBackground(theme.shape(this, theme.workspacePanel(), 24));
+        TextView eyebrow = text("MAKE IT YOURS", 10, theme.workspaceMuted(), Typeface.BOLD);
+        eyebrow.setLetterSpacing(0.14f);
+        introduction.addView(eyebrow);
+        introduction.addView(text("你的工作台，\n你的节奏。", 25,
+                theme.workspaceInk(), Typeface.BOLD), topMargin(dp(10)));
+        introduction.addView(text("外观、说话方式与每一台电脑", 12,
+                theme.workspaceMuted(), Typeface.NORMAL), topMargin(dp(10)));
+        page.addView(introduction, fullWidthMargins(dp(20)));
         page.addView(sectionLabel("使用偏好"), topMargin(dp(24)));
 
         themeSummary = summaryText();
@@ -403,9 +414,9 @@ public final class SettingsActivity extends Activity {
     private LinearLayout navRow(String glyph, String title, TextView summary, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(16), dp(16), dp(16));
-        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 10, 1, theme.outline));
-        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(32), dp(32)));
+        row.setPadding(dp(14), dp(15), dp(14), dp(15));
+        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 20));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(42), dp(42)));
         row.setFocusable(true);
 
         LinearLayout copy = new LinearLayout(this);
@@ -434,6 +445,7 @@ public final class SettingsActivity extends Activity {
     private LinearLayout iconTile(String glyph) {
         LinearLayout tile = new LinearLayout(this);
         tile.setGravity(Gravity.CENTER);
+        tile.setBackground(theme.shape(this, theme.primaryContainer, 13));
         tile.addView(new DeckIconView(this, glyph, theme.primary),
                 new LinearLayout.LayoutParams(dp(24), dp(24)));
         return tile;

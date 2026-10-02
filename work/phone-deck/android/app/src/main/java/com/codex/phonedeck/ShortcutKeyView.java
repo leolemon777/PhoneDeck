@@ -23,37 +23,40 @@ final class ShortcutKeyView extends FrameLayout {
         setSoundEffectsEnabled(true);
         setHapticFeedbackEnabled(true);
         setForegroundGravity(Gravity.CENTER);
-        setPadding(dp(12), dp(12), dp(12), dp(12));
+        setPadding(dp(12), dp(13), dp(10), dp(12));
+        boolean command = config.isTextAction();
+        int surface = command ? theme.primaryContainer : theme.shortcutColor(config.color);
         setBackground(theme.pressable(
                 context,
-                theme.shortcutColor(config.color),
+                surface,
                 theme.shortcutPressedColor(config.color),
-                8, 1, theme.outline));
+                18));
         setElevation(0);
 
         content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        content.setGravity(Gravity.START);
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        TextView title = label(config.label, 13,
-                theme.text, Typeface.BOLD);
+        TextView title = label(config.label, 14,
+                command ? theme.onPrimaryContainer : theme.text, Typeface.BOLD);
         title.setGravity(Gravity.START);
         title.setMaxLines(2);
         title.setEllipsize(TextUtils.TruncateAt.END);
         content.addView(title, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+                LayoutParams.MATCH_PARENT, 0, 1f));
 
         TextView chord = label(config.subtitle(), 11,
-                theme.muted,
+                command ? theme.mix(theme.muted, theme.onPrimaryContainer, 0.15f) : theme.muted,
                 Typeface.NORMAL);
         chord.setGravity(Gravity.START);
+        chord.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        chordParams.topMargin = dp(5);
+        chordParams.topMargin = dp(6);
         content.addView(chord, chordParams);
 
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);
