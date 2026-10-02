@@ -98,6 +98,8 @@ public final class MainActivity extends Activity {
     private LinearLayout targetDockRow;
     private ScrollView shortcutScroll;
     private android.app.Dialog shortcutDialog;
+    private android.app.Dialog homeStyleDialog;
+    private HomeStyle homeStyle = HomeStyle.CENTER;
     private TextView shortcutPanelFeedback;
     private boolean typelessInFlight;
     private boolean audioStartPending;
@@ -442,6 +444,11 @@ public final class MainActivity extends Activity {
     }
 
     private View createInterface() {
+        if (homeStyleDialog != null) {
+            homeStyleDialog.dismiss();
+            homeStyleDialog = null;
+        }
+        homeStyle = HomeStyle.load(this);
         if (shortcutDialog != null) {
             shortcutDialog.dismiss();
             shortcutDialog = null;
@@ -460,6 +467,12 @@ public final class MainActivity extends Activity {
         TextView brand = text(getString(R.string.brand_name), 24, theme.text, Typeface.BOLD);
         brandRow.addView(brand, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button appearance = smallButton("界面");
+        appearance.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
+        appearance.setTextColor(theme.muted);
+        appearance.setContentDescription("切换首页 UI，当前：" + homeStyle.title);
+        appearance.setOnClickListener(view -> showHomeStylePicker(appearance));
+        brandRow.addView(appearance, new LinearLayout.LayoutParams(dp(52), dp(48)));
         Button shortcuts = smallButton("快捷键");
         shortcuts.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
         shortcuts.setTextColor(theme.muted);
@@ -551,7 +564,9 @@ public final class MainActivity extends Activity {
         voiceDock.addView(voiceBody, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        int micSize = landscape || compact ? 128 : 184;
+        int micSize = homeStyle == HomeStyle.PANEL ? (landscape || !compact ? 128 : 104)
+                : homeStyle == HomeStyle.DOCK ? (landscape || compact ? 112 : 160)
+                : landscape || compact ? 128 : 184;
         FrameLayout voiceRing = new FrameLayout(this);
         voiceRing.setBackground(theme.shape(this,
                 theme.mix(theme.background, theme.primaryContainer, 0.65f), (micSize + 28) / 2));
@@ -580,7 +595,10 @@ public final class MainActivity extends Activity {
         voiceCopyParams.topMargin = landscape ? 0 : dp(compact ? 16 : 24);
         voiceCopyParams.leftMargin = landscape ? dp(18) : 0;
         voiceBody.addView(voiceCopy, voiceCopyParams);
-        voiceButtonCaption = text("点击开始说话", landscape ? 20 : 24, theme.text, Typeface.NORMAL);
+        int captionSize = landscape ? 20
+                : homeStyle == HomeStyle.DOCK ? (compact ? 24 : 32)
+                : homeStyle == HomeStyle.PANEL ? (compact ? 20 : 24) : 24;
+        voiceButtonCaption = text("点击开始说话", captionSize, theme.text, Typeface.NORMAL);
         voiceButtonCaption.setGravity(Gravity.CENTER);
         voiceButtonCaption.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         voiceCopy.addView(voiceButtonCaption);
@@ -663,6 +681,43 @@ public final class MainActivity extends Activity {
         refreshTargetSwitcher();
         refreshShortcutGrid();
 
+        if (homeStyle == HomeStyle.PANEL) {
+            // One compact control surface: status above, mic left, editing keys right.
+            voiceBody.removeView(voiceCopy);
+            voiceDock.removeView(voiceBody);
+            voiceDock.removeView(voiceEditRow);
+            voiceBody.setOrientation(LinearLayout.HORIZONTAL);
+            voiceEditRow.setOrientation(LinearLayout.VERTICAL);
+            for (int index = 0; index < voiceEditRow.getChildCount(); index++) {
+                LinearLayout.LayoutParams keyParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+                keyParams.topMargin = index == 0 ? 0 : dp(8);
+                voiceEditRow.getChildAt(index).setLayoutParams(keyParams);
+            }
+            voiceBody.addView(voiceEditRow, margins(dp(12), 0, 0, 0,
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT));
+            ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).weight = 1f;
+            LinearLayout panel = new LinearLayout(this);
+            panel.setOrientation(LinearLayout.VERTICAL);
+            panel.setPadding(dp(16), dp(16), dp(16), dp(16));
+            panel.setBackground(theme.shape(this, theme.surface, 28, 1, theme.outline));
+            voiceCopy.setGravity(Gravity.START);
+            voiceButtonCaption.setGravity(Gravity.START);
+            microphoneLevel.setGravity(Gravity.START);
+            panel.addView(voiceCopy, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            panel.addView(voiceBody, margins(0, dp(14), 0, 0,
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            voiceDock.addView(panel, 0, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        } else if (homeStyle == HomeStyle.DOCK && !landscape) {
+            voiceBody.removeView(voiceRing);
+            voiceCopyParams.topMargin = 0;
+            voiceCopy.setGravity(Gravity.START);
+            voiceButtonCaption.setGravity(Gravity.START);
+            microphoneLevel.setGravity(Gravity.START);
+        }
+
         ScrollView voiceScroll = new ScrollView(this);
         voiceScroll.setFillViewport(true);
         voiceScroll.setVerticalScrollBarEnabled(false);
@@ -684,14 +739,25 @@ public final class MainActivity extends Activity {
             footer.setOrientation(LinearLayout.VERTICAL);
             footer.setGravity(Gravity.CENTER_HORIZONTAL);
             footer.setPadding(dp(24), dp(8), dp(24), dp(20));
-            for (View control : new View[] {voiceModeSwitch, typelessModeRow,
-                    actionFeedback, voiceEditRow, targetDockRow}) {
+            View[] footerControls = homeStyle == HomeStyle.PANEL
+                    ? new View[] {voiceModeSwitch, typelessModeRow, actionFeedback, targetDockRow}
+                    : new View[] {voiceModeSwitch, typelessModeRow, actionFeedback, voiceEditRow, targetDockRow};
+            for (View control : footerControls) {
                 voiceDock.removeView(control);
                 footer.addView(control);
             }
             ((LinearLayout.LayoutParams) voiceModeSwitch.getLayoutParams()).topMargin = 0;
-            ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).topMargin = dp(16);
-            voiceDock.setGravity(Gravity.CENTER);
+            if (homeStyle != HomeStyle.PANEL) {
+                ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).topMargin = dp(16);
+            }
+            if (homeStyle == HomeStyle.DOCK) {
+                LinearLayout.LayoutParams ringParams = new LinearLayout.LayoutParams(
+                        dp(micSize + 28), dp(micSize + 28));
+                ringParams.topMargin = dp(12);
+                footer.addView(voiceRing, footer.indexOfChild(voiceEditRow), ringParams);
+            }
+            voiceDock.setGravity(homeStyle == HomeStyle.CENTER ? Gravity.CENTER
+                    : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
             voiceDock.setPadding(dp(24), dp(12), dp(24), dp(compact ? 8 : 24));
             console.addView(header);
             console.addView(voiceScroll, new LinearLayout.LayoutParams(
@@ -701,6 +767,29 @@ public final class MainActivity extends Activity {
         root.addView(console, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         return root;
+    }
+
+    private void showHomeStylePicker(View source) {
+        if (isVoiceInteractionBusy()) {
+            showActionFeedback("请先结束语音，再切换首页 UI", theme.warning);
+            performResultHaptic(source, false);
+            return;
+        }
+        if (homeStyleDialog != null && homeStyleDialog.isShowing()) return;
+        homeStyleDialog = HomeStylePicker.show(this, theme, homeStyle, style -> {
+            if (homeStyle == style) return;
+            // Audio may have started remotely while the picker was open.
+            if (isVoiceInteractionBusy()) {
+                showActionFeedback("请先结束语音，再切换首页 UI", theme.warning);
+                performResultHaptic(source, false);
+                return;
+            }
+            // Rebind the existing controls; never recreate connection/audio owners.
+            style.save(this);
+            stopKeyRepeat();
+            setContentView(createInterface());
+            applyUiState();
+        });
     }
 
     private android.graphics.drawable.Drawable voiceButtonBackground(int color, int pressed) {
@@ -2510,10 +2599,7 @@ public final class MainActivity extends Activity {
             TouchFeedback.selection(source);
             return;
         }
-        if (isVoiceStarting() || dictationActive || typelessInFlight || holdGestureActive
-                || sharedStartPending || currentSessionId != null
-                || PhoneAudioService.getSnapshot().busy
-                || (audioStreamer != null && audioStreamer.isRunning())) {
+        if (isVoiceInteractionBusy()) {
             showActionFeedback("请先结束语音，再切换说话方式", theme.warning);
             performResultHaptic(source, false);
             TouchFeedback.result(source, false);
@@ -2534,6 +2620,13 @@ public final class MainActivity extends Activity {
         updateVoiceModeInterface();
         refreshTargetSwitcher();
         TouchFeedback.selection(source);
+    }
+
+    private boolean isVoiceInteractionBusy() {
+        return isVoiceStarting() || dictationActive || typelessInFlight || holdGestureActive
+                || sharedStartPending || currentSessionId != null
+                || PhoneAudioService.getSnapshot().busy
+                || (audioStreamer != null && audioStreamer.isRunning());
     }
 
     private void updateVoiceModeInterface() {
@@ -3395,6 +3488,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (homeStyleDialog != null) homeStyleDialog.dismiss();
         if (shortcutDialog != null) shortcutDialog.dismiss();
         TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
