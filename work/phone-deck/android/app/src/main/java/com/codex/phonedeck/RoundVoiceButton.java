@@ -21,8 +21,9 @@ final class RoundVoiceButton extends Button {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        int width = Math.min(glyph.getIntrinsicWidth(), getWidth());
-        int height = Math.min(glyph.getIntrinsicHeight(), getHeight());
+        int height = Math.round(Math.min(getWidth(), getHeight()) * 0.42f);
+        int width = Math.round(height * (float) glyph.getIntrinsicWidth()
+                / glyph.getIntrinsicHeight());
         int left = (getWidth() - width) / 2;
         int top = (getHeight() - height) / 2;
         glyph.setBounds(left, top, left + width, top + height);

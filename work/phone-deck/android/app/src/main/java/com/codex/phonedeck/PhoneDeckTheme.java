@@ -193,23 +193,6 @@ final class PhoneDeckTheme {
         return background;
     }
 
-    // A single high-contrast device panel anchors the mobile workspace in every theme.
-    int workspacePanel() {
-        return light ? text : surfaceRaised;
-    }
-
-    int workspaceInk() {
-        return light ? surface : text;
-    }
-
-    int workspaceMuted() {
-        return mix(workspaceInk(), workspacePanel(), 0.27f);
-    }
-
-    int workspaceRaised() {
-        return mix(workspacePanel(), workspaceInk(), 0.10f);
-    }
-
     View wrapContent(Context context, View content) {
         return content;
     }

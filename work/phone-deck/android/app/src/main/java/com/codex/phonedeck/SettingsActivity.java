@@ -120,18 +120,6 @@ public final class SettingsActivity extends Activity {
         LinearLayout page = pageShell();
         addHeader(page, "设置", view -> finish());
 
-        LinearLayout introduction = new LinearLayout(this);
-        introduction.setOrientation(LinearLayout.VERTICAL);
-        introduction.setPadding(dp(20), dp(20), dp(20), dp(20));
-        introduction.setBackground(theme.shape(this, theme.workspacePanel(), 24));
-        TextView eyebrow = text("MAKE IT YOURS", 10, theme.workspaceMuted(), Typeface.BOLD);
-        eyebrow.setLetterSpacing(0.14f);
-        introduction.addView(eyebrow);
-        introduction.addView(text("你的工作台，\n你的节奏。", 25,
-                theme.workspaceInk(), Typeface.BOLD), topMargin(dp(10)));
-        introduction.addView(text("外观、说话方式与每一台电脑", 12,
-                theme.workspaceMuted(), Typeface.NORMAL), topMargin(dp(10)));
-        page.addView(introduction, fullWidthMargins(dp(20)));
         page.addView(sectionLabel("使用偏好"), topMargin(dp(24)));
 
         themeSummary = summaryText();

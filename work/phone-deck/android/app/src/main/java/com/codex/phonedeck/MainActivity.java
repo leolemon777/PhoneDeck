@@ -84,7 +84,6 @@ public final class MainActivity extends Activity {
     private String appliedThemeId;
     private TextView statusText;
     private TextView statusDetailText;
-    private TextView connectionEyebrow;
     private LinearLayout connectionCard;
     private View statusDot;
     private TextView actionFeedback;
@@ -97,6 +96,10 @@ public final class MainActivity extends Activity {
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
     private LinearLayout targetDeviceRow;
+    private LinearLayout targetDockRow;
+    private ScrollView shortcutScroll;
+    private android.app.Dialog shortcutDialog;
+    private TextView shortcutPanelFeedback;
     private boolean typelessInFlight;
     private boolean audioStartPending;
     private boolean dictationActive;
@@ -440,133 +443,86 @@ public final class MainActivity extends Activity {
     }
 
     private View createInterface() {
+        if (shortcutDialog != null) {
+            shortcutDialog.dismiss();
+            shortcutDialog = null;
+        }
+        boolean landscape = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        boolean compact = getResources().getConfiguration().screenHeightDp < 740;
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
 
-        boolean landscape = getResources().getConfiguration().orientation
-                == Configuration.ORIENTATION_LANDSCAPE;
-        boolean compact = !landscape
-                && getResources().getConfiguration().screenHeightDp < 740;
-
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(theme.contentBackground());
-        scrollView.setClipToPadding(false);
-        scrollView.setVerticalScrollBarEnabled(compact);
-
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(4), dp(20), dp(12));
-        scrollView.addView(page, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout pinnedHeader = new LinearLayout(this);
-        pinnedHeader.setOrientation(LinearLayout.VERTICAL);
-        pinnedHeader.setPadding(dp(20), dp(10), dp(20), dp(8));
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(24), dp(12), dp(24), dp(8));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        FrameLayout brandMark = new FrameLayout(this);
-        brandMark.setBackground(theme.shape(this, theme.primaryContainer, 14));
-        brandMark.addView(new DeckIconView(this, "voice", theme.primary),
-                new FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER));
-        brandRow.addView(brandMark, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        LinearLayout brandCopy = new LinearLayout(this);
-        brandCopy.setOrientation(LinearLayout.VERTICAL);
-        brandCopy.setPadding(dp(12), 0, 0, 0);
-        TextView brand = text(getString(R.string.brand_name), compact ? 22 : 25,
-                theme.text, Typeface.BOLD);
-        brandCopy.addView(brand);
-        TextView signature = text("YANDU  /  随身工作台", 10, theme.muted, Typeface.NORMAL);
-        signature.setLetterSpacing(0.08f);
-        signature.setSingleLine(true);
-        signature.setEllipsize(TextUtils.TruncateAt.END);
-        signature.setVisibility(compact ? View.GONE : View.VISIBLE);
-        brandCopy.addView(signature, marginTop(dp(1)));
-        brandRow.addView(brandCopy,
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView brand = text(getString(R.string.brand_name), 24, theme.text, Typeface.BOLD);
+        brandRow.addView(brand, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button shortcuts = smallButton("快捷键");
+        shortcuts.setBackgroundColor(Color.TRANSPARENT);
+        shortcuts.setTextColor(theme.muted);
+        shortcuts.setContentDescription("打开完整快捷键面板");
+        shortcuts.setOnClickListener(view -> showShortcutPanel());
+        brandRow.addView(shortcuts, new LinearLayout.LayoutParams(dp(64), dp(48)));
         Button settings = smallButton("设置");
-        settings.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 16));
-        settings.setTextColor(theme.text);
+        settings.setBackgroundColor(Color.TRANSPARENT);
+        settings.setTextColor(theme.muted);
         settings.setContentDescription("打开设置");
         settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
-        brandRow.addView(settings, new LinearLayout.LayoutParams(dp(64), dp(48)));
-        pinnedHeader.addView(brandRow);
+        brandRow.addView(settings, new LinearLayout.LayoutParams(dp(60), dp(48)));
+        header.addView(brandRow);
 
-        LinearLayout connection = new LinearLayout(this);
-        connectionCard = connection;
-        connection.setOrientation(LinearLayout.VERTICAL);
-        connection.setPadding(dp(18), dp(compact ? 10 : 14), dp(14), dp(compact ? 10 : 16));
-        connection.setElevation(0);
-        connection.setBackground(theme.shape(this, theme.workspacePanel(), 24));
-        connection.setOnClickListener(view -> {
-            showDeviceList();
-        });
-        connection.setContentDescription("当前电脑；点击查看全部电脑");
-        connection.setFocusable(true);
-        installTouchFeedback(connection);
-        pinnedHeader.addView(connection, margins(dp(0), dp(compact ? 8 : 16), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout connectionHeading = new LinearLayout(this);
-        connectionHeading.setGravity(Gravity.CENTER_VERTICAL);
-        connectionHeading.addView(new DeckIconView(this, "devices", theme.workspaceMuted()),
-                new LinearLayout.LayoutParams(dp(17), dp(17)));
-        connectionEyebrow = text("当前输入电脑", 11, theme.workspaceMuted(), Typeface.NORMAL);
-        connectionEyebrow.setLetterSpacing(0.04f);
-        LinearLayout.LayoutParams eyebrowParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        eyebrowParams.leftMargin = dp(8);
-        connectionHeading.addView(connectionEyebrow, eyebrowParams);
-        TextView deviceArrow = text("电脑列表  ›", 11, theme.workspaceMuted(), Typeface.NORMAL);
-        connectionHeading.addView(deviceArrow);
-        connectionHeading.setVisibility(compact ? View.GONE : View.VISIBLE);
-        connection.addView(connectionHeading);
-
-        LinearLayout connectionBody = new LinearLayout(this);
-        connectionBody.setGravity(Gravity.CENTER_VERTICAL);
-        connection.addView(connectionBody, margins(0, dp(compact ? 0 : 8), 0, 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        connectionCard = new LinearLayout(this);
+        connectionCard.setGravity(Gravity.CENTER_VERTICAL);
+        connectionCard.setPadding(dp(14), dp(4), dp(2), dp(4));
+        connectionCard.setBackground(theme.pressable(this, theme.surface,
+                theme.surfaceRaised, 16));
+        connectionCard.setOnClickListener(view -> showDeviceList());
+        connectionCard.setContentDescription("连接电脑，点击查看全部电脑");
+        connectionCard.setFocusable(true);
+        installTouchFeedback(connectionCard);
+        statusDot = new View(this);
+        statusDot.setBackground(roundRect(theme.muted, 20));
+        connectionCard.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
         LinearLayout connectionCopy = new LinearLayout(this);
         connectionCopy.setOrientation(LinearLayout.VERTICAL);
-        connectionBody.addView(connectionCopy, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        statusText = text("连接你的电脑", compact ? 17 : 21,
-                theme.workspaceInk(), Typeface.BOLD);
-        statusText.setMaxLines(2);
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        copyParams.leftMargin = dp(10);
+        connectionCard.addView(connectionCopy, copyParams);
+        statusText = text("连接你的电脑", 14, theme.text, Typeface.NORMAL);
+        statusText.setMaxLines(1);
         statusText.setEllipsize(TextUtils.TruncateAt.END);
         connectionCopy.addView(statusText);
-        LinearLayout connectionState = new LinearLayout(this);
-        connectionState.setGravity(Gravity.CENTER_VERTICAL);
-        connectionCopy.addView(connectionState, marginTop(dp(7)));
-        statusDot = new View(this);
-        statusDot.setBackground(roundRect(theme.workspaceMuted(), 20));
-        connectionState.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
-        statusDetailText = text("正在检测连接…", 12, theme.workspaceMuted(), Typeface.NORMAL);
+        statusDetailText = text("正在检测连接…", 11, theme.muted, Typeface.NORMAL);
         statusDetailText.setMaxLines(2);
         statusDetailText.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        detailParams.leftMargin = dp(7);
-        connectionState.addView(statusDetailText, detailParams);
+        connectionCopy.addView(statusDetailText);
         Button retry = smallButton("↻");
-        retry.setBackground(theme.pressable(this, theme.workspaceRaised(),
-                theme.mix(theme.workspacePanel(), theme.workspaceInk(), 0.20f), 16));
-        retry.setTextColor(theme.workspaceInk());
-        retry.setTextSize(22);
+        retry.setBackgroundColor(Color.TRANSPARENT);
+        retry.setTextColor(theme.muted);
+        retry.setTextSize(21);
         retry.setContentDescription("重新检测电脑连接");
         retry.setOnClickListener(view -> { startBluetoothTransport(); testConnection(); });
-        LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(dp(48), dp(48));
-        retryParams.leftMargin = dp(10);
-        connectionBody.addView(retry, retryParams);
+        connectionCard.addView(retry, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        header.addView(connectionCard, margins(0, dp(10), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        // Keep the existing editable grid in a secondary panel. The home screen
+        // remains focused on speech without changing any shortcut dispatch logic.
+        shortcutScroll = new ScrollView(this);
+        shortcutScroll.setVerticalScrollBarEnabled(true);
+        LinearLayout shortcutPage = new LinearLayout(this);
+        shortcutPage.setOrientation(LinearLayout.VERTICAL);
+        shortcutPage.setPadding(dp(16), 0, dp(16), dp(12));
+        shortcutScroll.addView(shortcutPage);
         LinearLayout shortcutHeader = new LinearLayout(this);
-        shortcutHeader.setOrientation(LinearLayout.HORIZONTAL);
         shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
-        TextView shortcutTitle = text("快捷操作", 19, theme.text, Typeface.BOLD);
-        shortcutHeader.addView(shortcutTitle, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        shortcutHeader.addView(text("快捷键", 18, theme.text, Typeface.BOLD),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         gridEditButton = smallButton(gridEditMode ? "完成" : "编辑布局");
         gridEditButton.setBackgroundColor(Color.TRANSPARENT);
         gridEditButton.setTextColor(theme.muted);
@@ -575,249 +531,242 @@ public final class MainActivity extends Activity {
         installTouchFeedback(gridEditButton);
         shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(48)));
-        page.addView(shortcutHeader, margins(0, dp(2), 0, 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        shortcutHintText = text(gridEditMode
-                ? "点击按钮编辑 · 长按拖动调换位置"
-                : "发送到当前电脑 · 编辑可调整按钮与顺序", 12,
+        shortcutPage.addView(shortcutHeader);
+        shortcutHintText = text("点击按钮编辑 · 长按拖动调换位置", 12,
                 theme.muted, Typeface.NORMAL);
-        page.addView(shortcutHintText, marginTop(dp(3)));
         shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
-
-        GridLayout grid = new GridLayout(this);
-        // Landscape already splits the screen with the voice dock; six columns
-        // in the remaining half truncate every meaningful shortcut label.
-        grid.setColumnCount(3);
-        grid.setUseDefaultMargins(false);
-        shortcutGrid = grid;
-        page.addView(grid, margins(dp(-4), dp(2), dp(-4), dp(0),
+        shortcutPage.addView(shortcutHintText, marginTop(dp(3)));
+        shortcutGrid = new GridLayout(this);
+        shortcutGrid.setColumnCount(3);
+        shortcutGrid.setUseDefaultMargins(false);
+        shortcutPage.addView(shortcutGrid, margins(dp(-4), dp(4), dp(-4), 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        refreshShortcutGrid();
 
         LinearLayout voiceDock = new LinearLayout(this);
         voiceDock.setOrientation(LinearLayout.VERTICAL);
-        voiceDock.setPadding(dp(18), dp(compact ? 10 : 14), dp(18), dp(compact ? 10 : 12));
-        voiceDock.setBackground(theme.shape(this, theme.voiceDock, 28, 1,
-                theme.mix(theme.surface, theme.outline, 0.5f)));
-        voiceDock.setElevation(0);
-
-        LinearLayout dockHeader = new LinearLayout(this);
-        dockHeader.setOrientation(LinearLayout.HORIZONTAL);
-        dockHeader.setGravity(Gravity.CENTER_VERTICAL);
-        voiceDock.addView(dockHeader, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        TextView voiceTitle = text("语音工作台", 13, theme.muted, Typeface.BOLD);
-        dockHeader.addView(voiceTitle, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        voiceModeText = text("点击说话模式", 11, theme.onPrimaryContainer, Typeface.BOLD);
-        voiceModeText.setGravity(Gravity.CENTER);
-        voiceModeText.setPadding(dp(12), dp(8), dp(12), dp(8));
-        voiceModeText.setMaxLines(2);
-        voiceModeText.setBackground(theme.pressable(this, theme.primaryContainer,
-                theme.surfaceRaised, 14));
-        voiceModeText.setMinHeight(dp(48));
-        voiceModeText.setFocusable(true);
-        voiceModeText.setContentDescription("语音模式，点击更改说话方式");
-        voiceModeText.setOnClickListener(view -> startActivity(new Intent(this,
-                SettingsActivity.class).putExtra("phonedeck_page", "voice")));
-        dockHeader.addView(voiceModeText, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, compact ? 1.2f : 1f));
-
-        typelessModeRow = new LinearLayout(this);
-        typelessModeRow.setOrientation(LinearLayout.HORIZONTAL);
-        typelessModeRow.setGravity(Gravity.CENTER_VERTICAL);
-        typelessModeRow.setVisibility(View.GONE);
-        voiceDock.addView(typelessModeRow, margins(dp(0), dp(6), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
+        voiceDock.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        voiceDock.setPadding(dp(24), dp(16), dp(24), dp(20));
         LinearLayout voiceBody = new LinearLayout(this);
-        voiceBody.setGravity(Gravity.CENTER_VERTICAL);
-        voiceDock.addView(voiceBody, margins(0, dp(3), 0, 0,
+        voiceBody.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        voiceBody.setGravity(Gravity.CENTER);
+        voiceDock.addView(voiceBody, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        LinearLayout voiceCopy = new LinearLayout(this);
-        voiceCopy.setOrientation(LinearLayout.VERTICAL);
-        voiceBody.addView(voiceCopy, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        voiceButtonCaption = text("点击开始说话", compact ? 18 : 22,
-                theme.text, Typeface.BOLD);
-        voiceButtonCaption.setLineSpacing(dp(2), 1f);
-        voiceButtonCaption.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        voiceCopy.addView(voiceButtonCaption);
-        microphoneLevel = text("手机麦克风 · 未启动", 11, theme.muted, Typeface.NORMAL);
-        voiceCopy.addView(microphoneLevel, marginTop(dp(compact ? 4 : 8)));
-        voiceMeter = new VoiceLevelView(this, theme);
-        voiceCopy.addView(voiceMeter, margins(0, dp(compact ? 4 : 8), dp(8), 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(compact ? 12 : 18)));
 
+        int micSize = landscape || compact ? 128 : 184;
         FrameLayout voiceRing = new FrameLayout(this);
-        voiceRing.setBackground(theme.shape(this, theme.primaryContainer, 64));
-        View innerRing = new View(this);
-        innerRing.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        innerRing.setBackground(theme.shape(this, theme.voiceDock, 59));
-        int ringSize = compact ? 100 : 128;
-        voiceRing.addView(innerRing, new FrameLayout.LayoutParams(
-                dp(ringSize - 10), dp(ringSize - 10), Gravity.CENTER));
+        voiceRing.setBackground(theme.shape(this,
+                theme.mix(theme.background, theme.primaryContainer, 0.65f), (micSize + 28) / 2));
         voiceIcon = new MicrophoneGlyphDrawable(this, theme.onPrimary);
         typelessButton = new RoundVoiceButton(this, voiceIcon);
         typelessButton.setTextColor(theme.onPrimary);
-        typelessButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         typelessButton.setAllCaps(false);
         typelessButton.setGravity(Gravity.CENTER);
         typelessButton.setPadding(0, 0, 0, 0);
-        typelessButton.setBackground(pressableRoundRect(
-                theme.primary, theme.primaryPressed, 56));
+        typelessButton.setBackground(voiceButtonBackground(theme.primary, theme.primaryPressed));
         typelessButton.setElevation(0);
         typelessButton.setStateListAnimator(null);
         typelessButton.setContentDescription("语音输入");
         installVoiceGesture();
         voiceRing.addView(typelessButton, new FrameLayout.LayoutParams(
-                dp(ringSize - 24), dp(ringSize - 24), Gravity.CENTER));
-        LinearLayout.LayoutParams voiceRingParams = new LinearLayout.LayoutParams(
-                dp(ringSize), dp(ringSize));
-        voiceRingParams.leftMargin = dp(12);
-        voiceBody.addView(voiceRing, voiceRingParams);
+                dp(micSize), dp(micSize), Gravity.CENTER));
+        voiceBody.addView(voiceRing, new LinearLayout.LayoutParams(dp(micSize + 28), dp(micSize + 28)));
 
-        actionFeedback = text("点击上方模式，可切换说话方式", 11, theme.muted, Typeface.NORMAL);
-        actionFeedback.setGravity(Gravity.CENTER_VERTICAL);
-        actionFeedback.setPadding(dp(10), dp(6), dp(10), dp(6));
+        LinearLayout voiceCopy = new LinearLayout(this);
+        voiceCopy.setOrientation(LinearLayout.VERTICAL);
+        voiceCopy.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams voiceCopyParams = landscape
+                ? new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                : new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        voiceCopyParams.topMargin = landscape ? 0 : dp(compact ? 16 : 24);
+        voiceCopyParams.leftMargin = landscape ? dp(18) : 0;
+        voiceBody.addView(voiceCopy, voiceCopyParams);
+        voiceButtonCaption = text("点击开始说话", landscape ? 20 : 24, theme.text, Typeface.NORMAL);
+        voiceButtonCaption.setGravity(Gravity.CENTER);
+        voiceButtonCaption.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        voiceCopy.addView(voiceButtonCaption);
+        microphoneLevel = text("手机麦克风 · 未启动", 12, theme.muted, Typeface.NORMAL);
+        microphoneLevel.setGravity(Gravity.CENTER);
+        voiceCopy.addView(microphoneLevel, marginTop(dp(7)));
+        voiceMeter = new VoiceLevelView(this, theme);
+        voiceCopy.addView(voiceMeter, margins(0, dp(10), 0, 0, dp(128), dp(14)));
+
+        voiceModeText = text("点击说话模式", 12, theme.onPrimaryContainer, Typeface.NORMAL);
+        voiceModeText.setGravity(Gravity.CENTER);
+        voiceModeText.setPadding(dp(20), dp(8), dp(20), dp(8));
+        voiceModeText.setMaxLines(2);
+        voiceModeText.setBackground(theme.pressable(this, theme.primaryContainer,
+                theme.surfaceRaised, 24));
+        voiceModeText.setMinHeight(dp(48));
+        voiceModeText.setFocusable(true);
+        voiceModeText.setContentDescription("语音模式，点击更改说话方式");
+        voiceModeText.setOnClickListener(view -> startActivity(new Intent(this,
+                SettingsActivity.class).putExtra("phonedeck_page", "voice")));
+        voiceDock.addView(voiceModeText, margins(0, dp(landscape ? 10 : compact ? 16 : 28), 0, 0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        typelessModeRow = new LinearLayout(this);
+        typelessModeRow.setGravity(Gravity.CENTER);
+        typelessModeRow.setVisibility(View.GONE);
+        voiceDock.addView(typelessModeRow, margins(0, dp(6), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        actionFeedback = text("", 12, theme.muted, Typeface.NORMAL);
+        actionFeedback.setGravity(Gravity.CENTER);
+        actionFeedback.setPadding(dp(12), dp(8), dp(12), dp(8));
+        actionFeedback.setVisibility(View.GONE);
         actionFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        actionFeedback.setBackground(theme.shape(this, theme.surfaceRaised, 10));
-        actionFeedback.setVisibility(compact ? View.GONE : View.VISIBLE);
-        voiceDock.addView(actionFeedback, margins(0, dp(4), 0, 0,
+        voiceDock.addView(actionFeedback, margins(0, dp(12), 0, 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout voiceEditRow = new LinearLayout(this);
-        voiceEditRow.setOrientation(LinearLayout.HORIZONTAL);
         voiceEditRow.setGravity(Gravity.CENTER);
-
-        Button backspaceButton = voiceEditButton("⌫  退格");
-        backspaceButton.setContentDescription("退格。点按删除一个字符，长按全部删除");
-        backspaceButton.setOnClickListener(view -> triggerVoiceEditAction(
-                backspaceButton, "退格", "BACKSPACE", "backspace"));
-        backspaceButton.setOnLongClickListener(view -> {
+        Button goal = voiceEditButton("Goal");
+        goal.setContentDescription("发送配置的 Goal 指令");
+        goal.setOnClickListener(view -> triggerConfiguredGoal(goal));
+        installTouchFeedback(goal);
+        voiceEditRow.addView(goal, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button backspace = voiceEditButton("退格");
+        backspace.setContentDescription("退格。点按删除一个字符，长按全部删除");
+        backspace.setOnClickListener(view -> triggerVoiceEditAction(
+                backspace, "退格", "BACKSPACE", "backspace"));
+        backspace.setOnLongClickListener(view -> {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            triggerDeleteAll(backspaceButton);
+            triggerDeleteAll(backspace);
             return true;
         });
-        installTouchFeedback(backspaceButton);
-        voiceEditRow.addView(backspaceButton, new LinearLayout.LayoutParams(
-                0, dp(48), 1f));
-
-        Button enterButton = voiceEditButton("↵  回车");
-        enterButton.setContentDescription("向电脑发送回车键");
-        enterButton.setOnClickListener(view -> triggerVoiceEditAction(
-                enterButton, "回车", "ENTER", "enter"));
-        installTouchFeedback(enterButton);
-        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(
-                0, dp(48), 1f);
+        installTouchFeedback(backspace);
+        LinearLayout.LayoutParams backspaceParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        backspaceParams.leftMargin = dp(8);
+        voiceEditRow.addView(backspace, backspaceParams);
+        Button enter = voiceEditButton("回车");
+        enter.setContentDescription("向电脑发送回车键");
+        enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
+        installTouchFeedback(enter);
+        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
         enterParams.leftMargin = dp(8);
-        voiceEditRow.addView(enterButton, enterParams);
-        voiceDock.addView(voiceEditRow, margins(dp(0), dp(7), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        voiceEditRow.addView(enter, enterParams);
+        voiceDock.addView(voiceEditRow, margins(0, dp(landscape ? 10 : 24), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout targetDockRow = new LinearLayout(this);
-        targetDockRow.setOrientation(LinearLayout.HORIZONTAL);
+        targetDockRow = new LinearLayout(this);
         targetDockRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        targetTitleText = text("输入到", 12, theme.muted, Typeface.BOLD);
+        targetTitleText = text("输入到", 12, theme.muted, Typeface.NORMAL);
         targetTitleText.setMinHeight(dp(48));
         targetTitleText.setGravity(Gravity.CENTER_VERTICAL);
         targetTitleText.setOnClickListener(view -> showDeviceList());
         targetTitleText.setContentDescription("查看全部电脑并选择输入目标");
-        targetDockRow.addView(targetTitleText, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
+        targetDockRow.addView(targetTitleText);
         HorizontalScrollView targetScroller = new HorizontalScrollView(this);
         targetScroller.setHorizontalScrollBarEnabled(false);
         targetScroller.setFillViewport(true);
         targetDeviceRow = new LinearLayout(this);
-        targetDeviceRow.setOrientation(LinearLayout.HORIZONTAL);
         targetDeviceRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         targetScroller.addView(targetDeviceRow, new HorizontalScrollView.LayoutParams(
                 HorizontalScrollView.LayoutParams.MATCH_PARENT,
                 HorizontalScrollView.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams targetScrollerParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams targetParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        targetScrollerParams.leftMargin = dp(10);
-        targetDockRow.addView(targetScroller, targetScrollerParams);
-        voiceDock.addView(targetDockRow, margins(dp(8), dp(4), dp(0), dp(0),
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        targetParams.leftMargin = dp(10);
+        targetDockRow.addView(targetScroller, targetParams);
+        voiceDock.addView(targetDockRow, margins(0, dp(8), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         refreshTargetSwitcher();
+        refreshShortcutGrid();
 
+        ScrollView voiceScroll = new ScrollView(this);
+        voiceScroll.setFillViewport(true);
+        voiceScroll.setVerticalScrollBarEnabled(false);
+        voiceScroll.addView(voiceDock);
+        LinearLayout console = new LinearLayout(this);
+        console.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         if (landscape) {
-            // 横屏双栏控制台：左侧网格滚动，右侧语音面板固定。
-            LinearLayout console = new LinearLayout(this);
-            console.setOrientation(LinearLayout.HORIZONTAL);
-            console.setBackgroundColor(theme.contentBackground());
-            LinearLayout leftColumn = new LinearLayout(this);
-            leftColumn.setOrientation(LinearLayout.VERTICAL);
-            leftColumn.addView(pinnedHeader);
-            leftColumn.addView(scrollView, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-            console.addView(leftColumn, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
-            ScrollView dockScroll = new ScrollView(this);
-            dockScroll.setFillViewport(true);
-            dockScroll.setBackgroundColor(theme.contentBackground());
-            dockScroll.addView(voiceDock, new ScrollView.LayoutParams(
-                    ScrollView.LayoutParams.MATCH_PARENT,
-                    ScrollView.LayoutParams.WRAP_CONTENT));
-            console.addView(dockScroll, new LinearLayout.LayoutParams(
-                    getResources().getDisplayMetrics().widthPixels * 44 / 100,
+            ScrollView headerScroll = new ScrollView(this);
+            headerScroll.addView(header);
+            console.addView(headerScroll, new LinearLayout.LayoutParams(
+                    getResources().getDisplayMetrics().widthPixels * 34 / 100,
                     LinearLayout.LayoutParams.MATCH_PARENT));
-            root.addView(console, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
+            console.addView(voiceScroll, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         } else {
-            LinearLayout console = new LinearLayout(this);
-            console.setOrientation(LinearLayout.VERTICAL);
-            if (compact) {
-                // Let the header scroll away on short screens so every shortcut
-                // remains reachable even with enlarged system text.
-                scrollView.removeView(page);
-                LinearLayout scrollContent = new LinearLayout(this);
-                scrollContent.setOrientation(LinearLayout.VERTICAL);
-                scrollContent.addView(pinnedHeader);
-                scrollContent.addView(page);
-                scrollView.addView(scrollContent);
-            } else {
-                console.addView(pinnedHeader);
+            // Keep the small editing controls reachable while the microphone area
+            // can scroll independently on a short screen or with enlarged text.
+            LinearLayout footer = new LinearLayout(this);
+            footer.setOrientation(LinearLayout.VERTICAL);
+            footer.setGravity(Gravity.CENTER_HORIZONTAL);
+            footer.setPadding(dp(24), dp(8), dp(24), dp(20));
+            for (View control : new View[] {voiceModeText, typelessModeRow,
+                    actionFeedback, voiceEditRow, targetDockRow}) {
+                voiceDock.removeView(control);
+                footer.addView(control);
             }
-            console.addView(scrollView, new LinearLayout.LayoutParams(
+            ((LinearLayout.LayoutParams) voiceModeText.getLayoutParams()).topMargin = 0;
+            ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).topMargin = dp(16);
+            voiceDock.setGravity(Gravity.CENTER);
+            voiceDock.setPadding(dp(24), dp(12), dp(24), dp(compact ? 8 : 24));
+            console.addView(header);
+            console.addView(voiceScroll, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-            ScrollView dockScroll = new ScrollView(this);
-            dockScroll.setVerticalScrollBarEnabled(false);
-            dockScroll.addView(voiceDock);
-            LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            dockParams.setMargins(dp(12), dp(6), dp(12), dp(8));
-            console.addView(dockScroll, dockParams);
-            root.addView(console);
-            // Measure the real dock, not a magic bottom inset. Large fonts can scroll
-            // the dock independently without covering the shortcut grid.
-            voiceDock.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> dockScroll.post(() -> {
-                // A health refresh can reveal engine modes after the first layout.
-                // Resize outside the layout pass so the parent lays out again.
-                int height = Math.min(voiceDock.getHeight(),
-                        root.getHeight() * (compact ? 60 : 55) / 100);
-                if (height > 0 && dockParams.height != height) {
-                    dockParams.height = height;
-                    dockScroll.setLayoutParams(dockParams);
-                }
-            }));
+            console.addView(footer);
         }
-
-        page.setFocusableInTouchMode(true);
-        page.requestFocus();
-        scrollView.post(() -> scrollView.scrollTo(0, 0));
+        root.addView(console, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         return root;
+    }
+
+    private android.graphics.drawable.Drawable voiceButtonBackground(int color, int pressed) {
+        // Large and compact microphone targets keep the same circular shape in every state.
+        return pressableRoundRect(color, pressed, 120);
+    }
+
+    private void showShortcutPanel() {
+        if (shortcutDialog != null && shortcutDialog.isShowing()) return;
+        if (shortcutScroll.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) shortcutScroll.getParent()).removeView(shortcutScroll);
+        }
+        shortcutDialog = new android.app.Dialog(this);
+        shortcutDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(0, dp(12), 0, dp(8));
+        shortcutPanelFeedback = text("发送到当前电脑", 12, theme.muted, Typeface.NORMAL);
+        shortcutPanelFeedback.setPadding(dp(20), dp(8), dp(20), dp(8));
+        shortcutPanelFeedback.setMaxLines(3);
+        shortcutPanelFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        panel.addView(shortcutPanelFeedback);
+        panel.addView(shortcutScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        Button close = smallButton("返回语音");
+        close.setOnClickListener(view -> shortcutDialog.dismiss());
+        panel.addView(close, margins(dp(16), dp(8), dp(16), 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        shortcutDialog.setContentView(panel);
+        shortcutDialog.setCanceledOnTouchOutside(true);
+        shortcutDialog.setOnDismissListener(dialog -> {
+            stopKeyRepeat();
+            if (gridEditMode) toggleGridEditMode();
+        });
+        shortcutDialog.show();
+        android.view.Window window = shortcutDialog.getWindow();
+        if (window != null) {
+            window.setGravity(Gravity.BOTTOM);
+            window.setBackgroundDrawable(theme.shape(this, theme.background, 24));
+            window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    getResources().getDisplayMetrics().heightPixels * 78 / 100);
+        }
+    }
+
+    private void triggerConfiguredGoal(Button source) {
+        if (targetComputerId == null || targetComputerId.isBlank()) {
+            showActionFeedback("请先连接电脑，再使用 Goal", theme.muted);
+            return;
+        }
+        for (ShortcutButtonConfig config : configRepository.load()) {
+            if ("agentGoal".equals(config.id)) {
+                triggerShortcut(source, config);
+                return;
+            }
+        }
+        showActionFeedback("找不到 Goal 配置，请在快捷键中检查", theme.warning);
     }
 
     private void refreshShortcutGrid() {
@@ -1167,7 +1116,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void triggerShortcut(ShortcutKeyView source, ShortcutButtonConfig config) {
+    private void triggerShortcut(View source, ShortcutButtonConfig config) {
         JSONObject body = new JSONObject();
         try {
             body.put("requestId", UUID.randomUUID().toString());
@@ -1198,19 +1147,19 @@ public final class MainActivity extends Activity {
             } else {
                 String legacyAction = legacyActionForId(config.id);
                 if (legacyAction == null) {
-                    source.showFailure();
+                    showShortcutFailure(source);
                     showActionFeedback("✕  自定义按键需要电脑端升级到 1.5.0", theme.danger);
                     return;
                 }
                 body.put("action", legacyAction);
             }
         } catch (Exception exception) {
-            source.showFailure();
+            showShortcutFailure(source);
             showActionFeedback("✕  快捷键配置无效，请进入设置修复", theme.danger);
             return;
         }
 
-        source.showSending();
+        showShortcutSending(source);
         showActionFeedback("●  正在发送：" + config.label + " · " + config.subtitle(),
                 theme.warning);
         actionExecutor.execute(() -> {
@@ -1221,7 +1170,7 @@ public final class MainActivity extends Activity {
                     showActionFeedback("✓  已发送：" + config.label + " · " + transport,
                             theme.success);
                     performResultHaptic(source, true);
-                    source.showSuccess();
+                    showShortcutSuccess(source);
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
@@ -1229,7 +1178,7 @@ public final class MainActivity extends Activity {
                     showActionFeedback("✕  电脑未确认快捷键：" + config.label,
                             theme.danger);
                     performResultHaptic(source, false);
-                    source.showFailure();
+                    showShortcutFailure(source);
                 });
             }
         });
@@ -1296,6 +1245,7 @@ public final class MainActivity extends Activity {
         }
         targetDeviceRow.removeAllViews();
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        targetDockRow.setVisibility(devices.size() > 1 ? View.VISIBLE : View.GONE);
         if (devices.isEmpty()) {
             TextView empty = text("添加电脑  +", 12,
                     theme.muted, Typeface.NORMAL);
@@ -2614,9 +2564,9 @@ public final class MainActivity extends Activity {
             int stopFill = theme.live;
             int stopInk = theme.onLive;
             typelessButton.setBackground(stopState
-                    ? pressableRoundRect(stopFill,
-                            theme.mix(theme.live, theme.onLive, 0.2f), 56)
-                    : pressableRoundRect(theme.primary, theme.primaryPressed, 56));
+                    ? voiceButtonBackground(stopFill,
+                            theme.mix(theme.live, theme.onLive, 0.2f))
+                    : voiceButtonBackground(theme.primary, theme.primaryPressed));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
                 voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
@@ -2650,10 +2600,9 @@ public final class MainActivity extends Activity {
         int stopFill = theme.live;
         int stopInk = theme.onLive;
         typelessButton.setBackground(stopState
-                ? pressableRoundRect(
-                        stopFill,
-                        theme.mix(theme.live, theme.onLive, 0.2f), 56)
-                : pressableRoundRect(theme.primary, theme.primaryPressed, 56));
+                ? voiceButtonBackground(stopFill,
+                        theme.mix(theme.live, theme.onLive, 0.2f))
+                : voiceButtonBackground(theme.primary, theme.primaryPressed));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
             voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
@@ -3333,22 +3282,23 @@ public final class MainActivity extends Activity {
 
     private void showConnection(String title, int color) {
         statusText.setText(targetComputerId == null ? "连接你的电脑" : targetDisplayName);
-        connectionEyebrow.setText(targetComputerId == null ? "从一台电脑开始" : "当前输入电脑");
         statusDetailText.setText(UiText.connectionDetail(targetDisplayName, title));
         connectionCard.setContentDescription(statusText.getText() + "，" + statusDetailText.getText()
                 + "。点击查看全部电脑");
-        statusText.setTextColor(theme.workspaceInk());
-        statusDetailText.setTextColor(theme.workspaceMuted());
-        statusDot.setBackground(roundRect(theme.light
-                ? theme.mix(color, theme.workspaceInk(), 0.62f) : color, 20));
-        connectionCard.setBackground(theme.shape(
-                this, theme.workspacePanel(), 24));
+        statusText.setTextColor(theme.text);
+        statusDetailText.setTextColor(theme.muted);
+        statusDetailText.setVisibility(targetComputerId == null ? View.GONE : View.VISIBLE);
+        statusDot.setBackground(roundRect(color, 20));
     }
 
     private void showActionFeedback(String message, int color) {
         lastFeedbackMessage = message;
         lastFeedbackColor = color;
         actionFeedback.setText(message);
+        if (shortcutDialog != null && shortcutDialog.isShowing()) {
+            shortcutPanelFeedback.setText(message);
+            shortcutPanelFeedback.setTextColor(color);
+        }
         actionFeedback.setVisibility(View.VISIBLE);
         actionFeedback.setTextColor(color);
         actionFeedback.setBackground(theme.shape(
@@ -3442,6 +3392,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (shortcutDialog != null) shortcutDialog.dismiss();
         TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
         if (sharedStatusReceiverRegistered) {

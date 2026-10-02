@@ -1,14 +1,14 @@
 # PhoneDeck 项目交接说明
 
-## 2026-10-02 手机语音工作台重新设计（最新状态）
+## 2026-10-02 极简语音手机首页（最新状态）
 
-- 用户要求手机界面呈现不同效果，并明确「只要手机界面」。本轮分支 `codex/yandu-phone-workspace` 基于云端 `agent/yandu-multi-theme-config` / `5a8da7b`（PR #29），没有将尚未合并的整组云端功能视为 main 已发布。
-- Android 首页改为品牌页头、高对比电脑卡、三列大快捷卡和底部语音工作台。话筒与状态说明并排，模式摘要可进入现有语音设置；退格、回车、真实目标切换和未配对时的添加入口保留。设置首页同步调整引导卡和导航行；六主题及既有偏好格式不变。
-- 短竖屏使用紧凑语音区，顶部信息随快捷区滚动，避免大字体挤掉全部快捷键；普通竖屏固定顶部，横屏保持双栏。结果反馈出现时仍可独立滚动语音区。点击/按住手势、语音会话、受控按键、采音参数和连接鉴权未修改。
-- **本机构建**：macOS ARM64、JDK 17，执行 `:app:assembleDebug :app:assembleUiPreview :app:testDebugUnitTest :app:lintDebug` 全部通过；27 项测试，0 失败/0 跳过；lint 0 error / 43 warning。新增配色的六主题共 30 组文字/背景对比度最低 4.805:1。
-- **模拟器走查**：Android 14 / API 34，六主题首页、暖白设置页、深色横屏、150% 字体，以及 320×640dp 窄屏/150% 字体的快捷区滚动。模式入口可切换点击/按住并正确回显；编辑布局可进入/退出；添加电脑打开既有配对说明。未配对状态与截图均来自实际运行，没有虚构在线设备；本轮不计真实录音或输入验收。
-- **交付**：独立 `com.codex.phonedeck.preview` / `1.6.0-dev.21-ui-preview` / versionCode 27 的开发预览 APK，文件 `outputs/yandu-phone-workspace/Yandu-phone-workspace-ui-preview.apk`，截图、构建日志和校验信息同目录（均 ignored）。该包可调试、使用本机调试签名，不是固定签名 `.desktoppreview` code4 的覆盖升级；未修改发布版本组、桌面源码或历史产物。
-- **待办**：当前没有连接真实 Android 手机；真实采音、点击/按住完整听写、已配对多电脑状态/切换、实机触感和锁屏仍需手机与接收端联合验收。若决定进入既有 `.desktoppreview` 渠道，需在持有该渠道固定签名的构建环境生成下一版本；不要用本机调试签名替代。跨平台验收继续按 DESKTOP_ACCEPTANCE 执行。
+- 用户否定第一版卡片工作台后，明确选择「极简语音：大话筒、少按钮」。继续分支 `codex/yandu-phone-workspace` 和 PR #30，基于云端 `agent/yandu-multi-theme-config` / `5a8da7b`（PR #29）。当前实现以本节为准；首轮工作台截图属于历史。
+- 首页缩减为轻量连接行、184dp 圆形话筒（短屏/横屏 128dp）、真实状态/电平，以及底部模式入口和 Goal/退格/回车。用户确认回撤就是退格；Goal 读取原 `agentGoal` 配置，默认 `/goal`，沿用既有提交偏好，不额外追加回车。完整快捷键入口移到顶部。快捷网格移入底部面板；原有排序、编辑、发送与长按行为保留，关闭面板停止连发并退出编辑，结果反馈在面板中可见。仅多台已配对电脑时显示底部目标切换；连接行始终可以查看电脑。设置首页删除大引导卡。
+- 圆形背景和图形缩放在空闲/启动/停止/共享状态保持一致。竖屏话筒区可滚动，模式和辅助操作固定；横屏为连接与语音双栏。六主题/偏好格式、会话所有权、语音手势、受控按键、采音和鉴权没有变更。
+- **本机构建**：macOS ARM64 / JDK 17，执行 `:app:assembleDebug :app:assembleUiPreview :app:testDebugUnitTest :app:lintDebug` 全通过；27 项测试，0 失败/0 跳过；lint 0 error / 43 warning。
+- **模拟器走查**：Android 14 / API 34。检查暖白/深色首页、设置、横屏、150% 字体、320×640dp 窄屏，点击/按住选择回显，快捷面板打开/编辑/关闭/重开及系统返回。截图均为真实运行的未配对状态，没有虚构在线电脑；该结果不代表录音或实际输入验收。
+- **交付**：独立 `com.codex.phonedeck.preview` / `1.6.0-dev.21-ui-preview` / versionCode 27 的开发预览 APK：`outputs/yandu-phone-workspace/Yandu-minimal-voice-ui-preview.apk`。最新截图使用 `minimal-*` 名称，构建日志为 `minimal-build.log`，校验信息为 `minimal-verification.json`（均 ignored）。该包可调试、使用本机调试签名，不是固定签名 `.desktoppreview` code4 的覆盖升级；旧预览产物保留原字节。
+- **待办**：当前没有连接真实手机；真实采音、点击/按住完整听写、已配对多电脑状态/切换、实机触感、快捷键连发释放和锁屏仍需手机与接收端联合验收。进入既有 `.desktoppreview` 渠道须使用该渠道原签名并递增版本，不能替换为本机调试签名。跨平台验收继续按 DESKTOP_ACCEPTANCE 执行。
 
 ## 2026-10-01 多主题与多电脑独立配置（当前）
 
