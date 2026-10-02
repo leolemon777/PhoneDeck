@@ -31,7 +31,6 @@ import android.view.Gravity;
 import android.view.DragEvent;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
-import android.view.SoundEffectConstants;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -88,7 +87,7 @@ public final class MainActivity extends Activity {
     private View statusDot;
     private TextView actionFeedback;
     private TextView microphoneLevel;
-    private TextView voiceModeText;
+    private VoiceModeSwitch voiceModeSwitch;
     private TextView targetTitleText;
     private Button typelessButton;
     private TextView voiceButtonCaption;
@@ -364,7 +363,7 @@ public final class MainActivity extends Activity {
         }
         applyWifiLock();
         requestImmediateLanCheck("App 回到前台");
-        if (voiceModeText != null && typelessButton != null) {
+        if (voiceModeSwitch != null && typelessButton != null) {
             updateVoiceModeInterface();
             refreshTypelessModeChips();
             if (WORK_SHARED.equals(voiceWorkMode)) {
@@ -388,7 +387,7 @@ public final class MainActivity extends Activity {
         updateConnectionDisplay();
         refreshShortcutGrid();
         refreshTargetSwitcher();
-        if (voiceModeText != null && typelessButton != null) {
+        if (voiceModeSwitch != null && typelessButton != null) {
             updateVoiceModeInterface();
         }
         if (lastFeedbackMessage != null) {
@@ -462,13 +461,13 @@ public final class MainActivity extends Activity {
         brandRow.addView(brand, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button shortcuts = smallButton("快捷键");
-        shortcuts.setBackgroundColor(Color.TRANSPARENT);
+        shortcuts.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
         shortcuts.setTextColor(theme.muted);
         shortcuts.setContentDescription("打开完整快捷键面板");
         shortcuts.setOnClickListener(view -> showShortcutPanel());
         brandRow.addView(shortcuts, new LinearLayout.LayoutParams(dp(64), dp(48)));
         Button settings = smallButton("设置");
-        settings.setBackgroundColor(Color.TRANSPARENT);
+        settings.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
         settings.setTextColor(theme.muted);
         settings.setContentDescription("打开设置");
         settings.setOnClickListener(view -> startActivity(new Intent(this, SettingsActivity.class)));
@@ -502,7 +501,7 @@ public final class MainActivity extends Activity {
         statusDetailText.setEllipsize(TextUtils.TruncateAt.END);
         connectionCopy.addView(statusDetailText);
         Button retry = smallButton("↻");
-        retry.setBackgroundColor(Color.TRANSPARENT);
+        retry.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 24));
         retry.setTextColor(theme.muted);
         retry.setTextSize(21);
         retry.setContentDescription("重新检测电脑连接");
@@ -591,19 +590,10 @@ public final class MainActivity extends Activity {
         voiceMeter = new VoiceLevelView(this, theme);
         voiceCopy.addView(voiceMeter, margins(0, dp(10), 0, 0, dp(128), dp(14)));
 
-        voiceModeText = text("点击说话模式", 12, theme.onPrimaryContainer, Typeface.NORMAL);
-        voiceModeText.setGravity(Gravity.CENTER);
-        voiceModeText.setPadding(dp(20), dp(8), dp(20), dp(8));
-        voiceModeText.setMaxLines(2);
-        voiceModeText.setBackground(theme.pressable(this, theme.primaryContainer,
-                theme.surfaceRaised, 24));
-        voiceModeText.setMinHeight(dp(48));
-        voiceModeText.setFocusable(true);
-        voiceModeText.setContentDescription("语音模式，点击更改说话方式");
-        voiceModeText.setOnClickListener(view -> startActivity(new Intent(this,
-                SettingsActivity.class).putExtra("phonedeck_page", "voice")));
-        voiceDock.addView(voiceModeText, margins(0, dp(landscape ? 10 : compact ? 16 : 28), 0, 0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        voiceModeSwitch = new VoiceModeSwitch(this, theme, this::selectVoiceInputMode);
+        voiceModeSwitch.setMode(WORK_SHARED.equals(voiceWorkMode) ? WORK_SHARED : voiceMode, false);
+        voiceDock.addView(voiceModeSwitch, margins(0, dp(landscape ? 10 : compact ? 16 : 28), 0, 0,
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         typelessModeRow = new LinearLayout(this);
         typelessModeRow.setGravity(Gravity.CENTER);
         typelessModeRow.setVisibility(View.GONE);
@@ -694,12 +684,12 @@ public final class MainActivity extends Activity {
             footer.setOrientation(LinearLayout.VERTICAL);
             footer.setGravity(Gravity.CENTER_HORIZONTAL);
             footer.setPadding(dp(24), dp(8), dp(24), dp(20));
-            for (View control : new View[] {voiceModeText, typelessModeRow,
+            for (View control : new View[] {voiceModeSwitch, typelessModeRow,
                     actionFeedback, voiceEditRow, targetDockRow}) {
                 voiceDock.removeView(control);
                 footer.addView(control);
             }
-            ((LinearLayout.LayoutParams) voiceModeText.getLayoutParams()).topMargin = 0;
+            ((LinearLayout.LayoutParams) voiceModeSwitch.getLayoutParams()).topMargin = 0;
             ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).topMargin = dp(16);
             voiceDock.setGravity(Gravity.CENTER);
             voiceDock.setPadding(dp(24), dp(12), dp(24), dp(compact ? 8 : 24));
@@ -758,6 +748,8 @@ public final class MainActivity extends Activity {
     private void triggerConfiguredGoal(Button source) {
         if (targetComputerId == null || targetComputerId.isBlank()) {
             showActionFeedback("请先连接电脑，再使用 Goal", theme.muted);
+            performResultHaptic(source, false);
+            showShortcutFailure(source);
             return;
         }
         for (ShortcutButtonConfig config : configRepository.load()) {
@@ -767,6 +759,8 @@ public final class MainActivity extends Activity {
             }
         }
         showActionFeedback("找不到 Goal 配置，请在快捷键中检查", theme.warning);
+        performResultHaptic(source, false);
+        showShortcutFailure(source);
     }
 
     private void refreshShortcutGrid() {
@@ -1107,12 +1101,16 @@ public final class MainActivity extends Activity {
     private void showShortcutSuccess(View source) {
         if (source instanceof ShortcutKeyView) {
             ((ShortcutKeyView) source).showSuccess();
+        } else {
+            TouchFeedback.result(source, true);
         }
     }
 
     private void showShortcutFailure(View source) {
         if (source instanceof ShortcutKeyView) {
             ((ShortcutKeyView) source).showFailure();
+        } else {
+            TouchFeedback.result(source, false);
         }
     }
 
@@ -1215,12 +1213,14 @@ public final class MainActivity extends Activity {
                     showActionFeedback("✓  已发送：" + label + " · " + transport,
                             theme.success);
                     performResultHaptic(source, true);
+                    TouchFeedback.result(source, true);
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
                     showConnection("发送失败，请检查当前电脑连接", theme.danger);
                     showActionFeedback("✕  电脑未确认" + label + "操作", theme.danger);
                     performResultHaptic(source, false);
+                    TouchFeedback.result(source, false);
                 });
             }
         });
@@ -1952,8 +1952,6 @@ public final class MainActivity extends Activity {
             typelessModeRow.setVisibility(View.GONE);
             return;
         }
-        voiceModeText.setText(getString(R.string.voice_mode_summary,
-                activeEngineName(), MODE_HOLD.equals(voiceMode) ? "按住" : "点击"));
         EngineMode[] modes = activeTypelessModes();
         boolean usable = activeManagedDictationSupported() && modes.length > 1;
         typelessModeRow.setVisibility(usable ? View.VISIBLE : View.GONE);
@@ -2468,10 +2466,12 @@ public final class MainActivity extends Activity {
                 if (!view.isEnabled()) {
                     return true;
                 }
-                view.animate().scaleX(0.965f).scaleY(0.965f).setDuration(55).start();
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-                view.playSoundEffect(SoundEffectConstants.CLICK);
+                TouchFeedback.press(view, 0.93f, true);
                 if (WORK_MANAGED.equals(voiceWorkMode) && MODE_HOLD.equals(voiceMode)) {
+                    // Consuming the hold gesture bypasses Button's own pressed/ripple state.
+                    view.drawableHotspotChanged(event.getX(), event.getY());
+                    view.setPressed(true);
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
                     holdGestureActive = true;
                     holdReleasePending = false;
                     if (!dictationActive && !audioStartPending && !typelessInFlight) {
@@ -2480,11 +2480,14 @@ public final class MainActivity extends Activity {
                     return true;
                 }
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
+                TouchFeedback.release(view);
                 if (WORK_MANAGED.equals(voiceWorkMode) && MODE_HOLD.equals(voiceMode)) {
+                    view.setPressed(false);
+                    view.getParent().requestDisallowInterceptTouchEvent(false);
                     boolean wasHolding = holdGestureActive;
                     holdGestureActive = false;
                     if (wasHolding) {
+                        TouchFeedback.selection(view);
                         if (dictationActive && !typelessInFlight) {
                             stopPhoneDictation();
                         } else if (audioStartPending || typelessInFlight) {
@@ -2492,7 +2495,7 @@ public final class MainActivity extends Activity {
                             showActionFeedback("●  已松开，连接完成后会自动结束", theme.warning);
                         }
                     }
-                    view.performClick();
+                    if (action == MotionEvent.ACTION_UP) view.performClick();
                     return true;
                 }
             }
@@ -2500,10 +2503,42 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void selectVoiceInputMode(String mode, View source) {
+        if (!MODE_TAP.equals(mode) && !MODE_HOLD.equals(mode) && !WORK_SHARED.equals(mode)) return;
+        String currentMode = WORK_SHARED.equals(voiceWorkMode) ? WORK_SHARED : voiceMode;
+        if (currentMode.equals(mode)) {
+            TouchFeedback.selection(source);
+            return;
+        }
+        if (isVoiceStarting() || dictationActive || typelessInFlight || holdGestureActive
+                || sharedStartPending || currentSessionId != null
+                || PhoneAudioService.getSnapshot().busy
+                || (audioStreamer != null && audioStreamer.isRunning())) {
+            showActionFeedback("请先结束语音，再切换说话方式", theme.warning);
+            performResultHaptic(source, false);
+            TouchFeedback.result(source, false);
+            return;
+        }
+        voiceWorkMode = WORK_SHARED.equals(mode) ? WORK_SHARED : WORK_MANAGED;
+        if (!WORK_SHARED.equals(mode)) voiceMode = mode;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putString(PREF_VOICE_WORK_MODE, voiceWorkMode)
+                .putString(PREF_VOICE_MODE, voiceMode).apply();
+        lastFeedbackMessage = null;
+        actionFeedback.setVisibility(View.GONE);
+        lastSharedDetail = null;
+        microphoneLevel.setText(WORK_SHARED.equals(mode)
+                ? "手机麦克风 · 共享未开启" : "手机麦克风 · 未启动");
+        microphoneLevel.setTextColor(theme.muted);
+        voiceModeSwitch.setMode(mode, true);
+        updateVoiceModeInterface();
+        refreshTargetSwitcher();
+        TouchFeedback.selection(source);
+    }
+
     private void updateVoiceModeInterface() {
+        voiceModeSwitch.setMode(WORK_SHARED.equals(voiceWorkMode) ? WORK_SHARED : voiceMode, false);
         if (WORK_SHARED.equals(voiceWorkMode)) {
-            voiceModeText.setText("共享麦克风模式");
-            voiceModeText.setTextColor(theme.warning);
             if (targetTitleText != null) {
                 targetTitleText.setText("快捷键到");
             }
@@ -2512,9 +2547,6 @@ public final class MainActivity extends Activity {
             return;
         }
         boolean holdMode = MODE_HOLD.equals(voiceMode);
-        voiceModeText.setText(getString(R.string.voice_mode_summary,
-                activeEngineName(), holdMode ? "按住" : "点击"));
-        voiceModeText.setTextColor(theme.onPrimaryContainer);
         if (targetTitleText != null) {
             targetTitleText.setText("输入到");
         }
@@ -3321,44 +3353,15 @@ public final class MainActivity extends Activity {
     }
 
     private void installTouchFeedback(View control, Runnable onRelease) {
-        control.setSoundEffectsEnabled(true);
-        control.setHapticFeedbackEnabled(true);
-        control.setOnTouchListener((view, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
-                view.animate().scaleX(0.965f).scaleY(0.965f).setDuration(55).start();
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-                view.playSoundEffect(SoundEffectConstants.CLICK);
-            } else if (action == MotionEvent.ACTION_UP
-                    || action == MotionEvent.ACTION_CANCEL) {
-                view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
-                if (onRelease != null) {
-                    onRelease.run();
-                }
-            }
-            return false;
-        });
+        TouchFeedback.install(control, onRelease);
     }
 
     private void performResultHaptic(View view, boolean success) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            view.performHapticFeedback(success
-                    ? HapticFeedbackConstants.CONFIRM
-                    : HapticFeedbackConstants.REJECT);
-        } else {
-            view.performHapticFeedback(success
-                    ? HapticFeedbackConstants.VIRTUAL_KEY
-                    : HapticFeedbackConstants.LONG_PRESS);
-        }
+        TouchFeedback.resultHaptic(view, success);
     }
 
     private void flashResult(View view, int color) {
-        view.animate().cancel();
-        view.setScaleX(1f);
-        view.setScaleY(1f);
-        view.animate().alpha(0.62f).setDuration(80).withEndAction(() ->
-                view.animate().alpha(view.isEnabled() ? 1f : 0.74f).setDuration(140).start()
-        ).start();
+        TouchFeedback.result(view, color == theme.success);
     }
 
     @Override
@@ -3444,6 +3447,7 @@ public final class MainActivity extends Activity {
         button.setBackground(theme.pressable(
                 this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 19));
         button.setStateListAnimator(null);
+        installTouchFeedback(button);
         return button;
     }
 

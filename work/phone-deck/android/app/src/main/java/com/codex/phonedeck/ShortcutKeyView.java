@@ -78,10 +78,7 @@ final class ShortcutKeyView extends FrameLayout {
         removeCallbacks(clearState);
         content.animate().alpha(1f).setDuration(100).start();
         showBadge("✓", theme.success);
-        animate().cancel();
-        setScaleX(0.97f);
-        setScaleY(0.97f);
-        animate().scaleX(1f).scaleY(1f).setDuration(180).start();
+        TouchFeedback.result(this, true);
         postDelayed(clearState, 900);
     }
 
@@ -89,10 +86,7 @@ final class ShortcutKeyView extends FrameLayout {
         removeCallbacks(clearState);
         content.animate().alpha(1f).setDuration(100).start();
         showBadge("!", theme.danger);
-        animate().cancel();
-        setTranslationX(-dp(5));
-        animate().translationX(dp(5)).setDuration(70).withEndAction(() ->
-                animate().translationX(0).setDuration(90).start()).start();
+        TouchFeedback.result(this, false);
         postDelayed(clearState, 1200);
     }
 

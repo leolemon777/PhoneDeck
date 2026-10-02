@@ -45,15 +45,17 @@ public final class PhoneAudioService extends Service {
 
     static final class Snapshot {
         final boolean running;
+        final boolean busy;
         final int connected;
         final int total;
         final int level;
         final String detail;
         final Map<String, String> receiverStates;
 
-        Snapshot(boolean running, int connected, int total, int level, String detail,
+        Snapshot(boolean running, boolean busy, int connected, int total, int level, String detail,
                  Map<String, String> receiverStates) {
             this.running = running;
+            this.busy = busy;
             this.connected = connected;
             this.total = total;
             this.level = level;
@@ -64,7 +66,7 @@ public final class PhoneAudioService extends Service {
     }
 
     private static volatile Snapshot snapshot = new Snapshot(
-            false, 0, 0, 0, "未开启", java.util.Collections.emptyMap());
+            false, false, 0, 0, 0, "未开启", java.util.Collections.emptyMap());
 
     static Snapshot getSnapshot() {
         return snapshot;
@@ -433,7 +435,7 @@ public final class PhoneAudioService extends Service {
 
     private void publishStatus() {
         boolean active = desiredRunning && broadcaster != null && broadcaster.isRunning();
-        snapshot = new Snapshot(active, connectedCount, knownTotal, lastLevel,
+        snapshot = new Snapshot(active, desiredRunning || stopping, connectedCount, knownTotal, lastLevel,
                 statusDetail, receiverStates);
         Intent status = new Intent(ACTION_STATUS).setPackage(getPackageName());
         status.putExtra(EXTRA_RUNNING, active);
@@ -520,7 +522,7 @@ public final class PhoneAudioService extends Service {
         releaseLocks();
         probeExecutor.shutdownNow();
         probePool.shutdownNow();
-        snapshot = new Snapshot(false, 0, knownTotal, 0,
+        snapshot = new Snapshot(false, false, 0, knownTotal, 0,
                 "共享麦克风已关闭", java.util.Collections.emptyMap());
         super.onDestroy();
     }
