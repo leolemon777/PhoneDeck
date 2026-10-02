@@ -45,6 +45,16 @@ public sealed class HttpTests
                 using var audio = new HttpRequestMessage(HttpMethod.Post, "/api/audio/stream") { Content = new ByteArrayContent(new byte[9600]) };
                 audio.Headers.Add("X-PhoneDeck-Protocol", "2"); audio.Headers.Add("X-PhoneDeck-Computer-Id", identity.ComputerId); audio.Headers.Add("X-PhoneDeck-Session", session);
                 Assert.AreEqual(HttpStatusCode.OK, (await lan.SendAsync(audio)).StatusCode);
+                // Stop on the desktop before the phone has ever polled a recording state.
+                Assert.AreEqual(HttpStatusCode.OK, (await local.PostAsJsonAsync("/local/dictation/stop", new { })).StatusCode);
+                var stoppedHealth = await lan.GetFromJsonAsync<JsonElement>("/api/health");
+                Assert.IsTrue(stoppedHealth.GetProperty("capabilities").EnumerateArray().Any(x => x.GetString() == "phoneStopV1"));
+                Assert.AreEqual(session, stoppedHealth.GetProperty("audio").GetProperty("stopRequestedSessionId").GetString());
+                Assert.IsFalse(stoppedHealth.GetProperty("dictation").GetProperty("active").GetBoolean());
+                lan.DefaultRequestHeaders.Authorization = new("Bearer", limited); lan.DefaultRequestHeaders.Remove("X-PhoneDeck-Client"); lan.DefaultRequestHeaders.Add("X-PhoneDeck-Client", scoped.ClientId);
+                var otherHealth = await lan.GetFromJsonAsync<JsonElement>("/api/health");
+                Assert.AreEqual(JsonValueKind.Null, otherHealth.GetProperty("audio").GetProperty("stopRequestedSessionId").ValueKind);
+                lan.DefaultRequestHeaders.Authorization = new("Bearer", token); lan.DefaultRequestHeaders.Remove("X-PhoneDeck-Client"); lan.DefaultRequestHeaders.Add("X-PhoneDeck-Client", phone.ClientId);
                 Assert.AreEqual(HttpStatusCode.OK, (await lan.PostAsJsonAsync("/api/dictation/stop", envelope)).StatusCode);
                 JsonElement results = default;
                 for (var i = 0; i < 100; i++) { results = await lan.GetFromJsonAsync<JsonElement>($"/api/transcripts?targetComputerId={identity.ComputerId}"); if (results.GetProperty("results").GetArrayLength() == 1) break; await Task.Delay(30); }

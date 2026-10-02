@@ -73,10 +73,10 @@ public final class MainActivity extends Activity {
     private static final String MODE_HOLD = "hold";
     private static final long HEALTH_CHECK_INTERVAL_MS = 2_000;
     private static final long VOICE_START_WATCHDOG_MS = 6_000;
-    private static final int REMOTE_STOP_CONFIRMATIONS_REQUIRED = 1;
     private final ExecutorService actionExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService voiceExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService voiceRecoveryExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService voiceStatusExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService connectionExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private PhoneDeckTheme theme;
@@ -129,9 +129,8 @@ public final class MainActivity extends Activity {
     private volatile String usbEngineName = "Typeless";
     private String selectedTypelessMode = "dictation";
     private String currentSessionMode;
-    private String remoteStopCandidateSessionId;
-    private int remoteStopConfirmations;
-    private boolean remoteVoiceWasObservedHealthy;
+    private long voiceStartConfirmedAt;
+    private boolean voiceStatusInFlight;
     private LinearLayout typelessModeRow;
     private WifiManager.WifiLock wifiLock;
     private boolean keepConnectionAlive = true;
@@ -202,6 +201,37 @@ public final class MainActivity extends Activity {
             testConnection();
             testLanConnections();
             mainHandler.postDelayed(this, nextHealthCheckDelayMs());
+        }
+    };
+
+    // Poll only the managed voice target while speaking. An offline second computer
+    // in the general discovery queue must not delay stopping the microphone.
+    private final Runnable managedVoiceCheck = new Runnable() {
+        @Override public void run() {
+            if (isFinishing() || isDestroyed() || !currentSessionManaged
+                    || currentSessionId == null || currentSessionEndpoint == null) return;
+            if (!voiceStatusInFlight) {
+                final String session = currentSessionId;
+                final PhoneDeckEndpoint endpoint = currentSessionEndpoint;
+                final long probeStartedAt = SystemClock.elapsedRealtime();
+                voiceStatusInFlight = true;
+                voiceStatusExecutor.execute(() -> {
+                    try {
+                        JSONObject health = PhoneDeckHttp.getJson(endpoint, "/api/health", 600, 900);
+                        RemoteVoiceState remote = RemoteVoiceState.fromHealth(health, probeStartedAt);
+                        String computer = health.optString("computerId", null);
+                        mainHandler.post(() -> {
+                            if (session.equals(currentSessionId))
+                                reconcileRemoteVoiceState(endpoint, computer, remote);
+                        });
+                    } catch (Exception ignored) {
+                        // Connection failure is unknown, never evidence of a desktop stop.
+                    } finally {
+                        mainHandler.post(() -> voiceStatusInFlight = false);
+                    }
+                });
+            }
+            mainHandler.postDelayed(this, 500);
         }
     };
 
@@ -2120,6 +2150,7 @@ public final class MainActivity extends Activity {
         }
         connectionExecutor.execute(() -> {
             HttpURLConnection connection = null;
+            final long probeStartedAt = SystemClock.elapsedRealtime();
             try {
                 connection = (HttpURLConnection) new URL(SERVER + "/api/health").openConnection();
                 connection.setConnectTimeout(1200);
@@ -2147,7 +2178,7 @@ public final class MainActivity extends Activity {
                     phoneAudioAvailable = audio != null
                             && audio.optBoolean("available", false);
                     RemoteVoiceState remoteVoiceState =
-                            RemoteVoiceState.fromHealth(health);
+                            RemoteVoiceState.fromHealth(health, probeStartedAt);
                     typelessVirtualCableSelected = parseVirtualCableSelected(health);
                     usbEngineName = parseEngineDisplayName(health);
                     String healthForegroundApp = health.optString("foregroundApp", null);
@@ -2260,6 +2291,7 @@ public final class MainActivity extends Activity {
                         continue;
                     }
                     anyPaired = true;
+                    final long probeStartedAt = SystemClock.elapsedRealtime();
                     PhoneDeckLanClient.ProbeOutcome outcome =
                             PhoneDeckLanClient.probe(device, lanProbePool);
                     PhoneDeckLanClient.ProbeResult result = outcome.result;
@@ -2297,7 +2329,7 @@ public final class MainActivity extends Activity {
                     }
                     JSONObject audio = health.optJSONObject("audio");
                     RemoteVoiceState remoteVoiceState =
-                            RemoteVoiceState.fromHealth(health);
+                            RemoteVoiceState.fromHealth(health, probeStartedAt);
                     String lanForegroundApp = health.optString("foregroundApp", null);
                     next.put(device.computerId, new LanTargetStatus(
                             result.endpoint,
@@ -2343,47 +2375,18 @@ public final class MainActivity extends Activity {
             PhoneDeckEndpoint observedEndpoint,
             String observedComputerId,
             RemoteVoiceState remote) {
-        if (!dictationActive || typelessInFlight || !currentSessionManaged
-                || currentSessionId == null || currentSessionTargetComputerId == null
-                || currentSessionEndpoint == null) {
-            resetRemoteStopConfirmation();
-            return;
-        }
+        if (!currentSessionManaged || currentSessionId == null
+                || currentSessionTargetComputerId == null || currentSessionEndpoint == null
+                || currentSessionId.equals(intentionalAudioStopSessionId)) return;
 
-        // USB 与 LAN 健康检查会并行回调。与当前会话无关的观察结果只能忽略，
-        // 不能清空当前传输链路已经积累的停止确认。
-        if (remote == null || !remote.reliable
+        // Ignore other computers/transports. A stop receipt must name this session;
+        // legacy probes must be fresh enough to follow its start acknowledgement.
+        if (remote == null
                 || !sameComputer(currentSessionTargetComputerId, observedComputerId)
-                || !sameSessionTransport(currentSessionEndpoint, observedEndpoint)) {
-            return;
-        }
-
-        boolean sameRemoteSession = remote.dictationActive
-                && currentSessionId.equals(remote.sessionId);
-        if (sameRemoteSession && remote.typelessCapturing) {
-            remoteVoiceWasObservedHealthy = true;
-            resetRemoteStopConfirmation();
-            return;
-        }
-
-        // 启动初期引擎状态快照可能比 start 响应晚一轮。只有亲眼观察到
-        // 当前会话正常采集后，才把后续的 false 当作电脑端手动完成。
-        if (!remoteVoiceWasObservedHealthy) {
-            return;
-        }
-
-        if (!currentSessionId.equals(remoteStopCandidateSessionId)) {
-            remoteStopCandidateSessionId = currentSessionId;
-            remoteStopConfirmations = 0;
-        }
-        remoteStopConfirmations++;
-        Log.i("PhoneDeckVoice", currentSessionId
-                + " remoteStopObserved confirmations=" + remoteStopConfirmations
-                + " remoteSessionActive=" + remote.dictationActive
-                + " remoteCapturing=" + remote.typelessCapturing);
-        if (remoteStopConfirmations < REMOTE_STOP_CONFIRMATIONS_REQUIRED) {
-            return;
-        }
+                || !sameSessionTransport(currentSessionEndpoint, observedEndpoint)
+                || !RemoteStopPolicy.shouldStop(currentSessionId, remote.stopRequestedSessionId,
+                        voiceStartConfirmedAt, remote.probeStartedAt, remote.sampleAgeMs,
+                        remote.stale, remote.dictationActive, remote.sessionId, remote.capturing)) return;
 
         String sessionId = currentSessionId;
         String sessionTargetComputerId = currentSessionTargetComputerId;
@@ -2398,7 +2401,7 @@ public final class MainActivity extends Activity {
         if (voiceMeter != null) {
             voiceMeter.setVoiceState(VoiceLevelView.IDLE);
         }
-        showActionFeedback("✓  电脑端已完成，手机已同步停止", theme.success);
+        showActionFeedback("✓  电脑端已停止，手机已同步停止", theme.success);
         performResultHaptic(typelessButton, true);
         flashResult(typelessButton, theme.success);
         bestEffortStopManagedDictation(
@@ -2414,11 +2417,6 @@ public final class MainActivity extends Activity {
             return expected == PhoneDeckEndpoint.USB && observed == PhoneDeckEndpoint.USB;
         }
         return expected.isLan() && observed.isLan();
-    }
-
-    private void resetRemoteStopConfirmation() {
-        remoteStopCandidateSessionId = null;
-        remoteStopConfirmations = 0;
     }
 
     /// UDP 广播发现（10 秒冷却）。发现结果只并入候选地址；
@@ -2975,6 +2973,8 @@ public final class MainActivity extends Activity {
             return;
         }
         if (currentSessionManaged) {
+            mainHandler.removeCallbacks(managedVoiceCheck);
+            mainHandler.post(managedVoiceCheck);
             // 协议 v2 接收端会在 start 内等待同一 sessionId 的音频会话，
             // 因此无需先等 HTTPS 音频通道完成。录音、TLS/WASAPI 与
             // 语音引擎唤醒并行进行，首段 PCM 由手机和服务端 pre-roll 保留。
@@ -3050,7 +3050,7 @@ public final class MainActivity extends Activity {
                     if (!managed) {
                         Thread.sleep(280);
                     }
-                    audioStreamer.stop();
+                    audioStreamer.stop(sessionId);
                 }
                 Log.i("PhoneDeckVoice", sessionId + " commandConfirmed starting="
                         + starting + " +"
@@ -3062,6 +3062,7 @@ public final class MainActivity extends Activity {
                     disarmVoiceStartWatchdog();
                     dictationActive = starting;
                     if (starting) {
+                        voiceStartConfirmedAt = SystemClock.elapsedRealtime();
                         dictationPaused = false;
                     }
                     showConnection(transport + " 已连接", theme.success);
@@ -3086,12 +3087,12 @@ public final class MainActivity extends Activity {
                 Log.w("PhoneDeckVoice", sessionId + " commandFailed starting="
                         + starting + " +"
                         + (SystemClock.elapsedRealtime() - queuedAt) + "ms", exception);
-                intentionalAudioStopSessionId = sessionId;
-                audioStreamer.stop();
                 mainHandler.post(() -> {
                     if (!sessionId.equals(currentSessionId)) {
                         return;
                     }
+                    intentionalAudioStopSessionId = sessionId;
+                    audioStreamer.stop(sessionId);
                     disarmVoiceStartWatchdog();
                     holdReleasePending = false;
                     clearVoiceSessionState();
@@ -3243,8 +3244,8 @@ public final class MainActivity extends Activity {
 
     private void clearVoiceSessionState() {
         disarmVoiceStartWatchdog();
-        resetRemoteStopConfirmation();
-        remoteVoiceWasObservedHealthy = false;
+        mainHandler.removeCallbacks(managedVoiceCheck);
+        voiceStartConfirmedAt = 0;
         audioStartPending = false;
         dictationActive = false;
         dictationPaused = false;
@@ -3492,6 +3493,8 @@ public final class MainActivity extends Activity {
         if (shortcutDialog != null) shortcutDialog.dismiss();
         TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
+        mainHandler.removeCallbacks(managedVoiceCheck);
+        voiceStatusExecutor.shutdownNow();
         if (sharedStatusReceiverRegistered) {
             unregisterReceiver(sharedStatusReceiver);
             sharedStatusReceiverRegistered = false;
@@ -3630,41 +3633,6 @@ public final class MainActivity extends Activity {
         EngineMode(String id, String label) {
             this.id = id;
             this.label = label;
-        }
-    }
-
-    private static final class RemoteVoiceState {
-        final boolean reliable;
-        final boolean dictationActive;
-        final String sessionId;
-        final boolean typelessCapturing;
-
-        RemoteVoiceState(
-                boolean reliable,
-                boolean dictationActive,
-                String sessionId,
-                boolean typelessCapturing) {
-            this.reliable = reliable;
-            this.dictationActive = dictationActive;
-            this.sessionId = sessionId;
-            this.typelessCapturing = typelessCapturing;
-        }
-
-        static RemoteVoiceState fromHealth(JSONObject health) {
-            JSONObject dictation = health == null
-                    ? null : health.optJSONObject("dictation");
-            JSONObject typeless = health == null
-                    ? null : health.optJSONObject("typeless");
-            boolean reliable = dictation != null
-                    && typeless != null
-                    && dictation.has("active")
-                    && typeless.has("capturing")
-                    && !typeless.optBoolean("stale", false);
-            return new RemoteVoiceState(
-                    reliable,
-                    dictation != null && dictation.optBoolean("active", false),
-                    dictation == null ? null : dictation.optString("sessionId", null),
-                    typeless != null && typeless.optBoolean("capturing", false));
         }
     }
 
