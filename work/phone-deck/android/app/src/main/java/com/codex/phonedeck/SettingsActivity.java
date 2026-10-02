@@ -120,7 +120,6 @@ public final class SettingsActivity extends Activity {
         LinearLayout page = pageShell();
         addHeader(page, "设置", view -> finish());
 
-        page.addView(text("按你的习惯，调整控制台", 14, theme.muted, Typeface.NORMAL), topMargin(dp(12)));
         page.addView(sectionLabel("使用偏好"), topMargin(dp(24)));
 
         themeSummary = summaryText();
@@ -403,9 +402,9 @@ public final class SettingsActivity extends Activity {
     private LinearLayout navRow(String glyph, String title, TextView summary, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(16), dp(16), dp(16));
-        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 10, 1, theme.outline));
-        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(32), dp(32)));
+        row.setPadding(dp(14), dp(15), dp(14), dp(15));
+        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 20));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(42), dp(42)));
         row.setFocusable(true);
 
         LinearLayout copy = new LinearLayout(this);
@@ -434,6 +433,7 @@ public final class SettingsActivity extends Activity {
     private LinearLayout iconTile(String glyph) {
         LinearLayout tile = new LinearLayout(this);
         tile.setGravity(Gravity.CENTER);
+        tile.setBackground(theme.shape(this, theme.primaryContainer, 13));
         tile.addView(new DeckIconView(this, glyph, theme.primary),
                 new LinearLayout.LayoutParams(dp(24), dp(24)));
         return tile;
