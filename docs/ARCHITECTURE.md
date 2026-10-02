@@ -1,5 +1,21 @@
 # PhoneDeck 架构说明
 
+## 2026-10-02 电脑停止联动
+
+新 Desktop `phoneStopV1` 在 `/api/health` 的 `audio.stopRequestedSessionId` 返回本手机 managed
+会话的结束凭据。凭据保留 60 秒且只在内存中；按鉴权 Owner 过滤，USB 为原有 usb-local 身份。
+`SpeechSession.HealthForPhone` 原子取得流、录音与结束凭据，避免跨字段竞态。
+本机停止、取消或 managed 异常结束写入凭据，结束过的 sessionId 继续受原停止墓碑保护。
+shared 的电脑段落结束保持供音，不发停止手机的凭据。
+
+Android `RemoteStopPolicy` 核对会话 ID；调用方先核对目标电脑和传输。明确凭据可在启动响应之前结束
+手机采音；开始响应迟到时不得重置新会话。旧接收端无此能力时，用开始确认的本机单调时刻、健康请求
+起始时刻和探针 age 筛掉开始前/缓存观察，并要求明确的布尔状态；不再把 JSON null 当 false。
+手机先停止 AudioRecord，再按既有尾音路径完成 HTTP；界面恢复空闲，best-effort stop 保持同一会话。
+后台音频停止也带期望 sessionId，避免上一请求的迟到失败/确认关掉下一段录音。
+活动 managed 会话使用独立队列每 500ms 探测当前目标，最多一个请求在途；常规发现检查保持原节奏。
+会话结束/页面销毁后移除轮询；网络错误保持未知，不转换成电脑停止。
+
 ## 2026-09-30 新增统一 Desktop 接收端（alpha）
 
 `desktop/PhoneDeck.Desktop` 使用 .NET 10/Kestrel，内嵌本机控制页；HTTP 仅回环，HTTPS 局域网入口沿用逐手机 Bearer、证书固定与扫码双端确认。身份/授权目录独立于旧接收端。受控输入通过 Windows SendInput、macOS CGEvent 或 Linux X11/Wayland 固定输入工具，不接受命令行程序、脚本或任意 shell。

@@ -67,8 +67,53 @@ public sealed class SpeechTests
     {
         var computer = Id(); var store = new TranscriptStore(computer); using var speech = new SpeechSession(new FakeEngine(), store, computer);
         var stream = Id(); speech.Attach("phone", stream, "shared");
-        for (var i = 0; i < 2; i++) { speech.StartLocal(false); speech.Feed(stream, new byte[9600]); await speech.StopLocalAsync(); await speech.WaitForResultAsync(); Assert.IsTrue(speech.Streaming); }
+        for (var i = 0; i < 2; i++)
+        {
+            speech.StartLocal(false); speech.Feed(stream, new byte[9600]); await speech.StopLocalAsync(); await speech.WaitForResultAsync();
+            Assert.IsTrue(speech.Streaming);
+            Assert.IsNull(speech.HealthForPhone("phone").StopRequestedSessionId);
+        }
         Assert.HasCount(2, store.LocalHistory()); Assert.AreNotEqual(store.LocalHistory()[0].SessionId, store.LocalHistory()[1].SessionId);
+    }
+    [TestMethod] public async Task QuickManagedDesktopStopSurvivesRecognitionAndIsScopedToOwner()
+    {
+        var computer = Id(); var store = new TranscriptStore(computer); var engine = new FakeEngine();
+        using var speech = new SpeechSession(engine, store, computer);
+        var first = Id(); speech.Start("one", first); speech.Attach("one", first, "managed"); speech.Feed(first, new byte[9600]);
+        await speech.StopLocalAsync(); await speech.StopLocalAsync(); await speech.WaitForResultAsync();
+        Assert.AreEqual(first, speech.HealthForPhone("one").StopRequestedSessionId);
+        Assert.IsNull(speech.HealthForPhone("two").StopRequestedSessionId);
+        Assert.IsFalse(speech.HealthForPhone("one").Recording); Assert.AreEqual(1, engine.Calls);
+        speech.EndStream(first, true);
+        var next = Id(); speech.Start("one", next); speech.Attach("one", next, "managed");
+        var health = speech.HealthForPhone("one");
+        Assert.IsTrue(health.Recording); Assert.AreEqual(next, health.RecordingSession);
+        Assert.AreNotEqual(next, health.StopRequestedSessionId);
+    }
+    [TestMethod] public async Task DesktopStopBeforeManagedStartRejectsLateStart()
+    {
+        var computer = Id(); using var speech = new SpeechSession(new FakeEngine(), new TranscriptStore(computer), computer);
+        var stream = Id(); speech.Attach("phone", stream, "managed"); await speech.StopLocalAsync();
+        Assert.AreEqual(stream, speech.HealthForPhone("phone").StopRequestedSessionId);
+        Assert.ThrowsExactly<InvalidOperationException>(() => speech.Start("phone", stream));
+    }
+    [TestMethod] public async Task DesktopStopWithoutALocalSegmentKeepsSharedSupply()
+    {
+        var computer = Id(); using var speech = new SpeechSession(new FakeEngine(), new TranscriptStore(computer), computer);
+        var stream = Id(); speech.Attach("phone", stream, "shared");
+        Assert.IsFalse(speech.HealthForPhone("phone").Recording);
+        Assert.IsNull(speech.HealthForPhone("phone").StopRequestedSessionId);
+        await speech.StopLocalAsync();
+        Assert.IsNull(speech.HealthForPhone("phone").StopRequestedSessionId);
+        Assert.IsTrue(speech.Streaming);
+    }
+    [TestMethod] public async Task SharedSegmentEndingAfterStreamEofDoesNotCreateAManagedStopReceipt()
+    {
+        var computer = Id(); using var speech = new SpeechSession(new FakeEngine(), new TranscriptStore(computer), computer);
+        var stream = Id(); speech.Attach("phone", stream, "shared"); speech.StartLocal(false);
+        speech.Feed(stream, new byte[9600]); speech.EndStream(stream, true);
+        await speech.StopLocalAsync(); await speech.WaitForResultAsync();
+        Assert.IsNull(speech.HealthForPhone("phone").StopRequestedSessionId);
     }
     [TestMethod] public async Task OtherPhoneCannotStopOrAttachToActiveRecording()
     {

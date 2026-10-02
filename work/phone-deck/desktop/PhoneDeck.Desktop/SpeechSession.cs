@@ -1,5 +1,8 @@
 namespace PhoneDeck.Desktop;
 
+internal sealed record PhoneVoiceHealth(bool Streaming, string? StreamSession, string? Mode,
+    bool Recording, string? RecordingSession, string? StopRequestedSessionId);
+
 // A shared stream supplies audio only. A local key starts a bounded segment from that stream.
 // Managed start/stop and local segment control share this state machine; no audio is written to disk.
 internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transcripts, string computerId, Func<Action<string>?>? prepareInsertion = null) : IDisposable
@@ -8,6 +11,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     private readonly object gate = new();
     private string? streamSession, streamOwner, streamMode, recordingSession, recordingOwner;
     private MemoryStream? recording;
+    private bool managedRecording;
     private readonly Queue<byte[]> preroll = new();
     private int prerollBytes;
     private TaskCompletionSource streamEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -21,6 +25,8 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     private string? error;
     private Task pendingResult = Task.CompletedTask;
     private bool applyingSettings;
+    private string? stopRequestOwner, stopRequestSession;
+    private long stopRequestAt;
     internal bool Busy { get { lock (gate) return applyingSettings || streamSession is not null || recording is not null || !pendingResult.IsCompleted; } }
     internal void WhileIdle(Action apply)
     {
@@ -40,6 +46,19 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     internal string? RecordingSession { get { lock (gate) return recordingSession; } }
     internal string? Mode { get { lock (gate) return streamMode; } }
     internal object Snapshot { get { lock (gate) return new { state, error, sessionId = recordingSession }; } }
+    internal PhoneVoiceHealth HealthForPhone(string owner)
+    {
+        lock (gate) return new(streamSession is not null, streamSession, streamMode,
+            recording is not null, recordingSession,
+            owner == stopRequestOwner && Environment.TickCount64 - stopRequestAt < 60000
+                ? stopRequestSession : null);
+    }
+
+    private void RequestPhoneStopLocked(string owner, string session)
+    {
+        stopRequestOwner = owner; stopRequestSession = session; stopRequestAt = Environment.TickCount64;
+        stopped[session] = stopRequestAt;
+    }
 
     internal void Attach(string owner, string session, string mode)
     {
@@ -67,7 +86,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
                 if (recording.Length + pcm.Length > MaxBytes) { AbortLocked("单次说话最多两分钟，请分段输入"); return; }
                 recording.Write(pcm);
             }
-            else if (streamMode == "managed")
+            else if (streamMode == "managed" && !stopped.ContainsKey(session))
             {
                 var bytes = pcm.ToArray(); preroll.Enqueue(bytes); prerollBytes += bytes.Length;
                 while (prerollBytes > 96000 && preroll.TryDequeue(out var old)) prerollBytes -= old.Length;
@@ -97,6 +116,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
             if (streamSession is not null && (streamOwner != owner || streamMode != "managed" || streamSession != session))
                 throw new InvalidOperationException("共享供音中，请用这台电脑的快捷键或先停止共享");
             recordingSession = session; recordingOwner = owner; recording = new(); state = "recording"; error = null;
+            managedRecording = true;
             BeginWatchdog(); insertion = prepareInsertion?.Invoke();
             while (preroll.TryDequeue(out var bytes)) recording.Write(bytes); prerollBytes = 0;
             return false;
@@ -111,6 +131,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
             if (!engine.Ready) throw new InvalidOperationException("请先下载语音模型");
             if (recording is not null || !pendingResult.IsCompleted) throw new InvalidOperationException("上一段语音仍在处理");
             recordingSession = Guid.NewGuid().ToString(); recordingOwner = streamOwner; recording = new(); state = "recording"; error = null;
+            managedRecording = false;
             BeginWatchdog(); insertion = insert ? prepareInsertion?.Invoke() : null;
             return recordingSession;
         }
@@ -128,6 +149,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
             }
             if (recordingOwner != owner) throw new InvalidOperationException("该会话属于另一手机");
             stopped[session] = Environment.TickCount64;
+            if (managedRecording) RequestPhoneStopLocked(owner, session);
             if (cancel) { AbortLocked(null); return; }
             if (!local && streamSession == session) { state = "stopping"; drain = streamEnded.Task; }
         }
@@ -149,6 +171,10 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     {
         lock (gate)
         {
+            // A managed stop ends this phone stream. Shared desktop segments end
+            // independently; the phone keeps supplying the other selected computers.
+            if (streamMode == "managed" && streamOwner is not null && streamSession is not null)
+                RequestPhoneStopLocked(streamOwner, streamSession);
             if (cancel && recordingSession is null) processing?.Cancel();
             return recordingSession is null ? Task.CompletedTask : StopAsync(recordingOwner!, recordingSession, true, cancel);
         }
@@ -188,7 +214,12 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     }
     private void AbortLocked(string? reason)
     {
-        if (recordingSession is not null) stopped[recordingSession] = Environment.TickCount64;
+        if (recordingSession is not null)
+        {
+            stopped[recordingSession] = Environment.TickCount64;
+            if (managedRecording && recordingOwner is not null)
+                RequestPhoneStopLocked(recordingOwner, recordingSession);
+        }
         ClearRecording(); recording = null; recordingSession = null; recordingOwner = null;
         insertion = null;
         preroll.Clear(); prerollBytes = 0; state = reason is null ? "idle" : "error"; error = reason;
@@ -200,6 +231,7 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
     }
     private void ClearRecording()
     {
+        managedRecording = false;
         if (recording is null) return;
         if (recording.TryGetBuffer(out var bytes)) bytes.AsSpan().Clear();
         recording.Dispose();

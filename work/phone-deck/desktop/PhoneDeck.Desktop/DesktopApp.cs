@@ -18,7 +18,7 @@ internal sealed record InputStep(string? Type, string? Text, string[]? Keys, int
 internal static class DesktopApp
 {
     internal const string Version = "2.0.0-alpha.1";
-    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1", "desktopSettingsV1"];
+    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1", "desktopSettingsV1", "phoneStopV1"];
     internal static WebApplication Create(string[] args, ISpeechEngine? testEngine = null)
     {
         var identity = ReceiverIdentity.LoadOrCreate();
@@ -132,18 +132,22 @@ internal static class DesktopApp
             using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.Yandu.Icon.svg")!;
             using var reader = new StreamReader(resource); return Results.Content(reader.ReadToEnd(), "image/svg+xml", Encoding.UTF8);
         });
-        app.MapGet("/api/health", () => Results.Ok(new
+        app.MapGet("/api/health", (HttpContext context) =>
         {
-            ok = true, name = "PhoneDeck", version = Version, protocolVersion = 2, computerId = identity.ComputerId, displayName = identity.DisplayName,
-            platform = identity.Platform, architecture = identity.Architecture, capabilities = Capabilities,
-            input = new { available = input.Available, backend = input.Backend },
-            audio = new { available = engine.Ready, streaming = speech.Streaming, sessionId = speech.StreamSession, mode = speech.Mode, device = "言渡 内置识别" },
-            dictation = new { active = speech.Recording, sessionId = speech.RecordingSession },
-            typeless = new { capturing = speech.Recording, virtualCableSelected = (bool?)null },
-            voiceEngine = new { id = "phonedeck-whisper", displayName = "言渡 本地语音", experimental = true, capturing = speech.Recording,
-                virtualCableSelected = (bool?)null, modes = new[] { new { id = "dictation", label = "听写", configured = engine.Ready, trigger = "toggle", keys = Array.Empty<string>() } } },
-            shared = new { requested = false }
-        }));
+            var voice = speech.HealthForPhone(Owner(context));
+            return Results.Ok(new
+            {
+                ok = true, name = "PhoneDeck", version = Version, protocolVersion = 2, computerId = identity.ComputerId, displayName = identity.DisplayName,
+                platform = identity.Platform, architecture = identity.Architecture, capabilities = Capabilities,
+                input = new { available = input.Available, backend = input.Backend },
+                audio = new { available = engine.Ready, streaming = voice.Streaming, sessionId = voice.StreamSession, mode = voice.Mode, device = "言渡 内置识别", stopRequestedSessionId = voice.StopRequestedSessionId },
+                dictation = new { active = voice.Recording, sessionId = voice.RecordingSession },
+                typeless = new { capturing = voice.Recording, virtualCableSelected = (bool?)null },
+                voiceEngine = new { id = "phonedeck-whisper", displayName = "言渡 本地语音", experimental = true, capturing = voice.Recording,
+                    virtualCableSelected = (bool?)null, modes = new[] { new { id = "dictation", label = "听写", configured = engine.Ready, trigger = "toggle", keys = Array.Empty<string>() } } },
+                shared = new { requested = false }
+            });
+        });
         app.MapGet("/local/status", () => Results.Ok(new { ok = true, identity, model = model.Snapshot, runtimePresent = File.Exists(Path.Combine(AppContext.BaseDirectory, "speech-runtime", OperatingSystem.IsWindows() ? "whisper-cli.exe" : "whisper-cli")),
             speech = speech.Snapshot, audioStreaming = speech.Streaming, hotkeys = hotkeys?.Status ?? "disabled", inputReady = input.Available, inputBackend = input.Backend,
             settings = settings.Current, settingsRevision = settings.Revision, addresses = DesktopTrust.Addresses(), history = history.LocalHistory(), clients = credentials.ListRedacted() }));

@@ -129,9 +129,16 @@ final class AudioStreamer implements AutoCloseable {
     }
 
     void stop() {
+        stop(null);
+    }
+
+    void stop(String expectedSessionId) {
         final Thread stoppingWorker;
         final String stoppingSession;
         synchronized (syncRoot) {
+            if (expectedSessionId != null && !expectedSessionId.equals(activeSessionId)) {
+                return;
+            }
             if (worker == null || stopRequested) {
                 return;
             }
