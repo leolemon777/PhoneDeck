@@ -22,6 +22,9 @@ Desktop.ini
 *.deps.json
 *.runtimeconfig.json
 
+# Browser integration test dependencies
+**/node_modules/
+
 # Local release/output trees and bundled toolchains
 outputs/
 work/tools/

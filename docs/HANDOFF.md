@@ -1,5 +1,17 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-03 iPhone / Android 网页 PWA（最新状态）
+
+- 用户明确选择网页/PWA、不上 App Store，优先 UI、按住/点击/三电脑共享、双端停止及流畅度。分支 `codex/iphone-pwa` 基于 `b196611` / PR #31；开始已 fetch main 并确认祖先关系。仍为新 Desktop `2.0.0-alpha.1` 预览，原生 Android dev.21 与旧接收端不改版本。本轮不覆盖既有候选包、不做正式发布。
+- **手机 UI**：极简居中、单手底座、紧凑面板三布局；暖纸/墨色/松绿/淡紫/陶土/雾蓝六主题，大话筒、点击/按住/共享、Goal/退格/回车、按压动画、受支持浏览器的振动及确认反馈。iPhone 不支持网页振动时显示说明。录音时不换方式/布局/目标；真实状态、离线未知、无障碍、200%字号、安全区及横屏均处理。电脑列表只在状态变化时更新节点，避免健康轮询打断手势/焦点。
+- **连接**：主电脑新增独立 HTTPS 8768，仅提供 `/phone`；原生 8765回环/8766固定证书保持。浏览器私有根CA/服务器证书分离，公开根证书通过本机页面导出、由用户手工在手机信任，程序不改系统证书库。地址变动不生成超出已有SAN的新链接，提示重启更新服务器证书。一次性fragment材料取用即清；电脑确认后发放独立Secure/HttpOnly/Strict cookie，精确Origin/Host校验，不能借cookie访问原生或本机API。主屏幕存储与Safari不同时，可在主屏幕App内粘贴新链接完成配对。
+- **多电脑与会话**：网关向最多四个额外电脑做独立凭据/证书固定连接，仅私网IP及固定端点。选择目标必须得到实际健康确认。按住松开/点击停止正常收尾；managed电脑停止立即推送手机，再清理慢端。共享电脑快捷键只结束自己的段，手机继续供音；手机关共享取消尚未完成的电脑段。新 `audioStopV1` `/api/audio/stop` 原子校验owner/session，迟到停止不影响新流；peer需builtInSpeechV1+phoneStopV1+audioStopV1。音频48k/PCM16/mono/20ms，启动缓存1秒、WS积压200ms，peer有界独立队列；音频不落盘，断线/中断不自动重新开麦。
+- **本地构建/测试**：Desktop Release 编译与测试通过，54 passed / 1 skipped（仅Windows原生快捷键测试在macOS跳过）；其中包含真实Kestrel/TLS/WebSocket、三个独立TLS供音接收器、停止所有权、重配撤销、慢电脑隔离、消息碎片、受控按键、错误JSON及证书链/入口隔离。Node22音频DSP/生命周期/会话49/49通过。新PWA没有修改原生Android源码，本轮原生回归由CI单独执行。
+- **浏览器 UI**：Chromium151与WebKit26.5各45组布局/尺寸/状态检查，另做三布局200%字号、软键盘收缩、对比度、列表节点/焦点、配对两形态和移除限制；辅助文字最低对比度4.51:1。三布局图与明细位于ignored `outputs/iphone-pwa/ui`，这些设备状态是明确UI夹具，不是真机连接证据。
+- **真实浏览器联调**：隔离真实DesktopApp、Chromium生成音频、实际AudioWorklet/WebSocket，共17检查点通过，无意外页面/CSP错误。覆盖桌面批准配对、三模式、PCstop后track ended/AudioContext closed、尾帧、共享局部停止不关麦、权限拒绝后重试、断线未知状态/恢复、离开页面清理、离线冷启动自动恢复、无cookie主屏幕手动配对。Service Worker activated，仅缓存12个公开资源。连续20轮PCstop中位101.40ms/P95 102.30ms/max102.46ms，每轮资源/接收端均回到空闲；仅本机生成音频+测试引擎，不是iPhone/Wi-Fi/识别延迟。报告 `outputs/iphone-pwa/integration/results.json`，复跑入口 `desktop/tests-web/browser.integration.mjs`；临时证书/凭据已删除。
+- **验证中修复**：首页尾斜杠重定向循环、缺失apple-touch图标阻止SW安装、迟到ACK/旧socket/启动取消、预录音突发撞发送积压限制、主屏幕独立授权、已消费二维码误显示等待、离线初开无恢复、共享断线显示旧供音及更新期间开麦竞态。新CI锁定Playwright1.62.1，包含Node单测和浏览器集成；四OS原生构建/识别样本/打包保持原流程。云端结果在后续验证记录追加，不能凭配置存在宣称通过。
+- **交付与待办**：使用步骤及醒来后的设备清单见 [IPHONE_PWA](IPHONE_PWA.md)，打包附该指南。用户允许无法自动验证时先交代码；真实iPhone/Android证书安装、麦克风权限、主屏幕运行、语音首尾/识别、触感、VoiceOver/TalkBack、实际按键输入、不同物理电脑及Wi-Fi性能仍需实测。PWA切后台/锁屏会停止，需要前台；网页暂不提供Android完整宏编辑、文字同步或电脑设置管理。主网关须持续运行。未公开正式发行、未自动安装根证书或替换使用中的接收端。
+
 ## 2026-10-02 电脑停止同步手机采音（最新状态）
 
 - 用户要求电脑停止后手机也停止，并明确共享例外为「只停止该电脑转写，手机继续共享」。独立分支 `codex/desktop-stop-sync` 基于三款 UI 的 `180b82c`，保留 Android `1.6.0-dev.21` / 新 Desktop `2.0.0-alpha.1`；开始已拉取核对云端 main。本轮为会话修复，不作正式版本发布。

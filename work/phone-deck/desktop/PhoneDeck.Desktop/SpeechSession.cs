@@ -179,6 +179,25 @@ internal sealed class SpeechSession(ISpeechEngine engine, TranscriptStore transc
             return recordingSession is null ? Task.CompletedTask : StopAsync(recordingOwner!, recordingSession, true, cancel);
         }
     }
+    internal async Task<bool> StopSupplyAsync(string owner, string session, bool cancel = false)
+    {
+        Validate(session);
+        Task finish;
+        lock (gate)
+        {
+            // Check the supply identity and capture its segment under the same lock.
+            // A late stop from a disconnected phone cannot affect a replacement stream.
+            if (streamOwner != owner || streamSession != session) return false;
+            stopped[session] = Environment.TickCount64;
+            streamSession = null; streamOwner = null; streamMode = null;
+            streamEnded.TrySetResult(); audioEnded = Environment.TickCount64;
+            preroll.Clear(); prerollBytes = 0;
+            finish = recordingOwner == owner && recordingSession is not null
+                ? StopAsync(owner, recordingSession, local: true, cancel: cancel) : Task.CompletedTask;
+        }
+        await finish;
+        return true;
+    }
     internal void Revoke(string owner)
     {
         lock (gate)

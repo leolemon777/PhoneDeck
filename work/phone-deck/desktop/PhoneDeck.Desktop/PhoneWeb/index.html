@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#f5f3ee">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="言渡">
+  <meta name="description" content="让声音抵达。手机与电脑之间，轻盈的语音工作台。">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <title>言渡 · 手机语音</title>
+</head>
+<body data-layout="center" data-theme="paper" data-mode="tap" data-state="unpaired">
+  <svg class="svg-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="i-mic" viewBox="0 0 32 32"><rect x="12" y="3" width="8" height="17" rx="4" fill="currentColor" stroke="none"/><path d="M7.5 15.5v1.2a8.5 8.5 0 0 0 17 0v-1.2M16 25.2V29M11 29h10"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 32 32"><rect x="8" y="8" width="16" height="16" rx="4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-computer" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3" fill="var(--surface)"/><circle cx="16" cy="17" r="3" fill="var(--surface)"/></symbol>
+    <symbol id="i-goal" viewBox="0 0 24 24"><path d="M6 21V4m0 0c5-4 7 4 13 0v10c-6 4-8-4-13 0"/></symbol>
+    <symbol id="i-backspace" viewBox="0 0 24 24"><path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-7-7 7-7Z"/><path d="m12 9 6 6m-6 0 6-6"/></symbol>
+    <symbol id="i-enter" viewBox="0 0 24 24"><path d="M20 5v8a3 3 0 0 1-3 3H4m5-5-5 5 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 16V3m-4 4 4-4 4 4M5 11H3v10h18V11h-2"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+  </defs></svg>
+  <div class="phone-shell">
+    <header class="app-header">
+      <a class="wordmark" href="./" aria-label="言渡首页"><span class="brand-icon"><svg><use href="#i-mic"/></svg></span><span>言渡</span></a>
+      <nav class="header-tools" aria-label="主要导航">
+        <button type="button" class="text-button" data-open-dialog="appearance-dialog">界面</button>
+        <button type="button" class="text-button" data-open-dialog="devices-dialog">电脑</button>
+        <button type="button" class="icon-button settings-button" data-open-dialog="settings-dialog" aria-label="设置"><svg><use href="#i-settings"/></svg></button>
+      </nav>
+    </header>
+    <main class="workspace" id="main-content">
+      <button type="button" class="target-card" id="target-button" data-open-dialog="devices-dialog" aria-haspopup="dialog">
+        <span class="target-icon"><svg><use href="#i-computer"/></svg></span>
+        <span class="target-copy"><span id="target-name">连接你的电脑</span><span class="connection-line"><span class="status-dot" id="connection-dot" data-status="offline"></span><span id="connection-label">配对后，即可开始说话</span></span></span>
+        <svg class="chevron"><use href="#i-chevron"/></svg>
+      </button>
+      <aside class="notice" id="app-notice" role="status" hidden><span id="notice-message"></span><button type="button" id="notice-action" hidden></button></aside>
+      <section class="shared-section" id="shared-section" aria-label="共享中的电脑" hidden>
+        <div class="section-heading"><span>共享给 <strong id="shared-count">0</strong> 台电脑</span><button type="button" class="text-button" data-open-dialog="devices-dialog">选择电脑 <span aria-hidden="true">↗</span></button></div>
+        <div class="shared-devices" id="shared-devices"><p class="shared-empty">选择共享组，然后手动开启麦克风。</p></div>
+      </section>
+      <section class="voice-workspace" aria-label="语音工作台">
+        <div class="voice-copy">
+          <p class="voice-status" id="voice-status"><span class="status-mark" aria-hidden="true"></span><span id="voice-status-text">准备就绪后开始</span></p>
+          <h1 id="mic-title">先连接一台电脑</h1>
+          <p id="mic-hint">把声音，送到你正在工作的地方。</p>
+        </div>
+        <div class="mic-wrap">
+          <div class="mic-orbit" aria-hidden="true"></div>
+          <button type="button" class="mic-button" id="mic-button" aria-label="请先连接电脑" aria-describedby="mic-hint voice-detail" disabled>
+            <svg class="mic-glyph"><use href="#i-mic"/></svg>
+            <svg class="stop-glyph"><use href="#i-stop"/></svg>
+            <span class="mic-spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="voice-meter-area">
+          <div class="level-meter" id="level-meter" role="meter" aria-label="麦克风音量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <p id="voice-detail" aria-live="polite" aria-atomic="true">麦克风尚未开启</p>
+        </div>
+        <div class="mode-switch" role="group" aria-label="说话方式">
+          <span class="mode-highlight" aria-hidden="true"></span>
+          <button type="button" data-mode-button="tap" aria-pressed="true">点击<span class="mode-long">说话</span></button>
+          <button type="button" data-mode-button="hold" aria-pressed="false">按住<span class="mode-long">说话</span></button>
+          <button type="button" data-mode-button="shared" aria-pressed="false">共享<span class="mode-long">麦克风</span></button>
+        </div>
+        <div class="quick-actions" role="group" aria-label="输入到当前电脑">
+          <button type="button" data-action="goal" disabled aria-label="发送 /goal 并回车" title="发送 /goal 并回车"><svg><use href="#i-goal"/></svg><span>Goal</span></button>
+          <button type="button" data-action="backspace" disabled aria-label="退格，删除前一个字"><svg><use href="#i-backspace"/></svg><span>退格</span></button>
+          <button type="button" data-action="enter" disabled><svg><use href="#i-enter"/></svg><span>回车</span></button>
+        </div>
+      </section>
+      <p class="foreground-note" id="foreground-note"><span class="status-dot" aria-hidden="true"></span>使用时请保持此页面在前台</p>
+    </main>
+  </div>
+  <dialog class="sheet" id="appearance-dialog" aria-labelledby="appearance-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow">让工作台，像你</p><h2 id="appearance-heading">挑一款喜欢的界面</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭外观设置"><svg><use href="#i-close"/></svg></button></header>
+    <div class="sheet-content">
+      <div class="layout-options" role="group" aria-label="首页布局">
+        <button type="button" class="layout-option" data-layout-option="center" aria-pressed="true"><span class="layout-preview preview-center" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>极简居中</strong><small>专注每一句</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+        <button type="button" class="layout-option" data-layout-option="dock" aria-pressed="false"><span class="layout-preview preview-dock" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>单手底座</strong><small>拇指刚好够到</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+        <button type="button" class="layout-option" data-layout-option="panel" aria-pressed="false"><span class="layout-preview preview-panel" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>紧凑面板</strong><small>所有操作在手边</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+      </div>
+      <h3 class="subheading">今天的颜色</h3>
+      <div class="theme-options" role="group" aria-label="配色主题">
+        <button type="button" data-theme-option="paper" aria-pressed="true"><span class="theme-swatch"><i></i></span><span>暖纸</span></button>
+        <button type="button" data-theme-option="ink" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>墨色</span></button>
+        <button type="button" data-theme-option="forest" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>松绿</span></button>
+        <button type="button" data-theme-option="lilac" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>淡紫</span></button>
+        <button type="button" data-theme-option="clay" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>陶土</span></button>
+        <button type="button" data-theme-option="sky" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>雾蓝</span></button>
+      </div>
+      <p class="sheet-footnote">界面与配色只保存在这台手机，不影响电脑。</p>
+    </div>
+  </dialog>
+  <dialog class="sheet" id="devices-dialog" aria-labelledby="devices-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow">你的工作空间</p><h2 id="devices-heading">声音送往哪里</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭电脑列表"><svg><use href="#i-close"/></svg></button></header>
+    <div class="sheet-content">
+      <p class="sheet-description">轻点选择当前电脑。加入共享组后，可由各台电脑的快捷键开始听写。</p>
+      <div class="devices-list" id="devices-list"><div class="empty-state"><span class="empty-icon"><svg><use href="#i-computer"/></svg></span><h3>还没有连接电脑</h3><p>先在电脑打开言渡，使用手机配对链接连接。</p></div></div>
+      <button type="button" class="primary-button add-device" data-open-dialog="pairing-dialog"><svg><use href="#i-plus"/></svg>添加另一台电脑</button>
+      <p class="sheet-footnote">切换需等待电脑确认；录音期间请先停止。共享组与当前输入目标分别保存。先用电脑快捷键结束本段；关闭共享会取消未结束的转写。</p>
+    </div>
+  </dialog>
+  <dialog class="sheet" id="pairing-dialog" aria-labelledby="pairing-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow" id="pairing-eyebrow">再多一个工作空间</p><h2 id="pairing-heading">添加另一台电脑</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭添加电脑"><svg><use href="#i-close"/></svg></button></header>
+    <form class="sheet-content" id="pairing-form">
+      <p class="sheet-description" id="pairing-description">在另一台电脑的言渡控制页打开配对，将配对资料复制到这里，随后在那台电脑确认。</p>
+      <div id="pairing-host-field"><label class="field-label" for="pairing-host">电脑的局域网地址</label>
+      <input type="text" id="pairing-host" name="pairing-host" placeholder="如 192.168.1.20" autocapitalize="off" autocomplete="off" spellcheck="false" required></div>
+      <label class="field-label" id="pairing-code-label" for="pairing-code">配对资料</label>
+      <textarea id="pairing-code" name="pairing-code" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="粘贴电脑提供的配对资料…" required></textarea>
+      <p class="form-message" id="pairing-message" aria-live="polite"></p>
+      <button type="submit" class="primary-button" id="pairing-submit">请求连接 <span aria-hidden="true">↗</span></button>
+      <p class="sheet-footnote">仅连接你信任的电脑。配对资料包含一次性密钥，请勿分享给他人。</p>
+    </form>
+  </dialog>
+  <dialog class="sheet" id="settings-dialog" aria-labelledby="settings-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow">简单，顺手</p><h2 id="settings-heading">设置</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭设置"><svg><use href="#i-close"/></svg></button></header>
+    <div class="sheet-content">
+      <div class="setting-list">
+        <button type="button" class="setting-row" data-open-dialog="install-dialog"><span class="setting-icon"><svg><use href="#i-share"/></svg></span><span><strong>添加到主屏幕</strong><small>像 App 一样打开言渡</small></span><svg class="chevron"><use href="#i-chevron"/></svg></button>
+        <button type="button" class="setting-row" data-open-dialog="trust-dialog"><span class="setting-icon"><svg><use href="#i-shield"/></svg></span><span><strong>连接与麦克风权限</strong><small>首次使用、证书与权限帮助</small></span><svg class="chevron"><use href="#i-chevron"/></svg></button>
+        <label class="setting-row haptic-row"><span><strong>轻触反馈</strong><small id="haptic-support">支持的设备可使用轻微振动</small></span><input type="checkbox" id="haptics-toggle" checked role="switch" aria-label="轻触反馈"><span class="switch-track" aria-hidden="true"></span></label>
+      </div>
+      <div class="quiet-card"><h3>声音只去你的电脑</h3><p>通过你的连接发送语音，默认不保存录音。网页需保持前台；锁屏或切换 App 时，将停止录音。</p></div>
+      <p class="version-caption">言渡 · 手机网页预览</p>
+    </div>
+  </dialog>
+  <dialog class="sheet" id="install-dialog" aria-labelledby="install-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow">留一个位置给声音</p><h2 id="install-heading">添加到主屏幕</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭安装说明"><svg><use href="#i-close"/></svg></button></header>
+    <div class="sheet-content help-content">
+      <h3>iPhone · Safari</h3><ol class="step-list"><li>在 Safari 打开电脑提供的手机地址，完成安全连接与配对。</li><li>轻点浏览器的「分享」，选择「添加到主屏幕」。</li><li>从主屏幕打开言渡，点击话筒时允许使用麦克风。</li></ol>
+      <h3>安卓 · Chrome</h3><p>打开浏览器菜单，选择「添加到主屏幕」或「安装应用」。菜单名称因浏览器而异。</p>
+      <div class="quiet-card"><p>添加后首次打开若仍未配对，请在电脑重新生成手机连接链接，回到主屏幕里的言渡，点「电脑 → 连接这台手机」粘贴并确认。浏览器与主屏幕 App 的存储可能独立。</p></div>
+      <button type="button" class="secondary-button" data-open-dialog="trust-dialog">查看首次连接说明</button>
+    </div>
+  </dialog>
+  <dialog class="sheet" id="trust-dialog" aria-labelledby="trust-heading">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <header class="sheet-header"><div><p class="eyebrow">第一次见面</p><h2 id="trust-heading">连接与麦克风权限</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭连接说明"><svg><use href="#i-close"/></svg></button></header>
+    <div class="sheet-content help-content">
+      <h3>先建立安全连接</h3><p>让手机与电脑处于同一网络，从电脑控制页打开「手机网页」。麦克风需要 HTTPS 安全连接；跳过浏览器警告不等于已建立可信连接。</p>
+      <div id="certificate-help"><h3>使用电脑的本地证书</h3><p>按电脑端的手机连接指引下载并安装本地证书，仅信任你自己电脑提供的证书。iPhone 安装后，还需在「设置 → 通用 → 关于本机 → 证书信任设置」启用该根证书的完全信任。</p><p>手机访问的地址必须与证书一致。证书过期、网络地址改变或信任未完成时，请回电脑端重新检查。</p></div>
+      <h3>麦克风被拒绝时</h3><p>在浏览器的网站设置中允许麦克风，再回到本页重新尝试。iPhone 也可在「设置 → App → Safari」检查麦克风权限。</p>
+      <div class="quiet-card"><p>网页无法保证锁屏后继续供音。为避免手机显示停了、电脑仍在等声音，离开前台时会结束本次采音；返回后需手动重新开启。</p></div>
+    </div>
+  </dialog>
+  <div class="toast" id="ui-toast" role="status" aria-live="polite" hidden></div>
+  <noscript><div class="noscript-notice">请允许 JavaScript，以连接电脑并使用麦克风。</div></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

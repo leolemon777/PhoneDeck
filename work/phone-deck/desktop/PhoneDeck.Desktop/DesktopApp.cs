@@ -18,7 +18,7 @@ internal sealed record InputStep(string? Type, string? Text, string[]? Keys, int
 internal static class DesktopApp
 {
     internal const string Version = "2.0.0-alpha.1";
-    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1", "desktopSettingsV1", "phoneStopV1"];
+    internal static readonly string[] Capabilities = ["fixedAction", "keyChord", "text", "macro", "phoneAudio", "sharedMicrophone", "managedDictation", "secureLan", "transcriptSyncV1", "builtInSpeechV1", "desktopSettingsV1", "phoneStopV1", "audioStopV1"];
     internal static WebApplication Create(string[] args, ISpeechEngine? testEngine = null)
     {
         var identity = ReceiverIdentity.LoadOrCreate();
@@ -28,6 +28,10 @@ internal static class DesktopApp
         var credentials = new ClientCredentialsStore(Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
         var localPort = int.TryParse(Environment.GetEnvironmentVariable("PHONEDECK_LOCAL_PORT"), out var lp) ? lp : 8765;
         var lanPort = int.TryParse(Environment.GetEnvironmentVariable("PHONEDECK_LAN_PORT"), out var sp) ? sp : 8766;
+        var webPort = int.TryParse(Environment.GetEnvironmentVariable("PHONEDECK_WEB_PORT"), out var wp) ? wp : 8768;
+        var browserTrust = args.Contains("--no-web-phone") ? null : new BrowserTrust(PhoneDeckDataDirectory.Get(), identity.ComputerId);
+        string[] BrowserAddresses() => browserTrust is null ? [] : DesktopTrust.Addresses()
+            .Where(address => browserTrust.Hosts.Contains(address, StringComparer.OrdinalIgnoreCase)).ToArray();
         var pairing = new PairingWindowManager(identity.ComputerId, identity.DisplayName, trust.CertificateSha256, lanPort);
         var model = new ModelAssets(Path.Combine(PhoneDeckDataDirectory.Get(), "models"), Path.Combine(AppContext.BaseDirectory, "models"));
         var engine = testEngine ?? new WhisperEngine(model, Path.Combine(AppContext.BaseDirectory, "speech-runtime"), () => settings.Current.Language);
@@ -36,6 +40,8 @@ internal static class DesktopApp
         var speech = new SpeechSession(engine, history, identity.ComputerId,
             testEngine is null && !args.Contains("--history-only") ? () => settings.Current.AutoInsert ? input.PrepareVoiceInsertion() : null : null);
         var hotkeys = args.Contains("--no-hotkeys") ? null : new DesktopHotkeys(speech, settings.Current.TapShortcut, settings.Current.HoldShortcut);
+        var webPhone = browserTrust is null ? null : new WebPhoneGateway(identity, speech, input, PhoneDeckDataDirectory.Get(),
+            webPort, browserTrust.CertificateSha256, () => engine.Ready, context => browserTrust.SameOrigin(context, webPort), browserAddresses: BrowserAddresses);
         LanDiscoveryResponder? udp = null; MdnsAdvertiser? mdns = null;
         Action ApplyShortcuts(DesktopSettings value)
         {
@@ -61,6 +67,7 @@ internal static class DesktopApp
         {
             if (identity.DisplayName == settings.Current.DisplayName) return;
             identity = identity with { DisplayName = settings.Current.DisplayName };
+            webPhone?.UpdateDisplayName(identity.DisplayName);
             pairing.Cancel(); pairing = new PairingWindowManager(identity.ComputerId, identity.DisplayName, trust.CertificateSha256, lanPort);
             if (udp is not null) { udp.Dispose(); udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start(); }
             mdns?.Start(identity, lanPort, Capabilities);
@@ -77,12 +84,16 @@ internal static class DesktopApp
             o.AddServerHeader = false; o.Limits.MaxRequestBodySize = 32 * 1024;
             o.ListenLocalhost(localPort, x => x.Protocols = HttpProtocols.Http1);
             o.ListenAnyIP(lanPort, x => { x.Protocols = HttpProtocols.Http1; x.UseHttps(trust.Certificate); });
+            if (browserTrust is not null)
+                o.ListenAnyIP(webPort, x => { x.Protocols = HttpProtocols.Http1; x.UseHttps(browserTrust.Certificate); });
         });
         var app = builder.Build();
         app.Lifetime.ApplicationStopped.Register(trust.Dispose);
+        app.Lifetime.ApplicationStopped.Register(() => browserTrust?.Dispose());
         app.Lifetime.ApplicationStopped.Register(() => hotkeys?.Dispose());
         app.Lifetime.ApplicationStopping.Register(() =>
         {
+            webPhone?.Dispose();
             pairing.Cancel();
             speech.Dispose();
             lock (clientGate) foreach (var c in clientCancellation.Values) c.Cancel();
@@ -94,9 +105,19 @@ internal static class DesktopApp
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'";
             var local = context.Connection.LocalPort == localPort;
+            var browser = browserTrust is not null && context.Connection.LocalPort == webPort;
+            if (browser)
+            {
+                if (!context.Request.Path.StartsWithSegments("/phone") || !browserTrust!.AcceptsHost(context.Request.Host, webPort))
+                { context.Response.StatusCode = 404; return; }
+                context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+                context.Response.Headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()";
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            }
+            else if (context.Request.Path.StartsWithSegments("/phone")) { context.Response.StatusCode = 404; return; }
             if (local && !LocalOriginAllowed(context, localPort)) { context.Response.StatusCode = 403; return; }
-            if (!local && (context.Request.Path == "/" || context.Request.Path.StartsWithSegments("/local"))) { context.Response.StatusCode = 404; return; }
-            if (!local && context.Request.Path != "/api/lan/pair/qr")
+            if (!local && !browser && (context.Request.Path == "/" || context.Request.Path.StartsWithSegments("/local"))) { context.Response.StatusCode = 404; return; }
+            if (!local && !browser && context.Request.Path != "/api/lan/pair/qr")
             {
                 var authorization = context.Request.Headers.Authorization.ToString();
                 var record = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? credentials.Authenticate(authorization[7..].Trim()) : null;
@@ -122,6 +143,15 @@ internal static class DesktopApp
             { context.Response.StatusCode = 401; }
             catch (IOException) when (!context.Response.HasStarted) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { ok = false, error = "操作未完成，请重试或检查本机权限" }); }
         });
+        if (webPhone is not null)
+        {
+            webPhone.Map(app);
+            PhoneWebAssets.Map(app);
+            app.MapGet("/local/web/certificate", () => Results.File(browserTrust!.PublicRoot, "application/x-x509-ca-cert", "Yandu-Personal-Root.cer"));
+            app.MapGet("/local/web/setup", () => Results.Ok(new { ok = true, port = webPort, certificateSha256 = browserTrust!.RootSha256,
+                urls = BrowserAddresses().Select(address => $"https://{address}:{webPort}/phone/").ToArray(),
+                message = BrowserAddresses().Length == 0 ? "网络地址已变化或未连接局域网，请重启接收端后重新打开手机入口" : null }));
+        }
         app.MapGet("/", () =>
         {
             using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.Ui.html")!;
@@ -131,6 +161,11 @@ internal static class DesktopApp
         {
             using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.Yandu.Icon.svg")!;
             using var reader = new StreamReader(resource); return Results.Content(reader.ReadToEnd(), "image/svg+xml", Encoding.UTF8);
+        });
+        app.MapGet("/brand/web-setup.js", () =>
+        {
+            using var resource = typeof(DesktopApp).Assembly.GetManifestResourceStream("PhoneDeck.Desktop.DesktopWebSetup.js")!;
+            using var reader = new StreamReader(resource); return Results.Content(reader.ReadToEnd(), "text/javascript", Encoding.UTF8);
         });
         app.MapGet("/api/health", (HttpContext context) =>
         {
@@ -187,9 +222,10 @@ internal static class DesktopApp
         app.MapPost("/local/pairing/begin", () =>
         {
             if (pairing.HasPendingConfirmation()) return Results.Conflict(new { ok = false, error = "请先处理待确认的手机" });
+            pairing.Cancel();
             var p = pairing.Begin(); using var qr = QRCodeGenerator.GenerateQrCode(p.QrPayloadJson, QRCodeGenerator.ECCLevel.L);
             using var png = new PngByteQRCode(qr);
-            return Results.Ok(new { ok = true, p.PairingId, qr = Convert.ToBase64String(png.GetGraphic(5)), checkCode = p.MaterialCheckCode, addresses = DesktopTrust.Addresses() });
+            return Results.Ok(new { ok = true, p.PairingId, qr = Convert.ToBase64String(png.GetGraphic(5)), qrPayload = p.QrPayloadJson, checkCode = p.MaterialCheckCode, addresses = DesktopTrust.Addresses() });
         });
         app.MapGet("/local/pairing/status", () => Results.Ok(pairing.StatusSnapshot()));
         app.MapPost("/local/pairing/cancel", () => { pairing.Cancel(); return Results.Ok(new { ok = true }); });
@@ -259,6 +295,12 @@ internal static class DesktopApp
             catch (OperationCanceledException) { return Results.Json(new { ok = false, error = "音频超时、中断或授权撤销" }, statusCode: 408); }
             finally { speech.EndStream(session, orderly); }
             return Results.Ok(new { ok = true, receivedBytes = received });
+        });
+        app.MapPost("/api/audio/stop", async (DictationRequest r, HttpContext context) =>
+        {
+            ValidateEnvelope(r.ProtocolVersion, r.TargetComputerId, identity.ComputerId, r.SessionId, r.RequestId);
+            var stopped = await speech.StopSupplyAsync(Owner(context), r.SessionId!, r.Cancel);
+            return Results.Ok(new { ok = true, stopped, sessionId = r.SessionId });
         });
         app.MapGet("/api/transcripts", (HttpContext context, long? after, string? targetComputerId) =>
         {

@@ -131,6 +131,21 @@ public sealed class SpeechTests
         var pcm = new byte[9600]; var wave = WhisperEngine.Wave(pcm);
         Assert.AreEqual(9644, wave.Length); Assert.AreEqual(48000, BitConverter.ToInt32(wave, 24)); Assert.AreEqual((short)1, BitConverter.ToInt16(wave, 22)); Assert.AreEqual((short)16, BitConverter.ToInt16(wave, 34));
     }
+    [TestMethod] public async Task SharedSupplyStopCancelsOnlyTheMatchingOwnersUnfinishedSegment()
+    {
+        var computer = Id(); var engine = new FakeEngine(); var history = new TranscriptStore(computer);
+        using var speech = new SpeechSession(engine, history, computer);
+        var stream = Id(); speech.Attach("one", stream, "shared"); speech.StartLocal(false); speech.Feed(stream, new byte[9600]);
+        Assert.IsFalse(await speech.StopSupplyAsync("two", stream, true)); Assert.IsTrue(speech.Recording);
+        Assert.IsFalse(await speech.StopSupplyAsync("one", Id(), true)); Assert.IsTrue(speech.Streaming);
+        Assert.IsTrue(await speech.StopSupplyAsync("one", stream, true));
+        Assert.IsFalse(speech.Recording); Assert.IsFalse(speech.Streaming); Assert.AreEqual(0, engine.Calls);
+        Assert.ThrowsExactly<InvalidOperationException>(() => speech.Attach("one", stream, "shared"));
+        var replacement = Id(); speech.Attach("one", replacement, "shared"); speech.StartLocal(false);
+        Assert.IsFalse(await speech.StopSupplyAsync("one", stream, true));
+        speech.EndStream(stream, false); Assert.IsTrue(speech.Streaming); Assert.IsTrue(speech.Recording);
+        Assert.IsTrue(await speech.StopSupplyAsync("one", replacement, true)); Assert.IsEmpty(history.LocalHistory());
+    }
 }
 [TestClass]
 public sealed class TranscriptTests

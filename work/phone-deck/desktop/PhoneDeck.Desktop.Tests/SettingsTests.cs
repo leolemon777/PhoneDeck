@@ -112,7 +112,7 @@ public sealed class SettingsTests
             var identity = ReceiverIdentity.LoadOrCreate(); var credentials = new ClientCredentialsStore(Path.Combine(directory, "clients.json"));
             var phone = credentials.Issue("settings phone", ["control", "audio", "settings"], Id(), out var token);
             var limited = credentials.Issue("control only", ["control"], Id(), out var limitedToken);
-            await using var app = DesktopApp.Create(["--no-browser", "--no-discovery", "--no-hotkeys"], new FakeEngine()); await app.StartAsync();
+            await using var app = DesktopApp.Create(["--no-web-phone", "--no-browser", "--no-discovery", "--no-hotkeys"], new FakeEngine()); await app.StartAsync();
             try
             {
                 using var local = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{localPort}") };
@@ -165,7 +165,7 @@ public sealed class SettingsTests
             using var otherSpeech = new SpeechSession(new FakeEngine(), new TranscriptStore(Id()), Id());
             using var blocked = new DesktopHotkeys(otherSpeech, "Ctrl+Alt+F10", "Ctrl+Alt+F11");
             if (blocked.WaitUntilReady() != "ready") Assert.Inconclusive("Isolated native test keys are already occupied by another application");
-            await using var app = DesktopApp.Create(["--no-browser", "--no-discovery"], new FakeEngine()); await app.StartAsync();
+            await using var app = DesktopApp.Create(["--no-web-phone", "--no-browser", "--no-discovery"], new FakeEngine()); await app.StartAsync();
             try
             {
                 using var local = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{localPort}") };

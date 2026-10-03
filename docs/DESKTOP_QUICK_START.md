@@ -1,5 +1,7 @@
 # 言渡 Yandu 2.0 跨平台预览：首次使用
 
+2026-10-03：新版源码增加 iPhone / Android **网页/PWA** 入口，无需 App Store。先完成下方电脑安装、模型准备，手机端改按 [PWA 首次连接指南](IPHONE_PWA.md) 操作：主电脑 HTTPS 8768、公开证书信任、电脑确认配对与主屏幕入口。以下 Android APK 的扫码、文字同步和配置管理说明仅适用于原生客户端；网页当前覆盖三种语音入口、三布局六主题及基础键。浏览器需前台使用，真机验收仍待完成。
+
 2026-10-01 更新：Android code4 提供六套主题和「多电脑配置」，保留圆形话筒入口及黑白话筒图标；可覆盖同签名的原 Luma Preview / 言渡 code2/code3。逐电脑设置需要本轮新版 Desktop 接收端，9 月 30 日旧候选包需更新后才能显示该配置页。PhoneDeck 工程名、包名和旧候选文件名保留兼容，详见 [品牌说明](BRANDING.md)。实际安装及验收状态以 HANDOFF 为准。
 
 这是新的统一桌面接收端。Windows/macOS/Linux 使用同一份手机协议、同一套本地识别引擎和最终文字记录。旧 Windows/Mac 接收端仍保留；两者占用相同端口，启动新版前请先退出旧接收端。
@@ -34,7 +36,7 @@
 ## 常见问题
 
 - 打不开控制页：退出旧 PhoneDeck 接收端，重新打开新版；手动打开 `http://127.0.0.1:8765/`。在控制页底部“退出接收端”可彻底结束运行。
-- 手机连接失败：检查电脑系统防火墙、手机与电脑间网络隔离、电脑上显示的地址。无需给浏览器安装或信任电脑的自签名证书；手机只信任扫码固定的证书指纹。
+- 手机连接失败：检查电脑系统防火墙、手机与电脑间网络隔离、电脑上显示的地址。原生 Android 只信任扫码固定的证书指纹；网页/PWA 则需按专门指引信任主电脑的公开根证书并访问 HTTPS 8768。仅在私有局域网允许所需接收端连接，不把回环 8765 暴露到网络。
 - 模型下载失败：检查网络和存储空间后重试。模型使用固定版本、大小和 SHA-256，校验失败不会启用；可使用完整模型包。模型失败不影响扫码、授权和普通按键。
 - Mac 输入失败：辅助功能授权给安装后的 PhoneDeck 应用，授权后重新打开。全局快捷键冲突时，控制页显示冲突状态；可在本机配置选择另一组合或使用手机按钮。Mac/Linux 的本轮快捷键改动仍待对应真机验收。
 - Linux Wayland：语音识别和文字同步可用，自动填入不启用，因为 Wayland 不公开全局输入焦点。在支持 virtual-keyboard 协议的桌面可安装 `wtype`；GNOME Wayland 等环境不能保证普通按键输入。可在系统自定义快捷键绑定 `/opt/phonedeck/PhoneDeck.Desktop --toggle`，或使用控制页。按住模式需要系统分别支持按下/松开的绑定，否则使用点击模式。
@@ -47,6 +49,6 @@
 
 Android分发渠道为 `com.codex.phonedeck.desktoppreview`，使用保存在所有者本地的固定签名。这个渠道默认扫码/TLS连接，不自动接入旧USB接收端或在启动时请求蓝牙权限；原Luma保留旧USB/蓝牙入口。CI的 `.preview` APK只供开发验收，临时debug签名不用于公开持续更新。Mac自行验收可按 [真机步骤](DESKTOP_ACCEPTANCE.md) 操作。
 
-构建范围为 Windows x64、Mac Intel/Apple Silicon、Linux x64/arm64（匹配架构原生构建）。系统基线为 Windows 10/11 x64、macOS 14+、Ubuntu 22.04/24.04 桌面，其他 Linux 发行版先按技术预览对待；运行时支持范围参照 [Microsoft .NET 10 系统矩阵](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)。Android 最低8.0；iPhone 客户端尚未实现。
+构建范围为 Windows x64、Mac Intel/Apple Silicon、Linux x64/arm64（匹配架构原生构建）。系统基线为 Windows 10/11 x64、macOS 14+、Ubuntu 22.04/24.04 桌面，其他 Linux 发行版先按技术预览对待；运行时支持范围参照 [Microsoft .NET 10 系统矩阵](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)。Android 原生最低8.0；iPhone 采用本轮 PWA 前台预览，原生客户端尚未实现。
 
 数据在当前用户的 `PhoneDeck-Desktop` 应用数据目录中，包含稳定身份、证书、授权、已下载模型及本机 `desktop-settings.json`。该文件按本机身份保存名称、语言、自动填入和快捷键；不要复制到另一台电脑来替代独立配置。识别文字和音频不写入该目录。撤销配对会停止对应手机的会话；重新配对即可恢复。不要把数据目录复制进 Git 或分发包。

@@ -1,0 +1,18 @@
+{
+  "id": "/phone/",
+  "name": "言渡 · 手机语音",
+  "short_name": "言渡",
+  "description": "让声音抵达。手机与电脑之间，轻盈的语音工作台。",
+  "lang": "zh-CN",
+  "start_url": "/phone/",
+  "scope": "/phone/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f3ee",
+  "theme_color": "#f5f3ee",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
