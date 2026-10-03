@@ -26,6 +26,8 @@
     <Compile Include="../../windows/PhoneDeck.Server/MdnsAdvertiser.cs" Link="Discovery/MdnsAdvertiser.cs" />
     <Compile Include="../../windows/PhoneDeck.Server/LanDiscoveryResponder.cs" Link="Discovery/LanDiscoveryResponder.cs" />
     <EmbeddedResource Include="Ui.html" />
+    <EmbeddedResource Include="DesktopWebSetup.js" />
+    <EmbeddedResource Include="PhoneWeb/**/*" />
     <EmbeddedResource Include="../../../../design/yandu-icon.svg" LogicalName="PhoneDeck.Desktop.Yandu.Icon.svg" />
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo"><_Parameter1>PhoneDeck.Desktop.Tests</_Parameter1></AssemblyAttribute>
   </ItemGroup>

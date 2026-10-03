@@ -1,5 +1,11 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-03 手机网页 / PWA 预览
+
+`desktop/PhoneDeck.Desktop/PhoneWeb` 静态文件和 `DesktopWebSetup.js` 嵌入新 Desktop 程序，由原跨平台构建入口打包；没有独立 iOS 签名/App Store 工程。仍是 `2.0.0-alpha.1` 开发候选，以提交和产物哈希区分，不替换同名历史候选、不混入旧固定三产物更新包。公开根证书和网页授权均由用户运行接收端时生成，不能包含在发行归档中。
+
+本切片至少执行 Desktop Release build/test，以及 Node 22 的 `node --test work/phone-deck/desktop/tests-web/audio.test.mjs work/phone-deck/desktop/tests-web/session.test.mjs`。Desktop CI 增加后者，并继续原四 OS 编译、原生识别与打包。浏览器集成台架见 `desktop/tests-web`：隔离端口/数据、生成音频、模拟识别引擎、关闭真实输入；真实浏览器结果不替代实际 iPhone 的证书、权限、录音与按键验收。UI/音频/会话变更需同时检查 Service Worker 资源清单及更新版本，不能缓存授权接口或音频。执行结果见 HANDOFF。
+
 ## 2026-10-01 多主题、多电脑配置 APK code4（当前切片）
 
 Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，包名 `com.codex.phonedeck.desktoppreview`、versionName `2.0.0-alpha.1` 保持兼容，versionCode 从 3 增至 4。源码新增六套主题及新版 Desktop 逐电脑设置入口，构建仍使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，同时运行 Debug 构建、lint 与单元测试。使用原固定签名覆盖安装（`adb install -r`），不卸载或清除数据；先核对 APK 证书、版本和候选 SHA-256，安装后读回 APK 核对字节及实际版本。是否已安装和通过真机走查以 HANDOFF 的本轮记录为准。
@@ -272,4 +278,3 @@ CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也
 Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。
-

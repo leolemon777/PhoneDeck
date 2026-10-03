@@ -71,6 +71,7 @@ if ($Rid.EndsWith('x64')) {
 }
 Copy-Item -LiteralPath (Join-Path $WhisperSource 'LICENSE') -Destination (Join-Path $runtime 'LICENSE-whisper.cpp.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP_QUICK_START.md') -Destination (Join-Path $package 'START-HERE.md')
+Copy-Item -LiteralPath (Join-Path $repo 'docs/IPHONE_PWA.md') -Destination (Join-Path $package 'IPHONE_PWA.md')
 Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP_THIRD_PARTY.md') -Destination (Join-Path $package 'THIRD-PARTY.md')
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $package 'LICENSE-PhoneDeck.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'licenses/desktop') -Destination (Join-Path $package 'licenses') -Recurse

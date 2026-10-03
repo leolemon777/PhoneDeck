@@ -2,17 +2,19 @@
 
 多设备语音输入。Android 显示名称为「言渡」，提供六套可切换主题、圆形话筒入口和原创黑白话筒图标；品牌和覆盖升级说明见 [BRANDING](docs/BRANDING.md)。PhoneDeck 保留为兼容工程名及当前仓库地址。
 
+2026-10-03 新增 **iPhone / Android 网页 PWA 预览**，无需 App Store。新版 Desktop 提供手机安全网页、电脑确认配对、三种布局/六种主题，以及按住、点击和多电脑共享。普通语音跟随电脑停止，共享时各电脑独立结束；手机关闭共享会取消未结束的电脑段落。首次需按电脑指引导入自己的公开证书；使用时保持网页前台。浏览器自动化结果与真机待验项目见 [使用与验收指南](docs/IPHONE_PWA.md)，不能把此预览视为 iOS 锁屏或原生全功能支持。
+
 2026-10-02 手机 UI 开发预览提供**三套首页**：极简居中、单手底座、紧凑面板，从顶部「界面」切换，可独立搭配六套配色。三款均有点击/按住/共享、Goal、退格、回车，完整快捷键收进顶部入口；按钮具有按压、回弹和系统触感反馈。正在进行的语音结束后才能从首页换方式或 UI，选择共享仍需手动开麦。当前为独立 `.preview` 开发包，模拟器检查不代表实际触感或语音验收；最新证据与安装渠道边界见 [交接记录](docs/HANDOFF.md)。
 
 2026-10-01 新增 **多主题、多电脑配置**：手机在「设置 → 外观主题」选择墨水屏暖白、墨水屏深色、森林松绿、瓷白淡紫、燕麦陶土或天空雾蓝。在「设置 → 多电脑配置」选择已配对电脑，逐台设置电脑名称、内置识别语言、识别后自动填入及点击/按住快捷键；这些设置保存到对应电脑，管理配置不会切换当前输入目标。手机主题与点击/按住模式保持手机自己的选择。新版 Desktop 本机控制页也可独立选主题、编辑本机配置。使用步骤与验收边界见 [快速开始](docs/DESKTOP_QUICK_START.md)。
 
 2026-09-30 新增 **2.0.0-alpha.1 跨平台 Desktop 接收端**：Windows/macOS/Linux 共用本地 Whisper 识别，手机点击、按住、电脑快捷键使用同一条语音链路。最终文字经配对手机同步到选定共享组；接收端保留临时记录，当前触发电脑仅在焦点未改变时自动填入。下载包自带 .NET 与识别组件，默认首次下载一次中文/多语言模型，也可构建完整离线包。首次按系统提示授权并扫码确认，无需另外安装输入法或虚拟声卡。
 
-使用方法见 [跨平台快速开始](docs/DESKTOP_QUICK_START.md)，实施与验收状态见 [执行记录](docs/CROSS_PLATFORM_EXECUTION.md)。alpha候选已打包，当前放在维护者发布草稿中供真机验收，尚未公开Release。这是新增的预览路线，不能宣称三平台均已实机验收；Linux X11 与 Wayland 的输入能力不同，iPhone 客户端尚未实现。下面保留的 Windows/Mac 外部输入法说明适用于旧接收端，两种接收端需分别运行。
+使用方法见 [跨平台快速开始](docs/DESKTOP_QUICK_START.md)，实施与验收状态见 [执行记录](docs/CROSS_PLATFORM_EXECUTION.md)。alpha候选已打包，当前放在维护者发布草稿中供真机验收，尚未公开Release。这是新增的预览路线，不能宣称三平台均已实机验收；Linux X11 与 Wayland 的输入能力不同，iPhone 已新增上述网页/PWA 前台预览，原生客户端尚未实现。下面保留的 Windows/Mac 外部输入法说明适用于旧接收端，两种接收端需分别运行。
 
 > **English** — The new 2.0.0-alpha.1 desktop candidate uses local Whisper on Windows, macOS and Linux. Android supplies microphone audio and can relay each final result to selected computers. Desktop packages include the runtime; the model downloads once, with no external input method or virtual audio driver. Candidate packages are in a maintainer draft pending actual-device acceptance. The public [v1.6.0-beta.1 release](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.1) is the legacy external-dictation route. Docs are Chinese-first; English contributions welcome.
 
-PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 尚待开发，Mac 仍为预览；实验引擎不等于正式支持。
+PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 原生客户端尚待开发，PWA 与 Mac 仍为预览；实验引擎不等于正式支持。
 
 当前源码为 **Android 1.6.0-dev.21 / Windows 接收端 1.6.0-dev.16**。本轮实现、手机安装通道限制与未验收项见 [手机统一设置记录](docs/PHONE_MANAGED_DESKTOP.md)。上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、真机安装和
@@ -24,7 +26,7 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 
 面向开源发布的完整路线见 [长期规格 v0.6 第 0 章](./spec%20plan.markdown)：
 无线首次配对与逐手机授权、动态多电脑管理、Mac 实机完善、四类语音输入法分级适配、
-iOS 原生客户端、主题与状态统一、签名分发和维护体系。第一轮容量目标为一台手机连接
+iOS 网页先行/原生后续、主题与状态统一、签名分发和维护体系。第一轮容量目标为一台手机连接
 五台电脑，后续按实测扩展。方向已确认，技术方案和排期为建议；不代表上述能力已经实现。
 
 新的完整评审附件：[开源可用性、全端兼容与发布验收规格 1.0](docs/OPEN_SOURCE_RELEASE_SPEC.md)

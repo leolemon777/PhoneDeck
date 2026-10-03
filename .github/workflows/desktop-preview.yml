@@ -14,6 +14,37 @@ concurrency:
   group: desktop-preview-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  phone-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: work/phone-deck/desktop/tests-web/package-lock.json
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Verify browser PCM and session lifecycle
+        run: node --test work/phone-deck/desktop/tests-web/audio.test.mjs work/phone-deck/desktop/tests-web/session.test.mjs
+      - name: Install pinned browser test tools
+        working-directory: work/phone-deck/desktop/tests-web
+        run: |
+          npm ci --ignore-scripts
+          npx --no-install playwright install --with-deps chromium --only-shell
+      - name: Exercise phone controls through real receiver and generated browser audio
+        run: node work/phone-deck/desktop/tests-web/browser.integration.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PhoneDeck-Web-Verification
+          retention-days: 7
+          path: |
+            outputs/iphone-pwa/integration/*.json
+            outputs/iphone-pwa/integration/*.png
+          if-no-files-found: warn
   desktop:
     strategy:
       fail-fast: false

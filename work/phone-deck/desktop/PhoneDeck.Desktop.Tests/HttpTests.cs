@@ -24,7 +24,7 @@ public sealed class HttpTests
             var credentials = new ClientCredentialsStore(Path.Combine(directory, "clients.json"));
             var phone = credentials.Issue("test", ["control", "audio", "transcript-sync"], Guid.NewGuid().ToString(), out var token);
             var scoped = credentials.Issue("limited", ["control"], Guid.NewGuid().ToString(), out var limited);
-            await using var app = DesktopApp.Create(["--no-browser", "--no-discovery", "--no-hotkeys"], new FakeEngine()); await app.StartAsync();
+            await using var app = DesktopApp.Create(["--no-web-phone", "--no-browser", "--no-discovery", "--no-hotkeys"], new FakeEngine()); await app.StartAsync();
             try
             {
                 using var local = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{localPort}") };

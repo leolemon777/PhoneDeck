@@ -1,5 +1,31 @@
 # PhoneDeck 架构说明
 
+## 2026-10-03 浏览器手机入口
+
+`Desktop/PhoneWeb` 是内嵌静态 PWA：`ui.js` 负责三种布局/六主题，`app.js` 连接用户手势与电脑状态，
+`session.js` 管理唯一活动会话/有界队列，`audio.js` 与 `pcm-worklet.js` 将实际输入采样率转为 48k PCM16 mono。
+Service Worker 只缓存固定公开资源。音频不写文件，生命周期中断先关麦；重连不会自动重启语音。
+
+`BrowserTrust` 为浏览器创建独立根 CA 和有本机地址 SAN 的服务器证书，受限目录存储私钥。
+HTTP 8765 仍只监听回环；原生 HTTPS 8766 仍验证证书固定/Bearer/目标 ID。
+新增 HTTPS 8768 只接受 `/phone`，Host 和写请求/WS Origin 必须匹配。
+用户从本机页面导出公开根证书，在手机手动建立 HTTPS 信任；不自动更改任何系统证书库。
+网页一次性材料在 URL fragment 中取用即删除，需电脑核对批准，授权由 HttpOnly/Secure/Strict cookie 承载。
+cookie 只识别网页手机，不能访问原生 `/api` 或本机 `/local`。
+
+`WebPhoneGateway` 为每个网页手机维护电脑目录、当前确认目标、单个 WS 和会话/停止墓碑。
+主电脑使用 `WebPhoneLocalTarget`，附加电脑使用 `WebPhoneRemoteTarget` 的固定业务路径、独立凭据与 TLS pin；
+不接受 DNS/公网/回环目的地或重定向，不提供通用代理。每手机最多主电脑加四个 peer。
+peer 新增需要其本机一次性 QR 材料+确认，`peers.json` 不向网页返回令牌。
+端点、cookie、资料格式和使用限制详见 [PWA 指南](IPHONE_PWA.md)。
+
+managed 对应选中的单台电脑；电脑本地结束产生 `phoneStopV1` 凭据，网关独立探测活动目标并先推送 `stopped`，
+再清理网络。共享组先由手机明确开麦；各电脑只控制自己的段落，停止不影响其他供音。
+新增 `audioStopV1` / `/api/audio/stop` 使用现有 v2 信封，`StopSupplyAsync` 在同一锁内核对 owner/session 并结束供音。
+PWA 关闭共享会取消尚未提交的段落；旧供音请求不能停止替换后的新会话。
+手机启动缓存最多 1 秒、WS 积压最多 200ms；共享每 peer 队列最多六个20ms帧，managed最多50帧且满时取消而非静默截字。
+健康探测和队列按 peer 独立，慢电脑不阻塞健康电脑。实际设备延迟与锁屏限制仍须实测。
+
 ## 2026-10-02 电脑停止联动
 
 新 Desktop `phoneStopV1` 在 `/api/health` 的 `audio.stopRequestedSessionId` 返回本手机 managed
