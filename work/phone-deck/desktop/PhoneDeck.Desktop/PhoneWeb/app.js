@@ -60,7 +60,7 @@ function render() {
   let title = mode === 'hold' ? '按住说话' : mode === 'shared' ? '开启共享' : '开始说话';
   let hint = mode === 'hold' ? '按下开始，松开结束' : mode === 'shared' ? '开启后，用各台电脑的快捷键说话' : '轻点开始，再点结束';
   let status = !authKnown ? '正在连接主电脑' : !paired ? '等待配对' : !connected ? '正在连接电脑' : target?.online ? '准备好了' : '选择一台在线电脑';
-  let detail = target?.name || '在电脑打开言渡，连接这台手机';
+  let detail = target ? '' : '在电脑打开言渡，连接这台手机';
   if (operation) {
     if (operation.phase === 'starting') { title = '正在准备'; hint = mode === 'hold' ? '松开取消本次说话' : '再次点击可取消'; status = '麦克风与电脑连接中'; }
     else if (operation.phase === 'stopping') { title = '正在结束'; hint = '手机已停录，等待电脑确认'; status = '正在收尾'; }

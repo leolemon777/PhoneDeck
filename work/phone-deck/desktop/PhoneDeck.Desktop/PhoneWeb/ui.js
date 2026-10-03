@@ -154,10 +154,10 @@ export function setVoiceState({ state, mode, title, hint, status, detail, level,
   const busy = currentState === 'starting' || currentState === 'stopping';
   const defaults = {
     unpaired: ['先连接一台电脑', '把声音，送到你正在工作的地方。', '等待连接', '麦克风尚未开启'],
-    idle: currentMode === 'hold' ? ['按住，开始说话', '松开话筒，这句话就送往电脑。', '随时可以开始', '麦克风已关闭'] : currentMode === 'shared' ? ['让电脑接过话筒', '开启后，用电脑快捷键开始每一段听写。', '共享尚未开启', '手机麦克风已关闭'] : ['点击，开始说话', '再点一次结束，也可以从电脑停止。', '随时可以开始', '麦克风已关闭'],
+    idle: currentMode === 'hold' ? ['按住说话', '按下开始，松开结束', '准备好了', ''] : currentMode === 'shared' ? ['开启共享', '开启后，用各台电脑的快捷键说话', '共享尚未开启', ''] : ['开始说话', '轻点开始，再点结束', '准备好了', ''],
     starting: ['正在连接声音', '准备好了，就可以说话。轻点可取消。', '正在开始', '正在等待电脑确认'],
-    recording: ['正在听你说', currentMode === 'hold' ? '松开结束，电脑停止时也会同步结束。' : '点击结束，或在电脑上停止。', '正在录音', '声音正在送往电脑'],
-    sharing: ['话筒已交给电脑', '用任意一台电脑的快捷键，开始或结束听写。', '共享麦克风已开启', '先在电脑结束本段；关闭共享会取消未结束的转写' ],
+    recording: [currentMode === 'hold' ? '松开结束' : '停止说话', '电脑端停止也会同步结束', '正在说话', ''],
+    sharing: ['关闭共享', '先在电脑结束本段；关闭共享会取消未结束的转写', '共享已就绪，等待电脑触发', '手机正在供音' ],
     stopping: ['这句话，说完了', '正在把最后一点声音送到电脑。', '正在结束', '本机麦克风已关闭'],
     error: ['暂时没有连上', '检查连接后，再试一次。', '需要留意', '麦克风已关闭']
   }[currentState] ?? ['准备说话', '', '', ''];
@@ -266,7 +266,9 @@ export function renderSharedDevices(devices = []) {
     card.dataset.streaming = String(!!device.streaming);
     const status = element('span', 'shared-device-state');
     status.append(element('span', 'status-dot'), document.createTextNode(device.error ? '连接需要检查' : device.recording ? '正在转写' : device.streaming ? '供音中 · 待命' : device.online ? '尚未供音' : '暂时离线'));
-    card.append(element('span', 'shared-device-name', device.name || '未命名电脑'), status, element('span', 'shared-device-detail', device.error ? String(device.error) : device.recording ? '在此电脑停止，不会关闭共享' : device.streaming ? '用电脑快捷键开始' : device.online ? '开启共享后接收声音' : '不影响其他电脑'));
+    const name = element('span', 'shared-device-name', device.name || '未命名电脑');
+    name.title = name.textContent;
+    card.append(name, status, element('span', 'shared-device-detail', device.error ? String(device.error) : device.recording ? '仅结束本机' : device.streaming ? '快捷键开始' : device.online ? '等待开启共享' : '检查电脑连接'));
     fragment.append(card);
   }
   if (!devices.length) fragment.append(element('p', 'shared-empty', '选择共享组，然后手动开启麦克风。'));
