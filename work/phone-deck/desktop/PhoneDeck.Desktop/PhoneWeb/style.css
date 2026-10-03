@@ -24,3 +24,74 @@
 textarea::placeholder,input::placeholder,.version-caption{color:var(--muted)}
 
 .device-footer{display:flex;align-items:center;border-top:1px solid var(--line)}.device-footer .device-shared{border-top:0;flex:1}.device-remove{font-size:.6875rem;min-width:52px;min-height:44px;padding:8px 14px;color:var(--muted);border-left:1px solid var(--line)}.device-remove:active:not(:disabled){color:var(--danger);background:var(--danger-soft)}
+
+/* Sharing adds a device strip above the same voice controls. Budget that space
+   explicitly instead of letting the ordinary listening layout push keys below
+   the screen. Text remains unconstrained, so accessibility sizes can scroll. */
+:root {
+  --phone-safe-top: env(safe-area-inset-top, 0px);
+  --phone-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (max-width: 649px) and (orientation: portrait) {
+  [data-mode=shared] .phone-shell {
+    padding-top: calc(8px + var(--phone-safe-top));
+    padding-bottom: calc(10px + var(--phone-safe-bottom));
+  }
+  [data-mode=shared] .app-header { margin-bottom: 14px; }
+  [data-mode=shared] .workspace { gap: 10px; }
+  [data-mode=shared] .target-card { min-height: 70px; padding: 12px 14px; }
+  [data-mode=shared] .shared-section { padding: 4px 10px 8px; }
+  [data-mode=shared] .section-heading { min-height: 34px; }
+  [data-mode=shared] .shared-device { min-height: 64px; padding: 7px 8px; gap: 4px; }
+  [data-mode=shared] .voice-workspace {
+    min-height: 390px;
+    grid-template-rows: minmax(10px, 1fr) auto auto auto minmax(10px, 1fr) auto auto;
+  }
+  [data-mode=shared] .mic-wrap {
+    width: clamp(144px, calc(100dvh - 668px - var(--phone-safe-top) - var(--phone-safe-bottom)), 176px);
+    height: auto;
+    aspect-ratio: 1;
+    margin: 8px;
+  }
+  [data-mode=shared] .voice-copy { margin-top: 16px; }
+  [data-mode=shared] .voice-status { margin-bottom: 8px; }
+  [data-mode=shared] #mic-hint { margin-top: 6px; }
+  [data-mode=shared] .voice-meter-area {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 4px 10px;
+    margin-top: 10px;
+  }
+  [data-mode=shared] .level-meter { width: 125px; height: 18px; }
+  [data-mode=shared] .level-meter i { width: 2px; }
+  [data-mode=shared] .mode-switch button { min-height: 44px; }
+  [data-mode=shared] .quick-actions { margin-top: 10px; }
+  [data-mode=shared] .quick-actions button { min-height: 52px; }
+  [data-mode=shared][data-layout=dock] .voice-workspace {
+    grid-template-rows: minmax(10px, 1fr) auto auto 12px auto auto auto;
+  }
+  [data-mode=shared][data-layout=dock] .voice-copy { margin-top: 0; }
+  [data-mode=shared][data-layout=dock] h1 { font-size: 1.8125rem; }
+  [data-mode=shared][data-layout=dock] .voice-meter-area { justify-content: flex-start; }
+  [data-mode=shared][data-layout=dock] .mic-wrap {
+    width: clamp(140px, calc(100dvh - 682px - var(--phone-safe-top) - var(--phone-safe-bottom)), 162px);
+    margin: 18px 0 8px;
+  }
+  [data-mode=shared][data-layout=panel] .voice-workspace {
+    grid-template-rows: minmax(14px, 1fr) auto auto auto auto minmax(24px, 1fr) auto;
+  }
+  [data-mode=shared][data-layout=panel] .voice-copy { margin-top: 0; }
+  [data-mode=shared][data-layout=panel] .voice-meter-area {
+    justify-content: flex-start;
+    margin: 10px 0 16px;
+  }
+  [data-mode=shared][data-layout=panel] .voice-workspace::before { margin: -12px -12px; }
+  [data-mode=shared][data-layout=panel] .mic-wrap {
+    width: min(100%, 154px);
+    margin: 8px 0;
+  }
+  [data-mode=shared][data-layout=panel] .quick-actions { margin: 0; }
+  [data-mode=shared][data-layout=panel] .quick-actions button { min-height: 48px; }
+}
