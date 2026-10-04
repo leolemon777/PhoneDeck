@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const activeStates = new Set(['starting', 'recording', 'sharing', 'stopping']);
 const layouts = new Set(['center', 'dock', 'panel']);
-const themes = new Set(['paper', 'ink', 'forest', 'lilac', 'clay', 'sky']);
+const themes = new Set(['paper', 'ink', 'forest', 'lilac', 'clay', 'sky', 'rose', 'butter', 'mint', 'ocean', 'midnight', 'plum']);
 const modes = new Set(['tap', 'hold', 'shared']);
 let initialized = false;
 let haptics = true;
@@ -68,7 +68,7 @@ function setAppearance(kind, value) {
   savePreference(kind, value);
   if (kind === 'theme') {
     document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).getPropertyValue('--bg').trim();
-    document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').content = value === 'ink' ? 'black-translucent' : 'default';
+    document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').content = getComputedStyle(document.body).colorScheme === 'dark' ? 'black-translucent' : 'default';
   }
 }
 export function initUI() {
