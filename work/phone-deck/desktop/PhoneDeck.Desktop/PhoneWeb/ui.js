@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const activeStates = new Set(['starting', 'recording', 'sharing', 'stopping']);
 const layouts = new Set(['center', 'dock', 'panel']);
-const themes = new Set(['paper', 'ink', 'forest', 'lilac', 'clay', 'sky']);
+const designThemes = { center: 'chat', dock: 'grok', panel: 'green' };
 const modes = new Set(['tap', 'hold', 'shared']);
 let initialized = false;
 let haptics = true;
@@ -61,23 +61,23 @@ export function closeDialog(id) {
   const dialog = id ? $(id) : document.querySelector('dialog[open]');
   if (dialog?.open) dialog.close();
 }
-function setAppearance(kind, value) {
-  if (kind === 'layout' && !layouts.has(value) || kind === 'theme' && !themes.has(value)) return;
-  document.body.dataset[kind] = value;
-  document.querySelectorAll(`[data-${kind}-option]`).forEach(button => button.setAttribute('aria-pressed', String(button.dataset[`${kind}Option`] === value)));
-  savePreference(kind, value);
-  if (kind === 'theme') {
-    document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).getPropertyValue('--bg').trim();
-    document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').content = value === 'ink' ? 'black-translucent' : 'default';
-  }
+function setAppearance(value) {
+  if (!layouts.has(value)) return;
+  document.body.dataset.layout = value;
+  document.body.dataset.theme = designThemes[value];
+  document.querySelectorAll('[data-layout-option]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.layoutOption === value)));
+  savePreference('style', value);
+  const scheme = getComputedStyle(document.body);
+  document.querySelector('meta[name="theme-color"]').content = scheme.getPropertyValue('--bg').trim();
+  document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').content = scheme.colorScheme === 'dark' ? 'black-translucent' : 'default';
 }
 export function initUI() {
   if (initialized) return;
   initialized = true;
-  const layout = readPreference('layout');
-  const theme = readPreference('theme');
-  if (layouts.has(layout)) setAppearance('layout', layout);
-  if (themes.has(theme)) setAppearance('theme', theme);
+  // Retain old preferences for rollback; old colors never override a complete design.
+  const style = readPreference('style');
+  const legacyLayout = readPreference('layout');
+  setAppearance(layouts.has(style) ? style : layouts.has(legacyLayout) ? legacyLayout : 'center');
   haptics = readPreference('haptics') !== 'off';
   $('haptics-toggle').checked = haptics;
   if (typeof navigator.vibrate !== 'function') {
@@ -97,9 +97,8 @@ export function initUI() {
     if (button.hasAttribute('data-close-dialog')) { pulse(); closeDialog(button.closest('dialog').id); return; }
     if (button.dataset.layoutOption) {
       if (activeStates.has(document.body.dataset.state)) { showToast('先结束语音，再换一个界面。'); return; }
-      pulse(); setAppearance('layout', button.dataset.layoutOption); return;
+      pulse(); setAppearance(button.dataset.layoutOption); return;
     }
-    if (button.dataset.themeOption) { pulse(); setAppearance('theme', button.dataset.themeOption); return; }
     if (button.dataset.modeButton) { pulse(); emit('mode', { mode: button.dataset.modeButton }); return; }
     if (button.dataset.action) { pulse(); emit('action', { action: button.dataset.action }); return; }
     if (button.dataset.targetId) { pulse(); emit('target', { id: button.dataset.targetId }); return; }
