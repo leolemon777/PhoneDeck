@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#f5f3ee">
+  <meta name="theme-color" content="#ffffff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="言渡">
@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="./style.css">
   <title>言渡 · 手机语音</title>
 </head>
-<body data-layout="center" data-theme="paper" data-mode="tap" data-state="unpaired">
+<body data-layout="center" data-theme="chat" data-mode="tap" data-state="unpaired">
   <svg class="svg-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
     <symbol id="i-mic" viewBox="0 0 32 32"><rect x="12" y="3" width="8" height="17" rx="4" fill="currentColor" stroke="none"/><path d="M7.5 15.5v1.2a8.5 8.5 0 0 0 17 0v-1.2M16 25.2V29M11 29h10"/></symbol>
     <symbol id="i-stop" viewBox="0 0 32 32"><rect x="8" y="8" width="16" height="16" rx="4" fill="currentColor" stroke="none"/></symbol>
@@ -32,7 +32,7 @@
   </defs></svg>
   <div class="phone-shell">
     <header class="app-header">
-      <a class="wordmark" href="./" aria-label="言渡首页"><span class="brand-icon"><svg><use href="#i-mic"/></svg></span><span>言渡</span></a>
+      <a class="wordmark" href="./" aria-label="言渡首页"><span>言渡</span></a>
       <nav class="header-tools" aria-label="主要导航">
         <button type="button" class="text-button" data-open-dialog="appearance-dialog">界面</button>
         <button type="button" class="text-button" data-open-dialog="devices-dialog">电脑</button>
@@ -85,29 +85,14 @@
   </div>
   <dialog class="sheet" id="appearance-dialog" aria-labelledby="appearance-heading">
     <div class="sheet-handle" aria-hidden="true"></div>
-    <header class="sheet-header"><div><p class="eyebrow">让工作台，像你</p><h2 id="appearance-heading">挑一款喜欢的界面</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭外观设置"><svg><use href="#i-close"/></svg></button></header>
+    <header class="sheet-header"><div><p class="eyebrow">手机界面</p><h2 id="appearance-heading">选择你的风格</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="关闭外观设置"><svg><use href="#i-close"/></svg></button></header>
     <div class="sheet-content">
-      <div class="layout-options" role="group" aria-label="首页布局">
-        <button type="button" class="layout-option" data-layout-option="center" aria-pressed="true"><span class="layout-preview preview-center" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>极简居中</strong><small>专注每一句</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
-        <button type="button" class="layout-option" data-layout-option="dock" aria-pressed="false"><span class="layout-preview preview-dock" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>单手底座</strong><small>拇指刚好够到</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
-        <button type="button" class="layout-option" data-layout-option="panel" aria-pressed="false"><span class="layout-preview preview-panel" aria-hidden="true"><i class="preview-line"></i><i class="preview-mic"></i><i class="preview-caption"></i><i class="preview-modes"></i><i class="preview-keys"></i></span><strong>紧凑面板</strong><small>所有操作在手边</small><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+      <div class="layout-options" role="group" aria-label="手机界面">
+        <button type="button" class="layout-option" data-layout-option="center" aria-pressed="true"><span class="layout-preview preview-center" aria-hidden="true"><i class="preview-line"></i><i class="preview-caption"></i><i class="preview-mic"></i><i class="preview-keys"></i></span><span class="option-copy"><strong>对话白</strong><small>留白，专注每一句</small></span><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+        <button type="button" class="layout-option" data-layout-option="dock" aria-pressed="false"><span class="layout-preview preview-dock" aria-hidden="true"><i class="preview-line"></i><i class="preview-caption"></i><i class="preview-mic"></i><i class="preview-keys"></i></span><span class="option-copy"><strong>极夜黑</strong><small>黑白，操作近在手边</small></span><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
+        <button type="button" class="layout-option" data-layout-option="panel" aria-pressed="false"><span class="layout-preview preview-panel" aria-hidden="true"><i class="preview-line"></i><i class="preview-caption"></i><i class="preview-mic"></i><i class="preview-keys"></i></span><span class="option-copy"><strong>常青绿</strong><small>清楚分区，轻松开始</small></span><span class="option-check"><svg><use href="#i-check"/></svg></span></button>
       </div>
-      <h3 class="subheading">今天的颜色</h3>
-      <div class="theme-options" role="group" aria-label="配色主题">
-        <button type="button" data-theme-option="paper" aria-pressed="true"><span class="theme-swatch"><i></i></span><span>暖纸</span></button>
-        <button type="button" data-theme-option="ink" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>墨色</span></button>
-        <button type="button" data-theme-option="forest" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>松绿</span></button>
-        <button type="button" data-theme-option="lilac" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>淡紫</span></button>
-        <button type="button" data-theme-option="clay" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>陶土</span></button>
-        <button type="button" data-theme-option="sky" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>雾蓝</span></button>
-        <button type="button" data-theme-option="rose" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>樱粉</span></button>
-        <button type="button" data-theme-option="butter" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>奶油</span></button>
-        <button type="button" data-theme-option="mint" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>薄荷</span></button>
-        <button type="button" data-theme-option="ocean" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>靛蓝</span></button>
-        <button type="button" data-theme-option="midnight" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>深海</span></button>
-        <button type="button" data-theme-option="plum" aria-pressed="false"><span class="theme-swatch"><i></i></span><span>暮紫</span></button>
-      </div>
-      <p class="sheet-footnote">界面与配色只保存在这台手机，不影响电脑。</p>
+      <p class="sheet-footnote">选择整套界面，自动保存在这台手机。结束语音后可切换。</p>
     </div>
   </dialog>
   <dialog class="sheet" id="devices-dialog" aria-labelledby="devices-heading">
