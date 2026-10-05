@@ -1,5 +1,36 @@
 # 言渡 · Yandu 产品规格与开发计划
 
+## 2026-10-05 语音传输延迟优化（分支 agent/voice-latency）
+
+用户要求“提升语音传输，降低延迟，更加丝滑”，并授权把评审提出的优化全部完成。本切片只改源码与测试，
+不改 Android `1.6.0-dev.21` / Windows `1.6.0-dev.16` / macOS `2.0.0-dev.3` 版本号、发布清单或签名渠道；
+48 kHz / PCM16 / mono 基线不变，Opus 等编码协商未实施（需先用实测证明收益）。
+
+- **只丢静音的追赶**：接收端放行 pre-roll 时只保留首个语音块前 150 ms；播放中积压超过目标
+  （managed 150 ms、shared 120 ms）时，跳过已持续静音 200 ms 之后的 10 ms 静音块。静音阈值约 -48 dBFS，
+  语音块、hangover 区间和不完整尾块一律保留。shared 硬上限由 120 ms 放宽到 240 ms 才丢最旧音频。
+  Windows/macOS 共用 `work/phone-deck/shared/Audio/PcmLatency.cs`。
+- **常驻虚拟声卡输出**：接收端启动后让 VB-CABLE / BlackHole 输出常开并在空闲时输出静音，会话不再重建
+  WASAPI/AUHAL；常驻输出运行时 Windows 取消 250 ms 预热等待、Mac 改为引擎与音频建连并行。设备故障时
+  自动回退按会话创建。`PHONEDECK_WARM_AUDIO=0` 可关闭。WASAPI 共享缓冲 60 ms → 30 ms。
+- **电脑端停止同步**：旧 Windows 接收端新增能力 `phoneStopV1`，与新版 Desktop 同义：
+  `audio.stopRequestedSessionId` 只在内存保留 60 秒、只返回给会话所有者。会话期间诊断刷新 3 s → 250 ms，
+  Core Audio 采集会话事件到来时立即刷新；需两次相隔 ≥100 ms 的“未采集”观测才写凭据，避免探针熔断误停。
+  电脑本机停止（`/local/dictation/stop`）先写凭据再收尾。macOS 声明同一能力，本机停止写凭据（旧共享令牌，
+  所有手机为同一 legacy 身份）。契约 `capabilityName`、health `audio` schema 与降级矩阵已登记。
+- **共享断线重连**：同一所有者、同一 shared sessionId 的新连接接管仍未被发现断开的旧连接
+  （等待 ≤2 s），旧连接不排空、不补尾音；managed 与其他手机仍返回冲突。
+- **Android**：证书固定连接关闭 Nagle（`TCP_NODELAY`）；采音线程 URGENT_AUDIO、共享发送线程 AUDIO；
+  点击模式按下话筒即预创建 AudioRecord（不开始录音、不触发麦克风指示，5 s 过期）并预热两条 keep-alive 连接；
+  managed 会话手机开始采音即提示“可以说话”（旧非 managed 接收端不提前提示）。共享队列 120 ms → 240 ms，
+  满了优先丢静音帧。
+- **PWA**：AudioContext 请求 48 kHz；发送等待容忍 1 s 网络卡顿；1 秒启动缓存满时先丢静音，shared 再丢最旧帧，
+  managed 仍取消而不静默丢语音。
+- **其他**：接收端 GC `SustainedLowLatency`；Mac AUHAL 回调环形缓冲改为无锁单写单读；尾音静音时长可用
+  `PHONEDECK_OUTPUT_TAIL_MS`（100–1000，默认 400）实测后调整。新增 `scripts/performance/voice-latency-report.py`
+  （按 sessionId 汇总两端日志）与 `voice-loopback-delay.py`（同一时钟回环测端到端延迟）。
+- 自动化测试与真机验收分开记录；真机延迟数据、Typeless 实际出字、Wi-Fi 抖动与共享重连仍须实测，见 HANDOFF。
+
 ## 2026-10-05 Android APK 同步一套「对话白」
 
 用户明确 Android 应使用原生 APK，并要求同步一套新 UI。本切片将 PWA「对话白」的构图同步到现有 Java Android 首页，覆盖此前“本轮不修改原生 Android”的范围限制；极夜黑、常青绿尚未同步，不以一套完成代表三套交付。

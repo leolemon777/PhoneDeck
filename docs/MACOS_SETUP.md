@@ -115,6 +115,10 @@ curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
 ~/Library/Application Support/PhoneDeck/server-settings.json
 ```
 
+语音延迟相关环境变量与 Windows 相同：BlackHole 输出默认常开（空闲输出静音，`PHONEDECK_WARM_AUDIO=0`
+关闭）；尾音静音默认 400 ms，可用 `PHONEDECK_OUTPUT_TAIL_MS`（100–1000）调整。常驻输出运行时，
+接收端会先触发输入法再等待手机音频建连，首段语音由两端启动缓存保留。
+
 如需把 PhoneDeck 自身数据保留在外置盘，启动前设置
 `PHONEDECK_DATA_DIR=/稳定的外置盘目录`；证书、电脑 ID、令牌和接收端配置会写入该目录。
 Typeless 自身配置仍由 Typeless 管理，不会随此变量搬移。

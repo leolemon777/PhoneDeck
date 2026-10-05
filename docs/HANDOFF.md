@@ -1,6 +1,41 @@
 # PhoneDeck 项目交接说明
 
-## 2026-10-05 Android APK 已同步一套对话白（最新状态）
+## 2026-10-05 语音传输延迟优化（最新状态）
+
+- 分支 `agent/voice-latency`，基于 `codex/android-dialogue-ui`（`290690c`），开始时工作树干净。范围：语音延迟与流畅度，
+  只改源码、测试、契约和文档；版本号、发布清单、签名渠道均未改，48 kHz / PCM16 / mono 基线不变。决策摘要见
+  规格顶部同日条目，结构见 ARCHITECTURE。
+- **接收端（Windows + Mac）**：放行 pre-roll 时裁掉开口前静音（保留 150 ms）；积压超过目标时只跳过静音块
+  （共用 `shared/Audio/PcmLatency.cs`）；VB-CABLE / BlackHole 输出常驻（`PHONEDECK_WARM_AUDIO=0` 关闭），
+  Windows 取消 250 ms 预热等待、Mac 引擎与音频建连并行；同一所有者的 shared 会话断线重连直接接管；
+  WASAPI 缓冲 30 ms；GC `SustainedLowLatency`；Mac 渲染回调改为无锁环形缓冲；尾音时长可用
+  `PHONEDECK_OUTPUT_TAIL_MS` 调整。
+- **电脑端停止同步**：Windows 旧接收端新增 `phoneStopV1`（凭据按 ClientId 返回、60 秒、仅内存）；会话期间诊断
+  250 ms 刷新并订阅 Core Audio 采集会话事件；连续两次未采集才写凭据；本机停止先写凭据再收尾。Mac 声明同一
+  能力并在本机停止时写凭据。契约 `definitions`/`health` schema 与降级矩阵已登记，`contracts/tools/validate.py` 全部通过。
+- **Android**：证书固定连接 `TCP_NODELAY`；采音/发送线程音频优先级；点击模式按下即预创建 AudioRecord
+  （不录音、5 s 过期）并预热两条连接；managed 会话开始采音即提示“可以说话”；共享队列 240 ms 且优先丢静音。
+- **PWA**：请求 48 kHz AudioContext；发送容忍 1 s 卡顿；启动缓存满时先丢静音（managed 仍取消、shared 丢最旧）。
+- **测量工具**：`scripts/performance/voice-latency-report.py`（两端日志按 sessionId 汇总）、
+  `voice-loopback-delay.py`（同一时钟回环测端到端延迟），两者 `--self-test` 通过。
+- **验证（本机 macOS，仓库自带 .NET 10.0.400 / JDK 17）**：
+  - Android `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug` 通过；单元测试 36/36（新增 3）；lint 0 error / 43 warning（与改动前相同）。
+  - Windows `PhoneDeck.Server` Release 构建通过（win-x64）。测试在 Mac 上用 `-p:RuntimeIdentifier=osx-arm64 -p:SelfContained=false`
+    运行：167/171，失败 4 项 `RevokeWriteFailureKeepsInMemoryStateConsistent`、`AtomicWriteFailureLeavesPreviousFileIntact`、
+    `AtomicPersistencePreservesOldFileWhenReplacementFails`、`RotateRateLimitEnforcesMinimumInterval` 在改动前同样失败
+    （146/150 基线），与文件权限/计时的宿主差异有关，需在 Windows 上复跑确认。新增 21 项全部通过。该方式会改写两个
+    `packages.lock.json`，已还原，未提交。
+  - macOS `PhoneDeck.Receiver` 构建通过，测试 39/39（新增 8）。Desktop 测试 63 通过 / 1 跳过（与改动前一致）。
+  - PWA `node --test` 53/53（新增 3；原“启动缓存溢出”用例改用语音帧，保持“managed 溢出取消”的原意）。
+  - `git diff --check` 通过。
+- **未在真实设备验证（不得声称已通过）**：真机延迟数值、Typeless 实际出字、常驻 WASAPI/AUHAL 长时间运行与设备
+  热插拔恢复、Core Audio 会话事件在真实 Windows 上的触发、`TCP_NODELAY` 抓包效果、Wi-Fi 抖动下共享接管、
+  静音阈值对轻声说话者的影响、AudioRecord 预创建在不同厂商机型上的行为、iPhone Safari 48 kHz AudioContext。
+- **待办**：在 Windows 复跑 `dotnet test`；用回环脚本在 Windows 与 Mac 各测一组改动前后延迟并记录；按实测调
+  `PHONEDECK_OUTPUT_TAIL_MS` 与 VB-CABLE 内部缓冲；若轻声开头被裁，调高 `PcmLatency.LeadInMs` 或降低阈值；
+  Opus 编码协商与“开始指令合并进音频请求”仍未实施，需先有实测数据。
+
+## 2026-10-05 Android APK 已同步一套对话白
 
 - 用户要求把新界面同步一套到 APK。独立分支 `codex/android-dialogue-ui` 基于 `7083d9b` / PR #37；开始工作树干净，fetch main 后没有待合入新提交。仅修改 Android 原生 UI 和预览构建入口，Java、音频/会话协议及电脑 Typeless 路线不变，不下载模型、不创建正式 Release。
 - 将 `center` 首页更新为「对话白」，`native_light` 更新为纯白/黑色/中性灰。竖屏状态区留白，点击/按住/共享、160dp 大话筒和 Goal/退格/回车固定在底部；短屏缩小话筒、状态区可滚动，横屏保持双栏。动态引擎模式、全部快捷键和设置收进右上角菜单，电脑入口仍显示实际连接状态。使用原生矢量图标、原有动画和系统触感逻辑；其余布局及偏好 ID 兼容。

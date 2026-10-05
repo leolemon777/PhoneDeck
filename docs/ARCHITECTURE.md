@@ -1,6 +1,30 @@
 # PhoneDeck 架构说明
 
 
+## 2026-10-05 语音延迟优化
+
+```text
+手机 AudioRecord(预创建) ─20ms PCM─▶ TLS(TCP_NODELAY) ─▶ 接收端 pre-roll
+   │                                                     │ 引擎确认采集
+   └ 开始采音即提示“可以说话”                              ▼
+                                      裁掉开口前静音(保留150ms) → PcmSilenceCatchUp
+                                                     │ 积压>目标时跳过静音块
+                                                     ▼
+                         常驻输出(SwitchingWaveProvider / 常驻 AUHAL) → VB-CABLE / BlackHole → 输入法
+```
+
+- `shared/Audio/PcmLatency.cs`：两端共用的静音判定、pre-roll 裁剪与 `PcmSilenceCatchUp`；`PhonePcmBuffer`
+  （Windows）与 `MacPhoneAudioBridge.ActiveSession.WriteLive`（Mac）在写入播放缓冲前调用。
+- `PhoneAudioBridge`：常驻 `WasapiPhoneAudioPlayback` + `SwitchingWaveProvider`，会话只挂接/摘除自己的
+  `PhonePcmBuffer`；`IsFaulted` 时下次重建。`TrySupersede` 让同一所有者的同一 shared 会话接管旧连接。
+- `DiagnosticsMonitor`：会话期间 250 ms 刷新，`VoiceEngineStateEvents` 订阅采集会话事件后 `Nudge()`；
+  每次刷新回调 `DictationSessionManager.ObserveEngineCapturing`，连续两次未采集后写 `PhoneStopReceipts`，
+  `/api/health` 按 `ClientId` 返回 `audio.stopRequestedSessionId`（能力 `phoneStopV1`）。
+- Mac：`MacAudioRingBuffer` 以单调递增读写位置实现无锁 SPSC，渲染回调不再取锁；常驻输出时
+  `MacDictationSessionManager` 先触发引擎再等待音频会话。
+- 测量：`scripts/performance/voice-latency-report.py` 按 sessionId 汇总手机 logcat 与接收端日志；
+  `voice-loopback-delay.py` 用同一台电脑的扬声器回环与虚拟声卡录音计算端到端延迟。
+
 ## 2026-10-04 Typeless 兼容网页
 
 `shared/PhoneWeb/PhoneWeb.props` 把同一份 PWA、TLS 信任、网页网关和凭据实现嵌入原 Windows/Mac 接收端；没有另开模型服务。`LegacyPhoneWebHost` 提供回环管理页和独立 8768 TLS 浏览器入口，先做端口/Host/Origin 隔离，再让浏览器请求进入网页自身的 cookie 鉴权，不经过旧原生令牌分支。

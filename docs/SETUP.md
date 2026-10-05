@@ -62,6 +62,12 @@ adb install -r work/phone-deck/android/app/build/outputs/apk/debug/app-debug.apk
 
 ## 4. Windows 首次运行
 
+> 语音延迟调优（可选）：接收端默认让 VB-CABLE 输出常开并在空闲时输出静音，会话开始不再初始化
+> WASAPI；如需关闭设置环境变量 `PHONEDECK_WARM_AUDIO=0`。VB-CABLE 控制面板中的内部缓冲（Max Latency）
+> 也会叠加延迟，可按实测调小。尾音静音默认 400 ms，可用 `PHONEDECK_OUTPUT_TAIL_MS`（100–1000）调整。
+> 端到端延迟用 `scripts/performance/voice-loopback-delay.py` 实测，两端日志用
+> `scripts/performance/voice-latency-report.py` 汇总。
+
 1. 将同一候选构建的接收端与控制台放到独立运行目录，保留已有 `data`；不要直接覆盖正在运行的 EXE。
 2. 自行安装 VB-CABLE，确认 `CABLE Input` 和 `CABLE Output` 存在，按驱动要求重启。
 3. 安装并启动语音输入法，在输入法中选择 `CABLE Output` 作为麦克风。
