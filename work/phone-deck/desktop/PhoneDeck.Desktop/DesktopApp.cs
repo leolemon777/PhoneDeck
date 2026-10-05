@@ -69,7 +69,7 @@ internal static class DesktopApp
             webPhone?.UpdateDisplayName(identity.DisplayName);
             pairing.Cancel(); pairing = new PairingWindowManager(identity.ComputerId, identity.DisplayName, trust.CertificateSha256, lanPort);
             if (udp is not null) { udp.Dispose(); udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start(); }
-            mdns?.Start(identity, lanPort, Capabilities);
+            mdns?.Start(identity.ComputerId, identity.DisplayName, identity.Platform, lanPort, Capabilities);
         }
         var recentInputs = new RequestDeduplicator();
         var clientCancellation = new Dictionary<string, CancellationTokenSource>();
@@ -355,7 +355,7 @@ internal static class DesktopApp
         if (!args.Contains("--no-discovery"))
         {
             udp = new LanDiscoveryResponder(identity, lanPort, Capabilities); udp.Start();
-            mdns = new MdnsAdvertiser(); mdns.Start(identity, lanPort, Capabilities);
+            mdns = new MdnsAdvertiser(); mdns.Start(identity.ComputerId, identity.DisplayName, identity.Platform, lanPort, Capabilities);
             app.Lifetime.ApplicationStopped.Register(() => { udp?.Dispose(); mdns?.Dispose(); });
         }
         return app;

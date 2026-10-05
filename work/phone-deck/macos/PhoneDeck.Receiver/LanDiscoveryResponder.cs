@@ -47,8 +47,19 @@ internal sealed class LanDiscoveryResponder : IDisposable
         };
     }
 
+    private volatile bool enabled = true;
     internal bool PortBound => client is not null;
-    internal bool Running => worker.IsAlive;
+    internal bool Running => enabled && worker.IsAlive;
+
+    /// <summary>手机集中设置可随时开关；关闭时不再应答发现请求。</summary>
+    internal void SetEnabled(bool value)
+    {
+        enabled = value;
+        if (value)
+        {
+            Start();
+        }
+    }
 
     internal void Start()
     {
@@ -82,7 +93,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
             {
                 break;
             }
-            if (remote is null || data.Length > 64)
+            if (!enabled || remote is null || data.Length > 64)
             {
                 continue;
             }

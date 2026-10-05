@@ -32,7 +32,8 @@ if (!isFirstInstance)
 var capabilities = new[]
 {
     "fixedAction", "keyChord", "text", "macro", "secureLan", "macInput",
-    "phoneAudio", "sharedMicrophone", "managedDictation", "phoneStopV1"
+    "phoneAudio", "sharedMicrophone", "managedDictation", "phoneStopV1", "healthEventsV1",
+    "phoneManagedSettingsV1"
 };
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
@@ -75,6 +76,17 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 phoneWeb.Map(app);
 
+// Receiver.Core：与 Windows 相同的逐手机凭据、扫码配对、撤销与 mDNS。
+var clientCredentials = new ClientCredentialsStore(
+    Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
+var clientSessions = new ClientSessionRegistry();
+var pairingWindows = new PairingWindowManager(
+    receiverIdentity.ComputerId,
+    receiverIdentity.DisplayName,
+    lanIdentity.CertificateSha256,
+    lanIdentity.HttpsPort);
+using var mdnsAdvertiser = new MdnsAdvertiser();
+
 if (settings.UsbWatchdog)
 {
     usbWatchdog.Start();
@@ -82,15 +94,48 @@ if (settings.UsbWatchdog)
 if (settings.LanDiscovery)
 {
     lanDiscovery.Start();
+    // mDNS 与 UDP 应答共用“局域网发现”开关；多播不可用时降级为仅 UDP。
+    mdnsAdvertiser.Start(receiverIdentity.ComputerId, receiverIdentity.DisplayName,
+        receiverIdentity.Platform, lanIdentity.HttpsPort, capabilities);
 }
+
+// 8765 回环入口的 Host/Origin 防护：拦截本机恶意网页对配对、撤销等写操作的跨站调用。
+app.Use(async (context, next) =>
+{
+    if (context.Connection.LocalPort == 8765
+        && !HttpMethods.IsGet(context.Request.Method)
+        && !HttpMethods.IsHead(context.Request.Method))
+    {
+        var rejection = LoopbackOriginGuard.Validate(
+            context.Request.Headers.Host.ToString(),
+            context.Request.Headers.Origin.FirstOrDefault(),
+            context.Request.Headers.Referer.FirstOrDefault());
+        if (rejection is not null)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { ok = false, error = rejection });
+            return;
+        }
+    }
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
     if (context.Connection.LocalPort == LegacyPhoneWebHost.Port) { await next(); return; }
-    if (!LanRequestAuthenticator.IsAuthorized(
+    // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料 + 本机确认即授权证明。
+    var isPairingBootstrap = context.Connection.LocalPort == lanIdentity.HttpsPort
+        && HttpMethods.IsPost(context.Request.Method)
+        && context.Request.Path.StartsWithSegments("/api/lan/pair/qr");
+    var auth = isPairingBootstrap
+        ? new LanAuthResult(true, null)
+        : LanRequestAuthenticator.Resolve(
             context.Connection.LocalPort,
             context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
-            lanIdentity.AccessToken))
+            context.Request.Headers["Authorization"].FirstOrDefault(),
+            lanIdentity.AccessToken,
+            clientCredentials);
+    if (!auth.Authorized)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await context.Response.WriteAsJsonAsync(new
@@ -100,11 +145,47 @@ app.Use(async (context, next) =>
         });
         return;
     }
+    context.Items["ClientId"] = auth.ClientId;
     await next();
 });
 
-app.MapGet("/api/health", () =>
+// 手机集中设置写入时排斥新的输入/音频请求；进行中的音频流持有使用租约直到收尾。
+var configurationGate = new ConfigurationGate();
+app.Use(async (context, next) =>
 {
+    var use = HttpMethods.IsPost(context.Request.Method)
+        && !context.Request.Path.StartsWithSegments("/api/config/desktop");
+    if (!use) { await next(); return; }
+    if (!configurationGate.EnterUse())
+    {
+        context.Response.StatusCode = 409;
+        await context.Response.WriteAsJsonAsync(new { ok = false, error = "正在保存设置，请稍后重试" });
+        return;
+    }
+    try { await next(); } finally { configurationGate.ExitUse(); }
+});
+MacDesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configurationGate,
+    () => audioBridge.IsStreaming || dictationSessions.IsActive || engineController.IsCapturing() == true,
+    () => settings, value => settings = value, usbWatchdog, lanDiscovery);
+
+NativePairingEndpoints.Map(app, new NativePairingHost(
+    receiverIdentity.ComputerId,
+    () => receiverIdentity.DisplayName,
+    receiverIdentity.Platform,
+    lanIdentity.CertificateSha256,
+    lanIdentity.HttpsPort,
+    lanIdentity.GetCandidateAddresses,
+    lanIdentity.AccessToken,
+    clientCredentials,
+    clientSessions,
+    pairingWindows,
+    // macOS 没有跨请求按住的普通按键；撤销后音频长流由 clientSessions 终止，
+    // managed 会话随断流复位输入法。
+    _ => { }));
+
+object BuildHealth(HttpContext context)
+{
+    var requesterClientId = context.Items["ClientId"] as string;
     var audio = audioBridge.Probe();
     var engineProfile = MacVoiceEngines.Active;
     var readerConfig = MacTypelessConfiguration.Load(settings);
@@ -119,7 +200,7 @@ app.MapGet("/api/health", () =>
         configured = MacVoiceEngines.IsModeConfigured(mode.Id),
         keys = MacVoiceEngines.ModeKeyNames(mode.Id)
     }).ToArray();
-    return Results.Ok(new
+    return new
     {
         ok = true,
         name = "PhoneDeck",
@@ -142,16 +223,18 @@ app.MapGet("/api/health", () =>
             device = audio.DeviceName,
             deviceUid = audio.DeviceUid,
             streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.ActiveSessionId,
+            // 多手机：会话 ID 只告诉所属手机；其他手机只看到“正在使用”。
+            sessionId = audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
             mode = audioBridge.ActiveMode?.ToWireValue(),
             lastError = audio.Error,
-            // phoneStopV1：Mac 仍是旧共享令牌，所有已配对手机共享同一 legacy 身份。
-            stopRequestedSessionId = dictationSessions.Receipts.For(null)
+            // phoneStopV1：只返回给发起该 managed 会话的手机（USB 与旧共享令牌为同一 legacy 身份）。
+            stopRequestedSessionId = dictationSessions.Receipts.For(requesterClientId)
         },
         dictation = new
         {
             active = dictationSessions.IsActive,
-            sessionId = dictationSessions.ActiveSessionId
+            sessionId = dictationSessions.IsOwnedBy(requesterClientId)
+                ? dictationSessions.ActiveSessionId : null
         },
         foregroundApp = (string?)null,
         usbWatchdog = new
@@ -188,8 +271,17 @@ app.MapGet("/api/health", () =>
             microphone = MacVoiceEngines.MicrophoneDescription,
             modes = engineModes
         }
-    });
-});
+    };
+}
+
+app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
+
+// healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
+app.MapGet("/api/events", async (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
+    () => BuildHealth(context),
+    context.Request.Query["since"].FirstOrDefault(),
+    HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
+    context.RequestAborted)));
 
 app.MapGet("/api/diagnostics", () =>
 {
@@ -262,28 +354,6 @@ app.MapGet("/api/diagnostics", () =>
     });
 });
 
-app.MapPost("/api/lan/pair", (HttpContext context) =>
-{
-    if (!LanRequestAuthenticator.IsUsbPairingRequest(
-            context.Connection.LocalPort,
-            context.Connection.RemoteIpAddress))
-    {
-        return Results.NotFound();
-    }
-    return Results.Ok(new
-    {
-        ok = true,
-        protocolVersion = 2,
-        computerId = receiverIdentity.ComputerId,
-        displayName = receiverIdentity.DisplayName,
-        platform = receiverIdentity.Platform,
-        addresses = lanIdentity.GetCandidateAddresses(),
-        port = lanIdentity.HttpsPort,
-        certificateSha256 = lanIdentity.CertificateSha256,
-        accessToken = lanIdentity.AccessToken
-    });
-});
-
 app.MapPost("/api/audio/stream", async (HttpContext context) =>
 {
     try
@@ -302,7 +372,7 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
         {
             return Results.BadRequest(new { ok = false, error = "请求目标不是当前电脑" });
         }
-        var mode = AudioStreamModeParser.Parse(
+        var mode = AudioStreamModes.Parse(
             context.Request.Headers["X-PhoneDeck-Audio-Mode"].FirstOrDefault());
         var probe = audioBridge.Probe();
         if (!probe.Available)
@@ -314,6 +384,12 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
         {
             bodySize.MaxRequestBodySize = null;
         }
+        // 撤销该手机即终止其音频长流（不只拦截新请求）。
+        var streamClientId = context.Items["ClientId"] as string;
+        using var revocation = streamClientId is null
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(
+                context.RequestAborted, clientSessions.Register(streamClientId));
         await audioBridge.StreamAsync(
             context.Request.Body,
             sessionId!,
@@ -325,7 +401,8 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
                     dictationSessions.AudioEnded(endedSession);
                 }
             },
-            context.RequestAborted);
+            revocation?.Token ?? context.RequestAborted,
+            streamClientId);
         return Results.Ok(new
         {
             ok = true,
@@ -347,7 +424,7 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
     }
 });
 
-app.MapPost("/api/dictation/start", (DictationCommand command) =>
+app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext context) =>
 {
     try
     {
@@ -358,7 +435,8 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
             command.TargetComputerId,
             receiverIdentity.ComputerId);
         var duplicate = dictationSessions.Start(
-            command.SessionId, command.RequestId, command.Mode);
+            command.SessionId, command.RequestId, command.Mode,
+            context.Items["ClientId"] as string);
         return Results.Ok(new
         {
             ok = true,
@@ -391,7 +469,7 @@ app.MapPost("/local/dictation/stop", () =>
     }
 });
 
-app.MapPost("/api/dictation/stop", (DictationCommand command) =>
+app.MapPost("/api/dictation/stop", (DictationCommand command, HttpContext context) =>
 {
     try
     {
@@ -401,7 +479,8 @@ app.MapPost("/api/dictation/stop", (DictationCommand command) =>
             command.SessionId,
             command.TargetComputerId,
             receiverIdentity.ComputerId);
-        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId);
+        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId,
+            context.Items["ClientId"] as string, checkOwner: true);
         return Results.Ok(new
         {
             ok = true,
@@ -455,7 +534,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("========================================");
     Console.WriteLine("  PhoneDeck macOS 接收端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
-    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（需先通过 USB 配对）");
+    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（扫码配对：http://127.0.0.1:8765/admin/pairing）");
     Console.WriteLine($"  局域网发现：UDP {LanDiscoveryResponder.DiscoveryPort}");
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  输入后端：CGEvent");

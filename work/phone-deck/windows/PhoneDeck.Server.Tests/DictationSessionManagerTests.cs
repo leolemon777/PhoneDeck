@@ -551,6 +551,41 @@ public sealed class DictationSessionManagerTests
         Assert.IsFalse(manager.IsActive);
     }
 
+    [TestMethod]
+    public void AnotherPhoneCannotStopTheActiveSession()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", "phone-a");
+
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Stop(session, "stop-b", "phone-b", checkOwner: true));
+
+        StringAssert.Contains(error.Message, "另一台手机");
+        Assert.IsTrue(manager.IsActive);
+        Assert.IsTrue(manager.IsOwnedBy("phone-a"));
+        Assert.IsFalse(manager.IsOwnedBy("phone-b"));
+        Assert.IsFalse(manager.IsOwnedBy(null));
+        manager.Stop(session, "stop-a", "phone-a", checkOwner: true);
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void UsbAndLegacyTokenShareTheLegacyIdentity()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", null);
+
+        Assert.IsTrue(manager.IsOwnedBy(ClientCredentialsStore.LegacySharedClientId));
+        manager.Stop(session, "stop", ClientCredentialsStore.LegacySharedClientId, checkOwner: true);
+        Assert.IsFalse(manager.IsActive);
+    }
+
     private sealed class FakeAudioSessionController : IPhoneAudioSessionController
     {
         public bool OutputWarm { get; set; }

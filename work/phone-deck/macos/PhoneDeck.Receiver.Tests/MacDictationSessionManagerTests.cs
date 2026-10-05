@@ -145,6 +145,58 @@ public sealed class MacDictationSessionManagerTests
         Assert.IsFalse(manager.IsActive);
     }
 
+    [TestMethod]
+    public void LateStartCannotReviveAStoppedSession()
+    {
+        var audio = new FakeAudio();
+        var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, Guid.NewGuid().ToString(), "dictation");
+        manager.Stop(session, Guid.NewGuid().ToString());
+
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Start(session, Guid.NewGuid().ToString(), "dictation"));
+
+        StringAssert.Contains(error.Message, "已终止");
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void FailedStartCanBeRetriedWithTheSameSession()
+    {
+        var audio = new FakeAudio { OutputWarm = true, SessionArrives = false };
+        var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString();
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Start(session, Guid.NewGuid().ToString(), "dictation"));
+
+        audio.SessionArrives = true;
+        manager.Start(session, Guid.NewGuid().ToString(), "dictation");
+
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void AnotherPhoneCannotStopAndReceiptGoesToOwner()
+    {
+        var audio = new FakeAudio();
+        var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, Guid.NewGuid().ToString(), "dictation", "phone-a");
+
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Stop(session, Guid.NewGuid().ToString(), "phone-b", checkOwner: true));
+        Assert.IsTrue(manager.IsOwnedBy("phone-a"));
+
+        manager.StopFromDesktop();
+        Assert.AreEqual(session, manager.Receipts.For("phone-a"));
+        Assert.IsNull(manager.Receipts.For("phone-b"));
+        Assert.IsNull(manager.Receipts.For(null));
+    }
+
     private sealed class FakeAudio : IMacPhoneAudioSessionController
     {
         internal bool PlaybackReleased { get; private set; }

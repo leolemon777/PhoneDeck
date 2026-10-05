@@ -269,10 +269,24 @@ internal sealed class DictationSessionManager : IDisposable
         }
     }
 
-    internal bool Stop(string? sessionId, string? requestId)
+    /// <summary>当前会话是否属于该手机（USB 与旧共享令牌同为 legacy 身份）。</summary>
+    internal bool IsOwnedBy(string? clientId) =>
+        activeDictationSessionId is not null
+        && string.Equals(PhoneStopReceipts.NormalizeOwner(activeOwnerClientId),
+            PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
+
+    internal bool Stop(string? sessionId, string? requestId,
+        string? requesterClientId = null, bool checkOwner = false)
     {
         var normalizedSessionId = ValidateSessionId(sessionId);
         var normalizedRequestId = ValidateRequestId(requestId);
+        // 多手机：另一台手机即使得知 sessionId 也不能结束别人的听写；在写墓碑前拒绝。
+        if (checkOwner
+            && string.Equals(activeDictationSessionId, normalizedSessionId, StringComparison.Ordinal)
+            && !IsOwnedBy(requesterClientId))
+        {
+            throw new InvalidOperationException("该语音会话属于另一台手机，不能由本机结束");
+        }
         // 停止优先（R1）：先在租约登记簿写墓碑，此后同会话迟到 start 一律拒绝；
         // 旧/未知会话返回 false（stale-ignored，不改任何状态）。
         var stopOwnsSession = leaseRegistry.BeginStop(normalizedSessionId);

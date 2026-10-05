@@ -215,6 +215,26 @@ public sealed class VoiceLatencyTests
     }
 
     [TestMethod]
+    public async Task StreamOwnershipIsVisibleOnlyToItsPhone()
+    {
+        using var bridge = new PhoneAudioBridge(source => new RecordingPlayback(source),
+            keepOutputWarm: true);
+        var session = Guid.NewGuid().ToString();
+        using var stalled = new GatedStream(Voice(20));
+        var streaming = bridge.StreamAsync(stalled, session, AudioStreamMode.Shared,
+            (_, _) => { }, CancellationToken.None, ownerId: "phone-a");
+        await stalled.Consumed.Task;
+
+        Assert.IsTrue(bridge.IsStreamOwnedBy("phone-a"));
+        Assert.IsFalse(bridge.IsStreamOwnedBy("phone-b"));
+        Assert.IsFalse(bridge.IsStreamOwnedBy(null));
+
+        stalled.Finish();
+        await streaming;
+        Assert.IsFalse(bridge.IsStreamOwnedBy("phone-a"));
+    }
+
+    [TestMethod]
     public async Task ManagedStreamIsNeverTakenOver()
     {
         using var bridge = new PhoneAudioBridge(source => new RecordingPlayback(source),

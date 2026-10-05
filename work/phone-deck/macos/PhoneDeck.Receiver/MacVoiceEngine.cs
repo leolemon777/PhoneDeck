@@ -288,6 +288,16 @@ internal sealed class MacVoiceEngineCatalog
 
     internal MacVoiceEngineSettings Settings { get; }
 
+    /// <summary>以新的引擎设置生成目录（档案不重新读取）；未知引擎回退到默认引擎。</summary>
+    internal MacVoiceEngineCatalog WithSettings(MacVoiceEngineSettings settings)
+    {
+        var activeId = settings.ActiveEngine?.Trim().ToLowerInvariant();
+        var active = activeId is not null && profiles.TryGetValue(activeId, out var chosen)
+            ? chosen
+            : profiles.TryGetValue(DefaultEngineId, out var fallback) ? fallback : profiles.Values.First();
+        return new MacVoiceEngineCatalog(profiles, active, settings, ReceiverSettings);
+    }
+
     /// <summary>server-settings.json（含旧版 typelessSettingsPath/typelessShortcuts 覆盖）。</summary>
     internal MacReceiverSettings ReceiverSettings { get; }
 
@@ -358,8 +368,23 @@ internal static class MacVoiceEngines
 {
     private static readonly Lazy<MacVoiceEngineCatalog> LazyCatalog =
         new(MacVoiceEngineCatalog.Load);
+    private static MacVoiceEngineCatalog? configured;
 
-    internal static MacVoiceEngineCatalog Catalog => LazyCatalog.Value;
+    /// <summary>手机集中设置写入时串行化；读取端无锁读取当前目录。</summary>
+    internal static readonly object ConfigurationLock = new();
+
+    internal static MacVoiceEngineCatalog Catalog => Volatile.Read(ref configured) ?? LazyCatalog.Value;
+
+    /// <summary>原子写入 voice-engine-settings.json 并立即热应用，无需重启接收端。</summary>
+    internal static void ApplySettings(MacVoiceEngineSettings settings)
+    {
+        lock (ConfigurationLock)
+        {
+            var next = Catalog.WithSettings(settings);
+            DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings);
+            Volatile.Write(ref configured, next);
+        }
+    }
 
     internal static MacVoiceEngineProfile Active => Catalog.Active;
 

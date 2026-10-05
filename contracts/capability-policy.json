@@ -40,6 +40,7 @@
     "secureLan": { "missingBehavior": "block-lan", "note": "无 HTTPS 通道时禁止 LAN 明文降级（SEC-02），仅 USB 通道可用" },
     "fleetUpdatesV1": { "missingBehavior": "hide-update-ui", "note": "隐藏统一更新入口，不假称已最新（REL-02）" },
     "phoneManagedSettingsV1": { "missingBehavior": "read-only-notice", "note": "旧接收端对集中设置显示缺失能力及升级入口，不静默装作保存（CFG-04；样本 capability-health-legacy-no-managed-settings.json）" },
+    "healthEventsV1": { "missingBehavior": "poll-health", "note": "GET /api/events 长轮询：状态版本变化即返回与 /api/health 相同的快照并附 stateVersion；缺失或 404 时回退到 /api/health 轮询" },
     "phoneStopV1": { "missingBehavior": "legacy-state-stop", "note": "无停止凭据时，手机只依据开始确认之后采样、非 stale、会话一致的 capturing=false 推断电脑端停止；未知/过期状态不作为停止依据" }
   }
 }

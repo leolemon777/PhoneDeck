@@ -110,11 +110,12 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         string sessionId,
         AudioStreamMode mode,
         Action<string, AudioStreamMode> ended,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? ownerId = null)
     {
         lock (syncRoot)
         {
-            if (active is not null && !TrySupersedeLocked(sessionId, mode))
+            if (active is not null && !TrySupersedeLocked(sessionId, mode, ownerId))
             {
                 throw new AudioStreamConflictException(
                     $"已有 {active.Mode.ToWireValue()} 音频会话正在使用接收端");
@@ -155,6 +156,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             session = new ActiveSession(sessionId, mode, output, cancellation)
             {
+                OwnerId = ownerId,
                 PlaybackReleased = mode == AudioStreamMode.Shared,
                 CatchUp = new PcmSilenceCatchUp(
                     mode == AudioStreamMode.Shared ? SharedTargetMs : ManagedTargetMs)
@@ -340,12 +342,24 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         }
     }
 
-    private bool TrySupersedeLocked(string sessionId, AudioStreamMode mode)
+    /// <summary>当前音频流是否属于该手机（USB 与旧共享令牌同为 legacy 身份）。</summary>
+    internal bool IsStreamOwnedBy(string? clientId)
+    {
+        lock (syncRoot)
+        {
+            return active is not null && string.Equals(
+                PhoneStopReceipts.NormalizeOwner(active.OwnerId),
+                PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
+        }
+    }
+
+    private bool TrySupersedeLocked(string sessionId, AudioStreamMode mode, string? ownerId)
     {
         var current = active;
         if (current is null || mode != AudioStreamMode.Shared
             || current.Mode != AudioStreamMode.Shared
-            || !string.Equals(current.SessionId, sessionId, StringComparison.Ordinal))
+            || !string.Equals(current.SessionId, sessionId, StringComparison.Ordinal)
+            || !string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal))
         {
             return false;
         }
@@ -378,6 +392,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         internal bool PlaybackReleased { get; set; }
         internal bool Ending { get; set; }
         internal volatile bool Superseded;
+        internal string? OwnerId { get; init; }
         internal required PcmSilenceCatchUp CatchUp { get; init; }
         private readonly Pcm16MonoToStereoConverter converter = new();
         private byte[] filtered = new byte[16 * 1024];

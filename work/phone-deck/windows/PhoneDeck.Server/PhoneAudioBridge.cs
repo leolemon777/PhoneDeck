@@ -148,6 +148,28 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         }
     }
 
+    internal string? ActiveOwnerId
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                return activeStream?.OwnerId;
+            }
+        }
+    }
+
+    /// <summary>当前音频流是否属于该手机（USB 与旧共享令牌同为 legacy 身份）。</summary>
+    internal bool IsStreamOwnedBy(string? clientId)
+    {
+        lock (sessionSync)
+        {
+            return activeStream is not null && string.Equals(
+                PhoneStopReceipts.NormalizeOwner(activeStream.OwnerId),
+                PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
+        }
+    }
+
     internal string? ActiveMode
     {
         get

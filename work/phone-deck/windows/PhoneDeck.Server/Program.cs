@@ -90,7 +90,8 @@ lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
 // mDNS 与 UDP 应答共用“局域网发现”开关；多播不可用时内部优雅降级到 UDP 回退。
 if (serverSettings.LanDiscovery)
 {
-    mdnsAdvertiser.Start(receiverIdentity, lanIdentity.HttpsPort);
+    mdnsAdvertiser.Start(receiverIdentity.ComputerId, receiverIdentity.DisplayName,
+        receiverIdentity.Platform, lanIdentity.HttpsPort);
 }
 
 var clientCredentials = new ClientCredentialsStore(
@@ -187,15 +188,16 @@ DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configuratio
 fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
     || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
 
-app.MapGet("/api/health", (HttpContext context) =>
+object BuildHealth(HttpContext context)
 {
+    var requesterClientId = context.Items["ClientId"] as string;
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
     // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
     var snapshot = diagnostics.Current;
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
     var stale = ageMs > DiagnosticsMonitor.StaleAfterMs;
     var engine = snapshot.Engine;
-    return Results.Ok(new
+    return new
     {
         ok = true,
         name = "PhoneDeck",
@@ -210,27 +212,28 @@ app.MapGet("/api/health", (HttpContext context) =>
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
             "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1", "phoneManagedSettingsV1",
-            "phoneStopV1"
+            "phoneStopV1", "healthEventsV1"
         },
         audio = new
         {
             available = snapshot.AudioAvailable,
             device = snapshot.VirtualCableDevice,
             streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.ActiveSessionId,
+            // 多手机：会话 ID 只告诉所属手机；其他手机只看到“正在使用”（streaming=true）。
+            sessionId = audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
             mode = audioBridge.ActiveMode,
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
             stale,
             // phoneStopV1：只返回给发起该 managed 会话的手机，60 秒内有效。
-            stopRequestedSessionId = dictationSessions.Receipts.For(
-                context.Items["ClientId"] as string)
+            stopRequestedSessionId = dictationSessions.Receipts.For(requesterClientId)
         },
         dictation = new
         {
             active = dictationSessions.IsActive,
-            sessionId = dictationSessions.ActiveSessionId
+            sessionId = dictationSessions.IsOwnedBy(requesterClientId)
+                ? dictationSessions.ActiveSessionId : null
         },
         foregroundApp = snapshot.ForegroundApp,
         usbWatchdog = new
@@ -285,8 +288,17 @@ app.MapGet("/api/health", (HttpContext context) =>
         {
             requested = serverSettings.SharedRequested
         }
-    });
-});
+    };
+}
+
+app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
+
+// healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
+app.MapGet("/api/events", async (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
+    () => BuildHealth(context),
+    context.Request.Query["since"].FirstOrDefault(),
+    HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
+    context.RequestAborted)));
 
 app.MapGet("/api/config/agent-shortcuts", () =>
 {
@@ -371,7 +383,7 @@ app.MapGet("/api/config/voice-engines", () =>
 app.MapPost("/api/config/voice-engines", () => Results.Json(
     new { ok = false, error = "请在新版手机 App 的电脑与输入法页面修改设置" }, statusCode: 409));
 
-app.MapGet("/api/diagnostics", async () =>
+app.MapGet("/api/diagnostics", async (HttpContext context) =>
 {
     // 深诊断：强制刷新一次（带超时），不阻塞 health、音频或快捷键请求。
     var snapshot = await diagnostics.RefreshAsync(2_000);
@@ -419,7 +431,8 @@ app.MapGet("/api/diagnostics", async () =>
             available = snapshot.AudioAvailable,
             device = snapshot.VirtualCableDevice,
             streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.ActiveSessionId,
+            sessionId = audioBridge.IsStreamOwnedBy(context.Items["ClientId"] as string)
+                ? audioBridge.ActiveSessionId : null,
             mode = audioBridge.ActiveMode
         },
         lan = new
@@ -447,302 +460,18 @@ app.MapGet("/api/diagnostics", async () =>
 
 // M1-A A2 扫码配对（设计 §3）：手机提交材料 → 本机确认 → 签发逐手机凭据。
 // 请求挂起等待托盘确认（30s），单次往返，无需轮询鉴权。
-app.MapPost("/api/lan/pair/qr", async (QrPairRequest body) =>
-{
-    var clientLabel = body.ClientLabel?.Trim();
-    if (clientLabel is { Length: > 64 })
-    {
-        clientLabel = clientLabel[..64];
-    }
-    var status = pairingWindows.TryBeginSubmit(
-        body.PairingId, body.OneTimeMaterial, body.ClientId?.Trim() ?? "", clientLabel ?? "",
-        out var pending);
-    switch (status)
-    {
-        case PairingSubmitStatus.WindowNotOpen:
-            return Results.NotFound(new { ok = false, error = "配对窗口未开启" });
-        case PairingSubmitStatus.MaterialInvalid:
-            return Results.Json(
-                new { ok = false, error = "配对材料无效或已使用" },
-                statusCode: StatusCodes.Status401Unauthorized);
-        case PairingSubmitStatus.FailureLimit:
-            return Results.Json(
-                new { ok = false, error = "失败次数过多，请在电脑上重新开启配对" },
-                statusCode: StatusCodes.Status429TooManyRequests);
-    }
-    if (pending is null)
-    {
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-    bool confirmed;
-    try
-    {
-        // 挂起等待本机确认/拒绝/超时（30s），随请求取消一并中断。
-        confirmed = await pending.Decision.Task.WaitAsync(
-            TimeSpan.FromSeconds(PairingWindowManager.ConfirmationTimeoutSeconds));
-    }
-    catch (TimeoutException)
-    {
-        return Results.Json(
-            new { ok = false, error = "本机确认超时，请重试" },
-            statusCode: StatusCodes.Status408RequestTimeout);
-    }
-    if (!confirmed)
-    {
-        return Results.Json(
-            new { ok = false, error = "电脑端已拒绝本次配对" },
-            statusCode: StatusCodes.Status403Forbidden);
-    }
-    var record = clientCredentials.Issue(
-        pending.ClientLabel,
-        new[] { "control", "audio", "settings", "update-request" },
-        pending.PairingId,
-        out var clientToken,
-        pending.ClientId);
-    Console.WriteLine($"配对完成：clientId={record.ClientId} pairingId={pending.PairingId}（材料与令牌不落日志）");
-    return Results.Ok(new
-    {
-        ok = true,
-        clientId = record.ClientId,
-        clientToken,
-        scopes = record.Scopes,
-        pairingId = pending.PairingId,
-        computerId = receiverIdentity.ComputerId,
-        displayName = receiverIdentity.DisplayName,
-        certificateSha256 = lanIdentity.CertificateSha256,
-    });
-});
-
-// M1-A A2 回环配对管理（设计 §3/§10：配对窗口只经本地 UI 开启，无 HTTP 外部入口）。
-app.MapGet("/api/admin/pairing/status", (HttpContext context) =>
-    context.Connection.LocalPort != 8765
-        ? Results.NotFound()
-        : Results.Ok(pairingWindows.StatusSnapshot()));
-app.MapPost("/api/admin/pairing/begin", (HttpContext context) =>
-{
-    if (context.Connection.LocalPort != 8765)
-    {
-        return Results.NotFound();
-    }
-    if (pairingWindows.HasPendingConfirmation())
-    {
-        return Results.Conflict(new { ok = false, error = "有待确认的配对提交" });
-    }
-    var session = pairingWindows.Begin();
-    return Results.Ok(new
-    {
-        ok = true,
-        pairingId = session.PairingId,
-        qrPayload = session.QrPayloadJson,
-        manualCode = session.ManualCode,
-        checkCode = session.MaterialCheckCode,
-        validSeconds = PairingWindowManager.ValidSeconds,
-    });
-});
-app.MapPost("/api/admin/pairing/cancel", (HttpContext context) =>
-{
-    if (context.Connection.LocalPort != 8765)
-    {
-        return Results.NotFound();
-    }
-    pairingWindows.Cancel();
-    return Results.Ok(new { ok = true });
-});
-app.MapPost("/api/admin/pairing/confirm", (HttpContext context, PairingAdminRequest body) =>
-    context.Connection.LocalPort != 8765
-        ? Results.NotFound()
-        : pairingWindows.Confirm(body.PairingId)
-            ? Results.Ok(new { ok = true })
-            : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
-app.MapPost("/api/admin/pairing/deny", (HttpContext context, PairingAdminRequest body) =>
-    context.Connection.LocalPort != 8765
-        ? Results.NotFound()
-        : pairingWindows.Deny(body.PairingId)
-            ? Results.Ok(new { ok = true })
-            : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
-
-app.MapPost("/api/lan/pair", (HttpContext context) =>
-{
-    if (!LanRequestAuthenticator.IsUsbPairingRequest(
-            context.Connection.LocalPort,
-            context.Connection.RemoteIpAddress))
-    {
-        return Results.NotFound();
-    }
-    if (clientCredentials.LegacyRevoked)
-    {
-        // 设计 §5.6：旧入口关闭后此端点停止签发共享令牌（410），不再制造 legacy 凭据。
-        return Results.Json(
-            new { ok = false, error = "旧共享令牌入口已关闭，请在电脑上扫码配对获取独立凭据" },
-            statusCode: StatusCodes.Status410Gone);
-    }
-    return Results.Ok(new
-    {
-        ok = true,
-        protocolVersion = 2,
-        computerId = receiverIdentity.ComputerId,
-        displayName = receiverIdentity.DisplayName,
-        platform = receiverIdentity.Platform,
-        addresses = lanIdentity.GetCandidateAddresses(),
-        port = lanIdentity.HttpsPort,
-        certificateSha256 = lanIdentity.CertificateSha256,
-        accessToken = lanIdentity.AccessToken,
-        // 设计 §5.6/§5.2：提示旧共享令牌可在手机端升级为独立凭据，无需重新扫码。
-        upgradeHint = "共享令牌仅供旧版本使用；升级手机 App 后可用它换领该手机独立凭据，无需重新扫码"
-    });
-});
-
-// M1-A A4 旧共享令牌升级（设计 §5.2）：仅 8766、仅旧共享令牌鉴权可调；手机无需重新扫码
-// 即获得该手机专属凭据。rotate 永不重发（G-1 处置）：同 clientId 重放只回 already-upgraded
-// 三字段状态，绝无令牌；revoked clientId 永不重发（403）；简单限速（同 clientId ≥3s）。
-app.MapPost("/api/lan/credential/rotate", (HttpContext context, RotateRequest body) =>
-{
-    if (context.Connection.LocalPort != 8766)
-    {
-        return Results.NotFound();
-    }
-    // Bearer/逐手机凭据调用者不获新能力（设计 §5.1）：新头不得重入签发。
-    if (!LanRequestAuthenticator.IsLegacySharedCaller(context.Items["ClientId"] as string))
-    {
-        return Results.Json(
-            new { ok = false, error = "请使用旧共享令牌升级" },
-            statusCode: StatusCodes.Status403Forbidden);
-    }
-    var clientId = body.ClientId?.Trim();
-    if (string.IsNullOrWhiteSpace(clientId) || !Guid.TryParse(clientId, out _))
-    {
-        return Results.BadRequest(new { ok = false, error = "clientId 必须为手机生成的 GUID" });
-    }
-    RotateResult rotation;
-    try
-    {
-        rotation = clientCredentials.Rotate(clientId, "旧共享令牌升级手机");
-    }
-    catch (Exception exception)
-    {
-        // 签发持久化失败：中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 纪律）。
-        Console.Error.WriteLine($"rotate 签发持久化失败：{exception.Message}");
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-    switch (rotation.Outcome)
-    {
-        case RotateOutcome.Revoked:
-            return Results.Json(
-                new { ok = false, error = "该 clientId 已撤销，凭据找回需重新扫码配对" },
-                statusCode: StatusCodes.Status403Forbidden);
-        case RotateOutcome.RateLimited:
-            return Results.Json(
-                new { ok = false, error = "rotate 请求过于频繁，请稍后重试" },
-                statusCode: StatusCodes.Status429TooManyRequests);
-        case RotateOutcome.AlreadyUpgraded:
-            // G-1 处置：该形态仅 {ok,status,clientId} 三字段，绝无令牌本体。
-            return Results.Ok(new
-            {
-                ok = true,
-                status = "already-upgraded",
-                clientId = rotation.Record!.ClientId,
-            });
-        default:
-            var record = rotation.Record!;
-            // issued 形态逐字对齐冻结契约 credentialRotateResponse（additionalProperties:false，
-            // 属性表无 ok 字段）；already-upgraded 形态则冻结为 {ok,status,clientId} 三字段。
-            return Results.Ok(new
-            {
-                status = "issued",
-                clientId = record.ClientId,
-                clientToken = rotation.Token,
-                scopes = record.Scopes,
-                pairingId = record.PairingId,
-                computerId = receiverIdentity.ComputerId,
-                displayName = receiverIdentity.DisplayName,
-                certificateSha256 = lanIdentity.CertificateSha256,
-            });
-    }
-});
-
-// M1-A A1/A4 回环管理端点（设计 §3 不变量：撤销属本机信任操作；仅 8765 回环可达，无鉴权面扩大）。
-app.MapGet("/api/admin/clients", (HttpContext context) =>
-{
-    if (context.Connection.LocalPort != 8765)
-    {
-        return Results.NotFound();
-    }
-    var clients = clientCredentials.ListRedacted().Select(record => (object)record).ToList();
-    if (!clientCredentials.LegacyRevoked)
-    {
-        // 设计 §5.3（M-4 处置）：legacy 未撤销时附加合成条目，显式列出旧入口，
-        // 供托盘"应急撤销旧入口"定位；撤销后该条目消失（入口已关闭）。
-        clients.Add(new
-        {
-            clientId = ClientCredentialsStore.LegacySharedClientId,
-            label = "未升级旧凭据（legacy 入口）",
-            legacy = true,
-        });
-    }
-    return Results.Ok(new
-    {
-        ok = true,
-        clients,
-        legacyRevokedAt = clientCredentials.LegacyRevokedAtUtc,
-    });
-});
-app.MapPost("/api/admin/clients/revoke", (HttpContext context, ClientRevokeRequest body) =>
-{
-    if (context.Connection.LocalPort != 8765)
-    {
-        return Results.NotFound();
-    }
-    var clientId = body.ClientId?.Trim();
-    if (string.IsNullOrWhiteSpace(clientId))
-    {
-        return Results.BadRequest(new { ok = false, error = "缺少 clientId" });
-    }
-    try
-    {
-        if (!clientCredentials.Revoke(clientId))
-        {
-            return Results.NotFound(new { ok = false, error = "未知 clientId" });
-        }
-    }
-    catch (Exception exception)
-    {
-        // 持久化失败：撤销中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 处置）。
-        Console.Error.WriteLine($"撤销持久化失败：{exception.Message}");
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-    clientSessions.Cancel(clientId);
-    KeyboardInput.RevokeClientInput(clientId);
-    return Results.Ok(new { ok = true, clientId });
-});
-
-// M1-A A4 legacy 应急撤销（设计 §5.3，M-4 处置）：仅 8765 回环。store 内先原子持久化
-// legacyRevokedAt 再生效，此后旧共享令牌一切请求 401（LanRequestAuthenticator legacy 分支拒签），
-// 逐手机凭据不受影响。一次性操作：无反向开关，重新打开旧入口只能手工删改 data/clients.json。
-app.MapPost("/api/admin/legacy/revoke", (HttpContext context) =>
-{
-    if (context.Connection.LocalPort != 8765)
-    {
-        return Results.NotFound();
-    }
-    try
-    {
-        clientCredentials.RevokeLegacy();
-    }
-    catch (Exception exception)
-    {
-        // 持久化失败：撤销中止，内存与磁盘保持一致，可安全重试（设计 §6 M-2 处置）。
-        Console.Error.WriteLine($"legacy 撤销持久化失败：{exception.Message}");
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-    // 与逐手机撤销同一编排（设计 §6）：持久化成功后终止旧入口的长流与持有键。
-    clientSessions.Cancel(ClientCredentialsStore.LegacySharedClientId);
-    KeyboardInput.RevokeClientInput(ClientCredentialsStore.LegacySharedClientId);
-    return Results.Ok(new
-    {
-        ok = true,
-        legacyRevokedAt = clientCredentials.LegacyRevokedAtUtc,
-    });
-});
+NativePairingEndpoints.Map(app, new NativePairingHost(
+    receiverIdentity.ComputerId,
+    () => receiverIdentity.DisplayName,
+    receiverIdentity.Platform,
+    lanIdentity.CertificateSha256,
+    lanIdentity.HttpsPort,
+    lanIdentity.GetCandidateAddresses,
+    lanIdentity.AccessToken,
+    clientCredentials,
+    clientSessions,
+    pairingWindows,
+    KeyboardInput.RevokeClientInput));
 
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
 {
@@ -886,7 +615,7 @@ app.MapPost("/local/dictation/stop", () => ExecuteDictationCommand(() =>
     return Results.Ok(new { ok = true });
 }));
 
-app.MapPost("/api/dictation/stop", (DictationCommand command) =>
+app.MapPost("/api/dictation/stop", (DictationCommand command, HttpContext context) =>
     ExecuteDictationCommand(() =>
     {
         TargetEnvelopeValidator.Validate(
@@ -895,7 +624,8 @@ app.MapPost("/api/dictation/stop", (DictationCommand command) =>
             command.SessionId,
             command.TargetComputerId,
             receiverIdentity.ComputerId);
-        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId);
+        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId,
+            context.Items["ClientId"] as string, checkOwner: true);
         return Results.Ok(new
         {
             ok = true,
@@ -1043,14 +773,6 @@ internal sealed record DictationCommand(
     string? RequestId,
     string? TargetComputerId,
     string? Mode);
-internal sealed record ClientRevokeRequest(string? ClientId);
-internal sealed record RotateRequest(string? ClientId);
-internal sealed record QrPairRequest(
-    string? PairingId,
-    string? OneTimeMaterial,
-    string? ClientId,
-    string? ClientLabel);
-internal sealed record PairingAdminRequest(string? PairingId);
 internal sealed record SharedMicrophoneRequest(bool Requested);
 internal sealed record VoiceEngineConfigRequest(
     string? ActiveEngine,

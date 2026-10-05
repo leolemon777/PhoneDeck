@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    Receiver.Core：Windows 与 macOS 接收端共用的协议、鉴权、配对与会话代码。
+    平台差异（按键注入、音频输出、输入法探测、身份与证书存储路径）留在各自项目。
+    新增共用文件时加在这里，两端同时获得，避免再出现复制后各自分叉。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Makaretu.Dns" Version="2.0.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)AudioStreamMode.cs" Link="Core/AudioStreamMode.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ClientCredentials.cs" Link="Core/ClientCredentials.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ClientSessionRegistry.cs" Link="Core/ClientSessionRegistry.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DesktopConfigurationCore.cs" Link="Core/DesktopConfigurationCore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)HealthEvents.cs" Link="Core/HealthEvents.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)LanRequestAuthenticator.cs" Link="Core/LanRequestAuthenticator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)LoopbackOriginGuard.cs" Link="Core/LoopbackOriginGuard.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)MdnsAdvertiser.cs" Link="Core/MdnsAdvertiser.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)NativePairingEndpoints.cs" Link="Core/NativePairingEndpoints.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)PairingWindow.cs" Link="Core/PairingWindow.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)PhoneStopReceipts.cs" Link="Core/PhoneStopReceipts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SessionLeaseRegistry.cs" Link="Core/SessionLeaseRegistry.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)TargetEnvelopeValidator.cs" Link="Core/TargetEnvelopeValidator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Audio/PcmLatency.cs" Link="Core/PcmLatency.cs" />
+  </ItemGroup>
+</Project>

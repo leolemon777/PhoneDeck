@@ -20,7 +20,18 @@ internal sealed class UsbWatchdog : IDisposable
     internal string? AdbPath { get; }
     internal string? LastRestoredAt { get; private set; }
     internal int RestoreCount { get; private set; }
-    internal bool Running => worker?.IsAlive == true;
+    private volatile bool enabled = true;
+    internal bool Running => enabled && worker?.IsAlive == true;
+
+    /// <summary>手机集中设置可随时开关；关闭只暂停恢复动作，不结束线程。</summary>
+    internal void SetEnabled(bool value)
+    {
+        enabled = value;
+        if (value)
+        {
+            Start();
+        }
+    }
 
     internal void Start()
     {
@@ -50,7 +61,10 @@ internal sealed class UsbWatchdog : IDisposable
         {
             try
             {
-                CheckAndRestore();
+                if (enabled)
+                {
+                    CheckAndRestore();
+                }
             }
             catch (Exception)
             {

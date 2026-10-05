@@ -52,15 +52,17 @@ internal sealed class MdnsAdvertiser : IDisposable
         return cleaned.Length > 63 ? cleaned[..63] : cleaned;
     }
 
-    internal void Start(ReceiverIdentity identity, int httpsPort, string[]? capabilities = null)
+    /// <summary>身份字段以基本类型传入：Windows、macOS 与 Desktop 的身份类型各自定义。</summary>
+    internal void Start(string computerId, string displayName, string platform,
+        int httpsPort, string[]? capabilities = null)
     {
         Stop();
         try
         {
             var fields = BuildTxtFields(
-                identity.ComputerId, identity.DisplayName, identity.Platform, httpsPort, capabilities);
+                computerId, displayName, platform, httpsPort, capabilities);
             var profile = new ServiceProfile(
-                SanitizeInstanceName(identity.ComputerId),
+                SanitizeInstanceName(computerId),
                 ServiceName,
                 (ushort)httpsPort);
             profile.Resources.Add(new TXTRecord

@@ -20,10 +20,10 @@
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="../../windows/PhoneDeck.Server/ClientCredentials.cs" Link="Trust/ClientCredentials.cs" />
-    <Compile Include="../../windows/PhoneDeck.Server/PairingWindow.cs" Link="Trust/PairingWindow.cs" />
-    <Compile Include="../../windows/PhoneDeck.Server/LoopbackOriginGuard.cs" Link="Trust/LoopbackOriginGuard.cs" />
-    <Compile Include="../../windows/PhoneDeck.Server/MdnsAdvertiser.cs" Link="Discovery/MdnsAdvertiser.cs" />
+    <Compile Include="../../shared/Receiver/ClientCredentials.cs" Link="Trust/ClientCredentials.cs" />
+    <Compile Include="../../shared/Receiver/PairingWindow.cs" Link="Trust/PairingWindow.cs" />
+    <Compile Include="../../shared/Receiver/LoopbackOriginGuard.cs" Link="Trust/LoopbackOriginGuard.cs" />
+    <Compile Include="../../shared/Receiver/MdnsAdvertiser.cs" Link="Discovery/MdnsAdvertiser.cs" />
     <Compile Include="../../windows/PhoneDeck.Server/LanDiscoveryResponder.cs" Link="Discovery/LanDiscoveryResponder.cs" />
     <EmbeddedResource Include="Ui.html" />
     <EmbeddedResource Include="DesktopWebSetup.js" />
