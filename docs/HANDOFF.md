@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-05 Samsung APK 真机验收与入口纠正（最新状态）
+
+- 用户明确纠正本次应测试 Android APK。Android 继续以原生 APK 为主；iPhone 网页适配不能替代 Android APK 交付。最近的对话白/极夜黑/常青绿三套新 UI 仅在 PWA，**尚未同步到 APK，不能报告手机 UI 已全部交付**。
+- 现场 Samsung SM-G9880 / Android 12 装有两份包：`com.codex.phonedeck.preview` 为 `1.6.0-dev.21-ui-preview`（桌面名「言渡 UI 预览」）；`com.codex.phonedeck.desktoppreview` 为 `2.0.0-alpha.1` / versionCode 5（桌面名「言渡」）。后者属于之前独立识别实验路线且禁用旧 USB 自动接入，本轮未卸载或替换任一包。
+- 复用正在运行的 Mac `2.0.0-dev.3` 接收端候选 `4373995`，Typeless 2.8.1 已在真实设置中选中「PhoneDeck Mic - BlackHole 2ch」。恢复 APK 的 `adb reverse tcp:8765 tcp:8765`；在原生 preview 包选择已配对 Mac，显示 Wi-Fi 在线和 Typeless 听写/翻译/问答。保留现有配对，未执行独立凭据升级。
+- **APK 实机通过**：从原生大话筒启动后，Mac 同一会话 `audio.streaming`、`dictation.active`、`typeless.capturing` 均为 true；电脑本机停止后均为 false，APK 显示「电脑端已完成，手机已同步停止」，Android RECORD_AUDIO 操作已有结束时长、没有 running。此轮证明原生开始/停止和电脑停止同步，未证明最终文字插入、首尾音、按住、基础三键或多电脑共享。
+- 此前误用 Samsung Internet PWA 的测试单独记录：HTTPS/配对/真实麦克风/Typeless 识别已发生，电脑停止后网页显示「电脑已停止」且麦克风指示熄灭；专用 TextEdit 文稿未出现转写，输入焦点仍待定位，不能把 PWA 的识别结果记作 APK 出字通过。
+- **待办**：统一 Android APK 的正确兼容入口、补齐原生三套 UI；在明确前台输入目标上完成 APK → Typeless 出字、Goal/退格/回车、按住和共享实测。iPhone 真机仍待验收。不下载识别模型。
+- 本轮仅实机验收及交接记录，未修改产品代码、构建/安装新 APK 或正式发布。证据位于 ignored `outputs/device-acceptance-20261005`（状态事件、原生采集中/停止截图、资源记录），不保存手机音频或提交个人配置。临时手机镜像和临时电脑控制页测试后正常关闭；接收端与原有 8768、新恢复 8765 通道保留供用户继续连接。
+
 ## 2026-10-04 Typeless 收尾与会话恢复（最新状态）
 
 - 用户在架构复核后要求开始后续开发。本轮独立分支 `codex/typeless-session-reliability` 基于 `101a789` / PR #36；开始工作树干净，fetch main 后没有待合入新提交。维护原 Windows/Mac 与共用 PWA 候选，不下载模型、不调整 UI 布局或发布版本。
