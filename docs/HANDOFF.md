@@ -1,18 +1,19 @@
 # PhoneDeck 项目交接说明
 
-## 2026-10-05 Android 首页重做：电脑卡片（最新状态）
+## 2026-10-05 Android 首页：方案二电脑大卡轮播（最新状态）
 
-- 分支 `agent/android-home-cards`，基于 `agent/multi-pc`。用户选定方向 A。只改 `MainActivity` 的默认首页（`center`）、
-  `DeckIconView`（新增笔记本、加号图标）与 `HomeStyle` 说明文字；其他布局、主题、协议与会话逻辑未改。
-- **修复 PR #40 的启动崩溃**：多电脑切片批量替换时把 `TargetDeviceManager.get()` 里的构造调用也换成了 `get()`，
-  启动即栈溢出。已在 `agent/multi-pc` 单独提交修复并推送，再合入本分支。单元测试未覆盖启动路径，此次靠模拟器冷启动发现。
-- **验证**：Android assemble + 单元测试 43/43 + lint 0 error / 43 warning。模拟器（`yandu-phone-ui`，API 34）截图：空状态、
-  三台电脑（预置测试记录）、共享模式、深色主题、长按管理菜单、上移排序、横屏，均无崩溃；截图在 ignored
-  `outputs/android-home-cards/`。期间发现并修复：卡片宽度只占一半、方式切换条被裁、提示条挤压状态文字、
-  2 秒刷新打断长按。
-- **未验证**：真实在线电脑下的卡片状态与切换确认、真机触感与字体缩放、读屏顺序。测试时 Samsung 手机通过 USB 连着，
-  未向其安装任何包。
-- **待办**：真机安装需用户选择渠道（`.preview` 签名不在本机）；极夜黑、常青绿两套网页风格仍未移植到 APK。
+- 分支 `agent/android-home-cards`（PR #41），基于 `agent/multi-pc`。先实现方向 A 卡片列表，随后按用户在设计画布确认的
+  方案二重写默认首页（`center`），配色先用墨白。改动在 `MainActivity`（轮播、卡内模式、指令栏、“刚刚”、状态胶囊、
+  竖横屏组合）与 `DeckIconView`（笔记本、加号、翻译、问答、斜杠图标）；其他布局、主题、协议与会话逻辑未改。决策见规格顶部。
+- **修复 PR #40 的启动崩溃**：`TargetDeviceManager.get()` 递归，已在 `agent/multi-pc` 单独修复并合入。
+- **验证**：Android assemble + 单元测试 + lint 通过（0 error）。模拟器（`yandu-phone-ui`，API 34）：浅色/深色、竖屏/横屏、
+  共享模式、指令面板无崩溃。在线状态、卡内模式切换、滑动切换和说话中外观是在本地临时注入假在线状态后截图的，
+  注入代码已删除、未提交。截图在 ignored `outputs/android-home-cards/`。期间修复：`lanTargets` 用空 ID 查询崩溃、
+  方式切换条被裁。
+- **未验证**：真实在线电脑上的听写/翻译/问答启动与“刚刚”记录、真实切换确认、真机滑动手感、字体缩放与读屏顺序。
+  测试时 Samsung 手机通过 USB 连着，未向其安装任何包。
+- **待办**：真机安装需用户选择渠道（`.preview` 签名不在本机）；其他配色移植；方案二的启动中、电脑未确认、长按管理与
+  指令面板样式细化。
 
 ## 2026-10-05 多电脑连接与 Receiver.Core
 
