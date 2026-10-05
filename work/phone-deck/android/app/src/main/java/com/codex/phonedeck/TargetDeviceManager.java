@@ -134,7 +134,7 @@ final class TargetDeviceManager {
     /// 不再各自整表写回而互相覆盖，也不必定时从 Keystore 重新解密。
     static synchronized TargetDeviceManager get(Context context) {
         if (instance == null) {
-            instance = TargetDeviceManager.get(context.getApplicationContext());
+            instance = new TargetDeviceManager(context.getApplicationContext());
         }
         return instance;
     }
