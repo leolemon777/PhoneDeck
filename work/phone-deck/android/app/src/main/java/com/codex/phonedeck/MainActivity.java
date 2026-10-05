@@ -1145,12 +1145,11 @@ public final class MainActivity extends Activity {
                 .append(isVoiceInteractionBusy()).append('|').append(dictationActive).append('|');
         for (EngineMode mode : activeTypelessModes()) signature.append(mode.id).append(',');
         for (TargetDeviceManager.Device device : devices) {
-            LanTargetStatus status = lanTargets.get(device.computerId);
             signature.append(device.computerId).append(',').append(device.slot).append(',')
                     .append(device.displayName).append(',').append(device.platform).append(',')
                     .append(device.sharedGroup).append(',').append(isDeviceOnline(device.computerId))
                     .append(',').append(lanPairingRejected.get(device.computerId)).append(',')
-                    .append(status == null ? null : status.engineName).append(',')
+                    .append(engineNameFor(device.computerId)).append(',')
                     .append(sharedStates.get(device.computerId)).append(';');
         }
         return signature.toString();
@@ -1203,7 +1202,8 @@ public final class MainActivity extends Activity {
     private String engineNameFor(String computerId) {
         if (computerId == null) return null;
         LanTargetStatus status = lanTargets.get(computerId);
-        return status == null || status.engineName == null ? null : status.engineName;
+        if (status != null && status.engineName != null) return status.engineName;
+        return usbConnected && sameComputer(computerId, usbComputerId) ? usbEngineName : null;
     }
 
     private String modeVerb(String modeId) {
