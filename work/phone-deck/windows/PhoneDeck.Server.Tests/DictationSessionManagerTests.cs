@@ -50,6 +50,96 @@ public sealed class DictationSessionManagerTests
     }
 
     [TestMethod]
+    public void PreflightFailureDoesNotReserveLeaseOrTurnRetryIntoFalseSuccess()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { UsesVirtualCable = false };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "first", "dictation"));
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "retry", "dictation"));
+        Assert.AreEqual(0, engine.ToggleCount);
+        engine.UsesVirtualCable = true;
+        engine.WaitResults.Enqueue(true);
+        Assert.IsFalse(manager.Start(Guid.NewGuid().ToString(), "fixed", "dictation"));
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void FailedBeginReleasesLeaseAndAudioForRetry()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { FailBegin = true };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "first", "dictation"));
+        Assert.IsFalse(manager.IsActive);
+        Assert.AreEqual(1, audio.StopCalls);
+        engine.FailBegin = false;
+        engine.WaitResults.Enqueue(true);
+        Assert.IsFalse(manager.Start(session, "retry", "dictation"));
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void AudioEndedBuriesOldLeaseAndAllowsImmediateNewSession()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var previous = StartSuccessfulSession(manager, engine);
+        engine.IsCapturingResults.Enqueue(false);
+        manager.AudioEnded(previous);
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(previous, "late", "dictation"));
+        engine.WaitResults.Enqueue(true);
+        var next = Guid.NewGuid().ToString();
+        Assert.IsFalse(manager.Start(next, "new", "dictation"));
+        Assert.AreEqual(next, manager.ActiveSessionId);
+    }
+
+    [TestMethod]
+    public void StopDuringWarmupWinsBeforeEngineShortcutAndKeepsTombstone()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        audio.OnWaitForSession = call => { if (call == 1) manager.Stop(session, "cancel"); };
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "start", "dictation"));
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "late", "dictation"));
+        Assert.AreEqual(0, engine.ToggleCount);
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public async Task DuplicateStartWaitsForActualEngineConfirmation()
+    {
+        using var gate = new ManualResetEventSlim(false);
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { WaitForCapturingGate = gate };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        var first = Task.Run(() => manager.Start(session, "first", "dictation"));
+        Task<bool>? duplicate = null;
+        try
+        {
+            Assert.IsTrue(SpinWait.SpinUntil(() => manager.IsActive, 3_000));
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            duplicate = Task.Run(() => { entered.SetResult(); return manager.Start(session, "again", "dictation"); });
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.AreNotSame(duplicate, await Task.WhenAny(duplicate, Task.Delay(100)),
+                "A reserved lease is not confirmation that the engine started");
+        }
+        finally
+        {
+            gate.Set(); await first;
+            if (duplicate is not null) await duplicate;
+        }
+        Assert.IsTrue(await duplicate!);
+        Assert.AreEqual(1, engine.ToggleCount);
+    }
+
+    [TestMethod]
     public void StartWaitsForConcurrentAudioStreamRegistration()
     {
         var audio = new FakeAudioSessionController
@@ -437,6 +527,7 @@ public sealed class DictationSessionManagerTests
         public int ToggleCount { get; private set; }
         public string LastMode { get; private set; } = "dictation";
         public bool UsesVirtualCable { get; set; } = true;
+        public bool FailBegin { get; set; }
         public int LastWaitTimeoutMilliseconds { get; private set; }
 
         public string EngineDisplayName => "Typeless";
@@ -464,6 +555,7 @@ public sealed class DictationSessionManagerTests
 
         public bool BeginOnce(string requestId, string mode)
         {
+            if (FailBegin) throw new InvalidOperationException("Simulated input failure");
             if (!requestIds.Add(requestId))
             {
                 return true;

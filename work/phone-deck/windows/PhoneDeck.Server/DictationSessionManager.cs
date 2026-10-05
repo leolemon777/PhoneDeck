@@ -65,13 +65,35 @@ internal sealed class DictationSessionManager : IDisposable
             clientId ?? ClientCredentialsStore.LegacySharedClientId))
         {
             case SessionLeaseRegistry.StartOutcome.Idempotent:
-                return true;
+                lock (syncRoot)
+                {
+                    if (activeDictationSessionId == normalizedSessionId
+                        && leaseRegistry.ActiveSnapshot()?.SessionId == normalizedSessionId)
+                        return true;
+                    throw new InvalidOperationException("该会话尚未确认开始，请重试");
+                }
             case SessionLeaseRegistry.StartOutcome.RejectedTombstoned:
                 throw new InvalidOperationException(
                     "该会话已终止，迟到的启动请求已被拒绝；请开启新会话");
             case SessionLeaseRegistry.StartOutcome.RejectedOwned:
                 throw new InvalidOperationException("另一个语音听写会话仍在运行");
         }
+        try { return StartReserved(normalizedSessionId, normalizedRequestId, normalizedMode); }
+        catch
+        {
+            lock (syncRoot)
+            {
+                // Preflight and shortcut failures are failures too. Release audio
+                // before allowing a retry to acquire this same session ID.
+                try { audioBridge.StopSession(normalizedSessionId); }
+                finally { leaseRegistry.Abandon(normalizedSessionId); }
+            }
+            throw;
+        }
+    }
+
+    private bool StartReserved(string normalizedSessionId, string normalizedRequestId, string normalizedMode)
+    {
         if (!engine.IsModeConfigured(normalizedMode))
         {
             throw new InvalidOperationException(
@@ -117,48 +139,59 @@ internal sealed class DictationSessionManager : IDisposable
                 $"{(audioWarmed ? "ready" : "timeout")} " +
                 $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
 
-            var duplicate = engine.BeginOnce(normalizedRequestId, normalizedMode);
-            Console.WriteLine(
-                $"[dictation:{normalizedSessionId}] engineStartRequested=" +
-                $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
-            activeDictationSessionId = normalizedSessionId;
-            bool? started;
+            // Stop can write its tombstone during the read-only preflight/warmup.
+            // It must win before any shortcut is sent.
+            if (leaseRegistry.ActiveSnapshot()?.SessionId != normalizedSessionId)
+                throw new InvalidOperationException("该会话已终止，启动请求已取消");
             try
             {
-                started = engine.WaitForCapturing(
-                    expected: true, EngineStateTimeoutMilliseconds);
+                var duplicate = engine.BeginOnce(normalizedRequestId, normalizedMode);
+                Console.WriteLine(
+                    $"[dictation:{normalizedSessionId}] engineStartRequested=" +
+                    $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
+                activeDictationSessionId = normalizedSessionId;
+                bool? started;
+                try
+                {
+                    started = engine.WaitForCapturing(
+                        expected: true, EngineStateTimeoutMilliseconds);
+                }
+                catch (Exception exception)
+                {
+                    throw new InvalidOperationException(
+                        $"读取 {engine.EngineDisplayName} 启动状态失败", exception);
+                }
+                if (started is not true)
+                {
+                    throw new InvalidOperationException(started is null
+                        ? $"无法确认 {engine.EngineDisplayName} 是否开始听写"
+                        : $"{engine.EngineDisplayName} 未确认开始听写");
+                }
+                Console.WriteLine(
+                    $"[dictation:{normalizedSessionId}] engineCapturing=" +
+                    $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
+                // 手机点击后会并行启动录音、音频 POST 和本 start 请求。
+                // 短预热后已立即唤醒引擎；这里再用完整失败预算复核对应
+                // 音频会话仍然有效。若音频连接失败，ResetFailedStart 会把
+                // 已唤醒的引擎自动复位，不留下孤立录音会话。
+                if (!audioBridge.WaitForSessionActive(
+                        normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
+                {
+                    throw new InvalidOperationException("音频会话不存在或已断开");
+                }
+                if (leaseRegistry.ActiveSnapshot()?.SessionId != normalizedSessionId)
+                    throw new InvalidOperationException("该会话已终止，启动请求已取消");
+                // 引擎已真实采集：放行 pre-roll，把点击后最先到达的音频
+                // 按原顺序送入 CABLE，保证第一音节不丢。
+                audioBridge.BeginPlayback(normalizedSessionId);
+                Console.WriteLine($"语音听写会话已启动：{normalizedSessionId}");
+                return duplicate;
             }
-            catch (Exception exception)
+            catch
             {
                 ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException(
-                    $"读取 {engine.EngineDisplayName} 启动状态失败", exception);
+                throw;
             }
-            if (started is not true)
-            {
-                ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException(started is null
-                    ? $"无法确认 {engine.EngineDisplayName} 是否开始听写"
-                    : $"{engine.EngineDisplayName} 未确认开始听写");
-            }
-            Console.WriteLine(
-                $"[dictation:{normalizedSessionId}] engineCapturing=" +
-                $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
-            // 手机点击后会并行启动录音、音频 POST 和本 start 请求。
-            // 短预热后已立即唤醒引擎；这里再用完整失败预算复核对应
-            // 音频会话仍然有效。若音频连接失败，ResetFailedStart 会把
-            // 已唤醒的引擎自动复位，不留下孤立录音会话。
-            if (!audioBridge.WaitForSessionActive(
-                    normalizedSessionId, AudioSessionReadyTimeoutMilliseconds))
-            {
-                ResetFailedStart(normalizedSessionId);
-                throw new InvalidOperationException("音频会话不存在或已断开");
-            }
-            // 引擎已真实采集：放行 pre-roll，把点击后最先到达的音频
-            // 按原顺序送入 CABLE，保证第一音节不丢。
-            audioBridge.BeginPlayback(normalizedSessionId);
-            Console.WriteLine($"语音听写会话已启动：{normalizedSessionId}");
-            return duplicate;
         }
     }
 
@@ -254,6 +287,7 @@ internal sealed class DictationSessionManager : IDisposable
             {
                 // 自动清理失败也不能让陈旧会话永久阻塞之后的请求。
                 activeDictationSessionId = null;
+                leaseRegistry.Bury(sessionId);
             }
             if (stopped)
             {
@@ -369,8 +403,7 @@ internal sealed class DictationSessionManager : IDisposable
                 $"引擎启动失败后的复位也失败：{exception.Message}");
         }
         activeDictationSessionId = null;
-        // 启动失败不写墓碑（T03→T09）：同会话重试是合法新尝试。
-        leaseRegistry.Abandon(sessionId);
+        // The outer startup cleanup releases audio, then abandons the lease.
     }
 
     public void Dispose()
