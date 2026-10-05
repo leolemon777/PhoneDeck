@@ -1,6 +1,18 @@
 # PhoneDeck 项目交接说明
 
-## 2026-10-05 Samsung APK 真机验收与入口纠正（最新状态）
+## 2026-10-05 Android APK 已同步一套对话白（最新状态）
+
+- 用户要求把新界面同步一套到 APK。独立分支 `codex/android-dialogue-ui` 基于 `7083d9b` / PR #37；开始工作树干净，fetch main 后没有待合入新提交。仅修改 Android 原生 UI 和预览构建入口，Java、音频/会话协议及电脑 Typeless 路线不变，不下载模型、不创建正式 Release。
+- 将 `center` 首页更新为「对话白」，`native_light` 更新为纯白/黑色/中性灰。竖屏状态区留白，点击/按住/共享、160dp 大话筒和 Goal/退格/回车固定在底部；短屏缩小话筒、状态区可滚动，横屏保持双栏。动态引擎模式、全部快捷键和设置收进右上角菜单，电脑入口仍显示实际连接状态。使用原生矢量图标、原有动画和系统触感逻辑；其余布局及偏好 ID 兼容。
+- **构建**：Debug、默认 uiPreview 的 assemble/lint 和 Debug 单元测试通过，33/33，无跳过；lint 分别为 0 error / 43 warning、0 error / 41 warning。独立包重新 assemble/lint 通过，0 error / 41 warning，`git diff --check` 通过。UI 候选为 `1.6.0-dev.21-ui-preview.2` / versionCode 28，正式基线及 `.desktoppreview` 版本未改。
+- **安装渠道**：Samsung 原 `.preview` 的签名在本机不可用，没有卸载、清数据或强行覆盖；原两份 APK 和配置保留。使用显式 `-PphoneDeckIsolatedUiPreview` 构建并排 `.dialoguepreview`，桌面名「言渡·对话白」，本机 debug 签名。新包经原有 USB 配对连接当前 Mac，未复制旧包私有数据、未执行独立凭据升级。正式分发仍需原所有者签名。
+- **已交付 APK**：ignored `outputs/android-dialogue-ui/Yandu-dialogue-native-code28.apk`，SHA-256 `050e5eb8855ebb8e5f04af82adf336862ec91d7a112704134a71affd91584474`；从手机读回 APK 与候选逐字节哈希一致。签名、版本、构建报告和来源记录在同目录 `build-verification.json`；原 APK/私有配置备份只在本机受限目录，不能提交或上传。
+- **Samsung 实机 UI**：SM-G9880 / Android 12 上检查竖屏、横屏、三种触发方式选择、动态 Typeless 子菜单、翻译选项保存，以及旧底座布局切换后返回对话白。底部主要操作可见；最后恢复竖屏、对话白、点击听写并保持连接。截图包括 `native-idle.png`、`native-modes.png`、`native-shared.png`、`native-landscape.png`、`native-final.png`。
+- **普通听写回归通过**：复用原 Mac 接收端 `4373995`、Typeless 2.8.1 与 BlackHole。新 APK 启动会话 `cd1db888-103c-4e45-82cb-fbc1fcbdc1ec` 后，`audio.streaming`、`dictation.active`、`typeless.capturing` 全为 true；电脑本机停止后全部为 false，手机显示「电脑端已停止，手机已同步停止」，Android RECORD_AUDIO 有结束时长且不再 running。状态与截图在 `native-session.jsonl` / `native-desktop-stop.png`，未保存音频。
+- **待办与边界**：本轮只同步对话白，极夜黑/常青绿尚未移植。最终落字、Goal/退格/回车实际输入、按住录音、触感手感、翻译/问答和多电脑共享仍待分别验收；一次翻译启动显示电脑未确认，不能把菜单切换通过记为翻译录音通过。iPhone 真机仍未验收。下次获取原签名后再选择是否覆盖旧渠道，不能把新 debug 包当成正式升级包。
+- **资源**：本轮临时手机镜像及电脑停止控制页已正常关闭；现有接收端、8765/8768 ADB 通道保留供用户使用。新 APK 留在手机前台且已停止采音。
+
+## 2026-10-05 Samsung APK 真机验收与入口纠正（上一轮）
 
 - 用户明确纠正本次应测试 Android APK。Android 继续以原生 APK 为主；iPhone 网页适配不能替代 Android APK 交付。最近的对话白/极夜黑/常青绿三套新 UI 仅在 PWA，**尚未同步到 APK，不能报告手机 UI 已全部交付**。
 - 现场 Samsung SM-G9880 / Android 12 装有两份包：`com.codex.phonedeck.preview` 为 `1.6.0-dev.21-ui-preview`（桌面名「言渡 UI 预览」）；`com.codex.phonedeck.desktoppreview` 为 `2.0.0-alpha.1` / versionCode 5（桌面名「言渡」）。后者属于之前独立识别实验路线且禁用旧 USB 自动接入，本轮未卸载或替换任一包。

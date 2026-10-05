@@ -10,6 +10,7 @@ import android.widget.Button;
 @SuppressLint("ViewConstructor") // Programmatic control; its glyph is shared with the voice state owner.
 final class RoundVoiceButton extends Button {
     private final MicrophoneGlyphDrawable glyph;
+    private float glyphScale = 0.42f;
 
     RoundVoiceButton(Context context, MicrophoneGlyphDrawable glyph) {
         super(context);
@@ -18,10 +19,15 @@ final class RoundVoiceButton extends Button {
         setText("");
     }
 
+    void setGlyphScale(float scale) {
+        glyphScale = scale;
+        invalidate();
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        int height = Math.round(Math.min(getWidth(), getHeight()) * 0.42f);
+        int height = Math.round(Math.min(getWidth(), getHeight()) * glyphScale);
         int width = Math.round(height * (float) glyph.getIntrinsicWidth()
                 / glyph.getIntrinsicHeight());
         int left = (getWidth() - width) / 2;

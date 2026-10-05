@@ -7,6 +7,7 @@ def phoneDeckSigningPropertiesFile = phoneDeckSigningPropertiesPath
         ? new File(phoneDeckSigningPropertiesPath) : rootProject.file("../signing/signing.properties")
 def phoneDeckSigningProperties = new Properties()
 def hasPhoneDeckSigning = phoneDeckSigningPropertiesFile.exists()
+def isolatedUiPreview = project.hasProperty("phoneDeckIsolatedUiPreview")
 
 if (hasPhoneDeckSigning) {
     phoneDeckSigningPropertiesFile.withInputStream {
@@ -62,10 +63,10 @@ android {
         // development certificate is unavailable. Never a fleet-update artifact.
         uiPreview {
             initWith debug
-            applicationIdSuffix ".preview"
+            applicationIdSuffix isolatedUiPreview ? ".dialoguepreview" : ".preview"
             versionNameSuffix "-ui-preview"
             signingConfig signingConfigs.debug
-            resValue "string", "app_name", "言渡 UI 预览"
+            resValue "string", "app_name", isolatedUiPreview ? "言渡·对话白" : "言渡 UI 预览"
         }
 
         // Stable owner-signed candidate, separate from both legacy fleet updates and ADB UI fixtures.
@@ -86,6 +87,12 @@ android {
 }
 
 androidComponents {
+    onVariants(selector().withBuildType("uiPreview")) { variant ->
+        variant.outputs.each { output ->
+            output.versionName.set("1.6.0-dev.21-ui-preview.2")
+            output.versionCode.set(28)
+        }
+    }
     onVariants(selector().withBuildType("desktopPreview")) { variant ->
         variant.outputs.each { output ->
             output.versionName.set("2.0.0-alpha.1")

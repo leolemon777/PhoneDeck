@@ -124,10 +124,11 @@ final class HomeStylePicker {
             rect(canvas, 7, 8, 24, 11, 1.5f, theme.text);
             rect(canvas, 7, 17, 59, 23, 3, theme.surfaceRaised);
             if (style == HomeStyle.CENTER) {
-                mic(canvas, 33, 48, 14);
-                rect(canvas, 19, 67, 47, 69, 1, theme.muted);
-                mode(canvas, 80);
-                keys(canvas, 89);
+                rect(canvas, 19, 40, 47, 43, 1, theme.text);
+                rect(canvas, 22, 48, 44, 50, 1, theme.muted);
+                rect(canvas, 10, 59, 25, 64, 2.5f, theme.surfaceRaised);
+                mic(canvas, 33, 77, 11);
+                rect(canvas, 7, 92, 59, 98, 3, theme.surfaceRaised);
             } else if (style == HomeStyle.DOCK) {
                 rect(canvas, 8, 40, 45, 43, 1, theme.text);
                 rect(canvas, 8, 47, 32, 49, 1, theme.muted);

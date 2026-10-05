@@ -4,7 +4,7 @@ import android.content.Context;
 
 /** Phone-local layout preference, independent of theme, computer, and voice mode. */
 enum HomeStyle {
-    CENTER("center", "极简居中", "大话筒居中，状态和操作分区"),
+    CENTER("center", "对话白", "留白与底部大话筒，专注每一句"),
     DOCK("dock", "单手底座", "话筒靠近底部，单手更顺手"),
     PANEL("panel", "紧凑面板", "话筒和三个按键并排，操作更集中");
 

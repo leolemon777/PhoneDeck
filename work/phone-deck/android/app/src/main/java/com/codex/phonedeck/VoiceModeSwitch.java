@@ -23,16 +23,18 @@ final class VoiceModeSwitch extends FrameLayout {
     private final LinearLayout choices;
     private final Button[] buttons = new Button[3];
     private final String[] modes = {"tap", "hold", "shared"};
+    private final boolean minimal;
     private int selectedIndex;
     private String selectedMode;
 
-    VoiceModeSwitch(Context context, PhoneDeckTheme theme, Listener listener) {
+    VoiceModeSwitch(Context context, PhoneDeckTheme theme, Listener listener, boolean minimal) {
         super(context);
         this.theme = theme;
-        setBackground(theme.shape(context, theme.primaryContainer, 28));
+        this.minimal = minimal;
+        setBackground(theme.shape(context, minimal ? Color.TRANSPARENT : theme.primaryContainer, 28));
         setPadding(dp(4), dp(4), dp(4), dp(4));
         indicator = new View(context);
-        indicator.setBackground(theme.shape(context, theme.primary, 24));
+        indicator.setBackground(theme.shape(context, minimal ? theme.surfaceRaised : theme.primary, 24));
         indicator.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         addView(indicator, new FrameLayout.LayoutParams(0, dp(48)));
         choices = new LinearLayout(context);
@@ -74,7 +76,8 @@ final class VoiceModeSwitch extends FrameLayout {
         for (int i = 0; i < buttons.length; i++) {
             boolean selected = modes[i].equals(mode);
             buttons[i].setSelected(selected);
-            buttons[i].setTextColor(selected ? theme.onPrimary : theme.onPrimaryContainer);
+            buttons[i].setTextColor(minimal ? (selected ? theme.text : theme.muted)
+                    : (selected ? theme.onPrimary : theme.onPrimaryContainer));
             buttons[i].setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
             if (selected) selectedIndex = i;
         }

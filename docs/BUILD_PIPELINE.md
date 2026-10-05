@@ -1,5 +1,21 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-05 Android 对话白原生 UI 候选
+
+`uiPreview` 为 `1.6.0-dev.21-ui-preview.2` / versionCode 28，Debug/Release 的基线版本及 `.desktoppreview` 的独立路线保持原值。本轮只更新原生 UI，不构建电脑端、不下载模型、不创建正式 Release。
+
+在 `work/phone-deck/android` 执行（Windows 使用 `gradlew.bat`）：
+
+```sh
+./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest :app:assembleUiPreview :app:lintUiPreview
+# 仅当原 .preview 的签名不可用，需要保留原包并排验收时：
+./gradlew :app:assembleUiPreview :app:lintUiPreview -PphoneDeckIsolatedUiPreview
+```
+
+默认仍生成 `.preview`「言渡 UI 预览」。显式带 `-PphoneDeckIsolatedUiPreview` 时生成 `.dialoguepreview`「言渡·对话白」，使用本机 debug 签名和独立数据目录；不要卸载或清数据来绕过原包签名不一致。两种命令的 APK 输出路径相同，归档时必须另存名称，并记录真实包名、版本、证书、来源及 SHA-256。覆盖安装前先确认签名相同，安装后从设备读回 APK 校验。并排包不复制旧配对记录，可经原有 USB 首次配对连接现有接收端。
+
+上述预览包均不能进入固定三产物更新清单。正式分发仍须所有者长期签名；不能把本机 debug 密钥作为新的正式签名。构建成功与实际手机语音、按键验收须分开报告。
+
 
 ## 2026-10-04 外部输入法接收端复用 PWA
 

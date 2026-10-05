@@ -4,20 +4,20 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:buttonStyle">@style/InkButton</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowBackground">#F5F3EE</item>
-        <item name="android:colorBackground">#F5F3EE</item>
-        <item name="android:colorBackgroundFloating">#FAF9F6</item>
-        <item name="android:statusBarColor">#F5F3EE</item>
-        <item name="android:navigationBarColor">#F5F3EE</item>
-        <item name="android:colorAccent">#242320</item>
-        <item name="android:colorForeground">#242320</item>
-        <item name="android:textColorPrimary">#242320</item>
-        <item name="android:textColorSecondary">#69665F</item>
-        <item name="android:colorControlNormal">#69665F</item>
-        <item name="android:colorControlActivated">#242320</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:colorBackground">#FFFFFF</item>
+        <item name="android:colorBackgroundFloating">#FFFFFF</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:colorAccent">#171717</item>
+        <item name="android:colorForeground">#171717</item>
+        <item name="android:textColorPrimary">#171717</item>
+        <item name="android:textColorSecondary">#626262</item>
+        <item name="android:colorControlNormal">#626262</item>
+        <item name="android:colorControlActivated">#171717</item>
         <item name="android:colorControlHighlight">#33242320</item>
-        <item name="android:colorButtonNormal">#FAF9F6</item>
-        <item name="android:colorError">#8E3535</item>
+        <item name="android:colorButtonNormal">#FFFFFF</item>
+        <item name="android:colorError">#AD3029</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
