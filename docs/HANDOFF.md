@@ -13,6 +13,9 @@
 - **扫码崩溃（既有问题）**：zxing-android-embedded 4.3.0 运行时调用 androidx `ContextCompat`/`ActivityCompat`，但 POM
   未声明依赖、本项目 `useAndroidX=false`，打开扫码页即崩溃。新增 `app/src/main/java/androidx/core/...` 两个转发类修复；
   以后若引入真正的 androidx.core 需删除它们。已在 Samsung 上确认扫码页能打开到相机权限弹窗。
+- **共享麦克风空组**：共享只发给共享组，新配对不自动入组；组为空时开启会静默等待 15 秒后自动停止。现在开启时若组为空，
+  先弹出勾选框（默认勾选当前电脑），确认后才入组并开启；共享模式下未入组的当前电脑卡片显示“加入共享组”按钮。
+  已在 Samsung + 本机 Mac 接收端（USB）验证：确认后 Mac `audio.streaming=true, mode=shared` 持续 16 秒以上，手动停止后归零。
 - **真机**：`.dialoguepreview`（言渡·对话白，本机 `~/.android/debug.keystore` 签名）已覆盖安装到 Samsung，首页正常显示。
 - **未验证**：真实在线电脑上的听写/翻译/问答启动与“刚刚”记录、真实切换确认、真机滑动手感、字体缩放与读屏顺序。
   测试时 Samsung 手机通过 USB 连着，未向其安装任何包。
