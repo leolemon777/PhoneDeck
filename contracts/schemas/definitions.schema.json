@@ -131,7 +131,8 @@
         "sharedMicrophone",
         "secureLan",
         "fleetUpdatesV1",
-        "phoneManagedSettingsV1"
+        "phoneManagedSettingsV1",
+        "phoneStopV1"
       ],
       "description": "能力协商枚举，来源 GET /api/health capabilities（Program.cs:147-151）。新增能力必须先扩展本枚举并升级协议版本，不由营销版本推断（规格 §8 PRO-01 / §16.2 能力）。"
     },

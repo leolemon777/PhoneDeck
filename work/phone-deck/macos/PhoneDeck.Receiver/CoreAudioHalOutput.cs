@@ -8,6 +8,9 @@ internal interface IMacAudioOutput : IDisposable
     string DeviceUid { get; }
     void Write(ReadOnlySpan<byte> stereoPcm16);
     Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds);
+
+    /// <summary>已写入但尚未被渲染的双声道字节，用于静音追赶判断积压。</summary>
+    int BufferedBytes => 0;
 }
 
 internal interface IMacAudioOutputFactory
@@ -118,6 +121,7 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
 
     public string DeviceName { get; }
     public string DeviceUid { get; }
+    public int BufferedBytes => ring.Count;
 
     public void Write(ReadOnlySpan<byte> stereoPcm16)
     {

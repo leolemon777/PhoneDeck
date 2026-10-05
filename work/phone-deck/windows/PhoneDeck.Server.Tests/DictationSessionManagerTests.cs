@@ -473,8 +473,87 @@ public sealed class DictationSessionManagerTests
         Assert.AreEqual(2, engine.ToggleCount, "Timeout must still release the engine.");
     }
 
+    [TestMethod]
+    public void WarmOutputSkipsAudioWarmupGrace()
+    {
+        var audio = new FakeAudioSessionController { OutputWarm = true };
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+
+        manager.Start(Guid.NewGuid().ToString(), "warm", "dictation");
+
+        Assert.AreEqual(0, audio.WaitTimeouts[0], "常驻输出已运行时不应再等待声卡预热");
+    }
+
+    [TestMethod]
+    public void DesktopStopAfterConfirmationIssuesReceiptOnlyToOwner()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", "phone-a");
+
+        // 确认后宽限期内的“未采集”观测是抖动，不作为电脑端停止依据。
+        manager.ObserveEngineCapturing(false, Environment.TickCount64);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+        manager.ObserveEngineCapturing(true, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+        manager.ObserveEngineCapturing(null, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+
+        var afterGrace = Environment.TickCount64
+            + DictationSessionManager.EngineStopObservationGraceMilliseconds + 50;
+        manager.ObserveEngineCapturing(false, afterGrace);
+        Assert.IsNull(manager.Receipts.For("phone-a"), "单次未采集可能是探针熔断，不能据此停录");
+        manager.ObserveEngineCapturing(true, afterGrace + 50);
+        manager.ObserveEngineCapturing(false, afterGrace + 100);
+        Assert.IsNull(manager.Receipts.For("phone-a"), "中间出现采集观测时重新计数");
+        manager.ObserveEngineCapturing(false,
+            afterGrace + 100 + DictationSessionManager.EngineStopConfirmationMilliseconds);
+
+        Assert.AreEqual(session, manager.Receipts.For("phone-a"));
+        Assert.IsNull(manager.Receipts.For("phone-b"), "凭据不能泄露给其他手机");
+        Assert.IsNull(manager.Receipts.For(null));
+    }
+
+    [TestMethod]
+    public void UnconfirmedOrEndedSessionNeverIssuesReceipt()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        manager.ObserveEngineCapturing(false, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For(null));
+
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation");
+        manager.Stop(session, "stop");
+        manager.ObserveEngineCapturing(false, Environment.TickCount64 + 10_000);
+
+        Assert.IsNull(manager.Receipts.For(null), "手机自己停止的会话不需要停止凭据");
+    }
+
+    [TestMethod]
+    public void LocalDesktopStopRecordsReceiptBeforeWaitingForPhoneTail()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation");
+        string? receiptDuringDrain = null;
+        audio.OnWaitForEnd = _ => receiptDuringDrain = manager.Receipts.For(null);
+
+        manager.StopFromDesktop();
+
+        Assert.AreEqual(session, receiptDuringDrain, "手机需要在服务端等尾音之前就收到停止凭据");
+        Assert.IsFalse(manager.IsActive);
+    }
+
     private sealed class FakeAudioSessionController : IPhoneAudioSessionController
     {
+        public bool OutputWarm { get; set; }
         public int StopCalls { get; private set; }
         public int WaitForSessionCalls { get; private set; }
         public int BeginPlaybackCalls { get; private set; }

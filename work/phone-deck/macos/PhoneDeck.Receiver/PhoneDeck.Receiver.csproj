@@ -20,5 +20,9 @@
     <Compile Include="../../windows/PhoneDeck.Server/ClientCredentials.cs" Link="PhoneWeb/ClientCredentials.cs" />
     <Compile Include="../../windows/PhoneDeck.Server/PairingWindow.cs" Link="PhoneWeb/PairingWindow.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../shared/Audio/PcmLatency.cs" Link="Shared/PcmLatency.cs" />
+    <Compile Include="../../windows/PhoneDeck.Server/PhoneStopReceipts.cs" Link="Shared/PhoneStopReceipts.cs" />
+  </ItemGroup>
   <Import Project="../../shared/PhoneWeb/PhoneWeb.props" />
 </Project>

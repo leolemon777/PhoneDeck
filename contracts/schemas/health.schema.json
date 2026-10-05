@@ -34,7 +34,11 @@
         "checkedAtMs": { "type": "integer", "minimum": 0 },
         "ageMs": { "type": "integer", "minimum": 0 },
         "lastError": { "type": ["string", "null"] },
-        "stale": { "type": "boolean" }
+        "stale": { "type": "boolean" },
+        "stopRequestedSessionId": {
+          "type": ["string", "null"],
+          "description": "能力 phoneStopV1：电脑端结束了本手机发起的 managed 会话时返回该 sessionId（仅内存、60 秒、只返回给会话所有者），手机据此立即停止采音；无凭据为 null。"
+        }
       },
       "required": ["available", "streaming", "stale"],
       "additionalProperties": false

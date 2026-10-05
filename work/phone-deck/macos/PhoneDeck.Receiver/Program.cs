@@ -17,6 +17,8 @@ if (!OperatingSystem.IsMacOSVersionAtLeast(14, 2))
     return;
 }
 
+// 实时音频线程（WASAPI/AUHAL 回调）不能被长时间阻塞式 GC 打断。
+System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
 using var singleInstance = new Mutex(
     initiallyOwned: true,
     "PhoneDeck.MacReceiver.Singleton",
@@ -30,7 +32,7 @@ if (!isFirstInstance)
 var capabilities = new[]
 {
     "fixedAction", "keyChord", "text", "macro", "secureLan", "macInput",
-    "phoneAudio", "sharedMicrophone", "managedDictation"
+    "phoneAudio", "sharedMicrophone", "managedDictation", "phoneStopV1"
 };
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
@@ -38,7 +40,10 @@ using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receive
 var settings = MacReceiverSettings.LoadOrCreate();
 var keyboard = new MacKeyboardInput();
 using var audioBridge = new MacPhoneAudioBridge(
-    new CoreAudioHalOutputFactory(settings.AudioDeviceUid));
+    new CoreAudioHalOutputFactory(settings.AudioDeviceUid),
+    keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0");
+// 常驻 BlackHole 输出放到后台预热，不阻塞 Kestrel 启动。
+_ = Task.Run(audioBridge.Prewarm);
 using var engineController = new MacVoiceEngineController(keyboard);
 using var dictationSessions = new MacDictationSessionManager(audioBridge, engineController);
 var inputProcessor = new InputCommandProcessor(keyboard);
@@ -139,7 +144,9 @@ app.MapGet("/api/health", () =>
             streaming = audioBridge.IsStreaming,
             sessionId = audioBridge.ActiveSessionId,
             mode = audioBridge.ActiveMode?.ToWireValue(),
-            lastError = audio.Error
+            lastError = audio.Error,
+            // phoneStopV1：Mac 仍是旧共享令牌，所有已配对手机共享同一 legacy 身份。
+            stopRequestedSessionId = dictationSessions.Receipts.For(null)
         },
         dictation = new
         {
@@ -372,9 +379,16 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
 
 app.MapPost("/local/dictation/stop", () =>
 {
-    if (dictationSessions.ActiveSessionId is { } session)
-        dictationSessions.Stop(session, Guid.NewGuid().ToString());
-    return Results.Ok(new { ok = true });
+    try
+    {
+        // 先发 phoneStopV1 凭据让手机停止供音，收尾才不会空等手机尾音。
+        dictationSessions.StopFromDesktop();
+        return Results.Ok(new { ok = true });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { ok = false, error = exception.Message });
+    }
 });
 
 app.MapPost("/api/dictation/stop", (DictationCommand command) =>

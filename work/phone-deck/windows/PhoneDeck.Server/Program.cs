@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+// 实时音频线程（WASAPI/AUHAL 回调）不能被长时间阻塞式 GC 打断。
+System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
 
 if (args.FirstOrDefault() == "--apply-fleet-update")
 {
@@ -49,6 +51,8 @@ var serverSettings = ServerSettings.LoadOrCreate();
 var fleetUpdates = new FleetUpdates();
 var configurationGate = new ConfigurationGate();
 using var audioBridge = new PhoneAudioBridge();
+// 常驻虚拟声卡输出放到后台预热，不阻塞 Kestrel 启动。
+_ = Task.Run(audioBridge.Prewarm);
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -69,8 +73,14 @@ using var diagnostics = new DiagnosticsMonitor(() =>
         ForegroundApp = KeyboardInput.ForegroundAppName()
     };
     }
-});
+},
+    sessionActive: () => dictationSessions.IsActive || audioBridge.IsStreaming,
+    refreshed: snapshot => dictationSessions.ObserveEngineCapturing(
+        snapshot.Engine?.Capturing, snapshot.CheckedAtMs));
 diagnostics.Start();
+// 采集会话状态一变就立即刷新，轮询只作兜底。
+using var engineStateEvents = new VoiceEngineStateEvents(diagnostics.Nudge);
+_ = Task.Run(engineStateEvents.Start);
 await using var bluetoothReceiver = new BluetoothReceiver(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName);
@@ -177,7 +187,7 @@ DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configuratio
 fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
     || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
 
-app.MapGet("/api/health", () =>
+app.MapGet("/api/health", (HttpContext context) =>
 {
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
     // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
@@ -199,7 +209,8 @@ app.MapGet("/api/health", () =>
         capabilities = new[]
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
-            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1", "phoneManagedSettingsV1"
+            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1", "phoneManagedSettingsV1",
+            "phoneStopV1"
         },
         audio = new
         {
@@ -211,7 +222,10 @@ app.MapGet("/api/health", () =>
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
-            stale
+            stale,
+            // phoneStopV1：只返回给发起该 managed 会话的手机，60 秒内有效。
+            stopRequestedSessionId = dictationSessions.Receipts.For(
+                context.Items["ClientId"] as string)
         },
         dictation = new
         {
@@ -807,7 +821,8 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
                     dictationSessions.AudioEnded(endedSessionId);
                 }
             },
-            streamToken);
+            streamToken,
+            streamClientId);
         return Results.Ok(new
         {
             ok = true,
@@ -846,11 +861,13 @@ app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext conte
             command.SessionId,
             command.TargetComputerId,
             receiverIdentity.ComputerId);
+        diagnostics.Nudge();
         var duplicate = dictationSessions.Start(
             command.SessionId,
             command.RequestId,
             VoiceEngines.NormalizeMode(command.Mode),
             context.Items["ClientId"] as string);
+        diagnostics.Nudge();
         return Results.Ok(new
         {
             ok = true,
@@ -862,12 +879,12 @@ app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext conte
         });
     }));
 
-app.MapPost("/local/dictation/stop", () =>
+app.MapPost("/local/dictation/stop", () => ExecuteDictationCommand(() =>
 {
-    if (dictationSessions.ActiveSessionId is { } session)
-        dictationSessions.Stop(session, Guid.NewGuid().ToString());
+    // 先发 phoneStopV1 凭据让手机停止供音，收尾才不会空等手机尾音。
+    dictationSessions.StopFromDesktop();
     return Results.Ok(new { ok = true });
-});
+}));
 
 app.MapPost("/api/dictation/stop", (DictationCommand command) =>
     ExecuteDictationCommand(() =>

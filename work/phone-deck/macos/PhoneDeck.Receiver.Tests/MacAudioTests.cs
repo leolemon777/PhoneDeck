@@ -248,6 +248,120 @@ public sealed class MacAudioTests
         }
     }
 
+    private static byte[] Silence(int milliseconds) => new byte[PcmLatency.MsToBytes(milliseconds)];
+
+    private static byte[] Voice(int milliseconds)
+    {
+        var bytes = new byte[PcmLatency.MsToBytes(milliseconds)];
+        for (var index = 0; index + 1 < bytes.Length; index += 2)
+        {
+            var sample = (short)((index / 2 / 24) % 2 == 0 ? 3_000 : -3_000);
+            bytes[index] = (byte)sample;
+            bytes[index + 1] = (byte)(sample >> 8);
+        }
+        return bytes;
+    }
+
+    [TestMethod]
+    public async Task ManagedReleaseTrimsLeadingSilenceAndSkipsBacklogPauses()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var source = new ChannelStream();
+        var session = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(
+            source, session, AudioStreamMode.Managed, (_, _) => { }, CancellationToken.None);
+        await WaitUntilAsync(() => bridge.ActiveSessionId == session);
+        // 共 1 秒，恰好不超过 pre-roll 容量。
+        source.Push(Silence(300).Concat(Voice(100)).Concat(Silence(500)).Concat(Voice(100)).ToArray());
+        await Task.Delay(100);
+
+        bridge.BeginPlayback(session);
+        source.Complete();
+        await streaming;
+
+        var stereoBytes = factory.Outputs[0].Writes.Sum(write => write.Length);
+        // lead-in 150 ms + 语音 100 ms + 静音 hangover 200 ms + 语音 100 ms，双声道翻倍。
+        Assert.AreEqual(PcmLatency.MsToBytes(550) * 2, stereoBytes);
+    }
+
+    [TestMethod]
+    public async Task WarmOutputIsReusedAndKeptOpenBetweenSessions()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory, keepOutputWarm: true);
+        bridge.Prewarm();
+        Assert.IsTrue(bridge.OutputWarm);
+
+        for (var round = 0; round < 2; round++)
+        {
+            var source = new ChannelStream();
+            source.Push(Voice(20));
+            source.Complete();
+            await bridge.StreamAsync(source, Guid.NewGuid().ToString(),
+                AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None);
+        }
+
+        Assert.HasCount(1, factory.Outputs);
+        Assert.IsFalse(factory.Outputs[0].Disposed);
+    }
+
+    [TestMethod]
+    public async Task FailedDrainDropsWarmOutputSoNextSessionRebuilds()
+    {
+        var factory = new RecordingOutputFactory { Drain = () => Task.FromResult(false) };
+        using var bridge = new MacPhoneAudioBridge(factory, keepOutputWarm: true);
+        var source = new ChannelStream();
+        source.Push(Voice(20));
+        source.Complete();
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => bridge.StreamAsync(source,
+            Guid.NewGuid().ToString(), AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None));
+
+        Assert.IsTrue(factory.Outputs[0].Disposed);
+        Assert.IsFalse(bridge.OutputWarm);
+    }
+
+    [TestMethod]
+    public async Task SharedReconnectTakesOverButManagedStillConflicts()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory, keepOutputWarm: true);
+        var session = Guid.NewGuid().ToString();
+        var stalled = new ChannelStream();
+        var first = bridge.StreamAsync(stalled, session, AudioStreamMode.Shared,
+            (_, _) => { }, CancellationToken.None);
+        await WaitUntilAsync(() => bridge.ActiveSessionId == session);
+
+        var managed = new ChannelStream();
+        await Assert.ThrowsExactlyAsync<AudioStreamConflictException>(() => bridge.StreamAsync(
+            managed, Guid.NewGuid().ToString(), AudioStreamMode.Managed, (_, _) => { }, CancellationToken.None));
+
+        var reconnect = new ChannelStream();
+        reconnect.Push(Voice(20));
+        reconnect.Complete();
+        await bridge.StreamAsync(reconnect, session, AudioStreamMode.Shared,
+            (_, _) => { }, CancellationToken.None);
+
+        Assert.IsTrue(first.IsCompleted);
+        Assert.HasCount(1, factory.Outputs, "接管沿用同一常驻输出");
+    }
+
+    [TestMethod]
+    public void RingReaderNeverBlocksAndReportsBacklog()
+    {
+        var ring = new MacAudioRingBuffer(8);
+        ring.Write([1, 2, 3, 4, 5, 6]);
+        Assert.AreEqual(6, ring.Count);
+        var output = new byte[4];
+        Assert.AreEqual(4, ring.Read(output));
+        Assert.AreEqual(2, ring.Count);
+        ring.Clear();
+        Assert.AreEqual(0, ring.Count);
+        Assert.AreEqual(0, ring.Read(output));
+        CollectionAssert.AreEqual(new byte[4], output);
+    }
+
     private sealed class RecordingOutputFactory : IMacAudioOutputFactory
     {
         internal List<RecordingOutput> Outputs { get; } = [];
@@ -284,6 +398,7 @@ public sealed class MacAudioTests
             return drain();
         }
         public void Dispose() => Disposed = true;
+        public int BufferedBytes => 0;
     }
 
     private sealed class ChannelStream : Stream

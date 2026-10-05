@@ -97,12 +97,72 @@ public sealed class MacDictationSessionManagerTests
         Assert.AreEqual(false, MacVoiceEngineStateProbe.CombineCaptureStates([]));
     }
 
+    [TestMethod]
+    public void WarmOutputTriggersEngineBeforeWaitingForPhoneAudio()
+    {
+        var audio = new FakeAudio { OutputWarm = true };
+        var typeless = new FakeTypeless { Capturing = false, Calls = audio.Calls };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+
+        manager.Start(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation");
+
+        CollectionAssert.AreEqual(new[] { "begin", "waitAudio" }, audio.Calls);
+        Assert.IsTrue(audio.PlaybackReleased);
+    }
+
+    [TestMethod]
+    public void ColdOutputKeepsAudioFirstOrderAndMissingAudioResetsEngine()
+    {
+        var audio = new FakeAudio();
+        var typeless = new FakeTypeless { Capturing = false, Calls = audio.Calls };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        manager.Start(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation");
+        CollectionAssert.AreEqual(new[] { "waitAudio", "begin" }, audio.Calls);
+
+        var warm = new FakeAudio { OutputWarm = true, SessionArrives = false };
+        var engine = new FakeTypeless { Capturing = false };
+        using var parallel = new MacDictationSessionManager(warm, engine);
+        Assert.ThrowsExactly<InvalidOperationException>(() => parallel.Start(
+            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation"));
+        Assert.IsFalse(parallel.IsActive);
+        Assert.IsFalse(engine.Capturing, "音频始终未到时必须复位已唤醒的引擎");
+    }
+
+    [TestMethod]
+    public void DesktopStopIssuesReceiptBeforeWaitingForPhoneTail()
+    {
+        var audio = new FakeAudio();
+        var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, Guid.NewGuid().ToString(), "dictation");
+        string? receiptDuringDrain = null;
+        audio.OnWaitForEnd = () => receiptDuringDrain = manager.Receipts.For(null);
+
+        manager.StopFromDesktop();
+
+        Assert.AreEqual(session, receiptDuringDrain);
+        Assert.IsFalse(manager.IsActive);
+    }
+
     private sealed class FakeAudio : IMacPhoneAudioSessionController
     {
         internal bool PlaybackReleased { get; private set; }
         internal bool Drained { get; set; } = true;
-        public bool WaitForSessionActive(string sessionId, int timeoutMilliseconds) => true;
-        public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds) => Drained;
+        internal bool SessionArrives { get; set; } = true;
+        internal List<string> Calls { get; } = [];
+        internal Action? OnWaitForEnd { get; set; }
+        public bool OutputWarm { get; set; }
+        public bool WaitForSessionActive(string sessionId, int timeoutMilliseconds)
+        {
+            Calls.Add("waitAudio");
+            return SessionArrives;
+        }
+        public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds)
+        {
+            OnWaitForEnd?.Invoke();
+            return Drained;
+        }
         public void BeginPlayback(string sessionId) => PlaybackReleased = true;
         public bool StopSession(string sessionId) => true;
     }
@@ -120,8 +180,10 @@ public sealed class MacDictationSessionManagerTests
         public bool? WaitForCapturing(bool expected, int timeoutMilliseconds) =>
             Capturing is null ? null : Capturing == expected;
         public bool IsModeConfigured(string mode) => true;
+        internal List<string>? Calls { get; set; }
         public bool BeginOnce(string requestId, string mode)
         {
+            Calls?.Add("begin");
             Toggle(mode);
             return false;
         }

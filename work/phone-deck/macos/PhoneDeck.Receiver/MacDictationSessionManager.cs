@@ -13,6 +13,21 @@ internal sealed class MacDictationSessionManager(
     internal bool IsActive => activeSessionId is not null;
     internal string? ActiveSessionId => activeSessionId;
 
+    /// <summary>phoneStopV1：电脑本机结束会话时写入，手机据此立即关麦。</summary>
+    internal PhoneStopReceipts Receipts { get; } = new();
+
+    /// <summary>电脑本机主动结束（控制页按钮）：先发凭据让手机停止供音，再收尾。</summary>
+    internal void StopFromDesktop()
+    {
+        var session = activeSessionId;
+        if (session is null)
+        {
+            return;
+        }
+        Receipts.Record(session, null);
+        Stop(session, Guid.NewGuid().ToString());
+    }
+
     internal bool Start(string? sessionId, string? requestId, string? mode)
     {
         var normalizedSession = ValidateId(sessionId, "sessionId");
@@ -59,7 +74,11 @@ internal sealed class MacDictationSessionManager(
             {
                 throw new InvalidOperationException("另一个语音听写会话仍在运行");
             }
-            if (!audio.WaitForSessionActive(normalizedSession, 3_000))
+            // 常驻输出已让 BlackHole 处于运行状态时，引擎与手机音频建连并行：
+            // 先触发引擎，再等待音频会话；首段语音由手机与接收端 pre-roll 保留。
+            // 输出未常驻时保持原顺序，避免引擎先打开尚未运行的虚拟声卡。
+            var parallelStart = audio.OutputWarm;
+            if (!parallelStart && !audio.WaitForSessionActive(normalizedSession, 3_000))
             {
                 throw new InvalidOperationException("对应的手机音频会话不存在");
             }
@@ -74,6 +93,10 @@ internal sealed class MacDictationSessionManager(
                 {
                     throw new InvalidOperationException(
                         $"{engine.EngineDisplayName} 未确认开始采集");
+                }
+                if (parallelStart && !audio.WaitForSessionActive(normalizedSession, 3_000))
+                {
+                    throw new InvalidOperationException("对应的手机音频会话不存在");
                 }
                 audio.BeginPlayback(normalizedSession);
                 return duplicate;
