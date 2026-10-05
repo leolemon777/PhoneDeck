@@ -1,6 +1,31 @@
 # PhoneDeck 项目交接说明
 
-## 2026-10-05 语音传输延迟优化（最新状态）
+## 2026-10-05 多电脑连接与 Receiver.Core（最新状态）
+
+- 分支 `agent/multi-pc`，基于 `agent/voice-latency`（PR #39）。范围：一台手机多台电脑、多手机隔离、Mac 与 Windows 接收端能力对齐；
+  版本号、发布清单与签名渠道未改。决策见规格顶部同日条目，结构见 ARCHITECTURE。
+- **Android**：`ConnectionMonitor` 并行探测 + 单台退避（2/4/8/15 s）+ 共享发现 + 结果复用；`TargetDeviceManager` 单例、
+  满员拒绝（10 台）、地址上限 6、最近在线刷新、本地重命名/排序；切换目标先实时确认；共享供音两帧一包、音量进程内回调、
+  多电脑状态汇总；managed 会话用 `/api/events` 长轮询（404 回退）；配对失效提示优先扫码；删除未使用的
+  `VoiceSessionCoordinator`、`AgentSyncManager`。
+- **接收端**：新建 `work/phone-deck/shared/Receiver`（`Receiver.Core.props`），从 Windows 挪入 10 个共用文件并删除 Mac 的 3 个
+  分叉副本；`NativePairingEndpoints`（含本机管理页 `/admin/pairing`）、`HealthEvents`（`healthEventsV1`）、
+  `DesktopConfigurationCore` 为新增共用代码。Windows/Mac 停止听写校验所属手机，健康响应只向所属手机返回会话字段。
+- **macOS 新增**：逐手机凭据与扫码配对、单台撤销即断流、旧令牌升级/应急撤销、mDNS、8765 来源防护、会话租约与墓碑、
+  `phoneManagedSettingsV1`（输入法/快捷键热应用、USB 恢复与发现开关、LaunchAgent 登录启动）。Mac 锁文件新增 mDNS 依赖链（与 Windows 同版本）。
+- **PWA**：网关快照附带各附加电脑的手机入口；主电脑离线 6 秒后提示并可打开备用入口（https、不同来源、固定 `/phone/`）。
+- **验证（本机 macOS）**：
+  - Android assemble + 单元测试 43/43（新增 `MultiComputerTest` 7 项）+ lint 0 error / 43 warning（与改动前相同）。
+  - Windows Server Release 构建通过；测试（osx 运行时）174/178，失败的仍是改动前那 4 项（文件权限/计时宿主差异），新增 7 项通过；两个 lock 已还原未提交。
+  - macOS Receiver 构建通过，测试 47/47（新增 8 项；新增 `TestDataDirectory` 让测试使用临时数据目录）。
+  - Desktop 测试 64 通过 / 1 跳过（新增 1 项）；PWA `node --test` 54/54（新增 1 项）；`contracts/tools/validate.py` 全部通过；`git diff --check` 通过。
+  - 测试过程中曾在 `~/Library/Application Support/PhoneDeck` 生成两个模板文件（该目录此前不存在），已删除并加隔离。
+- **未在真实设备验证**：多台真实电脑并行探测与切换确认、5 台电脑共享供音、多手机互斥、Mac 扫码配对/撤销/集中设置/登录启动、
+  mDNS 在 Mac 上的广播、`/api/events` 在真实网络中的长连接表现、PWA 备用入口跳转与再配对。
+- **未完成 / 待办**：MainActivity 的语音会话状态尚未拆成独立控制器（风险较高，需真机回归后再做）；后台在线探测仍为 2 秒，
+  未随事件通道放宽；Mac 不参与 `fleetUpdatesV1`（按 0.21 节）；在 Windows 复跑全部测试。
+
+## 2026-10-05 语音传输延迟优化
 
 - 分支 `agent/voice-latency`，基于 `codex/android-dialogue-ui`（`290690c`），开始时工作树干净。范围：语音延迟与流畅度，
   只改源码、测试、契约和文档；版本号、发布清单、签名渠道均未改，48 kHz / PCM16 / mono 基线不变。决策摘要见

@@ -1,6 +1,28 @@
 # PhoneDeck 架构说明
 
 
+## 2026-10-05 多电脑连接与 Receiver.Core
+
+```text
+Android                                   接收端（Windows / macOS）
+TargetDeviceManager.get()  ── 单例 ──┐    shared/Receiver（Receiver.Core.props）
+ConnectionMonitor.get()              │      ClientCredentials · PairingWindow · NativePairingEndpoints
+  ├ probeAll：并行 + 单台退避 + 共享发现│      LanRequestAuthenticator · TargetEnvelopeValidator
+  ├ probeNow：切换目标前确认           │      SessionLeaseRegistry · PhoneStopReceipts · HealthEvents
+  └ 主界面 / 共享服务复用结果 ─────────┘      MdnsAdvertiser · LoopbackOriginGuard · DesktopConfigurationCore
+managed 会话：GET /api/events 长轮询 ──────▶  平台项目：输入注入、音频输出、输入法探测、身份/证书存储
+```
+
+- `ConnectionMonitor`：`Prober`/`Discoverer`/`AddressSink` 可注入，`MultiComputerTest` 用假网络验证 5 台电脑并行、
+  慢电脑不误判、单台退避、一次发现覆盖全部、结果复用保留原采样时刻。
+- `NativePairingEndpoints.Map(app, NativePairingHost)`：两端的 `/api/lan/pair(/qr)`、`/api/lan/credential/rotate`、
+  `/api/admin/*` 与本机管理页 `/admin/pairing` 同一实现；撤销经 `ClientSessionRegistry` 立即取消音频长流。
+- `HealthEvents`：从健康对象的音频/听写/引擎采集/停止凭据字段计算 `stateVersion`，每 50 ms 比较内存快照。
+- `DictationSessionManager` / `MacDictationSessionManager`：`Stop(..., requesterClientId, checkOwner)` 拒绝其他手机；
+  `IsOwnedBy` 控制健康响应中会话字段的可见性。Mac 新增租约与墓碑，迟到 start 不能复活已停止会话。
+- macOS 集中设置：`MacDesktopConfigurationEndpoints` 与 Windows 同协议；`MacVoiceEngines.ApplySettings` 热替换目录，
+  `MacAutoStart` 写入 `~/Library/LaunchAgents/com.phonedeck.receiver.plist`。
+
 ## 2026-10-05 语音延迟优化
 
 ```text

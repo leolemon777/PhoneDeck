@@ -115,6 +115,11 @@ curl -s http://127.0.0.1:8765/api/health | python3 -m json.tool
 ~/Library/Application Support/PhoneDeck/server-settings.json
 ```
 
+**扫码配对与多手机管理**：在 Mac 浏览器打开 `http://127.0.0.1:8765/admin/pairing`，开启 2 分钟配对窗口，
+用手机「添加电脑 → 扫码配对」扫描二维码并在页面确认；每台手机获得独立凭据，可在同一页面单独撤销（立即断开该手机的音频）。
+手机「设置 → 多电脑配置」可直接修改这台 Mac 的输入法、快捷键、USB 恢复、局域网发现与登录启动（写入
+`~/Library/LaunchAgents/com.phonedeck.receiver.plist`，下次登录生效）。
+
 语音延迟相关环境变量与 Windows 相同：BlackHole 输出默认常开（空闲输出静音，`PHONEDECK_WARM_AUDIO=0`
 关闭）；尾音静音默认 400 ms，可用 `PHONEDECK_OUTPUT_TAIL_MS`（100–1000）调整。常驻输出运行时，
 接收端会先触发输入法再等待手机音频建连，首段语音由两端启动缓存保留。
