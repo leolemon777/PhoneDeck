@@ -38,7 +38,7 @@ internal sealed class BrowserTrust : IDisposable
         root = X509CertificateLoader.LoadPkcs12FromFile(rootPath, password, flags);
         if (root.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(2))
             throw new InvalidOperationException("手机网页证书已到期，请重新建立浏览器信任；不会静默更换已信任根证书");
-        Hosts = (addresses ?? DesktopTrust.Addresses()).Concat(["127.0.0.1", "::1", "localhost"])
+        Hosts = (addresses ?? WebPhoneNetwork.Addresses()).Concat(["127.0.0.1", "::1", "localhost"])
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
         var leafPath = Path.Combine(directory, "server.pfx");
         var hostsPath = Path.Combine(directory, "hosts.txt");

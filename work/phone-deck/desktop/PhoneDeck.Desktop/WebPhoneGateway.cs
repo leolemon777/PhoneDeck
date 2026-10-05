@@ -17,10 +17,9 @@ internal sealed class WebPhoneGateway : IDisposable
 {
     internal const string CookieName = "__Secure-YanduPhone";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private ReceiverIdentity identity;
-    private readonly SpeechSession speech;
-    private readonly PlatformInput input;
-    private readonly Func<bool> audioReady;
+    private WebPhoneIdentity identity;
+    private readonly Func<string, IWebPhoneTarget> localTarget;
+    private readonly Action<string>? revokeLocal;
     private readonly Func<HttpContext, bool> originAllowed;
     private readonly Func<string, IWebPhoneTarget[]>? testTargets;
     private readonly Func<string[]>? browserAddresses;
@@ -35,12 +34,12 @@ internal sealed class WebPhoneGateway : IDisposable
     private readonly RequestDeduplicator inputs = new();
     private readonly CancellationTokenSource lifetime = new();
 
-    internal WebPhoneGateway(ReceiverIdentity identity, SpeechSession speech, PlatformInput input, string dataDirectory,
-        int webPort, string certificateSha256, Func<bool> localAudioReady, Func<HttpContext, bool> originAllowed,
-        Func<string, IWebPhoneTarget[]>? testTargets = null, Func<string[]>? browserAddresses = null)
+    internal WebPhoneGateway(WebPhoneIdentity identity, Func<string, IWebPhoneTarget> localTarget, string dataDirectory,
+        int webPort, string certificateSha256, Func<HttpContext, bool> originAllowed,
+        Func<string, IWebPhoneTarget[]>? testTargets = null, Func<string[]>? browserAddresses = null, Action<string>? revokeLocal = null)
     {
-        this.identity = identity; this.certificateSha256 = certificateSha256; this.speech = speech; this.input = input; this.webPort = webPort;
-        audioReady = localAudioReady; this.originAllowed = originAllowed; this.testTargets = testTargets; this.browserAddresses = browserAddresses;
+        this.identity = identity; this.certificateSha256 = certificateSha256; this.localTarget = localTarget; this.revokeLocal = revokeLocal; this.webPort = webPort;
+        this.originAllowed = originAllowed; this.testTargets = testTargets; this.browserAddresses = browserAddresses;
         privateDirectory = Path.Combine(dataDirectory, "web-phone"); Directory.CreateDirectory(privateDirectory); PrivateFiles.RestrictDirectory(privateDirectory);
         credentials = new ClientCredentialsStore(Path.Combine(privateDirectory, "clients.json"));
         peers = new WebPhonePeerStore(Path.Combine(privateDirectory, "peers.json"));
@@ -51,7 +50,7 @@ internal sealed class WebPhoneGateway : IDisposable
         identity = identity with { DisplayName = name };
         pairing.Cancel(); pairing = new(identity.ComputerId, name, certificateSha256, webPort);
         foreach (var phone in phones.Values)
-            lock (phone.Gate) if (phone.Targets.TryGetValue(identity.ComputerId, out var local) && local is WebPhoneLocalTarget target) target.UpdateName(name);
+            lock (phone.Gate) if (phone.Targets.TryGetValue(identity.ComputerId, out var local)) local.UpdateName(name);
     }
     internal void Map(WebApplication app)
     {
@@ -59,7 +58,7 @@ internal sealed class WebPhoneGateway : IDisposable
         app.MapPost("/local/web/begin", () =>
         {
             if (pairing.HasPendingConfirmation()) return Results.Conflict(new { ok = false, error = "请先确认或拒绝待连接的手机" });
-            var addresses = browserAddresses?.Invoke() ?? DesktopTrust.Addresses();
+            var addresses = browserAddresses?.Invoke() ?? WebPhoneNetwork.Addresses();
             if (browserAddresses is not null && addresses.Length == 0)
             {
                 pairing.Cancel();
@@ -83,7 +82,7 @@ internal sealed class WebPhoneGateway : IDisposable
             if (!Guid.TryParse(r.ClientId, out _)) throw new ArgumentException("手机编号无效");
             credentials.Revoke(r.ClientId!);
             if (phones.TryGetValue(r.ClientId!, out var phone)) phone.Revoked.Cancel();
-            speech.Revoke("web:" + r.ClientId);
+            revokeLocal?.Invoke("web:" + r.ClientId);
             peers.Remove(r.ClientId!);
             return Results.Ok(new { ok = true });
         });
@@ -171,7 +170,7 @@ internal sealed class WebPhoneGateway : IDisposable
         {
             var phone = new BrowserPhone(record.ClientId, record.Label, identity.ComputerId);
             foreach (var target in testTargets?.Invoke(record.ClientId) ??
-                new IWebPhoneTarget[] { new WebPhoneLocalTarget(identity, speech, input, "web:" + record.ClientId, audioReady) }
+                new IWebPhoneTarget[] { localTarget(record.ClientId) }
                     .Concat(peers.ForOwner(record.ClientId).Select(x => (IWebPhoneTarget)new WebPhoneRemoteTarget(x))))
                 phone.Targets[target.Id] = target;
             return phone;
@@ -351,7 +350,7 @@ internal sealed class WebPhoneGateway : IDisposable
                 var completed = await Task.WhenAny(starts); starts.Remove(completed);
                 if (await completed) { success = true; break; }
             }
-            if (!success) throw new InvalidOperationException("电脑未能开始供音，请检查连接、授权及语音模型");
+            if (!success) throw new InvalidOperationException("电脑未能开始供音，请检查连接、输入法和音频设备");
             lock (phone.Gate)
             {
                 if (session.Ended || phone.Session != session) throw new OperationCanceledException();
@@ -363,12 +362,12 @@ internal sealed class WebPhoneGateway : IDisposable
     }
     private static async Task<bool> StartTargetAsync(AudioSession session, IWebPhoneTarget target, CancellationToken cancellation)
     {
-        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(cancellation, session.Canceled.Token); canceled.CancelAfter(TimeSpan.FromSeconds(4));
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(cancellation, session.Canceled.Token); canceled.CancelAfter(TimeSpan.FromSeconds(6));
         try
         {
             var health = await target.HealthAsync(canceled.Token);
             canceled.Token.ThrowIfCancellationRequested();
-            if (!health.Online || !health.AudioReady) throw new InvalidOperationException("请先在电脑准备好语音模型");
+            if (!health.Online || !health.AudioReady) throw new InvalidOperationException("请先检查电脑的输入法与音频设备");
             await target.StartAsync(session.Id, session.Mode, canceled.Token);
             canceled.Token.ThrowIfCancellationRequested(); session.Started.TryAdd(target.Id, true); return true;
         }

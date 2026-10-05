@@ -1,13 +1,13 @@
-name: Cross-platform Desktop Preview
+name: Phone Web Compatibility and Optional Desktop Preview
 on:
   pull_request:
-    paths: ['work/phone-deck/desktop/**','work/phone-deck/android/**','design/yandu-icon.svg','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
+    paths: ['work/phone-deck/shared/**','work/phone-deck/desktop/**','work/phone-deck/android/**','design/yandu-icon.svg','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
   workflow_dispatch:
     inputs:
       include_model:
         description: Bundle verified multilingual model for offline first use
         type: boolean
-        default: true
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -45,7 +45,25 @@ jobs:
             outputs/iphone-pwa/integration/*.json
             outputs/iphone-pwa/integration/*.png
           if-no-files-found: warn
+  protocol-tests:
+    name: Web gateway protocol tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Test browser gateway and optional engine contracts without downloading a model
+        run: dotnet test work/phone-deck/desktop/PhoneDeck.Desktop.Tests/PhoneDeck.Desktop.Tests.csproj -c Release --nologo
   desktop:
+    # Whisper packages remain a deliberately requested developer experiment.
+    # Normal UI/Typeless PR checks must not fetch speech models or publish that route.
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

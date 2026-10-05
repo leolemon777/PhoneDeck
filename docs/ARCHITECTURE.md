@@ -1,8 +1,17 @@
 # PhoneDeck 架构说明
 
+
+## 2026-10-04 Typeless 兼容网页
+
+`shared/PhoneWeb/PhoneWeb.props` 把同一份 PWA、TLS 信任、网页网关和凭据实现嵌入原 Windows/Mac 接收端；没有另开模型服务。`LegacyPhoneWebHost` 提供回环管理页和独立 8768 TLS 浏览器入口，先做端口/Host/Origin 隔离，再让浏览器请求进入网页自身的 cookie 鉴权，不经过旧原生令牌分支。
+
+`WebPhoneGateway` 通过 `Func<string, IWebPhoneTarget>` 创建本机目标，已不依赖 `SpeechSession`。内置实验路线单独构造 `WebPhoneLocalTarget`；外部路线只构造固定 127.0.0.1:8765 的业务目标，调用原有音频、受控输入和听写 API。浏览器表单不能提供这个回环地址；远端电脑仍是私网 IP、固定 API、独立 Bearer 与 TLS pin。
+
+外部 managed 的开始确认时刻与每次健康请求的起始时刻均使用本机单调时钟。只有确认后采样、非 stale/unknown、音频与听写 session 一致（或均已清空且无替代会话）的停止观察才能触发网页停录。shared 显示输入法采集状态，但不因单机停止而结束供音；关供音也不发送第三方快捷键。此路线不创建 `ModelAssets`、Whisper 或转写历史，不承诺取消第三方文字。Mac 的旧永久密钥配对不作为网页 peer 的替代入口，兼容矩阵见 TYPELESS_PWA。
+
 ## 2026-10-03 浏览器手机入口
 
-`Desktop/PhoneWeb` 是内嵌静态 PWA：`ui.js` 负责三种布局/六主题，`app.js` 连接用户手势与电脑状态，
+`Desktop/PhoneWeb` 是内嵌静态 PWA：`ui.js` 负责对话白/极夜黑/常青绿三套完整界面，`app.js` 连接用户手势与电脑状态，
 `session.js` 管理唯一活动会话/有界队列，`audio.js` 与 `pcm-worklet.js` 将实际输入采样率转为 48k PCM16 mono。
 Service Worker 只缓存固定公开资源。音频不写文件，生命周期中断先关麦；重连不会自动重启语音。
 

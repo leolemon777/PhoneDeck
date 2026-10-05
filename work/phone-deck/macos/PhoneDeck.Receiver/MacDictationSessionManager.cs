@@ -120,8 +120,18 @@ internal sealed class MacDictationSessionManager(
             Exception? failure = null;
             try
             {
-                duplicate = engine.End(activeMode ?? engine.Modes.First(), normalizedRequest);
-                stopped = engine.WaitForCapturing(false, 2_000);
+                if (engine.IsCapturing() is false)
+                {
+                    // The user may already have stopped in Typeless. A second toggle
+                    // would start a new recording while the phone is shutting down.
+                    engine.ReleaseHeldKeys();
+                    stopped = true;
+                }
+                else
+                {
+                    duplicate = engine.End(activeMode ?? engine.Modes.First(), normalizedRequest);
+                    stopped = engine.WaitForCapturing(false, 2_000);
+                }
             }
             catch (Exception exception)
             {
@@ -130,6 +140,7 @@ internal sealed class MacDictationSessionManager(
             finally
             {
                 activeSessionId = null;
+                engine.ReleaseHeldKeys();
                 audio.StopSession(normalizedSession);
             }
             if (failure is not null)
@@ -170,6 +181,7 @@ internal sealed class MacDictationSessionManager(
             finally
             {
                 activeSessionId = null;
+                engine.ReleaseHeldKeys();
             }
         }
     }

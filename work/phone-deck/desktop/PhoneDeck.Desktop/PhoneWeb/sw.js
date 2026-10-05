@@ -1,4 +1,4 @@
-const VERSION = 'yandu-phone-v1';
+const VERSION = 'yandu-phone-typeless-v2';
 const SHELL = ['./', './style.css', './app.js', './ui.js', './session.js', './audio.js', './pcm-worklet.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 self.addEventListener('install', event => event.waitUntil(caches.open(VERSION).then(cache => cache.addAll(SHELL))));
 self.addEventListener('activate', event => event.waitUntil((async () => {

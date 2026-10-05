@@ -1,3 +1,4 @@
+using PhoneDeck.Desktop;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -22,6 +23,7 @@ if (!isFirstInstance)
 
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
+using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receiverIdentity.DisplayName, PhoneDeckDataDirectory.Get());
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services.Configure<JsonOptions>(options =>
@@ -30,6 +32,7 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 builder.WebHost.ConfigureKestrel(options =>
 {
+    phoneWeb.Listen(options);
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
@@ -41,6 +44,7 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+phoneWeb.Map(app);
 var serverSettings = ServerSettings.LoadOrCreate();
 var fleetUpdates = new FleetUpdates();
 var configurationGate = new ConfigurationGate();
@@ -112,6 +116,7 @@ app.Use(async (context, next) =>
 
 app.Use(async (context, next) =>
 {
+    if (context.Connection.LocalPort == LegacyPhoneWebHost.Port) { await next(); return; }
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料即授权证明，不经令牌鉴权（设计 §3/§10）。
     var isPairingBootstrap = context.Connection.LocalPort == 8766
         && HttpMethods.IsPost(context.Request.Method)
@@ -856,6 +861,13 @@ app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext conte
             active = true
         });
     }));
+
+app.MapPost("/local/dictation/stop", () =>
+{
+    if (dictationSessions.ActiveSessionId is { } session)
+        dictationSessions.Stop(session, Guid.NewGuid().ToString());
+    return Results.Ok(new { ok = true });
+});
 
 app.MapPost("/api/dictation/stop", (DictationCommand command) =>
     ExecuteDictationCommand(() =>

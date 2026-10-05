@@ -1,0 +1,15 @@
+<Project>
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/WebPhoneGateway.cs" Link="PhoneWeb/WebPhoneGateway.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/WebPhonePeers.cs" Link="PhoneWeb/WebPhonePeers.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/WebPhoneInfrastructure.cs" Link="PhoneWeb/WebPhoneInfrastructure.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/PhoneWebAssets.cs" Link="PhoneWeb/PhoneWebAssets.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/BrowserTrust.cs" Link="PhoneWeb/BrowserTrust.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)LegacyPhoneWebHost.cs" Link="PhoneWeb/LegacyPhoneWebHost.cs" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)LegacyPhoneSetup.html" LogicalName="PhoneDeck.PhoneWeb.Setup.html" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/DesktopWebSetup.js" LogicalName="PhoneDeck.PhoneWeb.Setup.js" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/PhoneWeb/*" LogicalName="PhoneDeck.Desktop.PhoneWeb.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../desktop/PhoneDeck.Desktop/PhoneWeb/icons/*" LogicalName="PhoneDeck.Desktop.PhoneWeb.icons.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

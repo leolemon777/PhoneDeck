@@ -55,6 +55,18 @@ public sealed class MacDictationSessionManagerTests
     }
 
     [TestMethod]
+    public void PhoneStopAfterDesktopStopDoesNotRestartTypeless()
+    {
+        var audio = new FakeAudio(); var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString(); manager.Start(session, Guid.NewGuid().ToString(), "dictation");
+        typeless.Capturing = false; // Stopped using the desktop input method itself.
+        manager.Stop(session, Guid.NewGuid().ToString());
+        Assert.AreEqual(1, typeless.ToggleCount);
+        Assert.IsFalse(manager.IsActive); Assert.IsFalse(typeless.Capturing);
+    }
+
+    [TestMethod]
     public void CaptureProbeAcceptsAnyCapturingEngineProcess()
     {
         Assert.AreEqual(true, MacVoiceEngineStateProbe.CombineCaptureStates(

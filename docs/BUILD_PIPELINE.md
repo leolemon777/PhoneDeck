@@ -1,5 +1,12 @@
 # PhoneDeck 构建、打包与发布流程
 
+
+## 2026-10-04 外部输入法接收端复用 PWA
+
+当前 Typeless 路线从原 Windows `PhoneDeck.Server` / macOS `PhoneDeck.Receiver` 构建，两个项目导入 `shared/PhoneWeb/PhoneWeb.props`，嵌入共用资源、连接宿主和 QRCoder 1.6.0。包内没有模型或识别运行时，不调用 `scripts/build-desktop.ps1`。旧固定三产物更新清单不变，本轮仅源码候选与实机验收，不正式发布。
+
+修改共用网页/网关时同时运行 Desktop、Windows、Mac 的构建/测试和 Node PCM/会话测试。Windows 文件锁失败注入用例需在 Windows 跑，macOS 上的文件替换语义不能替代。只改共享资源也必须触发 CI；PR 跑三平台网关协议测试与网页测试，不自动构建/下载 Whisper。旧模型路线打包改为手动 workflow_dispatch，默认不把模型打入包；其显式原生识别验收仍可下载临时模型，独立保留供二开。
+
 ## 2026-10-03 手机网页 / PWA 预览
 
 `desktop/PhoneDeck.Desktop/PhoneWeb` 静态文件和 `DesktopWebSetup.js` 嵌入新 Desktop 程序，由原跨平台构建入口打包；没有独立 iOS 签名/App Store 工程。仍是 `2.0.0-alpha.1` 开发候选，以提交和产物哈希区分，不替换同名历史候选、不混入旧固定三产物更新包。公开根证书和网页授权均由用户运行接收端时生成，不能包含在发行归档中。

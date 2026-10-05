@@ -15,4 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\PhoneDeck.Server\PhoneDeck.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../macos/PhoneDeck.Receiver.Tests/PhoneWebSecurityTests.cs" Link="PhoneWebSecurityTests.cs" />
+  </ItemGroup>
 </Project>

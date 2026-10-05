@@ -78,6 +78,67 @@ public sealed class WebPhoneRemoteTests
         foreach (var payload in new[] { "[]", "null", "{", "{\"version\":\"1\"}" })
             await Assert.ThrowsExactlyAsync<ArgumentException>(() => WebPhoneRemoteTarget.PairAsync(Guid.NewGuid().ToString(), "test", payload, "192.168.0.2", CancellationToken.None));
     }
+    [TestMethod]
+    public async Task ExternalEngineStopsOnlyForFreshMatchingPostStartObservation()
+    {
+        await using var receiver = await Receiver.Create(external: true); using var target = receiver.CreateTarget();
+        var session = Guid.NewGuid().ToString();
+        await target.StartAsync(session, "managed", CancellationToken.None);
+        Assert.AreEqual("dictation", receiver.RequestedMode);
+        Assert.AreEqual("pcm-s16le", receiver.AudioFormat);
+        receiver.Capturing = false; receiver.ProbeAge = 5000;
+        Assert.IsNull((await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId, "Pre-start cached false must not stop new speech");
+        receiver.ProbeAge = 0; receiver.Stale = true;
+        Assert.IsNull((await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId);
+        receiver.Stale = false; receiver.Capturing = null;
+        Assert.IsNull((await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId);
+        receiver.Capturing = false; receiver.DictationOverride = Guid.NewGuid().ToString();
+        Assert.IsNull((await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId, "Another engine session cannot stop ours");
+        receiver.DictationOverride = null;
+        Assert.AreEqual(session, (await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId);
+        await target.StopAsync(session, false, CancellationToken.None);
+    }
+    [TestMethod]
+    public async Task ExternalStopUsesModeConfirmedForThisSession()
+    {
+        await using var receiver = await Receiver.Create(external: true); using var target = receiver.CreateTarget();
+        var session = Guid.NewGuid().ToString(); await target.StartAsync(session, "managed", CancellationToken.None);
+        receiver.ConfiguredMode = "translation"; await target.HealthAsync(CancellationToken.None);
+        await target.StopAsync(session, false, CancellationToken.None);
+        Assert.AreEqual("dictation", receiver.StoppedMode);
+    }
+    [TestMethod]
+    public async Task ExternalSharedEngineStopsIndependentlyAndClosingSupplyDoesNotToggleIt()
+    {
+        await using var first = await Receiver.Create(external: true); await using var second = await Receiver.Create(external: true);
+        using var a = first.CreateTarget(); using var b = second.CreateTarget(); var session = Guid.NewGuid().ToString();
+        await Task.WhenAll(a.StartAsync(session, "shared", CancellationToken.None), b.StartAsync(session, "shared", CancellationToken.None));
+        first.Capturing = true; second.Capturing = true;
+        Assert.IsTrue((await a.HealthAsync(CancellationToken.None)).Recording);
+        first.Capturing = false;
+        var h = await a.HealthAsync(CancellationToken.None);
+        Assert.IsTrue(h.Streaming); Assert.IsFalse(h.Recording); Assert.IsNull(h.StopRequestedSessionId);
+        Assert.IsTrue((await b.HealthAsync(CancellationToken.None)).Recording);
+        await a.StopAsync(session, false, CancellationToken.None);
+        Assert.IsTrue((await b.HealthAsync(CancellationToken.None)).Streaming);
+        await b.StopAsync(session, true, CancellationToken.None);
+        Assert.AreEqual(0, first.StartCalls + first.StopCalls + first.AudioStopCalls);
+        Assert.AreEqual(0, second.StartCalls + second.StopCalls + second.AudioStopCalls);
+    }
+    [TestMethod]
+    public async Task ExternalOldStopCannotEndReplacementAndDrainedDesktopStopStillReachesPhone()
+    {
+        await using var receiver = await Receiver.Create(external: true); using var target = receiver.CreateTarget();
+        var previous = Guid.NewGuid().ToString(); await target.StartAsync(previous, "managed", CancellationToken.None);
+        await target.StopAsync(previous, false, CancellationToken.None);
+        var session = Guid.NewGuid().ToString(); await target.StartAsync(session, "managed", CancellationToken.None);
+        await target.StopAsync(previous, true, CancellationToken.None);
+        Assert.AreEqual(session, (await target.HealthAsync(CancellationToken.None)).SessionId);
+        receiver.Capturing = false; receiver.StreamContext!.Abort();
+        await Wait(() => !receiver.Speech.Streaming);
+        Assert.AreEqual(session, (await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId);
+        await target.StopAsync(session, true, CancellationToken.None);
+    }
     private sealed class JsonHandler(string body) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -92,7 +153,10 @@ public sealed class WebPhoneRemoteTests
     {
         internal required WebApplication App; internal required SpeechSession Speech; internal required string Id, Token, ClientId, Base;
         internal required X509Certificate2 Certificate; internal int Bytes, AuthenticatedRequests; internal HttpContext? StreamContext;
-        internal static async Task<Receiver> Create()
+        internal string ConfiguredMode = "dictation"; internal string? StoppedMode;
+        internal bool? Capturing; internal long ProbeAge; internal bool Stale; internal string? DictationOverride, RequestedMode, AudioFormat;
+        internal int StartCalls, StopCalls, AudioStopCalls;
+        internal static async Task<Receiver> Create(bool external = false)
         {
             var id = Guid.NewGuid().ToString(); var owner = Guid.NewGuid().ToString(); var token = ClientCredentialsStore.NewToken();
             var speech = new SpeechSession(new FakeEngine(), new TranscriptStore(id), id);
@@ -112,13 +176,20 @@ public sealed class WebPhoneRemoteTests
             app.MapGet("/api/health", () =>
             {
                 var h = speech.HealthForPhone(owner);
+                if (external) return Results.Ok(new { computerId = id,
+                    capabilities = new[] { "phoneAudio", "managedDictation", "sharedMicrophone" },
+                    audio = new { available = true, streaming = h.Streaming, sessionId = h.StreamSession },
+                    dictation = new { active = h.Recording, sessionId = receiver.DictationOverride ?? h.RecordingSession },
+                    voiceEngine = new { displayName = "Typeless fixture", capturing = receiver.Capturing, ageMs = receiver.ProbeAge, stale = receiver.Stale,
+                        modes = new[] { new { id = receiver.ConfiguredMode, configured = true } } } });
                 return Results.Ok(new { computerId = id, capabilities = new[] { "builtInSpeechV1", "phoneStopV1", "audioStopV1" }, audio = new { available = true, streaming = h.Streaming, sessionId = h.StreamSession, stopRequestedSessionId = h.StopRequestedSessionId }, dictation = new { active = h.Recording, sessionId = h.RecordingSession } });
             });
-            app.MapPost("/api/dictation/start", (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); speech.Start(owner, command.SessionId!); return Results.Ok(); });
-            app.MapPost("/api/dictation/stop", async (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); await speech.StopAsync(owner, command.SessionId!, cancel: command.Cancel); return Results.Ok(); });
-            app.MapPost("/api/audio/stop", async (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); await speech.StopSupplyAsync(owner, command.SessionId!, command.Cancel); return Results.Ok(); });
+            app.MapPost("/api/dictation/start", (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); speech.Start(owner, command.SessionId!); receiver.StartCalls++; receiver.RequestedMode = command.Mode; receiver.Capturing = true; return Results.Ok(); });
+            app.MapPost("/api/dictation/stop", async (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); await speech.StopAsync(owner, command.SessionId!, cancel: command.Cancel); receiver.StopCalls++; receiver.StoppedMode = command.Mode; receiver.Capturing = false; return Results.Ok(); });
+            app.MapPost("/api/audio/stop", async (DictationRequest command) => { DesktopApp.ValidateEnvelope(command.ProtocolVersion, command.TargetComputerId, id, command.SessionId, command.RequestId); await speech.StopSupplyAsync(owner, command.SessionId!, command.Cancel); receiver.AudioStopCalls++; return Results.Ok(); });
             app.MapPost("/api/audio/stream", async (HttpContext context) =>
             {
+                receiver.AudioFormat = context.Request.Headers["X-PhoneDeck-Audio"].ToString();
                 var session = context.Request.Headers["X-PhoneDeck-Session"].ToString();
                 if (context.Request.Headers["X-PhoneDeck-Computer-Id"] != id || context.Request.Headers["X-PhoneDeck-Protocol"] != "2") return Results.BadRequest();
                 speech.Attach(owner, session, context.Request.Headers["X-PhoneDeck-Audio-Mode"].ToString()); receiver.StreamContext = context; var orderly = false;

@@ -84,15 +84,3 @@ internal sealed class ModelAssets
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellation)).Equals(Sha256, StringComparison.OrdinalIgnoreCase);
     }
 }
-
-internal static class PrivateFiles
-{
-    internal static void RestrictFile(string path)
-    {
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-    }
-    internal static void RestrictDirectory(string path)
-    {
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-    }
-}

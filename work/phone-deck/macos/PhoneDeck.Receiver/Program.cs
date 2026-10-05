@@ -1,3 +1,4 @@
+using PhoneDeck.Desktop;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -33,6 +34,7 @@ var capabilities = new[]
 };
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
+using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receiverIdentity.DisplayName, PhoneDeckDataDirectory.Get());
 var settings = MacReceiverSettings.LoadOrCreate();
 var keyboard = new MacKeyboardInput();
 using var audioBridge = new MacPhoneAudioBridge(
@@ -54,6 +56,7 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 builder.WebHost.ConfigureKestrel(options =>
 {
+    phoneWeb.Listen(options);
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
@@ -65,6 +68,7 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+phoneWeb.Map(app);
 
 if (settings.UsbWatchdog)
 {
@@ -77,6 +81,7 @@ if (settings.LanDiscovery)
 
 app.Use(async (context, next) =>
 {
+    if (context.Connection.LocalPort == LegacyPhoneWebHost.Port) { await next(); return; }
     if (!LanRequestAuthenticator.IsAuthorized(
             context.Connection.LocalPort,
             context.Request.Headers["X-PhoneDeck-Token"].FirstOrDefault(),
@@ -363,6 +368,13 @@ app.MapPost("/api/dictation/start", (DictationCommand command) =>
     {
         return Results.Conflict(new { ok = false, error = exception.Message });
     }
+});
+
+app.MapPost("/local/dictation/stop", () =>
+{
+    if (dictationSessions.ActiveSessionId is { } session)
+        dictationSessions.Stop(session, Guid.NewGuid().ToString());
+    return Results.Ok(new { ok = true });
 });
 
 app.MapPost("/api/dictation/stop", (DictationCommand command) =>

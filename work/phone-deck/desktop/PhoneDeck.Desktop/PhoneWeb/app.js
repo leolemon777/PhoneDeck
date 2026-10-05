@@ -65,11 +65,11 @@ function render() {
     if (operation.phase === 'starting') { title = '正在准备'; hint = mode === 'hold' ? '松开取消本次说话' : '再次点击可取消'; status = '麦克风与电脑连接中'; }
     else if (operation.phase === 'stopping') { title = '正在结束'; hint = '手机已停录，等待电脑确认'; status = '正在收尾'; }
     else if (operation.mode === 'shared') {
-      title = '关闭共享'; hint = '先在电脑结束本段；关闭共享会取消未结束的转写'; status = recording.length ? recording.map(item => item.name).join('、') + ' 正在听写' : '共享已就绪，等待电脑触发';
+      title = '关闭共享'; hint = '先在电脑结束本段，再关闭手机供音'; status = recording.length ? recording.map(item => item.name).join('、') + ' 正在听写' : '共享已就绪，等待电脑触发';
       detail = `正在向 ${streaming.length}/${operation.targetIds.length} 台电脑供音`;
     } else { title = mode === 'hold' ? '松开结束' : '停止说话'; hint = '电脑端停止也会同步结束'; status = '正在说话'; }
   } else if (paired && connected && target?.online && !target?.audioReady && mode !== 'shared') {
-    status = '电脑尚未准备好'; detail = '请在电脑完成语音模型下载';
+    status = '电脑尚未准备好'; detail = target.error || '请检查电脑的语音引擎与音频设备';
   }
   if (!secure) { status = '需要安全连接'; detail = '请按电脑上的手机网页指引建立信任，再使用 Safari 或 Chrome 打开'; }
   setVoiceState({ state: operation?.phase || (!paired ? 'unpaired' : 'idle'), mode, title, hint, status, detail, level,

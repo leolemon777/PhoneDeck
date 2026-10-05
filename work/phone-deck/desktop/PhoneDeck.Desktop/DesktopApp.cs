@@ -9,8 +9,6 @@ using QRCoder;
 namespace PhoneDeck.Desktop;
 
 internal sealed record DictationRequest(int ProtocolVersion, string? RequestId, string? SessionId, string? TargetComputerId, string? Mode, bool Cancel = false);
-internal sealed record PairRequest(string? PairingId, string? OneTimeMaterial, string? ClientId, string? ClientLabel);
-internal sealed record AdminRequest(string? PairingId, string? ClientId);
 internal sealed record ReceiveRequest(string? TargetComputerId, Transcript Result);
 internal sealed record InputRequest(int? ProtocolVersion, string? RequestId, string? SessionId, string? TargetComputerId, string? Action, string? Text, string[]? Keys, int? HoldMs, InputStep[]? Steps);
 internal sealed record InputStep(string? Type, string? Text, string[]? Keys, int? HoldMs, int? DelayBeforeMs, bool? Submit);
@@ -40,8 +38,9 @@ internal static class DesktopApp
         var speech = new SpeechSession(engine, history, identity.ComputerId,
             testEngine is null && !args.Contains("--history-only") ? () => settings.Current.AutoInsert ? input.PrepareVoiceInsertion() : null : null);
         var hotkeys = args.Contains("--no-hotkeys") ? null : new DesktopHotkeys(speech, settings.Current.TapShortcut, settings.Current.HoldShortcut);
-        var webPhone = browserTrust is null ? null : new WebPhoneGateway(identity, speech, input, PhoneDeckDataDirectory.Get(),
-            webPort, browserTrust.CertificateSha256, () => engine.Ready, context => browserTrust.SameOrigin(context, webPort), browserAddresses: BrowserAddresses);
+        var webPhone = browserTrust is null ? null : new WebPhoneGateway(new(identity.ComputerId, identity.DisplayName),
+            owner => new WebPhoneLocalTarget(identity, speech, input, "web:" + owner, () => engine.Ready), PhoneDeckDataDirectory.Get(),
+            webPort, browserTrust.CertificateSha256, context => browserTrust.SameOrigin(context, webPort), browserAddresses: BrowserAddresses, revokeLocal: speech.Revoke);
         LanDiscoveryResponder? udp = null; MdnsAdvertiser? mdns = null;
         Action ApplyShortcuts(DesktopSettings value)
         {
@@ -375,26 +374,4 @@ internal static class DesktopApp
             if (raw is not null && (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Scheme != "http" || uri.Port != port || !string.Equals(uri.Host.Trim('[', ']'), host.Host.Trim('[', ']'), StringComparison.OrdinalIgnoreCase))) return false;
         return context.Request.Headers["Sec-Fetch-Site"].ToString() != "cross-site";
     }
-}
-
-internal sealed class RequestDeduplicator
-{
-    private readonly Dictionary<string, (long At, string Hash, bool Complete)> recent = new();
-    internal bool Duplicate(string owner, string id, string payload)
-    {
-        foreach (var key in recent.Where(x => Environment.TickCount64 - x.Value.At > 30000).Select(x => x.Key).ToArray()) recent.Remove(key);
-        if (!recent.TryGetValue(owner + ":" + id, out var record)) return false;
-        if (record.Hash != Hash(payload)) throw new ArgumentException("相同请求编号对应不同内容");
-        if (!record.Complete) throw new InvalidOperationException("该请求已尝试但未确认完成，请检查电脑结果；不会自动重复执行");
-        return true;
-    }
-    internal void Begin(string owner, string id, string payload) => Save(owner, id, payload, false);
-    internal void Confirm(string owner, string id, string payload)
-        => Save(owner, id, payload, true);
-    private void Save(string owner, string id, string payload, bool complete)
-    {
-        if (recent.Count >= 4096) recent.Remove(recent.MinBy(x => x.Value.At).Key);
-        recent[owner + ":" + id] = (Environment.TickCount64, Hash(payload), complete);
-    }
-    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

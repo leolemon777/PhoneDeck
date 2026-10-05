@@ -306,7 +306,7 @@ public sealed class WebPhoneGatewayTests
             var speech = new SpeechSession(new FakeEngine(), new TranscriptStore(identity.ComputerId), identity.ComputerId);
             var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
             var origin = $"http://127.0.0.1:{port}"; var builder = WebApplication.CreateBuilder(Array.Empty<string>()); builder.Logging.ClearProviders(); builder.WebHost.UseUrls(origin);
-            var app = builder.Build(); var gateway = new WebPhoneGateway(identity, speech, new PlatformInput(), directory, port, new string('a', 64), () => true, context => context.Request.Headers.Origin == origin, targets, browserAddresses);
+            var app = builder.Build(); var gateway = new WebPhoneGateway(new(identity.ComputerId, identity.DisplayName), owner => new WebPhoneLocalTarget(identity, speech, new PlatformInput(), "web:" + owner, () => true), directory, port, new string('a', 64), context => context.Request.Headers.Origin == origin, targets, browserAddresses, speech.Revoke);
             gateway.Map(app); await app.StartAsync();
             return new Fixture { Directory = directory, Identity = identity, Speech = speech, Gateway = gateway, Origin = origin, App = app, Http = new HttpClient { BaseAddress = new Uri(origin) } };
         }

@@ -101,8 +101,16 @@
         "resolved": "4.3.3",
         "contentHash": "cTcdSPIZ8WvchbC5DFmfHxrvVNZCtops+2W94le+Q+mx110Y9L9mqNVVc9flF35lFeL5GsY+rxGBylsjDk4+zg=="
       },
+      "QRCoder": {
+        "type": "Transitive",
+        "resolved": "1.6.0",
+        "contentHash": "XmPA81eo+oRxBuyVdswsSkTGTE1d3thfF11Z1PdD7oB56A6HU4G4AAOdySmGRMb/cljwlFTMWUtosGEnwpS6GA=="
+      },
       "phonedeck.receiver": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "QRCoder": "[1.6.0, )"
+        }
       }
     },
     "net10.0/osx-arm64": {},

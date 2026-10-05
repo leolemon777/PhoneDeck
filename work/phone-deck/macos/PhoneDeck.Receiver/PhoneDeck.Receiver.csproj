@@ -16,4 +16,9 @@
       <_Parameter1>PhoneDeck.Receiver.Tests</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../windows/PhoneDeck.Server/ClientCredentials.cs" Link="PhoneWeb/ClientCredentials.cs" />
+    <Compile Include="../../windows/PhoneDeck.Server/PairingWindow.cs" Link="PhoneWeb/PairingWindow.cs" />
+  </ItemGroup>
+  <Import Project="../../shared/PhoneWeb/PhoneWeb.props" />
 </Project>
