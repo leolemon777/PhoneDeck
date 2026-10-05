@@ -7,10 +7,10 @@
 - 原 Windows/Mac 接收端复用完整 PWA，回环首页改为外部输入法连接页。共用资源清单 `shared/PhoneWeb/PhoneWeb.props`；`WebPhoneGateway` 改为本机 target 工厂，与模型/识别实现解耦。只通过固定 127.0.0.1:8765 业务 API 连接原音频桥和引擎档案，没有额外识别进程、模型下载或任意代理入口。三款 UI、方式、基础三键保留。
 - 外部目标不再要求 builtInSpeechV1；保留私网 IP、逐设备 Bearer、TLS pin 与 target ID。managed 只消费开始确认后、会话一致、非 stale/unknown 的采集停止；已排空且无替代会话也可确认停止。新旧会话隔离、每会话引擎模式固定，shared 不因单机停止而中断，也不在关供音时替第三方按快捷键。页面取消承诺改为先在电脑结束再关供音。
 - 修复 Mac 普通结束收到迟到手机 stop 时重复 toggle 导致重启听写；hold 键在结束与断流清理时尽力释放。新增回归覆盖真实 TLS 外部引擎状态适配、两个共享目标、陈旧/未知/其他会话、已排空停止、迟到 stop、冻结模式与本机管理 Origin/端口保护。
-- 本地验证：Desktop Release 测试 58 passed / 1 skipped（Windows 原生项），Mac Release 测试 25/25，Windows Release 构建通过，Node PCM/会话 49/49。Windows 测试在 Mac 使用 osx-arm64 托管运行 141 passed / 4 failed；四项均是 Windows 文件锁失败注入的既有用例，不能以 Mac 结果替代 Windows，待本 PR Windows CI。原 Mac 证书构造器 obsolete 警告未扩大处理。证据保留在 ignored `outputs/typeless-compat/tests`。
+- 本地验证：Desktop Release 测试 59 passed / 1 skipped（Windows 原生项），Mac Release 测试 25/25，Windows Release 构建通过，Node PCM/会话 49/49。Windows 测试在 Mac 使用 osx-arm64 托管运行 141 passed / 4 failed；四项均是 Windows 文件锁失败注入的既有用例，不能以 Mac 结果替代 Windows，待本 PR Windows CI。原 Mac 证书构造器 obsolete 警告未扩大处理。证据保留在 ignored `outputs/typeless-compat/tests`。
 - 已在当前真实 Mac 启动原接收端开发进程；BlackHole 2ch 与 CGEvent 辅助功能就绪，确认已安装 Typeless。10 项 HTTPS 静态资源、受保护 API、本机管理跨站与端口隔离检查通过。刚才错误路线下载的模型已删除（190085487 字节），模型目录为空。复用测试数据中的已导出 CA，仅保留公开证书的手机安装，不自动修改信任。
 - 真机待办：当前手机为 USB Samsung SM-G9880 / Android 12，浏览器 Samsung Internet 30.1.0.67；尚未完成网页配对或手机录音。用户找不到 Typeless 麦克风入口，已打开其设置里的麦克风列表，需选择「PhoneDeck Mic - BlackHole 2ch」。**不能报告手机→Typeless转写、电脑停手机停、Goal/退格/回车或 iPhone 已实测成功。** 接收端/ADB/8768 USB 反向通道仅保留供本次用户测试，PID/用途记在 `outputs/device-acceptance-20261004/connection-status.json`，清理时先核对归属。
-- 边界：旧 Mac 没有网页 peer 所需的一次性 QR/逐手机 Bearer；可作为主电脑，但多 Mac 附加电脑需独立安全迁移。Windows 安全扫码 peer 已适配，仍待联合实机。使用说明以 TYPELESS_PWA 为当前入口；独立 Whisper 实验路线保留供二开，PR CI 不自动下载模型，打包改为显式手动运行。
+- 边界：旧 Mac 没有网页 peer 所需的一次性 QR/逐手机 Bearer；可作为主电脑，但多 Mac 附加电脑需独立安全迁移。Windows 安全扫码 peer 已适配，仍待联合实机。草稿 PR #36；后续输入 requestId 按网页手机身份稳定派生，既保留重试去重，也避免不同网页手机相同请求编号互相吞键。使用说明以 TYPELESS_PWA 为当前入口；独立 Whisper 实验路线保留供二开，PR CI 不自动下载模型，打包改为显式手动运行。
 
 ## 2026-10-03 手机 PWA 参考 App 重设计（最新状态）
 

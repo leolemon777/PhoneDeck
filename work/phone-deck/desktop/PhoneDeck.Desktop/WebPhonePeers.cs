@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text;
 using System.Threading.Channels;
 
 namespace PhoneDeck.Desktop;
@@ -94,8 +95,8 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
     }
     // Only the in-process legacy host can create this fixed loopback transport.
     // Browser input can never select a loopback address or an arbitrary URL.
-    internal static WebPhoneRemoteTarget LocalExternal(WebPhoneIdentity identity) => new(
-        new("local", identity.ComputerId, identity.DisplayName, "127.0.0.1", 8765, "", "local", "local", ["audio", "control"]),
+    internal static WebPhoneRemoteTarget LocalExternal(WebPhoneIdentity identity, string owner) => new(
+        new(owner, identity.ComputerId, identity.DisplayName, "127.0.0.1", 8765, "", "local", "local", ["audio", "control"]),
         new HttpClient(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false })
         { BaseAddress = new Uri("http://127.0.0.1:8765/"), Timeout = Timeout.InfiniteTimeSpan }) { external = true };
 
@@ -255,9 +256,12 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
     public Task InputAsync(string request, string action, CancellationToken cancellation)
     {
         if (!peer.Scopes.Contains("control")) throw new InvalidOperationException("这台电脑未授权输入");
+        // Native loopback deduplication is global. Keep retries stable while
+        // preventing two approved browsers with the same request ID colliding.
+        var nativeRequest = "web-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(peer.OwnerId + ":" + request)));
         object body = action == "goal"
-            ? new { protocolVersion = 2, requestId = request, sessionId = Guid.NewGuid().ToString(), targetComputerId = Id, action = "macro", steps = new[] { new { type = "text", text = "/goal", submit = true } } }
-            : new { protocolVersion = 2, requestId = request, sessionId = Guid.NewGuid().ToString(), targetComputerId = Id, action };
+            ? new { protocolVersion = 2, requestId = nativeRequest, sessionId = Guid.NewGuid().ToString(), targetComputerId = Id, action = "macro", steps = new[] { new { type = "text", text = "/goal", submit = true } } }
+            : new { protocolVersion = 2, requestId = nativeRequest, sessionId = Guid.NewGuid().ToString(), targetComputerId = Id, action };
         return PostAsync("api/input", body, cancellation);
     }
     private async Task PostAsync(string path, object body, CancellationToken cancellation)

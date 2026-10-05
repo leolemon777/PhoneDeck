@@ -139,6 +139,30 @@ public sealed class WebPhoneRemoteTests
         Assert.AreEqual(session, (await target.HealthAsync(CancellationToken.None)).StopRequestedSessionId);
         await target.StopAsync(session, true, CancellationToken.None);
     }
+    [TestMethod]
+    public async Task InputRetriesRemainStableWithoutCollidingAcrossApprovedPhones()
+    {
+        using var handler = new InputHandler();
+        WebPhoneRemoteTarget Target(string owner) => new(new(owner, Guid.NewGuid().ToString(), "input", "192.168.0.2", 8766,
+            new string('a', 64), Guid.NewGuid().ToString(), "test-token", ["control"]),
+            new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://192.168.0.2:8766/") });
+        using var first = Target(Guid.NewGuid().ToString()); using var second = Target(Guid.NewGuid().ToString());
+        await first.InputAsync("same-request", "backspace", CancellationToken.None);
+        await first.InputAsync("same-request", "backspace", CancellationToken.None);
+        await second.InputAsync("same-request", "backspace", CancellationToken.None);
+        Assert.AreEqual(handler.Ids[0], handler.Ids[1]); Assert.AreNotEqual(handler.Ids[0], handler.Ids[2]);
+        Assert.IsTrue(handler.Ids.All(id => id.Length <= 128));
+    }
+    private sealed class InputHandler : HttpMessageHandler
+    {
+        internal List<string> Ids = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            Ids.Add(json.RootElement.GetProperty("requestId").GetString()!);
+            return new(HttpStatusCode.OK) { Content = new StringContent("{}") };
+        }
+    }
     private sealed class JsonHandler(string body) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

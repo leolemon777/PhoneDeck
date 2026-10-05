@@ -15,7 +15,7 @@ internal sealed class LegacyPhoneWebHost : IDisposable
     {
         trust = new BrowserTrust(dataDirectory, computerId);
         var identity = new WebPhoneIdentity(computerId, name);
-        gateway = new WebPhoneGateway(identity, _ => WebPhoneRemoteTarget.LocalExternal(identity), dataDirectory,
+        gateway = new WebPhoneGateway(identity, owner => WebPhoneRemoteTarget.LocalExternal(identity, owner), dataDirectory,
             Port, trust.CertificateSha256, context => trust.SameOrigin(context, Port), browserAddresses: Addresses);
     }
     private string[] Addresses() => WebPhoneNetwork.Addresses().Where(address => trust.Hosts.Contains(address)).ToArray();
