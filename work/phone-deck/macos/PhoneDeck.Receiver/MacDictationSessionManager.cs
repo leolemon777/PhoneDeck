@@ -287,7 +287,7 @@ internal sealed class MacDictationSessionManager(
                 audio.StopSession(session);
             }
             activeSessionId = null;
-                activeOwnerClientId = null;
+            activeOwnerClientId = null;
         }
         engine.Dispose();
     }
