@@ -165,7 +165,9 @@ export class AudioCapture {
     try {
       this.setState(run, "starting");
       this.assertCurrent(run);
-      run.context = new Context({ latencyHint: "interactive" });
+      // Ask for 48 kHz so the worklet usually skips resampling; older engines reject it.
+      try { run.context = new Context({ latencyHint: "interactive", sampleRate: 48000 }); }
+      catch { run.context = new Context({ latencyHint: "interactive" }); }
       const context = run.context;
       if (!context.audioWorklet) throw new Error("当前浏览器不支持语音采集，请升级 Safari 或系统");
       this.listen(run, context, "statechange", () => {

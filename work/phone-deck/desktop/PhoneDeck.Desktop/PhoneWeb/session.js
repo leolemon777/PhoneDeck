@@ -1,6 +1,16 @@
 // A unique operation owns capture, startup, bounded PCM and stop. Replies and
 // callbacks from an older operation can never change the next operation.
 const quiet = (callback, ...args) => { try { callback?.(...args); } catch { /* UI does not own resources. */ } };
+// Same threshold as the receivers' PcmLatency: RMS below about -48 dBFS is silence.
+export const isSilentPCM = bytes => {
+  const samples = new Int16Array(bytes, 0, bytes.byteLength >> 1);
+  if (!samples.length) return true;
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  return Math.sqrt(sum / samples.length) < 130;
+};
+// A Wi-Fi stall shorter than this keeps the session alive; the 1 s queue still bounds memory.
+export const PCM_STALL_TOLERANCE_MS = 1000;
 
 export class VoiceSession {
   constructor({ capture, transport, changed = () => {}, interrupted = () => {}, level = () => {} }) {
@@ -47,10 +57,14 @@ export class VoiceSession {
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 2 || bytes.byteLength > 1920 || bytes.byteLength % 2) {
       this.audioFailed(op, '音频帧无效，本段已取消'); return;
     }
-    // Preserve first words or explicitly cancel. Never silently discard arbitrary
-    // audio while waiting for a slow connection, and never grow beyond one second.
-    if (op.bytes + bytes.byteLength > 96000) {
-      this.audioFailed(op, '电脑连接较慢，本段已取消，请重新开始'); return;
+    // Preserve first words or explicitly cancel. Never grow beyond one second: drop the
+    // oldest queued silence first; shared audio then drops its oldest frame to stay live,
+    // while managed dictation cancels rather than silently losing speech.
+    while (op.bytes + bytes.byteLength > 96000) {
+      const silent = op.queue.findIndex(isSilentPCM);
+      const index = silent >= 0 ? silent : op.mode === 'shared' ? 0 : -1;
+      if (index < 0) { this.audioFailed(op, '电脑连接较慢，本段已取消，请重新开始'); return; }
+      const [dropped] = op.queue.splice(index, 1); op.bytes -= dropped.byteLength;
     }
     op.queue.push(bytes); op.bytes += bytes.byteLength;
     if (op.ready) void this.pump(op).catch(() => {});
@@ -64,7 +78,7 @@ export class VoiceSession {
         const bytes = op.queue[0];
         // A pre-roll burst can exceed the socket's live-audio limit. Wait for bounded
         // writable space before each frame instead of treating that burst as failure.
-        if (this.transport.waitForPCM) await this.transport.waitForPCM(bytes.byteLength);
+        if (this.transport.waitForPCM) await this.transport.waitForPCM(bytes.byteLength, PCM_STALL_TOLERANCE_MS);
         if (this.current !== op || op.cancelRequested) break;
         this.transport.sendPCM(bytes);
         op.queue.shift(); op.bytes -= bytes.byteLength;

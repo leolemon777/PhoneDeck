@@ -103,7 +103,8 @@ test('a failed tail send is canceled/disconnected, never silently submitted as s
 test('startup buffer is bounded to one second and overflow explicitly cancels', async () => {
   const f = sessionFixture({ delayedStart: true });
   const start = f.voice.start('managed', ['one']), op = f.voice.current;
-  for (let i = 0; i < 50; i++) f.callbacks[0].onChunk(pcm(i));
+  // Non-zero frames are speech: managed dictation must cancel rather than drop them.
+  for (let i = 0; i < 50; i++) f.callbacks[0].onChunk(pcm(i + 1));
   assert.equal(op.bytes, 96000);
   f.callbacks[0].onChunk(pcm(51));
   assert.ok(op.bytes <= 96000);
@@ -347,4 +348,40 @@ test('a connection callback can disable the socket without leaving a heartbeat b
   f.transport.enabled = true; f.transport.connect(); f.socket.open();
   assert.equal(f.transport.socket, null); assert.equal(f.clock.timers.size, 0);
   await f.clock.advance(20000); assert.equal(f.instances.length, 2);
+});
+
+test('full startup buffer drops oldest silence first and keeps the session', async () => {
+  const f = sessionFixture({ delayedStart: true });
+  const start = f.voice.start('managed', ['one']), op = f.voice.current;
+  f.callbacks[0].onChunk(pcm(0));
+  for (let i = 1; i < 50; i++) f.callbacks[0].onChunk(pcm(i));
+  f.callbacks[0].onChunk(pcm(60));
+  assert.equal(op.bytes, 96000);
+  assert.equal(new Uint8Array(op.queue[0])[0], 1, 'the silent frame is dropped, speech is kept');
+  assert.equal(new Uint8Array(op.queue.at(-1))[0], 60);
+  assert.equal(f.voice.current, op);
+  await f.voice.stop({ cancel: true });
+  f.requests[0].response.resolve({}); await start;
+});
+
+test('shared supply stays live by dropping its oldest frame when no silence is queued', async () => {
+  const f = sessionFixture({ delayedStart: true });
+  const start = f.voice.start('shared', ['one', 'two']), op = f.voice.current;
+  for (let i = 1; i <= 51; i++) f.callbacks[0].onChunk(pcm(i));
+  assert.equal(op.bytes, 96000);
+  assert.equal(new Uint8Array(op.queue[0])[0], 2);
+  assert.equal(f.voice.current, op);
+  await f.voice.stop({ cancel: true });
+  f.requests[0].response.resolve({}); await start;
+});
+
+test('a brief Wi-Fi stall waits up to the stall tolerance instead of failing the segment', async () => {
+  const waits = [];
+  const f = sessionFixture({ waitForPCM: (bytes, timeout) => { waits.push(timeout); return Promise.resolve(); } });
+  const start = f.voice.start('managed', ['one']);
+  f.callbacks[0].onChunk(pcm(5));
+  await start; await flush();
+  assert.ok(waits.length > 0);
+  assert.equal(waits[0], 1000);
+  await f.voice.stop();
 });
