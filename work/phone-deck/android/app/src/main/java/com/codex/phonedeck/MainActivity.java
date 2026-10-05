@@ -78,6 +78,10 @@ public final class MainActivity extends Activity {
     private final ExecutorService voiceRecoveryExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService voiceStatusExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService connectionExecutor = Executors.newSingleThreadExecutor();
+    /// 按下话筒时预热两条 keep-alive 连接（音频流与开始指令各用一条），省掉抬手后的 TLS 握手。
+    private final ExecutorService voicePrewarmExecutor = Executors.newFixedThreadPool(2);
+    private static final long VOICE_PREWARM_INTERVAL_MS = 3_000;
+    private long lastVoicePrewarmAt;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private PhoneDeckTheme theme;
     private String appliedThemeId;
@@ -266,6 +270,11 @@ public final class MainActivity extends Activity {
         maybeHandlePairingTestHook(getIntent());
         registerSharedAudioStatusReceiver();
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
+            @Override
+            public void onCapturing(String sessionId) {
+                mainHandler.post(() -> onPhoneCapturing(sessionId));
+            }
+
             @Override
             public void onReady(String sessionId) {
                 mainHandler.post(() -> onAudioReady(sessionId));
@@ -2667,6 +2676,10 @@ public final class MainActivity extends Activity {
                     return true;
                 }
                 TouchFeedback.press(view, 0.93f, true);
+                if (WORK_MANAGED.equals(voiceWorkMode) && MODE_TAP.equals(voiceMode)
+                        && !dictationActive && !audioStartPending && !typelessInFlight) {
+                    prewarmVoicePath();
+                }
                 if (WORK_MANAGED.equals(voiceWorkMode) && MODE_HOLD.equals(voiceMode)) {
                     // Consuming the hold gesture bypasses Button's own pressed/ripple state.
                     view.drawableHotspotChanged(event.getX(), event.getY());
@@ -3144,13 +3157,53 @@ public final class MainActivity extends Activity {
         sendTypelessToggle(false);
     }
 
+    /// 手机已开始采音：手机与接收端的启动缓存会保住首音节，立即提示用户开口，
+    /// 不等电脑确认；电脑最终未确认时，原有失败路径会停止录音并给出错误。
+    /// 仅限 managed 会话：旧接收端在输入法唤醒前就播放音频，提前开口会丢字。
+    private void onPhoneCapturing(String sessionId) {
+        if (!sessionId.equals(currentSessionId) || !currentSessionManaged || dictationActive
+                || !(audioStartPending || typelessInFlight)) {
+            return;
+        }
+        microphoneLevel.setText("手机麦克风  ● 可以说话了");
+        microphoneLevel.setTextColor(theme.success);
+        showActionFeedback("●  可以开始说话 · 正在连接电脑，开头不会丢", theme.success);
+        if (typelessButton != null) {
+            TouchFeedback.selection(typelessButton);
+        }
+    }
+
+    /// 点击模式按下话筒（抬手才真正开始）：预创建麦克风并预热到当前电脑的连接。
+    private void prewarmVoicePath() {
+        if (audioStreamer != null) {
+            audioStreamer.prepare();
+        }
+        long now = SystemClock.elapsedRealtime();
+        PhoneDeckEndpoint endpoint = endpointForActiveTarget();
+        if (endpoint == null || now - lastVoicePrewarmAt < VOICE_PREWARM_INTERVAL_MS
+                || voicePrewarmExecutor.isShutdown()) {
+            return;
+        }
+        lastVoicePrewarmAt = now;
+        for (int index = 0; index < 2; index++) {
+            voicePrewarmExecutor.execute(() -> {
+                try {
+                    // 成功响应会把已完成握手的连接留在 keep-alive 池中。
+                    PhoneDeckHttp.getJson(endpoint, "/api/health", 600, 900);
+                } catch (Exception ignored) {
+                    // 预热失败不影响正式开始。
+                }
+            });
+        }
+    }
+
     private void onAudioReady(String sessionId) {
         if (!audioStartPending || !sessionId.equals(currentSessionId)) {
             return;
         }
         audioStartPending = false;
         if (currentSessionManaged) {
-            showActionFeedback("●  手机麦克风已连接，正在等待电脑端确认…", theme.warning);
+            showActionFeedback("●  可以继续说话 · 声音已送达电脑，等待输入法确认…", theme.success);
             return;
         }
         showActionFeedback("●  手机麦克风已连接，正在唤醒语音输入…", theme.warning);
@@ -3661,6 +3714,7 @@ public final class MainActivity extends Activity {
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
+        voicePrewarmExecutor.shutdownNow();
         super.onDestroy();
     }
 

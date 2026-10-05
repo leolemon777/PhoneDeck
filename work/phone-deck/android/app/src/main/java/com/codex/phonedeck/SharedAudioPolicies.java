@@ -14,6 +14,24 @@ final class SharedAudioPolicies {
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
     }
 
+    /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
+    static final double SILENCE_RMS = 130;
+
+    static boolean isSilent(byte[] pcm) {
+        int samples = pcm.length / 2;
+        if (samples == 0) {
+            return true;
+        }
+        double sum = 0;
+        for (int index = 0; index + 1 < pcm.length; index += 2) {
+            short sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
+            sum += (double) sample * sample;
+        }
+        return Math.sqrt(sum / samples) < SILENCE_RMS;
+    }
+
+    /// 网络短暂卡顿时的有界队列：满了优先丢最旧的静音帧，没有静音才丢最旧帧，
+    /// 尽量不吞字，同时不积累成秒级延迟。
     static final class FrameQueue {
         private final ArrayDeque<byte[]> frames = new ArrayDeque<>();
         private final int capacity;
@@ -31,7 +49,18 @@ final class SharedAudioPolicies {
                 return;
             }
             if (frames.size() == capacity) {
-                frames.removeFirst();
+                java.util.Iterator<byte[]> oldest = frames.iterator();
+                boolean droppedSilence = false;
+                while (oldest.hasNext()) {
+                    if (isSilent(oldest.next())) {
+                        oldest.remove();
+                        droppedSilence = true;
+                        break;
+                    }
+                }
+                if (!droppedSilence) {
+                    frames.removeFirst();
+                }
             }
             frames.addLast(frame);
             notifyAll();

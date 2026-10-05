@@ -75,4 +75,52 @@ public final class SharedAudioPoliciesTest {
         backoff.reset();
         assertEquals(500, backoff.nextDelayMs());
     }
+
+    private static byte[] voiced(byte marker) {
+        byte[] frame = new byte[1_920];
+        for (int index = 0; index + 1 < frame.length; index += 2) {
+            short sample = (short) (((index / 2 / 24) % 2 == 0 ? 3_000 : -3_000) + marker);
+            frame[index] = (byte) sample;
+            frame[index + 1] = (byte) (sample >> 8);
+        }
+        return frame;
+    }
+
+    @Test
+    public void fullQueueDropsOldestSilenceBeforeAnyVoice() throws Exception {
+        SharedAudioPolicies.FrameQueue queue = new SharedAudioPolicies.FrameQueue(3);
+        byte[] voiceA = voiced((byte) 1);
+        byte[] silence = new byte[1_920];
+        byte[] voiceB = voiced((byte) 2);
+        byte[] voiceC = voiced((byte) 3);
+        queue.offerLatest(voiceA);
+        queue.offerLatest(silence);
+        queue.offerLatest(voiceB);
+
+        queue.offerLatest(voiceC);
+
+        assertArrayEquals(voiceA, queue.take());
+        assertArrayEquals(voiceB, queue.take());
+        assertArrayEquals(voiceC, queue.take());
+    }
+
+    @Test
+    public void fullQueueOfVoiceStillDropsOldestToStayLive() throws Exception {
+        SharedAudioPolicies.FrameQueue queue = new SharedAudioPolicies.FrameQueue(2);
+        byte[] first = voiced((byte) 1);
+        byte[] second = voiced((byte) 2);
+        byte[] third = voiced((byte) 3);
+        queue.offerLatest(first);
+        queue.offerLatest(second);
+        queue.offerLatest(third);
+
+        assertArrayEquals(second, queue.take());
+        assertArrayEquals(third, queue.take());
+    }
+
+    @Test
+    public void silenceThresholdMatchesReceivers() {
+        org.junit.Assert.assertTrue(SharedAudioPolicies.isSilent(new byte[1_920]));
+        org.junit.Assert.assertFalse(SharedAudioPolicies.isSilent(voiced((byte) 0)));
+    }
 }

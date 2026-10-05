@@ -154,13 +154,78 @@ final class PhoneDeckHttp {
         }
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(null, new TrustManager[]{new PinnedTrustManager(pin)}, new SecureRandom());
-        SSLSocketFactory created = context.getSocketFactory();
+        SSLSocketFactory created = new NoDelaySocketFactory(context.getSocketFactory());
         SSLSocketFactory previous = PINNED_FACTORIES.putIfAbsent(pin, created);
         return previous == null ? created : previous;
     }
 
     private static String normalizePin(String pin) {
         return pin.replace(":", "").trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * 音频每 20 ms 写一个约 1.9 KB 的 TLS 记录，超过一个 MSS 会拆成两段；
+     * 默认的 Nagle 算法会扣住尾段等待电脑 ACK，叠加 Windows 延迟确认可产生周期性卡顿。
+     * 所有证书固定连接一律关闭 Nagle（底层 TCP 套接字与 TLS 套接字都设置）。
+     */
+    static final class NoDelaySocketFactory extends SSLSocketFactory {
+        private final SSLSocketFactory delegate;
+
+        NoDelaySocketFactory(SSLSocketFactory delegate) {
+            this.delegate = delegate;
+        }
+
+        static java.net.Socket noDelay(java.net.Socket socket) {
+            if (socket != null) {
+                try {
+                    socket.setTcpNoDelay(true);
+                } catch (java.net.SocketException ignored) {
+                    // 个别实现不支持时保持默认，连接本身仍可用。
+                }
+            }
+            return socket;
+        }
+
+        @Override public String[] getDefaultCipherSuites() {
+            return delegate.getDefaultCipherSuites();
+        }
+
+        @Override public String[] getSupportedCipherSuites() {
+            return delegate.getSupportedCipherSuites();
+        }
+
+        @Override public java.net.Socket createSocket() throws java.io.IOException {
+            return noDelay(delegate.createSocket());
+        }
+
+        @Override public java.net.Socket createSocket(
+                java.net.Socket socket, String host, int port, boolean autoClose)
+                throws java.io.IOException {
+            noDelay(socket);
+            return noDelay(delegate.createSocket(socket, host, port, autoClose));
+        }
+
+        @Override public java.net.Socket createSocket(String host, int port)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port));
+        }
+
+        @Override public java.net.Socket createSocket(
+                String host, int port, java.net.InetAddress localHost, int localPort)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port, localHost, localPort));
+        }
+
+        @Override public java.net.Socket createSocket(java.net.InetAddress host, int port)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port));
+        }
+
+        @Override public java.net.Socket createSocket(
+                java.net.InetAddress address, int port,
+                java.net.InetAddress localAddress, int localPort) throws java.io.IOException {
+            return noDelay(delegate.createSocket(address, port, localAddress, localPort));
+        }
     }
 
     private static final class PinnedTrustManager implements X509TrustManager {

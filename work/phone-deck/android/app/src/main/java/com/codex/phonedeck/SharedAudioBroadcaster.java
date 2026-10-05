@@ -42,7 +42,8 @@ final class SharedAudioBroadcaster implements AutoCloseable {
 
     private static final int SAMPLE_RATE = 48_000;
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 * 20 / 1_000;
-    private static final int QUEUE_FRAMES = 6; // 120 ms; shared audio must remain live.
+    // 240 ms：吸收常见 Wi-Fi 抖动；满了优先丢静音（见 FrameQueue），接收端再跳过积压静音。
+    private static final int QUEUE_FRAMES = 12;
 
     private final Context context;
     private final Listener listener;
@@ -124,6 +125,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
 
     @android.annotation.SuppressLint("MissingPermission")
     private void captureLoop() {
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord localRecorder = null;
         String failure = null;
         try {
@@ -273,6 +275,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         }
 
         void writeLoop() {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO);
             SharedAudioPolicies.ReconnectBackoff backoff =
                     new SharedAudioPolicies.ReconnectBackoff();
             while (shouldRun) {
