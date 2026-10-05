@@ -10,6 +10,10 @@
   共享模式、指令面板无崩溃。在线状态、卡内模式切换、滑动切换和说话中外观是在本地临时注入假在线状态后截图的，
   注入代码已删除、未提交。截图在 ignored `outputs/android-home-cards/`。期间修复：`lanTargets` 用空 ID 查询崩溃、
   方式切换条被裁。
+- **扫码崩溃（既有问题）**：zxing-android-embedded 4.3.0 运行时调用 androidx `ContextCompat`/`ActivityCompat`，但 POM
+  未声明依赖、本项目 `useAndroidX=false`，打开扫码页即崩溃。新增 `app/src/main/java/androidx/core/...` 两个转发类修复；
+  以后若引入真正的 androidx.core 需删除它们。已在 Samsung 上确认扫码页能打开到相机权限弹窗。
+- **真机**：`.dialoguepreview`（言渡·对话白，本机 `~/.android/debug.keystore` 签名）已覆盖安装到 Samsung，首页正常显示。
 - **未验证**：真实在线电脑上的听写/翻译/问答启动与“刚刚”记录、真实切换确认、真机滑动手感、字体缩放与读屏顺序。
   测试时 Samsung 手机通过 USB 连着，未向其安装任何包。
 - **待办**：真机安装需用户选择渠道（`.preview` 签名不在本机）；其他配色移植；方案二的启动中、电脑未确认、长按管理与
