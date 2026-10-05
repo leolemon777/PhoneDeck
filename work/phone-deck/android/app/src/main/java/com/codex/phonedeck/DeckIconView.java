@@ -34,6 +34,16 @@ final class DeckIconView extends View {
                 canvas.drawLine(12, 16, 12, 20, paint);
                 canvas.drawLine(8, 20, 16, 20, paint);
                 break;
+            case "laptop":
+                canvas.drawRoundRect(5, 5, 19, 15, 1.5f, 1.5f, paint);
+                canvas.drawLine(2.5f, 18.5f, 21.5f, 18.5f, paint);
+                canvas.drawLine(5, 15, 3.5f, 18.5f, paint);
+                canvas.drawLine(19, 15, 20.5f, 18.5f, paint);
+                break;
+            case "plus":
+                canvas.drawLine(12, 5, 12, 19, paint);
+                canvas.drawLine(5, 12, 19, 12, paint);
+                break;
             case "appearance":
                 canvas.drawCircle(12, 12, 8, paint);
                 canvas.drawLine(12, 4, 12, 20, paint);
