@@ -1245,6 +1245,7 @@ public final class MainActivity extends Activity {
         String state = confirming ? "正在确认…" : rejected ? "配对已失效 · 长按重新配对"
                 : recording ? "正在" + modeVerb(effectiveSelectedMode())
                 : shared && device.sharedGroup ? (sharedState == null ? "共享组 · 等待供音" : sharedState)
+                : shared ? (online ? "在线 · 未加入共享组" : "离线 · 未加入共享组")
                 : online ? "在线" : "离线";
         int dotColor = confirming ? theme.warning : rejected ? theme.warning : recording ? theme.danger
                 : online ? theme.mix(theme.success, onInk, 0.35f) : soft;
@@ -1259,7 +1260,16 @@ public final class MainActivity extends Activity {
         if (device.sharedGroup && !shared) stateRow.addView(text("共享组", 12, soft, Typeface.NORMAL), margins(dp(14), 0, 0, 0, -2, -2));
         card.addView(stateRow, margins(0, dp(4), 0, 0, -1, -2));
 
-        if (selected && shared) {
+        if (selected && shared && !device.sharedGroup) {
+            TextView join = text("加入共享组", 13, ink, Typeface.BOLD);
+            join.setGravity(Gravity.CENTER);
+            join.setBackground(theme.pressable(this, onInk, theme.mix(onInk, ink, 0.15f), 20));
+            join.setContentDescription("把这台电脑加入共享组");
+            join.setOnClickListener(view -> toggleSharedGroupFromCard(device));
+            card.addView(join, margins(0, dp(12), 0, 0, -1, dp(40)));
+            TextView hint = text("只有共享组里的电脑会收到手机的声音", 12, soft, Typeface.NORMAL);
+            card.addView(hint, margins(0, dp(8), 0, 0, -1, -2));
+        } else if (selected && shared) {
             TextView note = text("共享时由这台电脑自己的快捷键开始和停止，模式按它的输入法设置", 12, soft, Typeface.NORMAL);
             note.setLineSpacing(0, 1.25f);
             card.addView(note, margins(0, dp(12), 0, 0, -1, -2));
@@ -1340,6 +1350,7 @@ public final class MainActivity extends Activity {
         String engine = engineNameFor(device.computerId);
         String state = rejected ? "配对已失效" : busy ? "说话时不能切换"
                 : shared && device.sharedGroup ? (sharedState == null ? "共享组" : "共享组 · " + sharedState)
+                : shared ? "未加入共享组"
                 : online ? "在线" + (engine == null ? "" : " · " + engine) : "离线";
         LinearLayout stateRow = new LinearLayout(this);
         stateRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -2358,6 +2369,60 @@ public final class MainActivity extends Activity {
                     showManageComputersDialog();
                 })
                 .setNegativeButton("取消", (dialog, which) -> showManageComputersDialog()).show();
+    }
+
+    private boolean hasSharedGroupMember() {
+        for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
+            if (device.sharedGroup) return true;
+        }
+        return false;
+    }
+
+    /// 共享组为空时开启共享：先请用户勾选接收电脑（默认勾选当前电脑），确认后才入组并开启。
+    /// 共享组仍是显式集合，只是不再静默等待 15 秒后自动停止。
+    private void showJoinSharedGroupDialog() {
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            showActionFeedback("✕  先扫码配对一台电脑，再开启共享麦克风", theme.warning);
+            return;
+        }
+        String activeId = targetDeviceManager.getActiveComputerId();
+        String[] labels = new String[devices.size()];
+        boolean[] checked = new boolean[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            labels[i] = device.slot + "号 · " + device.displayName
+                    + (isDeviceOnline(device.computerId) ? "" : "（离线）");
+            checked[i] = devices.size() == 1 || sameComputer(device.computerId, activeId);
+        }
+        new AlertDialog.Builder(this).setTitle("选择接收共享声音的电脑")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("加入并开启", (dialog, which) -> {
+                    boolean any = false;
+                    for (int i = 0; i < devices.size(); i++) {
+                        if (checked[i]) {
+                            targetDeviceManager.setSharedGroup(devices.get(i).computerId, true);
+                            any = true;
+                        }
+                    }
+                    lastComputerCardsSignature = null;
+                    refreshComputerCards();
+                    if (!any) {
+                        showActionFeedback("✕  没有选择电脑，共享麦克风未开启", theme.warning);
+                        return;
+                    }
+                    toggleSharedMicrophone();
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    private void toggleSharedGroupFromCard(TargetDeviceManager.Device device) {
+        boolean join = !device.sharedGroup;
+        targetDeviceManager.setSharedGroup(device.computerId, join);
+        lastComputerCardsSignature = null;
+        refreshComputerCards();
+        showActionFeedback(join ? "✓  " + device.displayName + " 已加入共享组"
+                : "✓  " + device.displayName + " 已移出共享组", theme.success);
     }
 
     /// M1-B/DEV-03：共享组多选；切换即持久化，下一轮探测生效（移除即停发该目标流）。
@@ -3777,6 +3842,10 @@ public final class MainActivity extends Activity {
         if (isVoiceStarting() || dictationActive || typelessInFlight
                 || (audioStreamer != null && audioStreamer.isRunning())) {
             showActionFeedback("✕  请等待手机控制听写完全结束后再开启共享", theme.warning);
+            return;
+        }
+        if (!hasSharedGroupMember()) {
+            showJoinSharedGroupDialog();
             return;
         }
         java.util.ArrayList<String> missing = new java.util.ArrayList<>();
