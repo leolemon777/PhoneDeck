@@ -16,6 +16,8 @@ internal interface IWebPhoneTarget : IDisposable
 {
     string Id { get; }
     string Name { get; }
+    /// <summary>这台电脑自己的私网地址；主电脑离线时，网页据此提示改用它的手机入口。本机目标为 null。</summary>
+    string? EntryHost => null;
     void UpdateName(string name) { }
     Task<WebPhoneTargetState> HealthAsync(CancellationToken cancellation);
     Task StartAsync(string session, string mode, CancellationToken cancellation);
@@ -86,6 +88,7 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
     private string? engineMode;
     public string Id => peer.ComputerId;
     public string Name => peer.Name;
+    public string? EntryHost => peer.Host == "127.0.0.1" ? null : peer.Host;
     internal WebPhoneRemoteTarget(WebPhonePeerRecord peer, HttpClient? testTransport = null)
     {
         this.peer = peer;

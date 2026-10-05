@@ -9,6 +9,12 @@ export const isSilentPCM = bytes => {
   for (const sample of samples) sum += sample * sample;
   return Math.sqrt(sum / samples.length) < 130;
 };
+// Backup entries are other computers' own /phone pages (each paired separately), never
+// arbitrary URLs: https only, a different origin, and the fixed /phone/ path.
+export const alternateEntries = (entries, origin) => !Array.isArray(entries) ? [] : entries.filter(entry => {
+  try { const url = new URL(entry?.url); return url.protocol === 'https:' && url.origin !== origin && url.pathname === '/phone/'; }
+  catch { return false; }
+});
 // A Wi-Fi stall shorter than this keeps the session alive; the 1 s queue still bounds memory.
 export const PCM_STALL_TOLERANCE_MS = 1000;
 

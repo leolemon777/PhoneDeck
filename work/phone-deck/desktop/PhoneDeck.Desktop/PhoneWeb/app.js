@@ -1,6 +1,6 @@
 import { initUI, setVoiceState, setConnection, renderDevices, renderSharedDevices, setNotice, setPairingState, setPairingKind, closeDialog, pulse, setLevel } from './ui.js';
 import { AudioCapture } from './audio.js';
-import { VoiceSession, PhoneSocket } from './session.js';
+import { VoiceSession, PhoneSocket, alternateEntries } from './session.js';
 
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem('yandu.web.' + key)) ?? fallback; } catch { return fallback; } };
 const save = (key, value) => { try { localStorage.setItem('yandu.web.' + key, JSON.stringify(value)); } catch { } };
@@ -13,6 +13,9 @@ let authGeneration = 0;
 let authKnown = false, authRequest = null, authRetryTimer = null, authRetries = 0, authError = false;
 let applyingUpdate = false;
 const pendingActions = new Set();
+// 主电脑持续离线时，提示改用其他电脑自己的手机入口（各入口独立配对，不转发凭据）。
+const ENTRY_FALLBACK_DELAY_MS = 6000;
+let entryFallbackTimer = null;
 const mic = document.getElementById('mic-button');
 initUI();
 
@@ -20,12 +23,19 @@ const secure = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia 
 const capture = new AudioCapture();
 const transport = new PhoneSocket({
   url: `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/phone/socket`,
-  state: state => { snapshot = state; paired = authKnown = true; render(); },
+  state: state => {
+    snapshot = state; paired = authKnown = true;
+    // 记住其他电脑的手机入口：主电脑离线时页面仍可从缓存打开并提示改用它们。
+    if (Array.isArray(state.entries)) save('entries', state.entries.filter(entry => typeof entry?.url === 'string'
+      && new URL(entry.url).origin !== location.origin));
+    render();
+  },
   stopped: event => voice.remoteStopped(event.sessionId, event.reason || '电脑端已停止，手机已同步停录'),
   connection: state => {
     connected = state === 'connected';
     if (!connected && voice.busy) voice.fail(voice.current, '电脑连接中断，手机已停止录音');
     if (state === 'disconnected') void checkAuthorization({ connect: false });
+    scheduleEntryFallback();
     render();
   }
 });
@@ -33,6 +43,22 @@ const voice = new VoiceSession({ capture, transport,
   changed: operation => { if (operation?.phase === 'recording' || operation?.phase === 'sharing') void keepAwake(); else if (!operation) releaseAwake(); render(); },
   interrupted: message => { notice = message; setNotice(message, { tone: 'info' }); },
   level: value => { level = value; setLevel(value); }
+});
+
+function scheduleEntryFallback() {
+  clearTimeout(entryFallbackTimer); entryFallbackTimer = null;
+  if (connected) return;
+  entryFallbackTimer = setTimeout(() => {
+    const entries = alternateEntries(read('entries', []), location.origin);
+    if (connected || voice.busy || !entries.length) return;
+    setNotice(`主电脑暂时离线。可改用「${entries[0].name || '另一台电脑'}」的手机入口，首次需在那台电脑确认`,
+      { tone: 'info', actionLabel: '打开备用入口', action: 'open-entry' });
+  }, ENTRY_FALLBACK_DELAY_MS);
+}
+window.addEventListener('yandu:notice-action', event => {
+  if (event.detail.action !== 'open-entry') return;
+  const [entry] = alternateEntries(read('entries', []), location.origin);
+  if (entry) location.assign(entry.url);
 });
 
 async function api(path, body, timeout = 10000) {

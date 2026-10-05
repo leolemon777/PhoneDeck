@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VoiceSession, PhoneSocket } from '../PhoneDeck.Desktop/PhoneWeb/session.js';
+import { VoiceSession, PhoneSocket, alternateEntries } from '../PhoneDeck.Desktop/PhoneWeb/session.js';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -384,4 +384,18 @@ test('a brief Wi-Fi stall waits up to the stall tolerance instead of failing the
   assert.ok(waits.length > 0);
   assert.equal(waits[0], 1000);
   await f.voice.stop();
+});
+
+test('backup entries only allow other computers\' https /phone pages', () => {
+  const origin = 'https://192.168.1.10:8768';
+  const entries = [
+    { name: 'self', url: 'https://192.168.1.10:8768/phone/' },
+    { name: '2号', url: 'https://192.168.1.20:8768/phone/' },
+    { name: 'plain', url: 'http://192.168.1.30:8768/phone/' },
+    { name: 'other path', url: 'https://192.168.1.40:8768/admin' },
+    { name: 'broken', url: 'not a url' },
+    null
+  ];
+  assert.deepEqual(alternateEntries(entries, origin).map(entry => entry.name), ['2号']);
+  assert.deepEqual(alternateEntries(null, origin), []);
 });

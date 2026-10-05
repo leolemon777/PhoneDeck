@@ -192,7 +192,13 @@ internal sealed class WebPhoneGateway : IDisposable
                 return phone.Session?.Failed.ContainsKey(target.Id) == true
                     ? state with { Streaming = false, Recording = false, Error = "这台电脑供音未连接，其他电脑继续工作" } : state;
             }).ToArray(),
-            session = phone.Session is { Ended: false } session ? new { id = session.Id, mode = session.Mode, targetIds = session.Targets.Select(x => x.Id).ToArray(), phase = session.Ready ? "active" : "starting" } : null
+            session = phone.Session is { Ended: false } session ? new { id = session.Id, mode = session.Mode, targetIds = session.Targets.Select(x => x.Id).ToArray(), phase = session.Ready ? "active" : "starting" } : null,
+            // 主电脑离线时的备用入口：每台附加电脑自己的手机网页（需在那台电脑单独确认一次）。
+            entries = phone.Targets.Values.Where(target => target.EntryHost is not null).Select(target => new
+            {
+                id = target.Id, name = target.Name,
+                url = new UriBuilder("https", target.EntryHost, webPort) { Path = "/phone/" }.Uri.AbsoluteUri
+            }).ToArray()
         };
     }
     private async Task RefreshAsync(BrowserPhone phone, CancellationToken cancellation)

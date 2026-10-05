@@ -190,6 +190,18 @@ public sealed class WebPhoneGatewayTests
         Assert.AreEqual("连接中断或授权失效", rejected.GetProperty("error").GetString());
     }
     [TestMethod]
+    public async Task StateListsBackupEntriesOnlyForComputersWithTheirOwnAddress()
+    {
+        var local = new FakeTarget(); var peer = new FakeTarget { EntryHost = "192.168.1.20" };
+        await using var fixture = await Fixture.Create(_ => [local, peer]); var cookie = await fixture.Pair();
+        var state = await fixture.State(cookie.Value);
+        var entries = state.GetProperty("entries").EnumerateArray().ToArray();
+        Assert.HasCount(1, entries);
+        Assert.AreEqual(peer.Id, entries[0].GetProperty("id").GetString());
+        StringAssert.StartsWith(entries[0].GetProperty("url").GetString(), "https://192.168.1.20:");
+        StringAssert.EndsWith(entries[0].GetProperty("url").GetString(), "/phone/");
+    }
+    [TestMethod]
     public async Task ActualLocalSpeechStopToBrowserNotificationHasSub250msMedian()
     {
         await using var fixture = await Fixture.Create(); var cookie = await fixture.Pair(); using var socket = await fixture.Connect(cookie.Value);
@@ -317,6 +329,7 @@ public sealed class WebPhoneGatewayTests
     private sealed class FakeTarget : IWebPhoneTarget
     {
         public string Id { get; } = Guid.NewGuid().ToString(); public string Name => "Test computer";
+        public string? EntryHost { get; init; }
         internal string? Session, StopReceipt; internal bool Recording, FailFeed, BlockHealth, MalformedHealth, BlockStop;
         internal bool FailStop, StopCompleted;
         internal int Frames, Inputs;
