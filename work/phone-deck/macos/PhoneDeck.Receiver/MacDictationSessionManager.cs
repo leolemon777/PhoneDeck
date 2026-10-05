@@ -114,7 +114,7 @@ internal sealed class MacDictationSessionManager(
             {
                 throw new InvalidOperationException("请求的会话不是当前听写会话");
             }
-            audio.WaitForSessionEnd(normalizedSession, 2_000);
+            var audioDrained = audio.WaitForSessionEnd(normalizedSession, MacPhoneAudioBridge.StopWaitMs);
             var duplicate = false;
             bool? stopped = null;
             Exception? failure = null;
@@ -154,6 +154,8 @@ internal sealed class MacDictationSessionManager(
                     ? $"无法确认 {engine.EngineDisplayName} 是否停止"
                     : $"{engine.EngineDisplayName} 仍在采集");
             }
+            if (!audioDrained)
+                throw new InvalidOperationException("手机尾音传输未完成，已停止会话；请检查连接后重试");
             return duplicate;
         }
     }

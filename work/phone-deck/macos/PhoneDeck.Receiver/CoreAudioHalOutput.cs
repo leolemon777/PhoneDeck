@@ -7,6 +7,7 @@ internal interface IMacAudioOutput : IDisposable
     string DeviceName { get; }
     string DeviceUid { get; }
     void Write(ReadOnlySpan<byte> stereoPcm16);
+    Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds);
 }
 
 internal interface IMacAudioOutputFactory
@@ -125,6 +126,15 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
             return;
         }
         ring.Write(stereoPcm16);
+    }
+
+    public async Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds)
+    {
+        if (disposed || !await ring.WaitForEmptyAsync(timeoutMilliseconds)) return false;
+        // The last render callback has consumed PCM, but Core Audio and the input
+        // method still need to receive it. Keep rendering silence during this tail.
+        await Task.Delay(tailMilliseconds);
+        return !disposed;
     }
 
     private int Render(

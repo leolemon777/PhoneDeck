@@ -11,9 +11,14 @@ internal interface IMacPhoneAudioSessionController
 internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDisposable
 {
     private const int PreRollCapacityBytes = 48_000 * 4;
+    internal const int DrainMaxMs = 3_000;
+    internal const int OutputTailMs = 400;
+    internal const int StopWaitMs = DrainMaxMs + OutputTailMs + 1_500;
     private readonly object syncRoot = new();
     private readonly IMacAudioOutputFactory outputFactory;
     private ActiveSession? active;
+    private string? completedSessionId;
+    private bool completedDrainSucceeded;
 
     internal MacPhoneAudioBridge(IMacAudioOutputFactory outputFactory)
     {
@@ -73,6 +78,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
 
         var converter = new Pcm16MonoToStereoConverter();
         var buffer = new byte[16 * 1024];
+        var drained = true;
         try
         {
             while (true)
@@ -116,19 +122,45 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         }
         finally
         {
-            lock (syncRoot)
+            bool released;
+            lock (syncRoot) { session.Ending = true; released = session.PlaybackReleased; }
+            try
             {
-                if (ReferenceEquals(active, session))
+                // Cancellation stops intake immediately, not playback of PCM that
+                // was already delivered. Unreleased startup pre-roll is discarded.
+                if (released)
+                    drained = await session.Output.DrainAsync(DrainMaxMs, OutputTailMs)
+                        .WaitAsync(TimeSpan.FromMilliseconds(DrainMaxMs + OutputTailMs + 500));
+            }
+            catch (Exception exception)
+            {
+                drained = false;
+                Console.Error.WriteLine($"[audio:{sessionId}] 尾音排空失败：{exception.Message}");
+            }
+            finally
+            {
+                try { session.Output.Dispose(); }
+                finally
                 {
-                    active = null;
-                    Monitor.PulseAll(syncRoot);
+                    lock (syncRoot)
+                    {
+                        if (ReferenceEquals(active, session))
+                        {
+                            completedSessionId = sessionId;
+                            completedDrainSucceeded = drained;
+                            active = null;
+                            Monitor.PulseAll(syncRoot);
+                        }
+                    }
+                    session.Cancellation.Dispose();
+                    // Signal before the callback: Stop may hold the dictation lock
+                    // while waiting here, and the callback needs that same lock.
+                    session.Ended.TrySetResult(drained);
+                    ended(sessionId, mode);
                 }
             }
-            session.Output.Dispose();
-            session.Cancellation.Dispose();
-            session.Ended.TrySetResult();
-            ended(sessionId, mode);
         }
+        if (!drained) throw new IOException("手机尾音未能在限定时间内播放完成");
     }
 
     public void BeginPlayback(string sessionId)
@@ -136,6 +168,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         lock (syncRoot)
         {
             var session = RequireSession(sessionId);
+            if (session.Ending) throw new InvalidOperationException("音频会话正在结束");
             if (session.Mode != AudioStreamMode.Managed || session.PlaybackReleased)
             {
                 return;
@@ -172,15 +205,16 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
 
     public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds)
     {
-        Task? ended;
+        Task<bool> ended;
         lock (syncRoot)
         {
             var current = active;
-            ended = current is not null
-                && string.Equals(current.SessionId, sessionId, StringComparison.Ordinal)
-                ? current.Ended.Task : null;
+            if (current is null || !string.Equals(current.SessionId, sessionId, StringComparison.Ordinal))
+                return !string.Equals(completedSessionId, sessionId, StringComparison.Ordinal)
+                    || completedDrainSucceeded;
+            ended = current.Ended.Task;
         }
-        return ended is null || ended.Wait(timeoutMilliseconds);
+        return ended.Wait(timeoutMilliseconds) && ended.Result;
     }
 
     public bool StopSession(string sessionId)
@@ -228,7 +262,8 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         internal Queue<byte[]> PreRoll { get; } = new();
         internal int PreRollBytes { get; set; }
         internal bool PlaybackReleased { get; set; }
-        internal TaskCompletionSource Ended { get; } =
+        internal bool Ending { get; set; }
+        internal TaskCompletionSource<bool> Ended { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

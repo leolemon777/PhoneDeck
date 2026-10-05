@@ -67,6 +67,25 @@ public sealed class MacDictationSessionManagerTests
     }
 
     [TestMethod]
+    public void FailedTailDrainStillStopsEngineAndAllowsAnotherSession()
+    {
+        var audio = new FakeAudio { Drained = false };
+        var typeless = new FakeTypeless { Capturing = false };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, Guid.NewGuid().ToString(), "dictation");
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Stop(session, Guid.NewGuid().ToString()));
+        StringAssert.Contains(error.Message, "尾音");
+        Assert.IsFalse(manager.IsActive);
+        Assert.IsFalse(typeless.Capturing);
+        Assert.AreEqual(2, typeless.ToggleCount);
+        audio.Drained = true;
+        manager.Start(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation");
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
     public void CaptureProbeAcceptsAnyCapturingEngineProcess()
     {
         Assert.AreEqual(true, MacVoiceEngineStateProbe.CombineCaptureStates(
@@ -81,8 +100,9 @@ public sealed class MacDictationSessionManagerTests
     private sealed class FakeAudio : IMacPhoneAudioSessionController
     {
         internal bool PlaybackReleased { get; private set; }
+        internal bool Drained { get; set; } = true;
         public bool WaitForSessionActive(string sessionId, int timeoutMilliseconds) => true;
-        public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds) => true;
+        public bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds) => Drained;
         public void BeginPlayback(string sessionId) => PlaybackReleased = true;
         public bool StopSession(string sessionId) => true;
     }

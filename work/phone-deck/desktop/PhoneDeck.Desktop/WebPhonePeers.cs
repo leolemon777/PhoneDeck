@@ -240,18 +240,32 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
     {
         lock (gate) return audio is { } current && current.Session == session && current.Feed(pcm);
     }
-    public async Task StopAsync(string session, bool cancel, CancellationToken cancellation)
+    public Task StopAsync(string session, bool cancel, CancellationToken cancellation)
     {
-        RemoteAudio? stream;
-        lock (gate) { if (audio?.Session != session) return; stream = audio; audio = null; }
+        lock (gate)
+        {
+            if (audio?.Session != session) return Task.CompletedTask;
+            return audio.Stopping ??= FinishAndStopAsync(audio, cancel, cancellation);
+        }
+    }
+    private async Task FinishAndStopAsync(RemoteAudio stream, bool cancel, CancellationToken cancellation)
+    {
         try
         {
             if (stream.Mode == "shared" && !stream.External)
-                await PostAsync("api/audio/stop", new { protocolVersion = 2, requestId = Guid.NewGuid().ToString(), sessionId = session, targetComputerId = Id, cancel = true }, cancellation);
-            await stream.FinishAsync(cancel);
-            if (stream.Mode == "managed") await PostAsync("api/dictation/stop", new { protocolVersion = 2, requestId = Guid.NewGuid().ToString(), sessionId = session, targetComputerId = Id, mode = stream.EngineMode, cancel }, cancellation);
+                await PostAsync("api/audio/stop", new { protocolVersion = 2, requestId = Guid.NewGuid().ToString(), sessionId = stream.Session, targetComputerId = Id, cancel = true }, cancellation);
+            try { await stream.FinishAsync(cancel, cancellation); }
+            finally
+            {
+                // Even a failed/aborted audio response must release the input method.
+                if (stream.Mode == "managed") await PostAsync("api/dictation/stop", new { protocolVersion = 2, requestId = Guid.NewGuid().ToString(), sessionId = stream.Session, targetComputerId = Id, mode = stream.EngineMode, cancel }, cancellation);
+            }
         }
-        finally { stream.Dispose(); }
+        finally
+        {
+            stream.Dispose();
+            lock (gate) if (ReferenceEquals(audio, stream)) audio = null;
+        }
     }
     public Task InputAsync(string request, string action, CancellationToken cancellation)
     {
@@ -320,6 +334,7 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
         internal bool External { get; }
         internal string? EngineMode { get; }
         internal long? ConfirmedAt { get; set; }
+        internal Task? Stopping { get; set; }
         internal RemoteAudio(HttpClient http, string target, string session, string mode, bool external, string? engineMode)
         {
             Session = session; Mode = mode; External = external; EngineMode = external ? engineMode : "dictation";
@@ -340,15 +355,21 @@ internal sealed class WebPhoneRemoteTarget : IWebPhoneTarget
         }
         internal bool Feed(byte[] bytes)
         {
-            if (Transfer.IsCompleted) return false;
+            if (Transfer.IsCompleted || Stopping is not null) return false;
             if (queue.Writer.TryWrite(bytes)) return true;
             cancellation.Cancel(); return false; // Managed mode never silently discards speech.
         }
-        internal async Task FinishAsync(bool cancel)
+        internal async Task FinishAsync(bool cancel, CancellationToken stopCancellation)
         {
             queue.Writer.TryComplete(); if (cancel) cancellation.Cancel();
-            try { await Transfer.WaitAsync(TimeSpan.FromMilliseconds(External ? 5500 : 1200)); }
-            catch (Exception e) when (e is OperationCanceledException or TimeoutException or HttpRequestException or IOException) { cancellation.Cancel(); }
+            // External receivers drain up to 3s, render 400ms silence and may need
+            // 4s to confirm the engine stopped before completing the HTTP response.
+            try { await Transfer.WaitAsync(TimeSpan.FromMilliseconds(External ? 8000 : 1200), stopCancellation); }
+            catch (Exception e) when (e is OperationCanceledException or TimeoutException or HttpRequestException or IOException)
+            {
+                cancellation.Cancel();
+                if (!cancel) throw new IOException("手机尾音传输未完成，请检查电脑状态后重试", e);
+            }
         }
         public void Dispose() { queue.Writer.TryComplete(); cancellation.Cancel(); }
     }

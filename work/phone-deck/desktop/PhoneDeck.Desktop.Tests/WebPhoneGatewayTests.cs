@@ -219,6 +219,46 @@ public sealed class WebPhoneGatewayTests
         target.ReleaseStop.TrySetResult();
     }
     [TestMethod]
+    public async Task PhoneStopWaitsForTailBeyondThreeSecondsAndKeepsSocketResponsive()
+    {
+        var target = new FakeTarget { BlockStop = true };
+        await using var fixture = await Fixture.Create(_ => [target]);
+        var cookie = await fixture.Pair(); using var socket = await fixture.Connect(cookie.Value);
+        await Send(socket, new { type = "select", requestId = "select", targetId = target.Id });
+        await Receive(socket, m => Is(m, "ack", "select"));
+        var session = Guid.NewGuid().ToString();
+        await Send(socket, new { type = "start", requestId = "start", sessionId = session, mode = "managed", targetIds = new[] { target.Id } });
+        await Receive(socket, m => Is(m, "ack", "start"));
+        await Send(socket, new { type = "stop", requestId = "stop", sessionId = session });
+        try
+        {
+            await Send(socket, new { type = "ping", requestId = "ping" });
+            await Receive(socket, m => Is(m, "pong", "ping"));
+            await Task.Delay(3300);
+        }
+        finally { target.ReleaseStop.TrySetResult(); }
+        await Receive(socket, m => Is(m, "ack", "stop"));
+        Assert.IsTrue(target.StopCompleted, "Normal drain must not be canceled at three seconds");
+    }
+    [TestMethod]
+    public async Task FailedStopReturnsErrorAndReleasesSessionForRetry()
+    {
+        var target = new FakeTarget { FailStop = true };
+        await using var fixture = await Fixture.Create(_ => [target]);
+        var cookie = await fixture.Pair(); using var socket = await fixture.Connect(cookie.Value);
+        await Send(socket, new { type = "select", requestId = "select", targetId = target.Id });
+        await Receive(socket, m => Is(m, "ack", "select"));
+        var session = Guid.NewGuid().ToString();
+        await Send(socket, new { type = "start", requestId = "start", sessionId = session, mode = "managed", targetIds = new[] { target.Id } });
+        await Receive(socket, m => Is(m, "ack", "start"));
+        await Send(socket, new { type = "stop", requestId = "stop", sessionId = session });
+        var reply = await Receive(socket, m => Is(m, "error", "stop") || Is(m, "ack", "stop"));
+        Assert.AreEqual("error", reply.GetProperty("type").GetString());
+        target.FailStop = false;
+        await Send(socket, new { type = "start", requestId = "retry", sessionId = Guid.NewGuid().ToString(), mode = "managed", targetIds = new[] { target.Id } });
+        await Receive(socket, m => Is(m, "ack", "retry"));
+    }
+    [TestMethod]
     public async Task InputCannotUseUnconfirmedPairedTarget()
     {
         var target = new FakeTarget(); await using var fixture = await Fixture.Create(_ => [target]); var cookie = await fixture.Pair(); using var socket = await fixture.Connect(cookie.Value);
@@ -278,6 +318,7 @@ public sealed class WebPhoneGatewayTests
     {
         public string Id { get; } = Guid.NewGuid().ToString(); public string Name => "Test computer";
         internal string? Session, StopReceipt; internal bool Recording, FailFeed, BlockHealth, MalformedHealth, BlockStop;
+        internal bool FailStop, StopCompleted;
         internal int Frames, Inputs;
         internal readonly TaskCompletionSource HealthEntered = new(TaskCreationOptions.RunContinuationsAsynchronously), ReleaseHealth = new(TaskCreationOptions.RunContinuationsAsynchronously), ReleaseStop = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<WebPhoneTargetState> HealthAsync(CancellationToken cancellation)
@@ -290,7 +331,13 @@ public sealed class WebPhoneGatewayTests
         public bool Feed(string session, byte[] pcm) { if (FailFeed || Session != session) return false; Interlocked.Increment(ref Frames); return true; }
         public async Task StopAsync(string session, bool cancel, CancellationToken cancellation)
         {
-            if (Session == session) { Session = null; Recording = false; if (BlockStop) await ReleaseStop.Task.WaitAsync(cancellation); }
+            if (Session == session)
+            {
+                Session = null; Recording = false;
+                if (BlockStop) await ReleaseStop.Task.WaitAsync(cancellation);
+                if (FailStop) throw new IOException("Tail drain failed");
+                StopCompleted = true;
+            }
         }
         public Task InputAsync(string request, string action, CancellationToken cancellation) { Inputs++; return Task.CompletedTask; }
         public void Dispose() { }

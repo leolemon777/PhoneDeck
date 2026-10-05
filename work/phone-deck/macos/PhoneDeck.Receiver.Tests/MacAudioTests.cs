@@ -43,6 +43,23 @@ public sealed class MacAudioTests
     }
 
     [TestMethod]
+    public async Task RingDrainWaitsForConsumptionAndTimeoutDoesNotDiscardAudio()
+    {
+        var ring = new MacAudioRingBuffer(8);
+        ring.Write([1, 2, 3, 4]);
+        Assert.IsFalse(await ring.WaitForEmptyAsync(20));
+        Assert.AreEqual(4, ring.Count);
+        var waiting = ring.WaitForEmptyAsync(1_000);
+        var first = new byte[2]; var last = new byte[2];
+        ring.Read(first);
+        Assert.IsFalse(waiting.IsCompleted);
+        ring.Read(last);
+        Assert.IsTrue(await waiting);
+        CollectionAssert.AreEqual(new byte[] { 1, 2 }, first);
+        CollectionAssert.AreEqual(new byte[] { 3, 4 }, last);
+    }
+
+    [TestMethod]
     public async Task ManagedAudioStaysInPreRollUntilReleased()
     {
         var factory = new RecordingOutputFactory();
@@ -86,6 +103,99 @@ public sealed class MacAudioTests
 
         source.Complete();
         await streaming;
+    }
+
+    [TestMethod]
+    public async Task EndOfStreamKeepsOutputAndOwnershipUntilTailHasDrained()
+    {
+        var drained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new RecordingOutputFactory { Drain = () => drained.Task };
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var source = new ChannelStream();
+        var ended = false;
+        var session = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(source, session, AudioStreamMode.Shared,
+            (_, _) => ended = true, CancellationToken.None);
+        var output = factory.Outputs.Single();
+        source.Push([0x78, 0x56]);
+        source.Complete();
+        try
+        {
+            await WaitUntilAsync(() => output.DrainCalled || streaming.IsCompleted);
+            Assert.IsTrue(output.DrainCalled, "EOF must drain the queued PCM before disposal");
+            Assert.IsFalse(output.Disposed);
+            Assert.IsFalse(ended);
+            Assert.IsTrue(bridge.IsStreaming);
+            Assert.IsFalse(bridge.WaitForSessionEnd(session, 1));
+            await Assert.ThrowsExactlyAsync<AudioStreamConflictException>(() =>
+                bridge.StreamAsync(new MemoryStream(), Guid.NewGuid().ToString(), AudioStreamMode.Shared,
+                    (_, _) => { }, CancellationToken.None));
+            CollectionAssert.AreEqual(new byte[] { 0x78, 0x56, 0x78, 0x56 }, output.Writes.Single());
+        }
+        finally
+        {
+            drained.TrySetResult(true);
+            await streaming;
+        }
+        Assert.IsTrue(output.Disposed);
+        Assert.IsTrue(ended);
+        Assert.IsTrue(bridge.WaitForSessionEnd(session, 1));
+        Assert.IsFalse(bridge.IsStreaming);
+    }
+
+    [TestMethod]
+    public async Task FailedDrainIsReportedAndReleasesOutputForNextSession()
+    {
+        var factory = new RecordingOutputFactory { Drain = () => Task.FromResult(false) };
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var session = Guid.NewGuid().ToString();
+        var ended = false;
+        await Assert.ThrowsExactlyAsync<IOException>(() => bridge.StreamAsync(
+            new MemoryStream([1, 2]), session, AudioStreamMode.Shared,
+            (_, _) => ended = true, CancellationToken.None));
+        Assert.IsTrue(factory.Outputs.Single().Disposed);
+        Assert.IsTrue(ended);
+        Assert.IsFalse(bridge.IsStreaming);
+        Assert.IsFalse(bridge.WaitForSessionEnd(session, 1));
+        factory.Drain = () => Task.FromResult(true);
+        await bridge.StreamAsync(new MemoryStream(), Guid.NewGuid().ToString(), AudioStreamMode.Shared,
+            (_, _) => { }, CancellationToken.None);
+    }
+
+    [TestMethod]
+    public async Task CanceledIntakeStillDrainsPcmAlreadyReleasedToOutput()
+    {
+        var drained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new RecordingOutputFactory { Drain = () => drained.Task };
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var source = new ChannelStream();
+        var session = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(source, session, AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None);
+        var output = factory.Outputs.Single();
+        try
+        {
+            source.Push([1, 2]);
+            await WaitUntilAsync(() => output.Writes.Count == 1);
+            Assert.IsTrue(bridge.StopSession(session));
+            await WaitUntilAsync(() => output.DrainCalled);
+            Assert.IsFalse(output.Disposed);
+            Assert.IsFalse(streaming.IsCompleted);
+        }
+        finally { drained.TrySetResult(true); source.Complete(); await streaming; }
+        Assert.IsTrue(output.Disposed);
+    }
+
+    [TestMethod]
+    public async Task UnreleasedManagedPreRollIsDiscardedWithoutPlaybackOrDrain()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory);
+        await bridge.StreamAsync(new MemoryStream([1, 2]), Guid.NewGuid().ToString(), AudioStreamMode.Managed,
+            (_, _) => { }, CancellationToken.None);
+        var output = factory.Outputs.Single();
+        Assert.HasCount(0, output.Writes);
+        Assert.IsFalse(output.DrainCalled);
+        Assert.IsTrue(output.Disposed);
     }
 
     [TestMethod]
@@ -141,22 +251,24 @@ public sealed class MacAudioTests
     private sealed class RecordingOutputFactory : IMacAudioOutputFactory
     {
         internal List<RecordingOutput> Outputs { get; } = [];
+        internal Func<Task<bool>> Drain { get; set; } = () => Task.FromResult(true);
 
         public (bool Available, string? DeviceName, string? DeviceUid, string? Error) Probe() =>
             (true, "BlackHole 2ch", "blackhole", null);
 
         public IMacAudioOutput Create()
         {
-            var output = new RecordingOutput();
+            var output = new RecordingOutput(Drain);
             Outputs.Add(output);
             return output;
         }
     }
 
-    private sealed class RecordingOutput : IMacAudioOutput
+    private sealed class RecordingOutput(Func<Task<bool>> drain) : IMacAudioOutput
     {
         private readonly object syncRoot = new();
         internal List<byte[]> Writes { get; } = [];
+        internal bool DrainCalled, Disposed;
         public string DeviceName => "BlackHole 2ch";
         public string DeviceUid => "blackhole";
         public void Write(ReadOnlySpan<byte> stereoPcm16)
@@ -166,7 +278,12 @@ public sealed class MacAudioTests
                 Writes.Add(stereoPcm16.ToArray());
             }
         }
-        public void Dispose() { }
+        public Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds)
+        {
+            DrainCalled = true;
+            return drain();
+        }
+        public void Dispose() => Disposed = true;
     }
 
     private sealed class ChannelStream : Stream

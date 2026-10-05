@@ -84,10 +84,11 @@ test('stop flushes capture tail and queued audio in order before protocol stop',
 });
 
 test('stop command failure always disconnects and leaves microphone/UI idle', async () => {
-  const f = sessionFixture({ request: type => type === 'stop' ? Promise.reject(new Error('lost ACK')) : undefined });
+  const f = sessionFixture({ request: type => type === 'stop' ? Promise.reject(new Error('语音收尾未确认')) : undefined });
   await f.voice.start('managed', ['one']); await f.voice.stop();
   assert.equal(f.captureStops, 1); assert.equal(f.disconnects, 1);
   assert.equal(f.voice.current, null); assert.equal(f.levels.at(-1), 0);
+  assert.match(f.notices.at(-1), /语音收尾未确认/);
 });
 
 test('a failed tail send is canceled/disconnected, never silently submitted as success', async () => {
@@ -170,6 +171,30 @@ function socketFixture(options = {}) {
   transport.connect(); instances[0].open();
   return { transport, clock, instances, states, stopped, connections, get socket() { return instances.at(-1); } };
 }
+
+test('microphone stops immediately while a healthy connection waits for receiver tail drain', async () => {
+  const f = socketFixture(), socket = f.socket; let captureStops = 0; const notices = [];
+  const voice = new VoiceSession({
+    capture: { start: async () => {}, stop: async () => { captureStops++; } },
+    transport: f.transport, interrupted: message => notices.push(message)
+  });
+  const starting = voice.start('managed', ['one']); await flush();
+  const start = f.socket.requests().find(item => item.type === 'start');
+  f.socket.message({ type: 'ack', requestId: start.requestId, sessionId: start.sessionId });
+  await starting;
+  const stopping = voice.stop(); await flush();
+  assert.equal(captureStops, 1);
+  await f.clock.advance(2500);
+  const ping = f.socket.requests().find(item => item.type === 'ping');
+  f.socket.message({ type: 'pong', requestId: ping.requestId });
+  await f.clock.advance(1000);
+  assert.equal(socket.closeCount, 0, 'valid tail drain must not trigger the old three-second timeout');
+  const stop = f.socket.requests().find(item => item.type === 'stop');
+  f.socket.message({ type: 'ack', requestId: stop.requestId, sessionId: stop.sessionId, state: 'stopped' });
+  await stopping;
+  assert.equal(voice.busy, false); assert.deepEqual(notices, []);
+  f.transport.disconnect();
+});
 
 test('server pong settles heartbeat ping without closing a healthy connection', async () => {
   const f = socketFixture();

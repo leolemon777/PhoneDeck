@@ -4,6 +4,7 @@
  *   node work/phone-deck/desktop/tests-web/browser.integration.mjs
  * Optional: PHONEDECK_DOTNET, PHONEDECK_PLAYWRIGHT_MODULE, PLAYWRIGHT_BROWSERS_PATH,
  * PHONEDECK_BROWSER_EXECUTABLE, PHONEDECK_SKIP_HARNESS_BUILD=1, PHONEDECK_TEST_BASE_PORT.
+ * PHONEDECK_TEST_OUTPUT selects a separate evidence directory for each run.
  * TLS validation is bypassed ONLY in this isolated test browser; this does not validate
  * iPhone certificate installation, Safari background capture, or real recognition.
  */
@@ -16,7 +17,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
-const output = resolve(root, 'outputs/iphone-pwa/integration');
+const output = resolve(process.env.PHONEDECK_TEST_OUTPUT || join(root, 'outputs/iphone-pwa/integration'));
 const dotnet = process.env.PHONEDECK_DOTNET || 'dotnet';
 const basePort = Number(process.env.PHONEDECK_TEST_BASE_PORT || 18765);
 assert.ok(Number.isInteger(basePort) && basePort > 1023 && basePort < 65531);

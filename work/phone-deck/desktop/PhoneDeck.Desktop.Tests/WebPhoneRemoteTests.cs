@@ -108,6 +108,44 @@ public sealed class WebPhoneRemoteTests
         Assert.AreEqual("dictation", receiver.StoppedMode);
     }
     [TestMethod]
+    public async Task RejectedAudioTailStillStopsExternalEngineAndReportsFailure()
+    {
+        await using var receiver = await Receiver.Create(external: true);
+        using var target = receiver.CreateTarget();
+        var session = Guid.NewGuid().ToString();
+        await target.StartAsync(session, "managed", CancellationToken.None);
+        receiver.RejectTail = true;
+        var error = await Assert.ThrowsExactlyAsync<IOException>(() => target.StopAsync(session, false, CancellationToken.None));
+        StringAssert.Contains(error.Message, "尾音");
+        Assert.AreEqual(1, receiver.StopCalls);
+        Assert.IsFalse(receiver.Capturing);
+        receiver.RejectTail = false;
+        await target.StartAsync(Guid.NewGuid().ToString(), "managed", CancellationToken.None);
+    }
+    [TestMethod]
+    public async Task RepeatedStopJoinsDrainAndNewStartCannotReplaceItsOwner()
+    {
+        await using var receiver = await Receiver.Create(external: true);
+        using var target = receiver.CreateTarget();
+        var session = Guid.NewGuid().ToString();
+        await target.StartAsync(session, "managed", CancellationToken.None);
+        receiver.BlockTail = true;
+        var stopping = target.StopAsync(session, false, CancellationToken.None);
+        try
+        {
+            await receiver.TailEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var repeated = target.StopAsync(session, false, CancellationToken.None);
+            Assert.IsFalse(repeated.IsCompleted);
+            var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+                target.StartAsync(Guid.NewGuid().ToString(), "managed", CancellationToken.None));
+            StringAssert.Contains(error.Message, "上一段供音尚未结束");
+            receiver.ReleaseTail.TrySetResult();
+            await Task.WhenAll(stopping, repeated);
+            Assert.AreEqual(1, receiver.StopCalls);
+        }
+        finally { receiver.ReleaseTail.TrySetResult(); await stopping; }
+    }
+    [TestMethod]
     public async Task ExternalSharedEngineStopsIndependentlyAndClosingSupplyDoesNotToggleIt()
     {
         await using var first = await Receiver.Create(external: true); await using var second = await Receiver.Create(external: true);
@@ -180,6 +218,8 @@ public sealed class WebPhoneRemoteTests
         internal string ConfiguredMode = "dictation"; internal string? StoppedMode;
         internal bool? Capturing; internal long ProbeAge; internal bool Stale; internal string? DictationOverride, RequestedMode, AudioFormat;
         internal int StartCalls, StopCalls, AudioStopCalls;
+        internal bool RejectTail, BlockTail;
+        internal readonly TaskCompletionSource TailEntered = new(TaskCreationOptions.RunContinuationsAsynchronously), ReleaseTail = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal static async Task<Receiver> Create(bool external = false)
         {
             var id = Guid.NewGuid().ToString(); var owner = Guid.NewGuid().ToString(); var token = ClientCredentialsStore.NewToken();
@@ -222,7 +262,10 @@ public sealed class WebPhoneRemoteTests
                     var buffer = new byte[8192]; int count;
                     while ((count = await context.Request.Body.ReadAsync(buffer, context.RequestAborted)) > 0)
                     { Interlocked.Add(ref receiver.Bytes, count); speech.Feed(session, buffer.AsSpan(0, count)); }
-                    orderly = true; return Results.Ok();
+                    receiver.TailEntered.TrySetResult();
+                    if (receiver.BlockTail) await receiver.ReleaseTail.Task.WaitAsync(context.RequestAborted);
+                    orderly = true;
+                    return receiver.RejectTail ? Results.StatusCode(500) : Results.Ok();
                 }
                 catch (OperationCanceledException) { return Results.StatusCode(408); }
                 catch (IOException) { return Results.StatusCode(408); }

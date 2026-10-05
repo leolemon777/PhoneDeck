@@ -20,6 +20,18 @@ internal sealed class MacAudioRingBuffer
     internal int Capacity => data.Length;
     internal int Count { get { lock (syncRoot) return count; } }
 
+    internal async Task<bool> WaitForEmptyAsync(int timeoutMilliseconds)
+    {
+        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        while (Count > 0)
+        {
+            var remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0) return false;
+            await Task.Delay((int)Math.Min(20, remaining));
+        }
+        return true;
+    }
+
     internal void Write(ReadOnlySpan<byte> source)
     {
         lock (syncRoot)

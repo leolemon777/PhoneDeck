@@ -115,11 +115,13 @@ export class VoiceSession {
           // Wait until queued binary frames have left the browser before protocol stop.
           if (this.transport.waitForPCM) await this.transport.waitForPCM(19200, 1000);
         }
-        await this.transport.request('stop', { sessionId: op.id, cancel: op.cancelRequested }, 3000);
-      } catch {
+        // The gateway allows 15s for receiver drain and engine-stop confirmation.
+        // Capture is already closed; only this operation's acknowledgement waits.
+        await this.transport.request('stop', { sessionId: op.id, cancel: op.cancelRequested }, 16000);
+      } catch (error) {
         // Never leave an uncertain remote session attached to a reusable socket.
         this.transport.disconnect({ reconnect: this.transport.enabled !== false });
-        quiet(this.interrupted, '连接已中断，手机已停止；重新连接后可再次开始');
+        quiet(this.interrupted, `${error?.message || '语音收尾未确认'}；手机已停止，重新连接后可再次开始`);
       } finally {
         for (const bytes of op.queue) new Uint8Array(bytes).fill(0);
         op.queue.length = 0; op.bytes = 0;

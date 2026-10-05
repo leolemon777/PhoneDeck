@@ -16,6 +16,9 @@ internal sealed record WebPhoneCommand(string? Type, string? RequestId, string? 
 internal sealed class WebPhoneGateway : IDisposable
 {
     internal const string CookieName = "__Secure-YanduPhone";
+    // 8s audio response + 6s engine stop, with transport margin. The browser
+    // allows 16s for its ACK and releases its microphone before waiting.
+    private static readonly TimeSpan TargetStopTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private WebPhoneIdentity identity;
     private readonly Func<string, IWebPhoneTarget> localTarget;
@@ -300,6 +303,8 @@ internal sealed class WebPhoneGateway : IDisposable
                         session = phone.Session?.Id == command.SessionId ? phone.Session : null;
                     }
                     if (session is not null) await EndAsync(phone, session, command.Cancel);
+                    if (!command.Cancel && session?.StopError is { } stopError)
+                        throw new InvalidOperationException(stopError);
                     await SendAsync(connection, new { type = "ack", requestId = command.RequestId, sessionId = command.SessionId, state = "stopped" }, cancellation);
                     break;
                 case "select":
@@ -374,7 +379,7 @@ internal sealed class WebPhoneGateway : IDisposable
         catch (Exception e) when (Expected(e))
         {
             session.Failed.TryAdd(target.Id, true);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var timeout = new CancellationTokenSource(TargetStopTimeout);
             try { await target.StopAsync(session.Id, true, timeout.Token); } catch (Exception cleanup) when (Expected(cleanup)) { }
             return false;
         }
@@ -456,11 +461,13 @@ internal sealed class WebPhoneGateway : IDisposable
     }
     private static async Task EndTargetsAsync(BrowserPhone phone, AudioSession session, bool cancel)
     {
-        await Task.WhenAll(session.Targets.Select(async target =>
+        var failures = await Task.WhenAll(session.Targets.Select(async target =>
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            try { await target.StopAsync(session.Id, cancel, timeout.Token); } catch (Exception e) when (Expected(e)) { }
+            using var timeout = new CancellationTokenSource(TargetStopTimeout);
+            try { await target.StopAsync(session.Id, cancel, timeout.Token); return null; }
+            catch (Exception e) when (Expected(e)) { return target.Name + "：语音收尾未确认；" + SafeError(e); }
         }));
+        session.StopError = failures.FirstOrDefault(failure => failure is not null);
         lock (phone.Gate) if (phone.Session == session) { phone.Session = null; Wake(phone); }
     }
     private static void Wake(BrowserPhone phone)
@@ -519,6 +526,7 @@ internal sealed class WebPhoneGateway : IDisposable
         internal volatile bool Ready, Ended;
         internal long LastAudio = Environment.TickCount64;
         internal Task? Cleanup;
+        internal string? StopError;
     }
     private sealed class SocketConnection
     {

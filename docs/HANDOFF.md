@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-04 Typeless 收尾与会话恢复（最新状态）
+
+- 用户在架构复核后要求开始后续开发。本轮独立分支 `codex/typeless-session-reliability` 基于 `101a789` / PR #36；开始工作树干净，fetch main 后没有待合入新提交。维护原 Windows/Mac 与共用 PWA 候选，不下载模型、不调整 UI 布局或发布版本。
+- Mac 修复 EOF 立即 Dispose/清空 AUHAL 环形缓冲导致截尾：排空最多 3 秒 + 400 ms 静音尾部，设备与会话所有权保留到结束；未放行 pre-roll 丢弃，已经播放的 PCM 在取消接收后仍有界排空。失败释放资源并返回错误，受管 stop 检查实际排空结果，原电脑停止后不补发启动 toggle 的规则保留。
+- PWA 停止预算统一为音频响应 8 秒 + 引擎请求 6 秒，目标总预算 15 秒、浏览器 ACK 16 秒。手机先关麦，心跳继续；收尾失败不再被吞掉后回成功 ACK，页面展示错误并断开不确定会话。重复 stop 加入原收尾任务，排空期间禁止新流抢占；音频响应失败仍尽力停止 managed 引擎，shared 从不代按外部输入法快捷键。Service Worker 升为 `yandu-phone-typeless-v3`。
+- Windows 修复前置检查/按键失败留下租约、同会话重试假成功，以及音频结束后旧租约阻塞下一段的问题；失败先停止对应音频再放开重试，重复 start 等真实确认，预热/确认阶段检查停止意图，AudioEnded 终结旧会话且保留迟到 start 防护。
+- 验证：先用新增用例复现 Mac 3 项、网页会话 1 项、WebPhone 后端 4 项、Windows 启动恢复 3 项旧行为失败，再修复。最终本地 Mac Release 31/31，Desktop Release 63 passed / 1 skipped（Windows 原生项），Node 50/50；Windows Release 构建通过，Windows 会话/租约专项用无 RID 托管模式在 Mac 33/33。已有证书 obsolete / 测试可空性警告未扩大处理。完整 Windows 实际 OS 检查以本轮 PR CI 为准。
+- 浏览器联调使用独立生成音频、测试引擎和 18765/18766/18768：17 个检查点通过，20 次电脑停止到网页清理的中位数 99.97 ms、P95 101.78 ms。覆盖点击/按住、共享单机停后继续供音、权限拒绝与重试、断线、离页、离线重开及主屏幕配对；这些数字不代表真实 Typeless 延迟。脚本支持单独证据目录，本轮在 ignored `outputs/typeless-session-reliability/browser`，结束正常关闭隔离浏览器与接收端。
+- 待办：真实 Samsung/iPhone → Typeless 出字、真实首尾音、电脑停止时手机释放麦克风，以及两 Windows/一 Mac 的共享联合验收。当前 Mac Typeless 仍选择自动麦克风，尚未选择已有的「PhoneDeck Mic - BlackHole 2ch」；本轮自动化不替代该实机步骤。继续保留原测试接收端/ADB 通道供验收，进程信息以 ignored `outputs/device-acceptance-20261004/connection-status.json` 为准。
+
 
 ## 2026-10-04 手机网页接回 Typeless（最新状态）
 
@@ -7,7 +17,7 @@
 - 原 Windows/Mac 接收端复用完整 PWA，回环首页改为外部输入法连接页。共用资源清单 `shared/PhoneWeb/PhoneWeb.props`；`WebPhoneGateway` 改为本机 target 工厂，与模型/识别实现解耦。只通过固定 127.0.0.1:8765 业务 API 连接原音频桥和引擎档案，没有额外识别进程、模型下载或任意代理入口。三款 UI、方式、基础三键保留。
 - 外部目标不再要求 builtInSpeechV1；保留私网 IP、逐设备 Bearer、TLS pin 与 target ID。managed 只消费开始确认后、会话一致、非 stale/unknown 的采集停止；已排空且无替代会话也可确认停止。新旧会话隔离、每会话引擎模式固定，shared 不因单机停止而中断，也不在关供音时替第三方按快捷键。页面取消承诺改为先在电脑结束再关供音。
 - 修复 Mac 普通结束收到迟到手机 stop 时重复 toggle 导致重启听写；hold 键在结束与断流清理时尽力释放。新增回归覆盖真实 TLS 外部引擎状态适配、两个共享目标、陈旧/未知/其他会话、已排空停止、迟到 stop、冻结模式与本机管理 Origin/端口保护。
-- 本地验证：Desktop Release 测试 59 passed / 1 skipped（Windows 原生项），Mac Release 测试 25/25，Windows Release 构建通过，Node PCM/会话 49/49。Windows 测试在 Mac 使用 osx-arm64 托管运行 141 passed / 4 failed；四项均是 Windows 文件锁失败注入的既有用例，不能以 Mac 结果替代 Windows，待本 PR Windows CI。原 Mac 证书构造器 obsolete 警告未扩大处理。证据保留在 ignored `outputs/typeless-compat/tests`。
+- 本地验证：Desktop Release 测试 59 passed / 1 skipped（Windows 原生项），Mac Release 测试 25/25，Windows Release 构建通过，Node PCM/会话 49/49。Windows 测试在 Mac 使用 osx-arm64 托管运行 141 passed / 4 failed；四项均是 Windows 文件锁失败注入的既有用例。后续 PR #36 的 PhoneDeck CI `37258262335` 与 Desktop Preview `37258262128` 已全部通过，Windows 实际 OS 回归通过；Whisper 打包按要求跳过。原 Mac 证书构造器 obsolete 警告未扩大处理。证据保留在 ignored `outputs/typeless-compat/tests` 和 `final-ci.json`。
 - 已在当前真实 Mac 启动原接收端开发进程；BlackHole 2ch 与 CGEvent 辅助功能就绪，确认已安装 Typeless。10 项 HTTPS 静态资源、受保护 API、本机管理跨站与端口隔离检查通过。刚才错误路线下载的模型已删除（190085487 字节），模型目录为空。复用测试数据中的已导出 CA，仅保留公开证书的手机安装，不自动修改信任。
 - 真机待办：当前手机为 USB Samsung SM-G9880 / Android 12，浏览器 Samsung Internet 30.1.0.67；尚未完成网页配对或手机录音。用户找不到 Typeless 麦克风入口，已打开其设置里的麦克风列表，需选择「PhoneDeck Mic - BlackHole 2ch」。**不能报告手机→Typeless转写、电脑停手机停、Goal/退格/回车或 iPhone 已实测成功。** 接收端/ADB/8768 USB 反向通道仅保留供本次用户测试，PID/用途记在 `outputs/device-acceptance-20261004/connection-status.json`，清理时先核对归属。
 - 边界：旧 Mac 没有网页 peer 所需的一次性 QR/逐手机 Bearer；可作为主电脑，但多 Mac 附加电脑需独立安全迁移。Windows 安全扫码 peer 已适配，仍待联合实机。草稿 PR #36；后续输入 requestId 按网页手机身份稳定派生，既保留重试去重，也避免不同网页手机相同请求编号互相吞键。使用说明以 TYPELESS_PWA 为当前入口；独立 Whisper 实验路线保留供二开，PR CI 不自动下载模型，打包改为显式手动运行。
