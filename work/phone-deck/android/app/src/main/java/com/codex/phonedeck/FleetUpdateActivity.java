@@ -152,7 +152,7 @@ public final class FleetUpdateActivity extends Activity {
     private void checkCancelled() throws IOException { if (cancelled) throw new IOException("已停止，可重新检查并继续"); }
 
     private void rollout() throws Exception {
-        TargetDeviceManager devices = new TargetDeviceManager(this);
+        TargetDeviceManager devices = TargetDeviceManager.get(this);
         List<TargetDeviceManager.Device> all = devices.list();
         Map<String, PhoneDeckEndpoint> online = new LinkedHashMap<>();
         Map<String, PhoneDeckEndpoint> audioPeers = new LinkedHashMap<>();

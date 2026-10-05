@@ -29,7 +29,7 @@ public final class TranscriptSyncActivity extends Activity {
         TextView hint = new TextView(this); hint.setText("同一手机配对的电脑可通过手机转发最终文字。只发给下面勾选的共享组电脑；接收后保留记录，不自动输入或回车。手机页面打开或共享麦克风运行时同步。\n\n需要2.0跨平台预览接收端；旧版Typeless接收端仅共享声音。文字仅在内存保留30分钟，断线重试也不写磁盘。"); hint.setTextColor(theme.muted); page.addView(hint);
         Switch enabled = new Switch(this); enabled.setText("同步最终文字"); enabled.setTextColor(theme.text); enabled.setChecked(TranscriptRelay.enabled(this));
         enabled.setOnCheckedChangeListener((v, on) -> { TranscriptRelay.setEnabled(this, on); render(); }); page.addView(enabled);
-        TargetDeviceManager devices = new TargetDeviceManager(this);
+        TargetDeviceManager devices = TargetDeviceManager.get(this);
         for (TargetDeviceManager.Device d : devices.list()) {
             CheckBox check = new CheckBox(this); check.setText(d.displayName + " · " + d.platform); check.setTextColor(theme.text); check.setChecked(d.sharedGroup);
             check.setEnabled(d.hasClientCredential()); check.setOnCheckedChangeListener((v, on) -> { devices.setSharedGroup(d.computerId, on); render(); }); page.addView(check);

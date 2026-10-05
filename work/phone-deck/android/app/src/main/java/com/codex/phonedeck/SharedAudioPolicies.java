@@ -77,6 +77,19 @@ final class SharedAudioPolicies {
             return frames.pollFirst();
         }
 
+        /// 最多等待 timeoutMs 取下一帧；结束或超时返回 null（用于把两帧合并成一个网络包）。
+        synchronized byte[] poll(long timeoutMs) throws InterruptedException {
+            long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
+            while (frames.isEmpty() && !finished) {
+                long remaining = (deadline - System.nanoTime()) / 1_000_000L;
+                if (remaining <= 0) {
+                    break;
+                }
+                wait(remaining);
+            }
+            return frames.pollFirst();
+        }
+
         synchronized int size() {
             return frames.size();
         }

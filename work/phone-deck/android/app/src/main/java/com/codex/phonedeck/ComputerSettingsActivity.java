@@ -43,7 +43,7 @@ public final class ComputerSettingsActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         theme = PhoneDeckTheme.load(this); theme.applyWindow(this);
-        devices = new TargetDeviceManager(this);
+        devices = TargetDeviceManager.get(this);
         list();
     }
     private int dp(int value) { return PhoneDeckTheme.dp(this, value); }
@@ -101,7 +101,6 @@ public final class ComputerSettingsActivity extends Activity {
     private void notice(String message, int color) { status.setText(message); status.setTextColor(color); updateCompactLayout(); }
     private void list() {
         selected = null; endpoint = null; snapshot = null; pending = false; desktopManaged = false;
-        devices.reload();
         voiceDirty = connectionDirty = false; shell();
         add(page, text("你的电脑", 28, theme.text, true), 12);
         add(page, text("每台电脑有自己的名称、语音引擎与快捷键。主题和点击 / 按住习惯跟随手机。", 14, theme.muted, false), 8);
@@ -247,7 +246,6 @@ public final class ComputerSettingsActivity extends Activity {
         binding = true; voiceDirty = connectionDirty = false; snapshot = data;
         JSONObject settings = data.optJSONObject("settings");
         if (settings == null) { binding = false; notice("电脑返回的配置不完整，请刷新", theme.danger); return; }
-        devices.reload();
         TargetDeviceManager.Device current = devices.find(selected.computerId);
         if (current != null) selected = devices.upsert(current.computerId,
                 settings.optString("displayName", current.displayName), current.platform);
@@ -318,8 +316,7 @@ public final class ComputerSettingsActivity extends Activity {
         group.setChecked(selected.sharedGroup); add(sync, group, 0); controls.add(group);
         add(sync, text("此组同时用于共享麦克风和最终文字同步。同步总开关在「设置 → 同步文字」；加入组不会切换当前输入电脑。此项保存在手机，切换后立即保存。", 12, theme.muted, false), 8);
         group.setOnCheckedChangeListener((button, checked) -> {
-            devices.reload();
-            if (devices.setSharedGroup(selected.computerId, checked)) {
+                if (devices.setSharedGroup(selected.computerId, checked)) {
                 selected = devices.find(selected.computerId);
                 Toast.makeText(this, checked ? "已加入共享与同步组" : "已移出共享与同步组", Toast.LENGTH_SHORT).show();
             }

@@ -26,6 +26,8 @@ final class TargetDeviceManager {
         /// M1-B/DEV-03：共享供音组是用户显式选择的集合；新增配对默认不入组，
         /// 存量已配对设备在首次迁移时默认入组（不破坏升级前的共享使用）。
         final boolean sharedGroup;
+        /// 用户在手机上自定义了名称：电脑上报的名称不再覆盖它。
+        final boolean nameLocked;
 
         Device(String computerId, String displayName, String platform,
                int slot, long lastSeenAt, List<String> lanAddresses,
@@ -47,6 +49,15 @@ final class TargetDeviceManager {
                int slot, long lastSeenAt, List<String> lanAddresses,
                int lanPort, String lanToken, String clientId, boolean sharedGroup,
                String certificateSha256, String lastGoodAddress) {
+            this(computerId, displayName, platform, slot, lastSeenAt, lanAddresses, lanPort,
+                    lanToken, clientId, sharedGroup, certificateSha256, lastGoodAddress, false);
+        }
+
+        Device(String computerId, String displayName, String platform,
+               int slot, long lastSeenAt, List<String> lanAddresses,
+               int lanPort, String lanToken, String clientId, boolean sharedGroup,
+               String certificateSha256, String lastGoodAddress, boolean nameLocked) {
+            this.nameLocked = nameLocked;
             this.computerId = computerId;
             this.displayName = displayName;
             this.platform = platform;
@@ -60,6 +71,31 @@ final class TargetDeviceManager {
             this.certificateSha256 = certificateSha256;
             this.lastGoodAddress = lastGoodAddress == null || lastGoodAddress.isBlank()
                     ? null : lastGoodAddress.trim();
+        }
+
+        Device withAddresses(List<String> addresses, String lastGood) {
+            return new Device(computerId, displayName, platform, slot, lastSeenAt, addresses,
+                    lanPort, lanToken, clientId, sharedGroup, certificateSha256, lastGood, nameLocked);
+        }
+
+        Device withSharedGroup(boolean inGroup) {
+            return new Device(computerId, displayName, platform, slot, lastSeenAt, lanAddresses,
+                    lanPort, lanToken, clientId, inGroup, certificateSha256, lastGoodAddress, nameLocked);
+        }
+
+        Device withName(String name, boolean locked) {
+            return new Device(computerId, name, platform, slot, lastSeenAt, lanAddresses,
+                    lanPort, lanToken, clientId, sharedGroup, certificateSha256, lastGoodAddress, locked);
+        }
+
+        Device withSlot(int newSlot) {
+            return new Device(computerId, displayName, platform, newSlot, lastSeenAt, lanAddresses,
+                    lanPort, lanToken, clientId, sharedGroup, certificateSha256, lastGoodAddress, nameLocked);
+        }
+
+        Device withLastSeen(long seenAt) {
+            return new Device(computerId, displayName, platform, slot, seenAt, lanAddresses,
+                    lanPort, lanToken, clientId, sharedGroup, certificateSha256, lastGoodAddress, nameLocked);
         }
 
         boolean hasLanPairing() {
@@ -78,7 +114,14 @@ final class TargetDeviceManager {
     private static final String KEY_DEVICES = "known_devices";
     private static final String KEY_DEVICES_ENCRYPTED = "known_devices_enc";
     private static final String KEY_ACTIVE = "active_computer_id";
-    private static final int MAX_DEVICES = 8;
+    /// 第一轮正式容量 5 台，10 台作为压力探索（规格 0.6）。满员时拒绝新增，绝不悄悄删除已配对电脑。
+    static final int MAX_DEVICES = 10;
+    /// 每台电脑最多保留的候选地址；DHCP 变化只替换最旧的历史地址。
+    static final int MAX_ADDRESSES = 6;
+    /// 探测成功后刷新 lastSeenAt 的最小间隔，避免每 2 秒加密写一次存储。
+    private static final long SEEN_PERSIST_INTERVAL_MS = 10 * 60_000L;
+
+    private static TargetDeviceManager instance;
 
     private final SharedPreferences preferences;
     private final ArrayList<Device> devices = new ArrayList<>();
@@ -87,11 +130,39 @@ final class TargetDeviceManager {
     /// 供网络受限环境的自动化协议验收；生产包保持严格地址过滤。
     private final boolean previewChannel;
 
-    TargetDeviceManager(Context context) {
+    /// 进程内唯一实例：主界面、共享麦克风服务和各设置页共用同一份设备状态，
+    /// 不再各自整表写回而互相覆盖，也不必定时从 Keystore 重新解密。
+    static synchronized TargetDeviceManager get(Context context) {
+        if (instance == null) {
+            instance = TargetDeviceManager.get(context.getApplicationContext());
+        }
+        return instance;
+    }
+
+    private TargetDeviceManager(Context context) {
         preferences = context.getApplicationContext().getSharedPreferences(
                 PREFS_NAME, Context.MODE_PRIVATE);
         previewChannel = context.getPackageName().endsWith(".preview");
         load();
+    }
+
+    /// 新电脑能否加入：已存在或尚未满员。
+    synchronized boolean canAdd(String computerId) {
+        return find(computerId) != null || devices.size() < MAX_DEVICES;
+    }
+
+    /// 保留 last-good，其余按新近程度保留，最多 max 个（输入按从旧到新排列）。
+    static List<String> capAddresses(List<String> addresses, String lastGood, int max) {
+        ArrayList<String> result = new ArrayList<>(addresses);
+        int index = 0;
+        while (result.size() > max && index < result.size()) {
+            if (result.get(index).equals(lastGood)) {
+                index++;
+            } else {
+                result.remove(index);
+            }
+        }
+        return result;
     }
 
     /// 稳定身份是 computerId + 证书指纹 + 令牌；IP 只是缓存。
@@ -140,9 +211,14 @@ final class TargetDeviceManager {
         String safePlatform = platform == null || platform.isBlank()
                 ? "unknown" : platform.trim();
         Device existing = find(computerId);
+        if (existing == null && devices.size() >= MAX_DEVICES) {
+            // 满员：拒绝新增，由调用方提示用户先删除一台。
+            return null;
+        }
         int slot = existing == null ? nextSlot() : existing.slot;
+        boolean locked = existing != null && existing.nameLocked;
         Device updated = new Device(
-                computerId.trim(), safeName, safePlatform, slot,
+                computerId.trim(), locked ? existing.displayName : safeName, safePlatform, slot,
                 System.currentTimeMillis(),
                 existing == null ? java.util.Collections.emptyList() : existing.lanAddresses,
                 existing == null ? 0 : existing.lanPort,
@@ -150,18 +226,10 @@ final class TargetDeviceManager {
                 existing == null ? null : existing.clientId,
                 existing != null && existing.sharedGroup,
                 existing == null ? null : existing.certificateSha256,
-                existing == null ? null : existing.lastGoodAddress);
+                existing == null ? null : existing.lastGoodAddress,
+                locked);
         if (existing != null) {
             devices.remove(existing);
-        } else if (devices.size() >= MAX_DEVICES) {
-            Device oldest = devices.stream()
-                    .min(Comparator.comparingLong(device -> device.lastSeenAt))
-                    .orElse(null);
-            if (oldest != null && !oldest.computerId.equalsIgnoreCase(activeComputerId)) {
-                devices.remove(oldest);
-            } else {
-                return existing;
-            }
         }
         devices.add(updated);
         if (activeComputerId == null || activeComputerId.isBlank()) {
@@ -206,7 +274,7 @@ final class TargetDeviceManager {
                 base.computerId, base.displayName, base.platform,
                 base.slot, System.currentTimeMillis(), safeAddresses, port,
                 accessToken.trim(), base.clientId, base.sharedGroup,
-                certificateSha256.trim().toLowerCase(), lastGood);
+                certificateSha256.trim().toLowerCase(), lastGood, base.nameLocked);
         devices.remove(base);
         devices.add(paired);
         save();
@@ -220,18 +288,18 @@ final class TargetDeviceManager {
             return false;
         }
         String trimmed = address.trim();
-        if (trimmed.equals(device.lastGoodAddress)) {
+        long now = System.currentTimeMillis();
+        boolean seenStale = now - device.lastSeenAt >= SEEN_PERSIST_INTERVAL_MS;
+        if (trimmed.equals(device.lastGoodAddress) && !seenStale) {
             return false;
         }
-        Device updated = new Device(
-                device.computerId, device.displayName, device.platform,
-                device.slot, device.lastSeenAt, device.lanAddresses,
-                device.lanPort, device.lanToken, device.clientId, device.sharedGroup,
-                device.certificateSha256, trimmed);
+        // 探测成功即“最近在线”：按节流间隔刷新，供列表排序与诊断使用。
+        Device updated = device.withAddresses(device.lanAddresses, trimmed)
+                .withLastSeen(seenStale ? now : device.lastSeenAt);
         devices.remove(device);
         devices.add(updated);
         save();
-        return true;
+        return !trimmed.equals(device.lastGoodAddress);
     }
 
     /// 合并自动发现得到的新地址（仍需 HTTPS + 令牌 + 证书固定验证后才可用）。
@@ -246,11 +314,9 @@ final class TargetDeviceManager {
         }
         ArrayList<String> merged = new ArrayList<>(device.lanAddresses);
         merged.add(trimmed);
-        Device updated = new Device(
-                device.computerId, device.displayName, device.platform,
-                device.slot, device.lastSeenAt, merged,
-                device.lanPort, device.lanToken, device.clientId, device.sharedGroup,
-                device.certificateSha256, device.lastGoodAddress);
+        Device updated = device.withAddresses(
+                capAddresses(merged, device.lastGoodAddress, MAX_ADDRESSES),
+                device.lastGoodAddress);
         devices.remove(device);
         devices.add(updated);
         save();
@@ -273,13 +339,50 @@ final class TargetDeviceManager {
         if (device == null || device.sharedGroup == inGroup) {
             return device != null;
         }
-        Device updated = new Device(
-                device.computerId, device.displayName, device.platform,
-                device.slot, device.lastSeenAt, device.lanAddresses,
-                device.lanPort, device.lanToken, device.clientId, inGroup,
-                device.certificateSha256, device.lastGoodAddress);
         devices.remove(device);
-        devices.add(updated);
+        devices.add(device.withSharedGroup(inGroup));
+        save();
+        return true;
+    }
+
+    /// 手机本地重命名；空名称恢复为电脑上报的名称（下次连接时更新）。
+    synchronized boolean rename(String computerId, String name) {
+        Device device = find(computerId);
+        if (device == null) {
+            return false;
+        }
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.length() > 40) {
+            trimmed = trimmed.substring(0, 40);
+        }
+        devices.remove(device);
+        devices.add(trimmed.isEmpty()
+                ? device.withName(device.displayName, false)
+                : device.withName(trimmed, true));
+        save();
+        return true;
+    }
+
+    /// 在编号顺序中上移（delta<0）或下移一位：与相邻电脑交换编号。
+    synchronized boolean move(String computerId, int delta) {
+        List<Device> ordered = list();
+        int index = -1;
+        for (int i = 0; i < ordered.size(); i++) {
+            if (ordered.get(i).computerId.equalsIgnoreCase(computerId)) {
+                index = i;
+                break;
+            }
+        }
+        int target = index + Integer.signum(delta);
+        if (index < 0 || delta == 0 || target < 0 || target >= ordered.size()) {
+            return false;
+        }
+        Device first = ordered.get(index);
+        Device second = ordered.get(target);
+        devices.remove(first);
+        devices.remove(second);
+        devices.add(first.withSlot(second.slot));
+        devices.add(second.withSlot(first.slot));
         save();
         return true;
     }
@@ -299,8 +402,7 @@ final class TargetDeviceManager {
         return true;
     }
 
-    /// 主界面与共享麦克风服务各持有一份实例；任一方更新配对或删除设备后，
-    /// 另一方在下一轮探测前调用 reload() 刷新自己的视图。
+    /// 从存储重新读取（仅用于存储被外部改写的情况；进程内共享单例不需要定时调用）。
     synchronized void reload() {
         devices.clear();
         load();
@@ -376,7 +478,8 @@ final class TargetDeviceManager {
                         item.optString("clientId", null),
                         sharedGroup,
                         certificateSha256,
-                        hostAcceptable(lastGood) ? lastGood : null));
+                        hostAcceptable(lastGood) ? lastGood : null,
+                        item.optBoolean("nameLocked", false)));
             }
         } catch (Exception ignored) {
             devices.clear();
@@ -405,6 +508,7 @@ final class TargetDeviceManager {
                 item.put("sharedGroup", device.sharedGroup);
                 item.put("certificateSha256", device.certificateSha256);
                 item.put("lastGoodAddress", device.lastGoodAddress);
+                item.put("nameLocked", device.nameLocked);
                 array.put(item);
             }
         } catch (Exception ignored) {
@@ -466,7 +570,8 @@ final class TargetDeviceManager {
                 System.currentTimeMillis(), safeAddresses, port,
                 clientToken.trim(), clientId.trim(), false,
                 certificateSha256.trim().toLowerCase(),
-                safeAddresses.contains(base.lastGoodAddress) ? base.lastGoodAddress : null);
+                safeAddresses.contains(base.lastGoodAddress) ? base.lastGoodAddress : null,
+                base.nameLocked);
         devices.remove(base);
         devices.add(paired);
         save();
@@ -574,7 +679,8 @@ final class TargetDeviceManager {
                 current.lanPort, clientToken, clientId, current.sharedGroup,
                 current.certificateSha256,
                 current.lanAddresses.contains(verifiedHost)
-                        ? verifiedHost : current.lastGoodAddress);
+                        ? verifiedHost : current.lastGoodAddress,
+                current.nameLocked);
         devices.remove(current);
         devices.add(upgraded);
         save();

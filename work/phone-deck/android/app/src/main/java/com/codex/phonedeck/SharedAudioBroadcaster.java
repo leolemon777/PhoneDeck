@@ -44,6 +44,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 * 20 / 1_000;
     // 240 ms：吸收常见 Wi-Fi 抖动；满了优先丢静音（见 FrameQueue），接收端再跳过积压静音。
     private static final int QUEUE_FRAMES = 12;
+    /// 共享模式长时间（含锁屏）供音：两帧 20 ms 合并成一个约 40 ms 的网络包，
+    /// TLS 记录与无线唤醒次数减半，代价是最多多出 20 ms 延迟。
+    static final long BATCH_WAIT_MS = 25;
 
     private final Context context;
     private final Listener listener;
@@ -303,6 +306,10 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                                 break;
                             }
                             output.write(frame);
+                            byte[] next = queue.poll(BATCH_WAIT_MS);
+                            if (next != null) {
+                                output.write(next);
+                            }
                             output.flush();
                         }
                         if (shouldRun && finishing) {

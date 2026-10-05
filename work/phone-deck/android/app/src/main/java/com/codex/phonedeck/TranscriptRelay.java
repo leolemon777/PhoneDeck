@@ -67,7 +67,7 @@ final class TranscriptRelay {
     private static synchronized boolean valid(Context c, int ticket) { return users > 0 && ticket == generation && enabled(c); }
     private static void synchronize(Context context, int ticket) throws Exception {
         List<TargetDeviceManager.Device> group = new ArrayList<>();
-        for (TargetDeviceManager.Device device : new TargetDeviceManager(context).list())
+        for (TargetDeviceManager.Device device : TargetDeviceManager.get(context).list())
             if (device.sharedGroup && device.hasLanPairing() && device.hasClientCredential()) group.add(device);
         Map<String, PhoneDeckEndpoint> online = new HashMap<>(); Set<String> selected = new HashSet<>(); int unsupported = 0;
         for (TargetDeviceManager.Device device : group) {

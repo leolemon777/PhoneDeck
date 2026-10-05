@@ -95,7 +95,7 @@ final class PhoneDeckUsbClient {
             usbFailure = exception;
         }
 
-        TargetDeviceManager deviceManager = new TargetDeviceManager(context);
+        TargetDeviceManager deviceManager = TargetDeviceManager.get(context);
         String activeComputerId = deviceManager.getActiveComputerId();
         if (activeComputerId == null || activeComputerId.isBlank()) {
             if (usbServer != null && !usbServer.computerId.isEmpty()) {

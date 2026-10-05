@@ -40,13 +40,16 @@ final class PhoneDeckLanClient {
     private static final int PROBE_CONNECT_TIMEOUT_MS = 600;
     private static final int PROBE_READ_TIMEOUT_MS = 900;
 
-    /// 共享探测池（守护线程，不阻止进程退出），供无自备线程池的调用方使用。
+    /// 共享地址探测池（守护线程）：直接移交、不排队。固定小线程池在多台电脑同时探测时
+    /// 会让后一台的地址任务排在前一台未结束的任务之后，等不到截止时间被误判离线。
     private static final ExecutorService SHARED_PROBE_POOL =
-            java.util.concurrent.Executors.newFixedThreadPool(4, runnable -> {
+            new java.util.concurrent.ThreadPoolExecutor(0, 64, 30,
+                    java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.SynchronousQueue<>(), runnable -> {
                 Thread thread = new Thread(runnable, "PhoneDeck-LanProbe");
                 thread.setDaemon(true);
                 return thread;
-            });
+            }, new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
 
     private PhoneDeckLanClient() {
     }
@@ -54,6 +57,11 @@ final class PhoneDeckLanClient {
     /// 只关心在线结果的便捷入口（输入指令的 Wi-Fi 优先通道等场景）。
     static ProbeResult probe(TargetDeviceManager.Device device) {
         return probe(device, SHARED_PROBE_POOL).result;
+    }
+
+    /// 含“配对被拒”信号的探测，使用共享地址探测池（ConnectionMonitor 默认探测器）。
+    static ProbeOutcome probeOutcome(TargetDeviceManager.Device device) {
+        return probe(device, SHARED_PROBE_POOL);
     }
 
     static TargetDeviceManager.Device pairOverUsb(TargetDeviceManager manager)
@@ -79,6 +87,10 @@ final class PhoneDeckLanClient {
                 pairing.optString("accessToken", null),
                 pairing.optString("certificateSha256", null));
         if (paired == null) {
+            if (!manager.canAdd(pairing.optString("computerId", ""))) {
+                throw new IllegalStateException("已配对 " + TargetDeviceManager.MAX_DEVICES
+                        + " 台电脑，请先删除一台再配对");
+            }
             throw new IllegalStateException("电脑返回的 Wi-Fi 配对资料不完整");
         }
         return paired;

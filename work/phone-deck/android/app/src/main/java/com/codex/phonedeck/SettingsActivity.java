@@ -136,7 +136,7 @@ public final class SettingsActivity extends Activity {
 
         page.addView(sectionLabel("连接与维护"), topMargin(dp(24)));
         computerSummary = summaryText();
-        int computers = new TargetDeviceManager(this).list().size();
+        int computers = TargetDeviceManager.get(this).list().size();
         computerSummary.setText(getString(R.string.computer_settings_summary, computers));
         page.addView(navRow("devices", "多电脑配置", computerSummary,
                 () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(8)));
@@ -493,7 +493,7 @@ public final class SettingsActivity extends Activity {
                 : "手机控制 · " + (holdSelected ? "按住说话" : "点击说话"));
         shortcutSummary.setText(repository.load().size() + " 个按钮");
         computerSummary.setText(getString(R.string.computer_settings_summary,
-                new TargetDeviceManager(this).list().size()));
+                TargetDeviceManager.get(this).list().size()));
     }
 
     private TextView summaryText() {

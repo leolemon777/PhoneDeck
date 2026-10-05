@@ -80,6 +80,14 @@ public final class MainActivity extends Activity {
     private final ExecutorService connectionExecutor = Executors.newSingleThreadExecutor();
     /// 按下话筒时预热两条 keep-alive 连接（音频流与开始指令各用一条），省掉抬手后的 TLS 握手。
     private final ExecutorService voicePrewarmExecutor = Executors.newFixedThreadPool(2);
+    private final ExecutorService targetSwitchExecutor = Executors.newSingleThreadExecutor();
+    private static final int VOICE_EVENTS_TIMEOUT_MS = 8_000;
+    private final java.util.Set<String> eventsUnsupportedBaseUrls =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private volatile String voiceEventsVersion;
+    private final java.util.concurrent.atomic.AtomicBoolean sharedRenderPending =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    private boolean targetSwitchInFlight;
     private static final long VOICE_PREWARM_INTERVAL_MS = 3_000;
     private long lastVoicePrewarmAt;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -179,16 +187,12 @@ public final class MainActivity extends Activity {
     private final ConcurrentHashMap<String, Boolean> lanPairingRejected =
             new ConcurrentHashMap<>();
     /// 并行探测所有候选地址；死地址短超时快速失败，不互相排队。
-    private final ExecutorService lanProbePool = Executors.newFixedThreadPool(6);
     /// 单轮 LAN 探测全部失败时的连续计数，用于探测间隔退避。
     private int lanCheckFailStreak;
     /// 立即探测的最小间隔，避免网络回调风暴。
     private long lastLanCheckAt;
-    /// UDP 发现冷却计时（elapsedRealtime）。
-    private volatile long lastDiscoveryAt;
     /// 单台设备探测失败后到判离线的宽限期。
     private static final long OFFLINE_GRACE_MS = 6_000;
-    private static final long DISCOVERY_COOLDOWN_MS = 10_000;
     private ConnectivityManager.NetworkCallback networkCallback;
 
     // Microphone activation is owned by explicit actions on the phone.
@@ -221,20 +225,56 @@ public final class MainActivity extends Activity {
                 final String session = currentSessionId;
                 final PhoneDeckEndpoint endpoint = currentSessionEndpoint;
                 final long probeStartedAt = SystemClock.elapsedRealtime();
+                // healthEventsV1：长轮询在状态变化时立即返回；接收端不支持（404）时回退到 500 ms 轮询。
+                final boolean useEvents = !eventsUnsupportedBaseUrls.contains(endpoint.baseUrl);
+                final String since = voiceEventsVersion;
                 voiceStatusInFlight = true;
                 voiceStatusExecutor.execute(() -> {
+                    boolean immediate = false;
                     try {
-                        JSONObject health = PhoneDeckHttp.getJson(endpoint, "/api/health", 600, 900);
-                        RemoteVoiceState remote = RemoteVoiceState.fromHealth(health, probeStartedAt);
+                        JSONObject health;
+                        if (useEvents) {
+                            try {
+                                health = PhoneDeckHttp.getJson(endpoint, "/api/events?timeoutMs="
+                                        + VOICE_EVENTS_TIMEOUT_MS + (since == null ? ""
+                                        : "&since=" + java.net.URLEncoder.encode(since, "UTF-8")),
+                                        600, VOICE_EVENTS_TIMEOUT_MS + 2_000);
+                                immediate = true;
+                            } catch (PhoneDeckHttp.ResponseException missing) {
+                                if (missing.status != 404) throw missing;
+                                eventsUnsupportedBaseUrls.add(endpoint.baseUrl);
+                                health = PhoneDeckHttp.getJson(endpoint, "/api/health", 600, 900);
+                            }
+                        } else {
+                            health = PhoneDeckHttp.getJson(endpoint, "/api/health", 600, 900);
+                        }
+                        // 长轮询返回时快照是最新的：采样时刻按返回时刻保守扣除一段网络往返，
+                        // 仍不早于请求发出时；探针自身的 ageMs 由 RemoteStopPolicy 另行扣除。
+                        long sampledAt = immediate
+                                ? Math.max(probeStartedAt, SystemClock.elapsedRealtime() - 300)
+                                : probeStartedAt;
+                        RemoteVoiceState remote = RemoteVoiceState.fromHealth(health, sampledAt);
                         String computer = health.optString("computerId", null);
+                        String version = health.optString("stateVersion", null);
                         mainHandler.post(() -> {
-                            if (session.equals(currentSessionId))
+                            if (session.equals(currentSessionId)) {
+                                voiceEventsVersion = version;
                                 reconcileRemoteVoiceState(endpoint, computer, remote);
+                            }
                         });
                     } catch (Exception ignored) {
                         // Connection failure is unknown, never evidence of a desktop stop.
+                        immediate = false;
                     } finally {
-                        mainHandler.post(() -> voiceStatusInFlight = false);
+                        final boolean again = immediate;
+                        mainHandler.post(() -> {
+                            voiceStatusInFlight = false;
+                            if (again) {
+                                // 长轮询刚返回：马上挂起下一次，不等 500 ms 节拍。
+                                mainHandler.removeCallbacks(managedVoiceCheck);
+                                mainHandler.post(managedVoiceCheck);
+                            }
+                        });
                     }
                 });
             }
@@ -265,10 +305,21 @@ public final class MainActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
-        targetDeviceManager = new TargetDeviceManager(this);
+        targetDeviceManager = TargetDeviceManager.get(this);
         setContentView(createInterface());
         maybeHandlePairingTestHook(getIntent());
         registerSharedAudioStatusReceiver();
+        // 共享麦克风音量每 100 ms 更新：走进程内回调，合并成至多一个待处理的界面刷新。
+        PhoneAudioService.setInProcessListener(() -> {
+            if (sharedRenderPending.compareAndSet(false, true)) {
+                mainHandler.post(() -> {
+                    sharedRenderPending.set(false);
+                    if (!isDestroyed()) {
+                        renderSharedAudioStatus(PhoneAudioService.getSnapshot());
+                    }
+                });
+            }
+        });
         audioStreamer = new AudioStreamer(this, new AudioStreamer.Listener() {
             @Override
             public void onCapturing(String sessionId) {
@@ -360,6 +411,7 @@ public final class MainActivity extends Activity {
             }
             Log.i("PhoneDeckNet", "立即重新探测：" + reason);
             lanCheckFailStreak = 0;
+            ConnectionMonitor.get(this).reset();
             testConnection();
             testLanConnections();
         });
@@ -1540,7 +1592,7 @@ public final class MainActivity extends Activity {
             chip.setEnabled(true);
             chip.setContentDescription(device.slot + "号电脑 " + device.displayName
                     + (sharedState == null ? "" : "，共享状态" + sharedState)
-                    + (pairingRejected ? "，配对已失效，用 USB 连接该电脑一次可自动修复" : "")
+                    + (pairingRejected ? "，配对已失效，请重新扫码配对（也可用 USB 连接一次自动修复）" : "")
                     + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线")
                     + "，长按删除这台电脑");
             chip.setOnClickListener(view -> selectTargetDevice(device, chip));
@@ -1565,7 +1617,7 @@ public final class MainActivity extends Activity {
                     .setNegativeButton("知道了", null).show();
             return;
         }
-        String[] labels = new String[devices.size() + 1];
+        String[] labels = new String[devices.size() + 2];
         for (int i = 0; i < devices.size(); i++) {
             TargetDeviceManager.Device device = devices.get(i);
             String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
@@ -1578,10 +1630,15 @@ public final class MainActivity extends Activity {
         }
         // M1-B/DEV-03：共享组管理入口（显式集合；新增配对不自动入组）。
         labels[devices.size()] = "⚙ 管理共享组（勾选接收共享麦克风的电脑）";
+        labels[devices.size() + 1] = "✎ 管理电脑（重命名、排序、删除、重新配对）";
         new android.app.AlertDialog.Builder(this).setTitle("选择输入电脑")
                 .setItems(labels, (dialog, which) -> {
                     if (which == devices.size()) {
                         showSharedGroupDialog();
+                        return;
+                    }
+                    if (which == devices.size() + 1) {
+                        showManageComputersDialog();
                         return;
                     }
                     selectTargetDevice(devices.get(which), statusText);
@@ -1589,6 +1646,64 @@ public final class MainActivity extends Activity {
                 .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
                 .setPositiveButton("扫码配对新电脑", (dialog, which) -> launchQrPairingScan())
                 .setNegativeButton("取消", null).show();
+    }
+
+    /// 多电脑管理：编号即顺序，名称只改手机上的显示，不影响电脑身份与配对。
+    private void showManageComputersDialog() {
+        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        if (devices.isEmpty()) {
+            showDeviceList();
+            return;
+        }
+        String[] labels = new String[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            String state = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))
+                    ? "需重新配对" : isDeviceOnline(device.computerId) ? "在线" : "离线";
+            labels[i] = device.slot + "号 · " + device.displayName + "\n" + state
+                    + (device.nameLocked ? " · 手机自定义名称" : "");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("管理电脑（" + devices.size() + "/" + TargetDeviceManager.MAX_DEVICES + "）")
+                .setItems(labels, (dialog, which) -> showManageComputerActions(devices.get(which)))
+                .setNegativeButton("完成", null).show();
+    }
+
+    private void showManageComputerActions(TargetDeviceManager.Device device) {
+        String[] actions = {"重命名", "上移一位", "下移一位", "重新扫码配对", "删除这台电脑"};
+        new AlertDialog.Builder(this).setTitle(device.slot + "号 · " + device.displayName)
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) {
+                        showRenameComputerDialog(device);
+                    } else if (which == 1 || which == 2) {
+                        if (targetDeviceManager.move(device.computerId, which == 1 ? -1 : 1)) {
+                            applyStoredTarget();
+                        }
+                        showManageComputersDialog();
+                    } else if (which == 3) {
+                        launchQrPairingScan();
+                    } else {
+                        confirmDeleteTargetDevice(device);
+                    }
+                })
+                .setNegativeButton("返回", (dialog, which) -> showManageComputersDialog()).show();
+    }
+
+    private void showRenameComputerDialog(TargetDeviceManager.Device device) {
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setText(device.displayName);
+        input.setSelection(input.getText().length());
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(40)});
+        new AlertDialog.Builder(this).setTitle("重命名 " + device.slot + "号电脑")
+                .setMessage("只修改手机上的显示名称。留空则恢复电脑自己的名称。")
+                .setView(input)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    targetDeviceManager.rename(device.computerId, input.getText().toString());
+                    applyStoredTarget();
+                    showManageComputersDialog();
+                })
+                .setNegativeButton("取消", (dialog, which) -> showManageComputersDialog()).show();
     }
 
     /// M1-B/DEV-03：共享组多选；切换即持久化，下一轮探测生效（移除即停发该目标流）。
@@ -1771,7 +1886,10 @@ public final class MainActivity extends Activity {
                         result.optString("clientId", clientId),
                         payload.certificateSha256);
                 if (saved == null) {
-                    showActionFeedback("✕  凭据保存失败", theme.danger);
+                    showActionFeedback(targetDeviceManager.canAdd(payload.computerId)
+                            ? "✕  凭据保存失败"
+                            : "✕  已配对 " + TargetDeviceManager.MAX_DEVICES
+                                    + " 台电脑，请先长按删除一台再配对", theme.danger);
                     return;
                 }
                 new Thread(() -> {
@@ -1909,16 +2027,81 @@ public final class MainActivity extends Activity {
             performResultHaptic(source, false);
             return;
         }
+        if (device.hasLanPairing() && !sameComputer(device.computerId, targetComputerId)) {
+            confirmAndSelectLanTarget(device, source);
+            return;
+        }
         if (!isDeviceOnline(device.computerId)) {
             if (Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))) {
                 showActionFeedback("✕  " + device.displayName
-                        + " 的配对已失效；用 USB 连接该电脑一次即可自动修复", theme.warning);
+                        + " 的配对已失效；请重新扫码配对，或用 USB 连接一次自动修复", theme.warning);
             } else {
                 showActionFeedback("✕  " + device.displayName + " 当前未连接", theme.danger);
             }
             performResultHaptic(source, false);
             return;
         }
+        if (!targetDeviceManager.select(device.computerId)) {
+            showActionFeedback("✕  无法选择目标电脑", theme.danger);
+            performResultHaptic(source, false);
+            return;
+        }
+        applyStoredTarget();
+        String channel = isLanTargetOnline()
+                ? "Wi-Fi" : isUsbTargetOnline() ? "USB" : "蓝牙快捷键";
+        showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
+                + device.displayName + " · " + channel, theme.success);
+        performResultHaptic(source, true);
+    }
+
+    /// 切换目标必须得到新电脑确认：立即单独探测（核对 computerId、证书与凭据），
+    /// 成功才切换；不依赖可能已过期数秒的缓存在线状态，也不改变共享组。
+    private void confirmAndSelectLanTarget(TargetDeviceManager.Device device, View source) {
+        if (targetSwitchInFlight) {
+            return;
+        }
+        targetSwitchInFlight = true;
+        showActionFeedback("●  正在确认 " + device.slot + "号电脑 · " + device.displayName + "…",
+                theme.warning);
+        targetSwitchExecutor.execute(() -> {
+            ConnectionMonitor.Outcome outcome = ConnectionMonitor.get(this).probeNow(device);
+            mainHandler.post(() -> {
+                targetSwitchInFlight = false;
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                if (isVoiceStarting() || dictationActive || typelessInFlight
+                        || audioStreamer != null && audioStreamer.isRunning()) {
+                    showActionFeedback("✕  语音已开始，未切换目标电脑", theme.warning);
+                    return;
+                }
+                if (outcome.result == null) {
+                    if (outcome.pairingRejected) {
+                        lanPairingRejected.put(device.computerId, Boolean.TRUE);
+                        showActionFeedback("✕  " + device.displayName
+                                + " 的配对已失效，请重新扫码配对", theme.warning);
+                    } else if (isUsbTargetOnline() && isDeviceOnline(device.computerId)) {
+                        // 局域网不可达但 USB 仍连着这台电脑：沿用已校验的 USB 通道。
+                        finishTargetSelection(device, source);
+                        return;
+                    } else {
+                        showActionFeedback("✕  " + device.displayName
+                                + " 没有回应，仍保持当前电脑", theme.danger);
+                    }
+                    performResultHaptic(source, false);
+                    refreshTargetSwitcher();
+                    return;
+                }
+                lanPairingRejected.remove(device.computerId);
+                lanTargets.put(device.computerId, lanStatusFrom(outcome.result));
+                targetDeviceManager.recordLastGoodAddress(
+                        device.computerId, outcome.result.hostAddress);
+                finishTargetSelection(device, source);
+            });
+        });
+    }
+
+    private void finishTargetSelection(TargetDeviceManager.Device device, View source) {
         if (!targetDeviceManager.select(device.computerId)) {
             showActionFeedback("✕  无法选择目标电脑", theme.danger);
             performResultHaptic(source, false);
@@ -2405,23 +2588,20 @@ public final class MainActivity extends Activity {
                 boolean anyPaired = false;
                 boolean anySuccess = false;
                 ConcurrentHashMap<String, Boolean> rejectedNext = new ConcurrentHashMap<>();
-                for (TargetDeviceManager.Device device : targetDeviceManager.list()) {
-                    if (lanProbePool.isShutdown() || Thread.currentThread().isInterrupted()) {
-                        return; // Activity was destroyed during a font/orientation change.
-                    }
-                    if (!device.hasLanPairing()) {
+                java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+                // 全部电脑并行探测，离线电脑按各自退避降频；与共享麦克风服务共用结果。
+                java.util.Map<String, ConnectionMonitor.Outcome> outcomes =
+                        ConnectionMonitor.get(this).probeAll(devices, false);
+                if (isDestroyed() || Thread.currentThread().isInterrupted()) {
+                    return; // Activity was destroyed during a font/orientation change.
+                }
+                for (TargetDeviceManager.Device device : devices) {
+                    ConnectionMonitor.Outcome outcome = outcomes.get(device.computerId);
+                    if (outcome == null) {
                         continue;
                     }
                     anyPaired = true;
-                    final long probeStartedAt = SystemClock.elapsedRealtime();
-                    PhoneDeckLanClient.ProbeOutcome outcome =
-                            PhoneDeckLanClient.probe(device, lanProbePool);
                     PhoneDeckLanClient.ProbeResult result = outcome.result;
-                    if (result == null) {
-                        // 缓存地址全部失败：触发一次 UDP 自动发现（带冷却），
-                        // 把新地址并入候选后重试；全程不需要重新插 USB。
-                        result = probeWithDiscovery(device);
-                    }
                     if (result == null) {
                         if (outcome.pairingRejected) {
                             rejectedNext.put(device.computerId, Boolean.TRUE);
@@ -2429,40 +2609,17 @@ public final class MainActivity extends Activity {
                         continue;
                     }
                     anySuccess = true;
+                    // 复用的缓存结果按其真实采样时刻判断远端停止，不能当作本轮新样本。
+                    final long probeStartedAt = outcome.startedAt;
                     if (targetDeviceManager.recordLastGoodAddress(
                             device.computerId, result.hostAddress)) {
                         Log.i("PhoneDeckNet", "last-good 地址更新："
                                 + device.displayName + " → " + result.hostAddress);
                     }
                     JSONObject health = result.health;
-                    if (sameComputer(device.computerId,
-                            targetDeviceManager.getActiveComputerId())) {
-                        // Keep the phone layout when moving between computers.
-                    }
-                    boolean supportsManagedDictation = false;
-                    org.json.JSONArray capabilities = health.optJSONArray("capabilities");
-                    if (capabilities != null) {
-                        for (int index = 0; index < capabilities.length(); index++) {
-                            if ("managedDictation".equals(capabilities.optString(index))) {
-                                supportsManagedDictation = true;
-                                break;
-                            }
-                        }
-                    }
-                    JSONObject audio = health.optJSONObject("audio");
                     RemoteVoiceState remoteVoiceState =
                             RemoteVoiceState.fromHealth(health, probeStartedAt);
-                    String lanForegroundApp = health.optString("foregroundApp", null);
-                    next.put(device.computerId, new LanTargetStatus(
-                            result.endpoint,
-                            health.optInt("protocolVersion", 0),
-                            supportsManagedDictation,
-                            audio != null && audio.optBoolean("available", false),
-                            parseVirtualCableSelected(health),
-                            parseEngineModes(health),
-                            parseEngineDisplayName(health),
-                            lanForegroundApp == null || lanForegroundApp.isBlank()
-                                    ? null : lanForegroundApp));
+                    next.put(device.computerId, lanStatusFrom(result));
                     PhoneDeckEndpoint healthEndpoint = result.endpoint;
                     String healthComputerId = device.computerId;
                     mainHandler.post(() -> {
@@ -2478,16 +2635,36 @@ public final class MainActivity extends Activity {
                 lanPairingRejected.clear();
                 lanPairingRejected.putAll(rejectedNext);
                 mainHandler.post(this::applyStoredTarget);
-            } catch (java.util.concurrent.RejectedExecutionException exception) {
-                // onDestroy may shut the pool down between the check and submission.
-                // Cancel this obsolete screen's probe without crashing the replacement.
-                if (!lanProbePool.isShutdown()) {
-                    throw exception;
-                }
             } finally {
                 lanCheckInFlight = false;
             }
         });
+    }
+
+    private LanTargetStatus lanStatusFrom(PhoneDeckLanClient.ProbeResult result) {
+        JSONObject health = result.health;
+        boolean supportsManagedDictation = false;
+        org.json.JSONArray capabilities = health.optJSONArray("capabilities");
+        if (capabilities != null) {
+            for (int index = 0; index < capabilities.length(); index++) {
+                if ("managedDictation".equals(capabilities.optString(index))) {
+                    supportsManagedDictation = true;
+                    break;
+                }
+            }
+        }
+        JSONObject audio = health.optJSONObject("audio");
+        String lanForegroundApp = health.optString("foregroundApp", null);
+        return new LanTargetStatus(
+                result.endpoint,
+                health.optInt("protocolVersion", 0),
+                supportsManagedDictation,
+                audio != null && audio.optBoolean("available", false),
+                parseVirtualCableSelected(health),
+                parseEngineModes(health),
+                parseEngineDisplayName(health),
+                lanForegroundApp == null || lanForegroundApp.isBlank()
+                        ? null : lanForegroundApp);
     }
 
     /// 手机只反向同步自己创建的 managedDictation 会话。电脑端独立启动语音引擎
@@ -2539,31 +2716,6 @@ public final class MainActivity extends Activity {
             return expected == PhoneDeckEndpoint.USB && observed == PhoneDeckEndpoint.USB;
         }
         return expected.isLan() && observed.isLan();
-    }
-
-    /// UDP 广播发现（10 秒冷却）。发现结果只并入候选地址；
-    /// 建立连接仍必须通过 HTTPS + 配对令牌 + 证书固定验证。
-    private PhoneDeckLanClient.ProbeResult probeWithDiscovery(
-            TargetDeviceManager.Device device) {
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastDiscoveryAt < DISCOVERY_COOLDOWN_MS) {
-            return null;
-        }
-        lastDiscoveryAt = now;
-        java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> found =
-                LanDiscoveryClient.discover(this, 700);
-        LanDiscoveryClient.DiscoveredComputer discovered = found.get(device.computerId);
-        if (discovered == null
-                || discovered.port != device.lanPort
-                || !targetDeviceManager.mergeDiscoveredAddress(
-                        device.computerId, discovered.hostAddress)) {
-            return null;
-        }
-        Log.i("PhoneDeckNet", "UDP 发现新地址："
-                + device.displayName + " → " + discovered.hostAddress);
-        TargetDeviceManager.Device updated = targetDeviceManager.find(device.computerId);
-        return updated == null
-                ? null : PhoneDeckLanClient.probe(updated, lanProbePool).result;
     }
 
     private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
@@ -3052,7 +3204,7 @@ public final class MainActivity extends Activity {
                 showConnection(targetDisplayName + " · 需要重新配对", theme.warning);
                 showActionFeedback(isDesktopPreviewChannel()
                         ? "✕  配对已失效，请重新扫描电脑二维码"
-                        : "✕  配对已失效；用 USB 连接 " + targetDisplayName + " 一次即可自动修复", theme.danger);
+                        : "✕  配对已失效；请重新扫码配对 " + targetDisplayName + "，或用 USB 连接一次自动修复", theme.danger);
             } else if (isBluetoothTargetOnline()) {
                 showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
                 showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；请连接 Wi-Fi 或 USB",
@@ -3709,12 +3861,13 @@ public final class MainActivity extends Activity {
             audioStreamer.close();
         }
         clearVoiceSessionState();
-        lanProbePool.shutdownNow();
         actionExecutor.shutdownNow();
         voiceExecutor.shutdownNow();
         voiceRecoveryExecutor.shutdownNow();
         connectionExecutor.shutdownNow();
         voicePrewarmExecutor.shutdownNow();
+        targetSwitchExecutor.shutdownNow();
+        PhoneAudioService.setInProcessListener(null);
         super.onDestroy();
     }
 
