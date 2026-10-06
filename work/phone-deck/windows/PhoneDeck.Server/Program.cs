@@ -312,25 +312,6 @@ app.MapGet("/api/events", async Task<IResult> (HttpContext context) => Results.J
     HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
     context.RequestAborted)));
 
-app.MapGet("/api/config/agent-shortcuts", () =>
-{
-    var settings = AgentShortcutSettings.LoadOrCreate();
-    return Results.Json(new
-    {
-        ok = true,
-        schemaVersion = settings.SchemaVersionValue,
-        updatedAt = settings.UpdatedAt,
-        buttons = settings.Buttons.Select(button => new
-        {
-            id = button.Id,
-            label = button.Label,
-            text = button.Text,
-            submit = button.Submit,
-            visible = button.Visible
-        })
-    });
-});
-
 // 共享麦克风联动开关：控制台界面或 Ctrl+Alt+M 热键从 loopback 调用；
 // 局域网调用仍需令牌。手机轮询 /api/health 里的 shared.requested 自动跟随，
 // 持久化到 server-settings.json，电脑重启后手机会重新自动开启。

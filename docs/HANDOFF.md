@@ -12,8 +12,9 @@
   已解压的 JDK / cmdline-tools / scrcpy 安装包、Gradle 守护日志、旧 `work/tools/phonedeck-mac` 启动器移入废纸篓（约 3 GB，可恢复；
   含旧 `outputs/device-acceptance-20261004/data` 副本，现用数据在 `~/Library/Application Support/PhoneDeck`）。`outputs/` 只留
   `windows-receiver-20261006`（安装包）与 `android-home-cards`（截图）。
-- **发现**：a26f23a 删除 `AgentSyncManager` 后，手机端不再拉取 `/api/config/agent-shortcuts`，`ShortcutConfigRepository.applyAgentOverrides`
-  已无调用方；Windows 端仍在发布。属于功能回退，未删，待决定恢复还是正式下线。
+- **下线 Agent 指令同步**（用户确认）：删 Windows `/api/config/agent-shortcuts`、`AgentShortcutSettings` 及其测试，删手机端
+  `applyAgentOverrides` 与同步记录；手机 Agent 按钮仍作为本地快捷键。另把 Android 模拟器、系统镜像和 PWA 测试浏览器移入废纸篓
+  （约 4.4 GB），`work/tools` 现约 3.7 GB；Android 调试签名用 `~/.android/debug.keystore`，不受影响。
 - **验证**：清缓存后全量重建。Android assembleDebug / 单元测试 / lint 通过；Mac 测试 48/48；Windows 测试 179/183（同 4 项 macOS
   基线失败）；ControlCenter 交叉编译 0 警告；`contracts/tools/validate.py` 全部通过。
 
