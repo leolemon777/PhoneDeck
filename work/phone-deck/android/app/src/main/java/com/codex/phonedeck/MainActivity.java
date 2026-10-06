@@ -4365,7 +4365,10 @@ public final class MainActivity extends Activity {
                     holdReleasePending = false;
                     clearVoiceSessionState();
                     showConnection("语音指令发送失败", theme.danger);
-                    showActionFeedback("✕  电脑没有确认，请检查 Wi-Fi/USB 连接后重试", theme.danger);
+                    showActionFeedback(exception instanceof ComputerRejectedException
+                                    && ((ComputerRejectedException) exception).fromComputer
+                                    ? "✕  " + exception.getMessage()
+                                    : "✕  电脑没有确认，请检查 Wi-Fi/USB 连接后重试", theme.danger);
                     performResultHaptic(typelessButton, false);
                     flashResult(typelessButton, theme.danger);
                     finishGuardedAction(typelessButton, true);
@@ -4434,8 +4437,12 @@ public final class MainActivity extends Activity {
         body.put("targetComputerId", sessionTargetComputerId);
         body.put("mode", currentSessionMode == null ? "dictation" : currentSessionMode);
         String endpoint = starting ? "/api/dictation/start" : "/api/dictation/stop";
+        lastRejectionReason = null;
         if (!postEndpointWithRetry(sessionEndpoint, endpoint, body, 2)) {
-            throw new IllegalStateException("电脑端未确认语音会话");
+            String reason = lastRejectionReason;
+            // 电脑明确拒绝（如 Mac 未授予辅助功能）时把原因带给界面，而不是笼统地让用户查连接。
+            throw new ComputerRejectedException(reason == null || reason.isBlank() ? "电脑端未确认语音会话" : reason,
+                    reason != null && !reason.isBlank());
         }
         return sessionEndpoint.label;
     }
@@ -4571,6 +4578,19 @@ public final class MainActivity extends Activity {
         return postEndpointWithRetry(PhoneDeckEndpoint.USB, endpoint, body, attempts);
     }
 
+    /// 最近一次被电脑明确拒绝（HTTP 4xx/5xx）时电脑给出的原因。
+    private volatile String lastRejectionReason;
+
+    /// 电脑处理并拒绝了请求；fromComputer 表示消息来自电脑（可直接展示）。
+    private static final class ComputerRejectedException extends IllegalStateException {
+        final boolean fromComputer;
+
+        ComputerRejectedException(String message, boolean fromComputer) {
+            super(message);
+            this.fromComputer = fromComputer;
+        }
+    }
+
     private boolean postEndpointWithRetry(
             PhoneDeckEndpoint connectionEndpoint,
             String endpoint,
@@ -4614,6 +4634,7 @@ public final class MainActivity extends Activity {
             PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, readTimeout);
             return PostAttemptResult.SUCCESS;
         } catch (PhoneDeckHttp.ResponseException exception) {
+            lastRejectionReason = exception.getMessage();
             Log.w("PhoneDeckNet", endpoint + " rejected via "
                     + connectionEndpoint.label + " +"
                     + (SystemClock.elapsedRealtime() - startedAt) + "ms: HTTP "
