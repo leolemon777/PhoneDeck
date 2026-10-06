@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-/// 六套外观共用语义令牌，原墨水屏主题 ID 保持兼容。
+/// 八套外观（来自言渡 Android UI 设计稿）共用语义令牌；墨白沿用原 native_light / native_dark ID。
 /// 槽位分四组：
 /// - 底面：background / surface / surfaceRaised（凹陷与按压）/ key（键帽）/ voiceDock / outline；
 /// - 内容：text / muted；
@@ -25,20 +25,77 @@ final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";
     static final String NATIVE_LIGHT = "native_light";
+    static final String PAPER = "paper";
+    static final String FOREST = "forest";
+    static final String VIOLET = "violet";
+    static final String CLAY = "clay";
+    static final String MIST = "mist";
     static final String NATIVE_DARK = "native_dark";
-    static final String FOREST_LIGHT = "forest_light";
-    static final String VIOLET_LIGHT = "violet_light";
-    static final String TERRACOTTA_LIGHT = "terracotta_light";
-    static final String OCEAN_LIGHT = "ocean_light";
+    static final String NIGHT = "night";
+
+    /// 上一代彩色主题 ID → 新配色中最接近的一套（2026-10 换成设计稿配色时删除旧四套）。
+    private static final java.util.Map<String, String> RETIRED_IDS = new java.util.HashMap<>();
+    static {
+        RETIRED_IDS.put("forest_light", FOREST);
+        RETIRED_IDS.put("violet_light", VIOLET);
+        RETIRED_IDS.put("terracotta_light", CLAY);
+        RETIRED_IDS.put("ocean_light", MIST);
+    }
 
     /// 历史深色主题 ID：迁移时落深色，其余历史 ID 一律落浅色。
     private static final Set<String> LEGACY_DARK_IDS = new HashSet<>(Arrays.asList(
             "espresso", "cocoa", "mono", "ocean", "oled", "inkdark",
             "goldamber", "goldforest", "gptdark", "claudedark", "grokdark"));
 
+    /// 墨白：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_LIGHT = {
+            "#FFFFFF", "#F5F5F3", "#EBEAE6", "#E2E1DC", "#151515", "#63625C", "#151515",
+            "#FFFFFF", "#1E7A4C", "#E5F2EA", "#8F5400", "#FAEFD9", "#BF3324", "#FBE8E4"};
+
+    /// 暖纸：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_PAPER = {
+            "#F7F3EA", "#EEE8DA", "#E4DCCB", "#E0D7C5", "#22201B", "#665F52", "#22201B",
+            "#F7F3EA", "#3B7546", "#E3EDDD", "#8A5300", "#F5E8CF", "#B23526", "#F6E1DA"};
+
+    /// 松绿：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_FOREST = {
+            "#F5F8F6", "#E7EFEA", "#D9E5DD", "#D3E0D8", "#12251B", "#4C6155", "#1D5A3C",
+            "#FFFFFF", "#1E7A4C", "#DDEFE4", "#8A5300", "#F6EBD4", "#B7352A", "#F8E4E0"};
+
+    /// 淡紫：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_VIOLET = {
+            "#FAF9FD", "#EFEDF8", "#E3E0F2", "#DEDAEF", "#1D1A2C", "#5B5573", "#4A3E8E",
+            "#FFFFFF", "#1F7A55", "#E2F1EA", "#8A5300", "#F6EBD4", "#B8342A", "#F8E4E1"};
+
+    /// 陶土：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_CLAY = {
+            "#FAF6F1", "#F1E8DE", "#E7DACB", "#E3D5C5", "#2A1F18", "#6A5A4D", "#9C4D2A",
+            "#FFFFFF", "#3B7546", "#E4EDDD", "#7D5A00", "#F3EACB", "#A3203A", "#F6DDE2"};
+
+    /// 雾蓝：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_MIST = {
+            "#F6F9FC", "#E8F0F7", "#DAE6F1", "#D3E0EC", "#132232", "#4C5F73", "#1E5C8B",
+            "#FFFFFF", "#1E7A55", "#DDF0E7", "#8A5300", "#F6EBD4", "#B8342A", "#F8E4E1"};
+
+    /// 墨白 · 深色：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_DARK = {
+            "#141413", "#1F1F1D", "#2B2B28", "#34342F", "#F1F0EB", "#A6A59E", "#F1F0EB",
+            "#141413", "#62C793", "#1B3226", "#E8AE52", "#3A2C14", "#F2806F", "#3E211C"};
+
+    /// 极夜：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_NIGHT = {
+            "#0B0B0B", "#171717", "#242424", "#2C2C2C", "#FFFFFF", "#A8A8A8", "#FFFFFF",
+            "#0B0B0B", "#5FD39A", "#14301F", "#F0B44E", "#3A2B12", "#FF7A66", "#3F1C17"};
+
     private static final PhoneDeckTheme[] THEMES = {
-            nativeTheme(true), nativeTheme(false), forestTheme(), violetTheme(),
-            terracottaTheme(), oceanTheme()};
+            palette(NATIVE_LIGHT, "墨白", "纯白底，墨色话筒", true, PALETTE_LIGHT),
+            palette(PAPER, "暖纸", "米色纸面，深墨文字", true, PALETTE_PAPER),
+            palette(FOREST, "松绿", "浅绿底色，深松绿主色", true, PALETTE_FOREST),
+            palette(VIOLET, "淡紫", "瓷白底色，沉静紫", true, PALETTE_VIOLET),
+            palette(CLAY, "陶土", "燕麦暖底，陶土红棕", true, PALETTE_CLAY),
+            palette(MIST, "雾蓝", "清浅蓝底，深雾蓝", true, PALETTE_MIST),
+            palette(NATIVE_DARK, "墨白 · 深色", "暖黑底，米白话筒", false, PALETTE_DARK),
+            palette(NIGHT, "极夜", "纯黑底，适合 OLED 夜间", false, PALETTE_NIGHT)};
 
     final String id;
     final String name;
@@ -167,7 +224,9 @@ final class PhoneDeckTheme {
             return stored;
         }
         String migrated = NATIVE_LIGHT;
-        if (legacyPairPending && "dark".equals(preferences.getString("theme_mode", null))) {
+        if (stored != null && RETIRED_IDS.containsKey(stored)) {
+            migrated = RETIRED_IDS.get(stored);
+        } else if (legacyPairPending && "dark".equals(preferences.getString("theme_mode", null))) {
             migrated = NATIVE_DARK;
         } else if (stored != null && LEGACY_DARK_IDS.contains(stored)) {
             migrated = NATIVE_DARK;
@@ -216,16 +275,20 @@ final class PhoneDeckTheme {
 
     private int nativeStyle() {
         switch (id) {
+            case PAPER:
+                return R.style.AppThemePaper;
+            case FOREST:
+                return R.style.AppThemeForest;
+            case VIOLET:
+                return R.style.AppThemeViolet;
+            case CLAY:
+                return R.style.AppThemeClay;
+            case MIST:
+                return R.style.AppThemeMist;
             case NATIVE_DARK:
                 return R.style.AppThemeDark;
-            case FOREST_LIGHT:
-                return R.style.AppThemeForest;
-            case VIOLET_LIGHT:
-                return R.style.AppThemeViolet;
-            case TERRACOTTA_LIGHT:
-                return R.style.AppThemeTerracotta;
-            case OCEAN_LIGHT:
-                return R.style.AppThemeOcean;
+            case NIGHT:
+                return R.style.AppThemeNight;
             default:
                 return R.style.AppTheme;
         }
@@ -316,97 +379,21 @@ final class PhoneDeckTheme {
         return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }
 
-    private static PhoneDeckTheme nativeTheme(boolean light) {
-        return new PhoneDeckTheme(
-                light ? NATIVE_LIGHT : NATIVE_DARK,
-                light ? "对话白" : "墨水屏 · 深色",
-                light ? "纯白留白，黑色话筒" : "柔和墨底，暖白文字",
-                light,
-                Color.parseColor(light ? "#FFFFFF" : "#1F1E1B"),
-                Color.parseColor(light ? "#FFFFFF" : "#292824"),
-                Color.parseColor(light ? "#F3F3F3" : "#34322D"),
-                Color.parseColor(light ? "#FFFFFF" : "#292824"),
-                Color.parseColor(light ? "#FFFFFF" : "#292824"),
-                Color.parseColor(light ? "#E5E5E5" : "#4C4941"),
-                Color.parseColor(light ? "#171717" : "#F4F1EA"),
-                Color.parseColor(light ? "#626262" : "#B6B1A6"),
-                Color.parseColor(light ? "#171717" : "#F1EDE4"),
-                Color.parseColor(light ? "#333333" : "#D3CEC3"),
-                Color.parseColor(light ? "#FFFFFF" : "#242320"),
-                Color.parseColor(light ? "#171717" : "#F1EDE4"),
-                Color.parseColor(light ? "#EEEEEE" : "#38362F"),
-                Color.parseColor(light ? "#171717" : "#F2EEE7"),
-                Color.parseColor(light ? "#171717" : "#F1EDE4"),
-                Color.parseColor(light ? "#FFFFFF" : "#242320"),
-                Color.parseColor(light ? "#257647" : "#C5C3B9"),
-                Color.parseColor(light ? "#E8F3EC" : "#35342F"),
-                Color.parseColor(light ? "#795A26" : "#D3C9B6"),
-                Color.parseColor(light ? "#F8EFD9" : "#36332C"),
-                Color.parseColor(light ? "#AD3029" : "#E7A49E"),
-                Color.parseColor(light ? "#FCE9E7" : "#3B2C28"));
-    }
-
-    private static PhoneDeckTheme forestTheme() {
-        return new PhoneDeckTheme(
-                FOREST_LIGHT, "森林 · 松绿", "浅绿纸面，沉静松绿", true,
-                Color.parseColor("#F2F5EE"), Color.parseColor("#FBFCF8"),
-                Color.parseColor("#E4ECDC"), Color.parseColor("#FBFCF8"),
-                Color.parseColor("#FBFCF8"), Color.parseColor("#C9D4C3"),
-                Color.parseColor("#26392D"), Color.parseColor("#586959"),
-                Color.parseColor("#2F6346"), Color.parseColor("#244E38"),
-                Color.parseColor("#FFFDF8"), Color.parseColor("#2F6346"),
-                Color.parseColor("#DEEBDF"), Color.parseColor("#244A32"),
-                Color.parseColor("#2F6346"), Color.parseColor("#FFFDF8"),
-                Color.parseColor("#2F6346"), Color.parseColor("#E0ECDD"),
-                Color.parseColor("#705521"), Color.parseColor("#F1E7D0"),
-                Color.parseColor("#963F3A"), Color.parseColor("#F7E5DE"));
-    }
-
-    private static PhoneDeckTheme violetTheme() {
-        return new PhoneDeckTheme(
-                VIOLET_LIGHT, "瓷白 · 淡紫", "柔白底色，低饱和紫", true,
-                Color.parseColor("#F4F1FA"), Color.parseColor("#FDFBFF"),
-                Color.parseColor("#E9E2F1"), Color.parseColor("#FDFBFF"),
-                Color.parseColor("#FDFBFF"), Color.parseColor("#D5CCE1"),
-                Color.parseColor("#302A3D"), Color.parseColor("#6C617A"),
-                Color.parseColor("#66508C"), Color.parseColor("#4C3C6C"),
-                Color.parseColor("#FFFCFF"), Color.parseColor("#66508C"),
-                Color.parseColor("#E7DEF3"), Color.parseColor("#46355F"),
-                Color.parseColor("#66508C"), Color.parseColor("#FFFCFF"),
-                Color.parseColor("#3E6450"), Color.parseColor("#E2EDE6"),
-                Color.parseColor("#765723"), Color.parseColor("#F4EAD7"),
-                Color.parseColor("#943C50"), Color.parseColor("#F5E3E9"));
-    }
-
-    private static PhoneDeckTheme terracottaTheme() {
-        return new PhoneDeckTheme(
-                TERRACOTTA_LIGHT, "燕麦 · 陶土", "燕麦暖底，陶土红棕", true,
-                Color.parseColor("#F6F0E8"), Color.parseColor("#FFFAF4"),
-                Color.parseColor("#EEE2D5"), Color.parseColor("#FFFAF4"),
-                Color.parseColor("#FFFAF4"), Color.parseColor("#DBCBBC"),
-                Color.parseColor("#3D3028"), Color.parseColor("#706151"),
-                Color.parseColor("#915038"), Color.parseColor("#733F2D"),
-                Color.parseColor("#FFFBF6"), Color.parseColor("#915038"),
-                Color.parseColor("#F0DDD0"), Color.parseColor("#713D2A"),
-                Color.parseColor("#915038"), Color.parseColor("#FFFBF6"),
-                Color.parseColor("#426247"), Color.parseColor("#E6ECDC"),
-                Color.parseColor("#785620"), Color.parseColor("#F2E6CC"),
-                Color.parseColor("#963C3C"), Color.parseColor("#F4E0DB"));
-    }
-
-    private static PhoneDeckTheme oceanTheme() {
-        return new PhoneDeckTheme(
-                OCEAN_LIGHT, "天空 · 雾蓝", "清浅蓝底，柔和雾蓝", true,
-                Color.parseColor("#EFF4F8"), Color.parseColor("#F9FCFE"),
-                Color.parseColor("#DFE9F1"), Color.parseColor("#F9FCFE"),
-                Color.parseColor("#F9FCFE"), Color.parseColor("#C6D4DF"),
-                Color.parseColor("#243746"), Color.parseColor("#586875"),
-                Color.parseColor("#365F7E"), Color.parseColor("#294A63"),
-                Color.parseColor("#FAFDFF"), Color.parseColor("#365F7E"),
-                Color.parseColor("#DEEAF3"), Color.parseColor("#284A63"),
-                Color.parseColor("#365F7E"), Color.parseColor("#FAFDFF"),
-                Color.parseColor("#37654F"), Color.parseColor("#DFEDE5"),
-                Color.parseColor("#775820"), Color.parseColor("#F3EBD6"),
-                Color.parseColor("#963F49"), Color.parseColor("#F6E4E6"));
+    /// 设计稿令牌 → 语义槽：卡片与键帽用底色，凹陷/分段用 sf，选中容器用 sf2；
+    /// 话筒、当前电脑卡与“正在采音”都用墨色 ink（采音状态靠光环与状态胶囊区分）。
+    private static PhoneDeckTheme palette(String id, String name, String description, boolean light,
+                                          String[] p) {
+        int bg = Color.parseColor(p[0]);
+        int ink = Color.parseColor(p[6]);
+        int onInk = Color.parseColor(p[7]);
+        return new PhoneDeckTheme(id, name, description, light,
+                bg, bg, Color.parseColor(p[1]), bg, bg, Color.parseColor(p[3]),
+                Color.parseColor(p[4]), Color.parseColor(p[5]),
+                ink, blend(ink, bg, 0.18f), onInk, ink,
+                Color.parseColor(p[2]), Color.parseColor(p[4]),
+                ink, onInk,
+                Color.parseColor(p[8]), Color.parseColor(p[9]),
+                Color.parseColor(p[10]), Color.parseColor(p[11]),
+                Color.parseColor(p[12]), Color.parseColor(p[13]));
     }
 }

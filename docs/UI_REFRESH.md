@@ -1,5 +1,26 @@
 # UI 翻新：简洁原生方向
 
+## 2026-10-06 八套配色（取代旧六套）
+
+用户要求“多配色搞几套，原来的都删掉”。Android 主题全部换成言渡 Android UI 设计稿的配色令牌，旧的松绿/淡紫/陶土/雾蓝四套
+`*_light` 删除。墨白沿用 `native_light` / `native_dark` ID，用户原选择不变；旧四套 ID 自动迁移到新配色中最接近的一套，
+更早的历史 ID 仍按明暗迁移。设置 → 外观主题分“浅色 / 深色”两组。
+
+| 名称 | ID | 底色 | 墨色（话筒/当前卡） |
+|---|---|---|---|
+| 墨白 | `native_light` | #FFFFFF | #151515 |
+| 暖纸 | `paper` | #F7F3EA | #22201B |
+| 松绿 | `forest`（原 `forest_light`） | #F5F8F6 | #1D5A3C |
+| 淡紫 | `violet`（原 `violet_light`） | #FAF9FD | #4A3E8E |
+| 陶土 | `clay`（原 `terracotta_light`） | #FAF6F1 | #9C4D2A |
+| 雾蓝 | `mist`（原 `ocean_light`） | #F6F9FC | #1E5C8B |
+| 墨白 · 深色 | `native_dark` | #141413 | #F1F0EB |
+| 极夜 | `night` | #0B0B0B | #FFFFFF |
+
+每套 14 个设计令牌（底、凹陷、选中容器、线、文字、次要文字、墨色、墨上文字、成功/警告/录音及其底色）在
+`PhoneDeckTheme.palette()` 映射到语义槽，`styles.xml` 由同一组令牌生成原生对话框与控件配色。Desktop 网页控制台的
+主题不在本次范围。模拟器截图八套首页与旧 ID 迁移均已检查。
+
 ## 2026-10-02 多套首页 UI
 
 用户要求多个 UI。本轮提供三种可切换布局，配色继续独立选择，默认保留极简居中：

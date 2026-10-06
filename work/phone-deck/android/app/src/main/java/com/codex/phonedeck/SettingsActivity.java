@@ -166,9 +166,9 @@ public final class SettingsActivity extends Activity {
 
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
-                page.addView(sectionLabel("墨水屏系列"), topMargin(dp(20)));
-            } else if ("forest_light".equals(candidate.id)) {
-                page.addView(sectionLabel("彩色主题"), topMargin(dp(20)));
+                page.addView(sectionLabel("浅色"), topMargin(dp(20)));
+            } else if (PhoneDeckTheme.NATIVE_DARK.equals(candidate.id)) {
+                page.addView(sectionLabel("深色"), topMargin(dp(20)));
             }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
