@@ -1,0 +1,6 @@
+{
+  "targetComputerId": "computer-placeholder-01",
+  "revision": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "usbWatchdog": true,
+  "lanDiscovery": false
+}

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "9.9.9-placeholder",
+  "protocolVersion": 3,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "capabilities": ["fixedAction", "phoneAudio"],
+  "audio": { "available": true, "streaming": false, "stale": false },
+  "dictation": { "active": false }
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/config-export.schema.json",
+  "title": "普通配置导出文档（§16.2 第 7 行：配置“导出秘密隔离”）",
+  "description": "普通导出（用户在手机上导出/分享设置）【目标形态】：只含布局/引擎/连接偏好，不含任何配对秘密（SEC-05“普通导出/诊断不含秘密”、§11 CFG-03“普通导出不含配对秘密”）。containsSecrets 恒为 false 且 additionalProperties=false 在每一层拒绝令牌类字段；tools/validate.py 另按 contracts/config-policy.json 的 exportForbiddenFields 对导出样本做全树键名扫描。",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "phoneManagedSettingsExport" },
+    "schemaVersion": { "const": 1 },
+    "containsSecrets": { "const": false, "description": "恒 false：导出文档携带秘密即为契约违例（非法样本 config-export-contains-token.json 固化）。" },
+    "computerId": { "$ref": "definitions.schema.json#/definitions/computerId" },
+    "exportedAtMs": { "type": "integer", "minimum": 0 },
+    "voice": {
+      "type": "object",
+      "properties": {
+        "activeEngine": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "shortcutOverrides": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": { "type": "string", "maxLength": 100, "pattern": "^[A-Za-z0-9+` ]*$" }
+          }
+        }
+      },
+      "required": ["activeEngine"],
+      "additionalProperties": false
+    },
+    "connection": {
+      "type": "object",
+      "properties": {
+        "usbWatchdog": { "type": "boolean" },
+        "lanDiscovery": { "type": "boolean" },
+        "autoStart": { "type": "boolean" }
+      },
+      "required": ["usbWatchdog", "lanDiscovery"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema", "schemaVersion", "containsSecrets", "computerId", "exportedAtMs", "voice", "connection"],
+  "additionalProperties": false
+}

@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "1.6.0-dev.16",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "platform": "windows",
+  "architecture": "x64",
+  "capabilities": [
+    "fixedAction",
+    "keyChord",
+    "text",
+    "macro",
+    "phoneAudio",
+    "managedDictation",
+    "sharedMicrophone",
+    "secureLan",
+    "fleetUpdatesV1",
+    "phoneManagedSettingsV1"
+  ],
+  "audio": {
+    "available": true,
+    "device": "PLACEHOLDER-VIRTUAL-CABLE",
+    "streaming": false,
+    "sessionId": null,
+    "mode": null,
+    "checkedAtMs": 100000,
+    "ageMs": 120,
+    "lastError": null,
+    "stale": false
+  },
+  "dictation": { "active": false, "sessionId": null },
+  "voiceEngine": {
+    "id": "typeless",
+    "displayName": "PLACEHOLDER ENGINE",
+    "experimental": false,
+    "capturing": null,
+    "virtualCableSelected": null,
+    "microphone": null,
+    "modes": [
+      {
+        "id": "dictation",
+        "label": "PLACEHOLDER 听写",
+        "trigger": "toggle",
+        "configured": true,
+        "keys": ["CTRL", "SHIFT", "D"]
+      }
+    ],
+    "checkedAtMs": 100000,
+    "ageMs": 120,
+    "lastError": null,
+    "stale": false
+  },
+  "shared": { "requested": false }
+}

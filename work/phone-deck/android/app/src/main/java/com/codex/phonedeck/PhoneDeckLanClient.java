@@ -40,13 +40,16 @@ final class PhoneDeckLanClient {
     private static final int PROBE_CONNECT_TIMEOUT_MS = 600;
     private static final int PROBE_READ_TIMEOUT_MS = 900;
 
-    /// 共享探测池（守护线程，不阻止进程退出），供无自备线程池的调用方使用。
+    /// 共享地址探测池（守护线程）：直接移交、不排队。固定小线程池在多台电脑同时探测时
+    /// 会让后一台的地址任务排在前一台未结束的任务之后，等不到截止时间被误判离线。
     private static final ExecutorService SHARED_PROBE_POOL =
-            java.util.concurrent.Executors.newFixedThreadPool(4, runnable -> {
+            new java.util.concurrent.ThreadPoolExecutor(0, 64, 30,
+                    java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.SynchronousQueue<>(), runnable -> {
                 Thread thread = new Thread(runnable, "PhoneDeck-LanProbe");
                 thread.setDaemon(true);
                 return thread;
-            });
+            }, new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
 
     private PhoneDeckLanClient() {
     }
@@ -54,6 +57,11 @@ final class PhoneDeckLanClient {
     /// 只关心在线结果的便捷入口（输入指令的 Wi-Fi 优先通道等场景）。
     static ProbeResult probe(TargetDeviceManager.Device device) {
         return probe(device, SHARED_PROBE_POOL).result;
+    }
+
+    /// 含“配对被拒”信号的探测，使用共享地址探测池（ConnectionMonitor 默认探测器）。
+    static ProbeOutcome probeOutcome(TargetDeviceManager.Device device) {
+        return probe(device, SHARED_PROBE_POOL);
     }
 
     static TargetDeviceManager.Device pairOverUsb(TargetDeviceManager manager)
@@ -79,6 +87,10 @@ final class PhoneDeckLanClient {
                 pairing.optString("accessToken", null),
                 pairing.optString("certificateSha256", null));
         if (paired == null) {
+            if (!manager.canAdd(pairing.optString("computerId", ""))) {
+                throw new IllegalStateException("已配对 " + TargetDeviceManager.MAX_DEVICES
+                        + " 台电脑，请先删除一台再配对");
+            }
             throw new IllegalStateException("电脑返回的 Wi-Fi 配对资料不完整");
         }
         return paired;
@@ -119,17 +131,15 @@ final class PhoneDeckLanClient {
         }
     }
 
-    /// 判定一次探测失败是否意味着“需要重新配对”而不是单纯离线：
-    /// 服务端明确拒绝令牌（401/403），或证书指纹与配对记录不一致。
+    /// 判定一次探测失败是否意味着“需要重新配对”而不是单纯离线：只有服务端明确拒绝
+    /// 令牌（401/403）才算。证书不一致说明旧 IP 上换成了另一台电脑（IP 会被重新分配，
+    /// 不能当身份），按“这台电脑不在这个地址”处理，不提示重新配对。
     static boolean isPairingRejection(Exception exception) {
         Throwable current = exception;
         while (current != null) {
             if (current instanceof PhoneDeckHttp.ResponseException) {
                 int status = ((PhoneDeckHttp.ResponseException) current).status;
                 return status == 401 || status == 403;
-            }
-            if (current instanceof java.security.cert.CertificateException) {
-                return true;
             }
             current = current.getCause();
         }
@@ -146,7 +156,10 @@ final class PhoneDeckLanClient {
                     device.lanToken,
                     device.certificateSha256,
                     "Wi-Fi",
-                    device.computerId);
+                    device.computerId,
+                    // M1-A：有 clientId 的设备（Wi-Fi 配对/rotate 升级）必须走
+                    // Bearer + X-PhoneDeck-Client；旧共享令牌头只服务 legacy 设备。
+                    device.clientId);
             JSONObject health = PhoneDeckHttp.getJson(
                     endpoint, "/api/health",
                     PROBE_CONNECT_TIMEOUT_MS, PROBE_READ_TIMEOUT_MS);

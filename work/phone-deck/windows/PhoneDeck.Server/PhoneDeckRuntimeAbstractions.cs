@@ -9,6 +9,9 @@ internal interface IPhoneAudioSessionController
 
     /// <summary>等待该会话的音频流（含尾部排空）真正结束。</summary>
     bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds);
+
+    /// <summary>虚拟声卡常驻输出已运行时，引擎可立即触发而无需等待音频预热。</summary>
+    bool OutputWarm => false;
 }
 
 /// <summary>语音引擎触发键的底层发送通道。抽象出来是为了让

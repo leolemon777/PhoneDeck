@@ -38,6 +38,19 @@ final class PhoneDeckHttp {
     private static final HostnameVerifier PINNED_HOSTNAME_VERIFIER =
             (hostname, session) -> true;
 
+    /// 主界面是否在前台：随每个请求告诉电脑（X-PhoneDeck-Foreground），电脑只在手机前台时
+    /// 预热音频输出，后台保活探测不再让电脑常驻音频线程。
+    static volatile boolean appInForeground;
+
+    /// 手机型号（如 SM-G9880），电脑状态页据此显示“哪台手机连着”；只保留可打印 ASCII。
+    static final String DEVICE_LABEL = deviceLabel();
+
+    private static String deviceLabel() {
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
+        String cleaned = model.replaceAll("[^\\x20-\\x7E]", "").trim();
+        return cleaned.isEmpty() ? "Android" : cleaned.length() > 64 ? cleaned.substring(0, 64) : cleaned;
+    }
+
     private PhoneDeckHttp() {
     }
 
@@ -51,8 +64,16 @@ final class PhoneDeckHttp {
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setUseCaches(false);
+        connection.setRequestProperty("X-PhoneDeck-Foreground", appInForeground ? "1" : "0");
+        connection.setRequestProperty("X-PhoneDeck-Device", DEVICE_LABEL);
         if (endpoint.accessToken != null) {
-            connection.setRequestProperty("X-PhoneDeck-Token", endpoint.accessToken);
+            if (endpoint.clientId != null) {
+                // M1-A 逐手机凭据：Bearer + 客户端标识（设计 §5.1）。
+                connection.setRequestProperty("Authorization", "Bearer " + endpoint.accessToken);
+                connection.setRequestProperty("X-PhoneDeck-Client", endpoint.clientId);
+            } else {
+                connection.setRequestProperty("X-PhoneDeck-Token", endpoint.accessToken);
+            }
         }
         if (connection instanceof HttpsURLConnection) {
             if (endpoint.certificateSha256 == null
@@ -134,6 +155,7 @@ final class PhoneDeckHttp {
             String line;
             while ((line = reader.readLine()) != null) {
                 content.append(line);
+                if (content.length() > 2 * 1024 * 1024) throw new java.io.IOException("电脑响应超过允许大小");
             }
         }
         return new JSONObject(content.toString());
@@ -147,13 +169,127 @@ final class PhoneDeckHttp {
         }
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(null, new TrustManager[]{new PinnedTrustManager(pin)}, new SecureRandom());
-        SSLSocketFactory created = context.getSocketFactory();
+        SSLSocketFactory created = new NoDelaySocketFactory(context.getSocketFactory());
         SSLSocketFactory previous = PINNED_FACTORIES.putIfAbsent(pin, created);
         return previous == null ? created : previous;
     }
 
+    /**
+     * 首次连接（同一 Wi-Fi 免扫码）时读取电脑 TLS 证书指纹：握手只记录叶证书 SHA-256，
+     * 不发送任何数据就关闭。随后的配对请求钉扎这个指纹；中间人换证书会让手机与电脑
+     * 显示的四位校验码不同，由用户在电脑确认框上核对。
+     */
+    static String fetchCertificateSha256(String host, int port, int timeoutMs) throws Exception {
+        final String[] captured = new String[1];
+        X509TrustManager capture = new X509TrustManager() {
+            @Override
+            public void checkClientTrusted(X509Certificate[] chain, String authType)
+                    throws CertificateException {
+                throw new CertificateException("PhoneDeck 手机端不接受客户端证书");
+            }
+
+            @Override
+            public void checkServerTrusted(X509Certificate[] chain, String authType)
+                    throws CertificateException {
+                if (chain == null || chain.length == 0) {
+                    throw new CertificateException("电脑没有提供证书");
+                }
+                try {
+                    byte[] digest = MessageDigest.getInstance("SHA-256").digest(chain[0].getEncoded());
+                    StringBuilder hex = new StringBuilder(64);
+                    for (byte value : digest) hex.append(String.format(Locale.ROOT, "%02x", value));
+                    captured[0] = hex.toString();
+                } catch (Exception exception) {
+                    throw new CertificateException("无法读取电脑证书", exception);
+                }
+            }
+
+            @Override
+            public X509Certificate[] getAcceptedIssuers() {
+                return new X509Certificate[0];
+            }
+        };
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, new TrustManager[]{capture}, new SecureRandom());
+        try (java.net.Socket plain = new java.net.Socket()) {
+            plain.connect(new java.net.InetSocketAddress(host, port), timeoutMs);
+            plain.setSoTimeout(timeoutMs);
+            try (javax.net.ssl.SSLSocket secure = (javax.net.ssl.SSLSocket) context.getSocketFactory()
+                    .createSocket(plain, host, port, true)) {
+                secure.startHandshake();
+            }
+        }
+        if (captured[0] == null) throw new java.io.IOException("没有读到电脑证书");
+        return captured[0];
+    }
+
     private static String normalizePin(String pin) {
         return pin.replace(":", "").trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * 音频每 20 ms 写一个约 1.9 KB 的 TLS 记录，超过一个 MSS 会拆成两段；
+     * 默认的 Nagle 算法会扣住尾段等待电脑 ACK，叠加 Windows 延迟确认可产生周期性卡顿。
+     * 所有证书固定连接一律关闭 Nagle（底层 TCP 套接字与 TLS 套接字都设置）。
+     */
+    static final class NoDelaySocketFactory extends SSLSocketFactory {
+        private final SSLSocketFactory delegate;
+
+        NoDelaySocketFactory(SSLSocketFactory delegate) {
+            this.delegate = delegate;
+        }
+
+        static java.net.Socket noDelay(java.net.Socket socket) {
+            if (socket != null) {
+                try {
+                    socket.setTcpNoDelay(true);
+                } catch (java.net.SocketException ignored) {
+                    // 个别实现不支持时保持默认，连接本身仍可用。
+                }
+            }
+            return socket;
+        }
+
+        @Override public String[] getDefaultCipherSuites() {
+            return delegate.getDefaultCipherSuites();
+        }
+
+        @Override public String[] getSupportedCipherSuites() {
+            return delegate.getSupportedCipherSuites();
+        }
+
+        @Override public java.net.Socket createSocket() throws java.io.IOException {
+            return noDelay(delegate.createSocket());
+        }
+
+        @Override public java.net.Socket createSocket(
+                java.net.Socket socket, String host, int port, boolean autoClose)
+                throws java.io.IOException {
+            noDelay(socket);
+            return noDelay(delegate.createSocket(socket, host, port, autoClose));
+        }
+
+        @Override public java.net.Socket createSocket(String host, int port)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port));
+        }
+
+        @Override public java.net.Socket createSocket(
+                String host, int port, java.net.InetAddress localHost, int localPort)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port, localHost, localPort));
+        }
+
+        @Override public java.net.Socket createSocket(java.net.InetAddress host, int port)
+                throws java.io.IOException {
+            return noDelay(delegate.createSocket(host, port));
+        }
+
+        @Override public java.net.Socket createSocket(
+                java.net.InetAddress address, int port,
+                java.net.InetAddress localAddress, int localPort) throws java.io.IOException {
+            return noDelay(delegate.createSocket(address, port, localAddress, localPort));
+        }
     }
 
     private static final class PinnedTrustManager implements X509TrustManager {

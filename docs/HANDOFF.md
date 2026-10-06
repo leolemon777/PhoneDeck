@@ -1,5 +1,858 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 开源准备：README 重写与合入 main（最新状态）
+
+- README 改为面向用户：一句话介绍、三张当前界面截图（模拟器演示数据）、准备清单、Windows/Mac/手机安装、真机验证表、隐私、
+  常见问题、构建。原日期式开发记录不再放 README（历史在本文件和 git）。新增 `README.en.md`。`docs/release/KNOWN_ISSUES.md`
+  按当前状态重写（16 项）。
+- 17 个串联草稿 PR（#24→#41）整体经 #41 合入 main；`agent/phone-managed-desktop` 上未进入链条的 0a15ac8（旧状态窗配色）
+  已被新墨白托盘取代，未合入。
+- **待办**：Mac 辅助功能授权后跑通听写/翻译/问答；Windows 实机跑新托盘与附近连接；之后出预览版 Release（APK + Windows zip + Mac zip）。
+
+## 2026-10-06 仓库整理（最新状态）
+
+- **文档分类**：`docs/` 根目录只留 HANDOFF / ARCHITECTURE / BUILD_PIPELINE，其余移入 `guides/`（安装部署使用）、`design/`、
+  `release/`、`archive/`（已取代的历史记录，含扫码配对指南），目录见 `docs/README.md`。仓库内全部引用（README、AGENTS、规格、
+  contracts、脚本、源码注释）已同步，Markdown 相对链接检查 0 失效；`build-desktop.ps1` 复制路径已改。
+- **删除**：`work/phone-deck` 根目录 8 张未被引用的 1.5.0 旧截图、`design/` 两张未用 aether 图标、`android/artwork` 旧
+  PhoneDeck 图标；README 两张截图移到 `docs/images/`。死代码：Android `typelessModeLabel`、Mac `SendModifierOnly`、
+  Windows `VoiceEngineSettings.Save` 与 `VoiceEngineConfigRequest`。
+- **本地（不入 Git）**：清掉 bin/obj/Gradle 构建缓存；把旧 `outputs/*` 评审产物、`work/phone-deck/dist`、未用的 .NET 8 SDK、
+  已解压的 JDK / cmdline-tools / scrcpy 安装包、Gradle 守护日志、旧 `work/tools/phonedeck-mac` 启动器移入废纸篓（约 3 GB，可恢复；
+  含旧 `outputs/device-acceptance-20261004/data` 副本，现用数据在 `~/Library/Application Support/PhoneDeck`）。`outputs/` 只留
+  `windows-receiver-20261006`（安装包）与 `android-home-cards`（截图）。
+- **下线 Agent 指令同步**（用户确认）：删 Windows `/api/config/agent-shortcuts`、`AgentShortcutSettings` 及其测试，删手机端
+  `applyAgentOverrides` 与同步记录；手机 Agent 按钮仍作为本地快捷键。另把 Android 模拟器、系统镜像和 PWA 测试浏览器移入废纸篓
+  （约 4.4 GB），`work/tools` 现约 3.7 GB；Android 调试签名用 `~/.android/debug.keystore`，不受影响。
+- **验证**：清缓存后全量重建。Android assembleDebug / 单元测试 / lint 通过；Mac 测试 48/48；Windows 测试 179/183（同 4 项 macOS
+  基线失败）；ControlCenter 交叉编译 0 警告；`contracts/tools/validate.py` 全部通过。
+
+## 2026-10-06 电脑端墨白界面（最新状态）
+
+- 设计稿在 Android UI 设计画布最下两行（Windows 托盘与确认、Mac 本机状态页）；决策见规格顶部同日条目。
+- **验证**：Mac 测试 48/48；Windows 179/183（同 4 项 macOS 基线失败）；Windows Server 与 ControlCenter 交叉编译 0 错误 0 警告；
+  Android 构建/测试/lint 通过并安装到 Samsung。Mac 原生版实测：状态页深浅色与手机宽度排版、`/api/admin/presence` 识别
+  `SM-G9880 · USB`、根路径跳转；连接请求卡用浏览器内模拟数据验证渲染与转义（未再触发真实请求，避免系统确认框被误点）。
+- **发现**：用户 Typeless 麦克风原为“Auto-detect（MacBook Air 麦克风）”，状态页提示后已改为 BlackHole；辅助功能仍未授权。
+- **未验证**：Windows 托盘新窗口在 Windows 实机的显示与 DPI 缩放、开机启动开关；`AXIsProcessTrustedWithOptions` 弹框效果
+  （由 Claude 进程启动时归属不同）。ad-hoc 签名每次重建会改变 cdhash，辅助功能授权可能需要重新勾选。
+
+## 2026-10-06 Mac 原生精简接收端（最新状态）
+
+- 决策、范围与数据见规格顶部同日条目。新增文件：`shared/Receiver/ReceiverJsonContexts.cs`、`ReceiverApiModels.cs`、
+  `macos/PhoneDeck.Receiver/MacJsonContexts.cs`；构建脚本加 `lite|full`。
+- **验证**：Mac 测试 48/48（新增首次探测回归用例）；Windows 测试 179/183（同样 4 项 macOS 基线失败，另 2 项快照测试改为
+  与生产相同的 Web 序列化）；Windows Server/ControlCenter 交叉编译 0 错误；Android 单元测试通过。原生版功能实测见规格。
+- **本机部署**：`~/Applications/PhoneDeck Receiver.app`（ad-hoc 签名，Bundle ID `com.codex.phonedeck.receiver`）；接收端数据
+  已复制到默认目录 `~/Library/Application Support/PhoneDeck`（原 `outputs/device-acceptance-20261004/data` 保留），电脑身份不变。
+  当前由 Claude 进程直接运行，日志 `~/Library/Logs/PhoneDeckReceiver.log`；从 Claude 的 shell `open` 该 App 失败（-10810）。
+- **待用户**：双击该 App 启动并在“辅助功能”授权（新二进制需重新授权，否则按键/输入法快捷键无效）。
+- **未验证**：原生版真实听写/翻译/问答（需辅助功能授权）、mDNS、x64 原生构建、Windows 原生编译。
+
+## 2026-10-06 电脑端资源占用（最新状态）
+
+- 决策与数据见规格顶部同日条目。改动：`Receiver.Core.props` 运行时设置；Mac `MacPhoneAudioBridge`（按需预热、空闲回收、探测缓存）、
+  `MacTypelessConfiguration`（按文件变化缓存）、`Program.cs`（前台头判定、采集状态缓存）、`UsbWatchdog`；Windows `PhoneAudioBridge`
+  （按需预热、空闲回收，用 streamGate 判断无流）、`Program.cs`（前台头）、`UsbWatchdog`；Android 请求带 `X-PhoneDeck-Foreground`。
+- **验证**：Android 构建/测试/lint 通过；Mac 接收端测试 47/47；Windows 测试 179/183（同样 4 项 macOS 基线失败）；Windows Server
+  交叉编译 0 错误。本机 Mac 实测前台→后台→空闲 90 秒后日志出现“关闭常驻 BlackHole 输出”，重新打开 App 立即预热。
+- **未验证**：Windows 实机资源占用与按需预热；按需预热后第一句话的启动延迟（输出已在前台预热，理论不变）未用秒表复测。
+
+## 2026-10-06 同一 Wi-Fi 免扫码连接与手机端精简（最新状态）
+
+- 同分支 `agent/android-home-cards`。协议与决策见规格顶部同日条目。
+- **接收端（Receiver.Core）**：`PairingWindowManager.TryBeginNearbyRequest/FinishNearby/NearbyCheckCode`，
+  `/api/lan/pair/request`；Windows/Mac `Program.cs` 鉴权旁路加入该路径；`MacNearbyPrompt` 弹系统确认框；
+  Windows `ReceiverTray` 后台检查并弹框；管理页文案与转义。
+- **Android**：删除 `QrPairingClient`、zxing、androidx 占位类；新增 `NearbyPairingClient`、`PhoneDeckHttp.fetchCertificateSha256`、
+  `LanDiscoveryClient.queryHost` 与平台字段；首页附近卡片、添加电脑说明/输入地址、长按“重新配对”。
+- **验证**：Android assemble + 单元测试 + lint 通过；Mac 接收端测试 47/47；Windows 测试 179/183，失败的 4 项
+  （凭据文件只读与 rotate 限速）在未改动的基线提交上于 macOS 同样失败，属平台差异；Windows ControlCenter/Server
+  以 `EnableWindowsTargeting` 交叉编译 0 错误。本机 Mac 接收端实测：curl 提交附近请求 → 系统确认框出现、管理页显示
+  校验码（与手机公式对真实证书计算一致）→ 拒绝返回 403、对话框自动关闭。Samsung 实测：附近卡片显示同网段
+  Windows 电脑「往里走的COMPUTE」（未点击连接）；APK 561 KB、PSS 约 83 MB；“配对已失效”误报修复后恢复为在线。
+- **未验证**：手机点附近卡片到电脑点允许的完整闭环（手机与本机 Mac 不在同一网段，且那台 Windows 是旧接收端）；
+  Windows 托盘弹框未在 Windows 实机运行；输入地址路径未实测。
+- **本机环境**：Mac 接收端以本分支 Release 重启，数据目录 `outputs/device-acceptance-20261004/data`，已开 USB 恢复与
+  局域网发现（原设置备份为 `server-settings.json.bak-20261006`）。由 Claude 进程启动时提示“辅助功能未授权”，
+  键盘输入需用户在终端启动接收端或给对应进程授权。
+
+## 2026-10-05 Android 首页：方案二电脑大卡轮播（最新状态）
+
+- 分支 `agent/android-home-cards`（PR #41），基于 `agent/multi-pc`。先实现方向 A 卡片列表，随后按用户在设计画布确认的
+  方案二重写默认首页（`center`），配色先用墨白。改动在 `MainActivity`（轮播、卡内模式、指令栏、“刚刚”、状态胶囊、
+  竖横屏组合）与 `DeckIconView`（笔记本、加号、翻译、问答、斜杠图标）；其他布局、主题、协议与会话逻辑未改。决策见规格顶部。
+- **修复 PR #40 的启动崩溃**：`TargetDeviceManager.get()` 递归，已在 `agent/multi-pc` 单独修复并合入。
+- **验证**：Android assemble + 单元测试 + lint 通过（0 error）。模拟器（`yandu-phone-ui`，API 34）：浅色/深色、竖屏/横屏、
+  共享模式、指令面板无崩溃。在线状态、卡内模式切换、滑动切换和说话中外观是在本地临时注入假在线状态后截图的，
+  注入代码已删除、未提交。截图在 ignored `outputs/android-home-cards/`。期间修复：`lanTargets` 用空 ID 查询崩溃、
+  方式切换条被裁。
+- **扫码崩溃（既有问题）**：zxing-android-embedded 4.3.0 运行时调用 androidx `ContextCompat`/`ActivityCompat`，但 POM
+  未声明依赖、本项目 `useAndroidX=false`，打开扫码页即崩溃。新增 `app/src/main/java/androidx/core/...` 两个转发类修复；
+  以后若引入真正的 androidx.core 需删除它们。已在 Samsung 上确认扫码页能打开到相机权限弹窗。
+- **共享麦克风空组**：共享只发给共享组，新配对不自动入组；组为空时开启会静默等待 15 秒后自动停止。现在开启时若组为空，
+  先弹出勾选框（默认勾选当前电脑），确认后才入组并开启；共享模式下未入组的当前电脑卡片显示“加入共享组”按钮。
+  已在 Samsung + 本机 Mac 接收端（USB）验证：确认后 Mac `audio.streaming=true, mode=shared` 持续 16 秒以上，手动停止后归零。
+- **中部留白**：真机上“刚刚”在进程重启后清空，中部只剩话筒。新增“常用”4 键行（取快捷键配置顺序）、“刚刚”改为存入
+  `PhoneDeckSettings.recent_actions`（仅名称/目标/时间）、高屏话筒 148dp。模拟器竖横屏已截图；真机已安装，锁屏未截图。
+- **八套配色**：按用户要求删除旧四色主题，换成设计稿的 8 套（墨白/暖纸/松绿/淡紫/陶土/雾蓝/墨白深色/极夜），旧 ID 迁移到
+  最接近的新配色，见 `docs/design/UI_REFRESH.md`。模拟器八套首页截图与 `ocean_light→mist` 迁移已检查。
+- **真机**：`.dialoguepreview`（言渡·对话白，本机 `~/.android/debug.keystore` 签名）已覆盖安装到 Samsung，首页正常显示。
+- **未验证**：真实在线电脑上的听写/翻译/问答启动与“刚刚”记录、真实切换确认、真机滑动手感、字体缩放与读屏顺序。
+  测试时 Samsung 手机通过 USB 连着，未向其安装任何包。
+- **待办**：真机安装需用户选择渠道（`.preview` 签名不在本机）；其他配色移植；方案二的启动中、电脑未确认、长按管理与
+  指令面板样式细化。
+
+## 2026-10-05 多电脑连接与 Receiver.Core
+
+- 分支 `agent/multi-pc`，基于 `agent/voice-latency`（PR #39）。范围：一台手机多台电脑、多手机隔离、Mac 与 Windows 接收端能力对齐；
+  版本号、发布清单与签名渠道未改。决策见规格顶部同日条目，结构见 ARCHITECTURE。
+- **Android**：`ConnectionMonitor` 并行探测 + 单台退避（2/4/8/15 s）+ 共享发现 + 结果复用；`TargetDeviceManager` 单例、
+  满员拒绝（10 台）、地址上限 6、最近在线刷新、本地重命名/排序；切换目标先实时确认；共享供音两帧一包、音量进程内回调、
+  多电脑状态汇总；managed 会话用 `/api/events` 长轮询（404 回退）；配对失效提示优先扫码；删除未使用的
+  `VoiceSessionCoordinator`、`AgentSyncManager`。
+- **接收端**：新建 `work/phone-deck/shared/Receiver`（`Receiver.Core.props`），从 Windows 挪入 10 个共用文件并删除 Mac 的 3 个
+  分叉副本；`NativePairingEndpoints`（含本机管理页 `/admin/pairing`）、`HealthEvents`（`healthEventsV1`）、
+  `DesktopConfigurationCore` 为新增共用代码。Windows/Mac 停止听写校验所属手机，健康响应只向所属手机返回会话字段。
+- **macOS 新增**：逐手机凭据与扫码配对、单台撤销即断流、旧令牌升级/应急撤销、mDNS、8765 来源防护、会话租约与墓碑、
+  `phoneManagedSettingsV1`（输入法/快捷键热应用、USB 恢复与发现开关、LaunchAgent 登录启动）。Mac 锁文件新增 mDNS 依赖链（与 Windows 同版本）。
+- **PWA**：网关快照附带各附加电脑的手机入口；主电脑离线 6 秒后提示并可打开备用入口（https、不同来源、固定 `/phone/`）。
+- **验证（本机 macOS）**：
+  - Android assemble + 单元测试 43/43（新增 `MultiComputerTest` 7 项）+ lint 0 error / 43 warning（与改动前相同）。
+  - Windows Server Release 构建通过；测试（osx 运行时）174/178，失败的仍是改动前那 4 项（文件权限/计时宿主差异），新增 7 项通过；两个 lock 已还原未提交。
+  - macOS Receiver 构建通过，测试 47/47（新增 8 项；新增 `TestDataDirectory` 让测试使用临时数据目录）。
+  - Desktop 测试 64 通过 / 1 跳过（新增 1 项）；PWA `node --test` 54/54（新增 1 项）；`contracts/tools/validate.py` 全部通过；`git diff --check` 通过。
+  - 测试过程中曾在 `~/Library/Application Support/PhoneDeck` 生成两个模板文件（该目录此前不存在），已删除并加隔离。
+- **未在真实设备验证**：多台真实电脑并行探测与切换确认、5 台电脑共享供音、多手机互斥、Mac 扫码配对/撤销/集中设置/登录启动、
+  mDNS 在 Mac 上的广播、`/api/events` 在真实网络中的长连接表现、PWA 备用入口跳转与再配对。
+- **未完成 / 待办**：MainActivity 的语音会话状态尚未拆成独立控制器（风险较高，需真机回归后再做）；后台在线探测仍为 2 秒，
+  未随事件通道放宽；Mac 不参与 `fleetUpdatesV1`（按 0.21 节）；在 Windows 复跑全部测试。
+
+## 2026-10-05 语音传输延迟优化
+
+- 分支 `agent/voice-latency`，基于 `codex/android-dialogue-ui`（`290690c`），开始时工作树干净。范围：语音延迟与流畅度，
+  只改源码、测试、契约和文档；版本号、发布清单、签名渠道均未改，48 kHz / PCM16 / mono 基线不变。决策摘要见
+  规格顶部同日条目，结构见 ARCHITECTURE。
+- **接收端（Windows + Mac）**：放行 pre-roll 时裁掉开口前静音（保留 150 ms）；积压超过目标时只跳过静音块
+  （共用 `shared/Audio/PcmLatency.cs`）；VB-CABLE / BlackHole 输出常驻（`PHONEDECK_WARM_AUDIO=0` 关闭），
+  Windows 取消 250 ms 预热等待、Mac 引擎与音频建连并行；同一所有者的 shared 会话断线重连直接接管；
+  WASAPI 缓冲 30 ms；GC `SustainedLowLatency`；Mac 渲染回调改为无锁环形缓冲；尾音时长可用
+  `PHONEDECK_OUTPUT_TAIL_MS` 调整。
+- **电脑端停止同步**：Windows 旧接收端新增 `phoneStopV1`（凭据按 ClientId 返回、60 秒、仅内存）；会话期间诊断
+  250 ms 刷新并订阅 Core Audio 采集会话事件；连续两次未采集才写凭据；本机停止先写凭据再收尾。Mac 声明同一
+  能力并在本机停止时写凭据。契约 `definitions`/`health` schema 与降级矩阵已登记，`contracts/tools/validate.py` 全部通过。
+- **Android**：证书固定连接 `TCP_NODELAY`；采音/发送线程音频优先级；点击模式按下即预创建 AudioRecord
+  （不录音、5 s 过期）并预热两条连接；managed 会话开始采音即提示“可以说话”；共享队列 240 ms 且优先丢静音。
+- **PWA**：请求 48 kHz AudioContext；发送容忍 1 s 卡顿；启动缓存满时先丢静音（managed 仍取消、shared 丢最旧）。
+- **测量工具**：`scripts/performance/voice-latency-report.py`（两端日志按 sessionId 汇总）、
+  `voice-loopback-delay.py`（同一时钟回环测端到端延迟），两者 `--self-test` 通过。
+- **验证（本机 macOS，仓库自带 .NET 10.0.400 / JDK 17）**：
+  - Android `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug` 通过；单元测试 36/36（新增 3）；lint 0 error / 43 warning（与改动前相同）。
+  - Windows `PhoneDeck.Server` Release 构建通过（win-x64）。测试在 Mac 上用 `-p:RuntimeIdentifier=osx-arm64 -p:SelfContained=false`
+    运行：167/171，失败 4 项 `RevokeWriteFailureKeepsInMemoryStateConsistent`、`AtomicWriteFailureLeavesPreviousFileIntact`、
+    `AtomicPersistencePreservesOldFileWhenReplacementFails`、`RotateRateLimitEnforcesMinimumInterval` 在改动前同样失败
+    （146/150 基线），与文件权限/计时的宿主差异有关，需在 Windows 上复跑确认。新增 21 项全部通过。该方式会改写两个
+    `packages.lock.json`，已还原，未提交。
+  - macOS `PhoneDeck.Receiver` 构建通过，测试 39/39（新增 8）。Desktop 测试 63 通过 / 1 跳过（与改动前一致）。
+  - PWA `node --test` 53/53（新增 3；原“启动缓存溢出”用例改用语音帧，保持“managed 溢出取消”的原意）。
+  - `git diff --check` 通过。
+- **未在真实设备验证（不得声称已通过）**：真机延迟数值、Typeless 实际出字、常驻 WASAPI/AUHAL 长时间运行与设备
+  热插拔恢复、Core Audio 会话事件在真实 Windows 上的触发、`TCP_NODELAY` 抓包效果、Wi-Fi 抖动下共享接管、
+  静音阈值对轻声说话者的影响、AudioRecord 预创建在不同厂商机型上的行为、iPhone Safari 48 kHz AudioContext。
+- **待办**：在 Windows 复跑 `dotnet test`；用回环脚本在 Windows 与 Mac 各测一组改动前后延迟并记录；按实测调
+  `PHONEDECK_OUTPUT_TAIL_MS` 与 VB-CABLE 内部缓冲；若轻声开头被裁，调高 `PcmLatency.LeadInMs` 或降低阈值；
+  Opus 编码协商与“开始指令合并进音频请求”仍未实施，需先有实测数据。
+
+## 2026-10-05 Android APK 已同步一套对话白
+
+- 用户要求把新界面同步一套到 APK。独立分支 `codex/android-dialogue-ui` 基于 `7083d9b` / PR #37；开始工作树干净，fetch main 后没有待合入新提交。仅修改 Android 原生 UI 和预览构建入口，Java、音频/会话协议及电脑 Typeless 路线不变，不下载模型、不创建正式 Release。
+- 将 `center` 首页更新为「对话白」，`native_light` 更新为纯白/黑色/中性灰。竖屏状态区留白，点击/按住/共享、160dp 大话筒和 Goal/退格/回车固定在底部；短屏缩小话筒、状态区可滚动，横屏保持双栏。动态引擎模式、全部快捷键和设置收进右上角菜单，电脑入口仍显示实际连接状态。使用原生矢量图标、原有动画和系统触感逻辑；其余布局及偏好 ID 兼容。
+- **构建**：Debug、默认 uiPreview 的 assemble/lint 和 Debug 单元测试通过，33/33，无跳过；lint 分别为 0 error / 43 warning、0 error / 41 warning。独立包重新 assemble/lint 通过，0 error / 41 warning，`git diff --check` 通过。UI 候选为 `1.6.0-dev.21-ui-preview.2` / versionCode 28，正式基线及 `.desktoppreview` 版本未改。
+- **安装渠道**：Samsung 原 `.preview` 的签名在本机不可用，没有卸载、清数据或强行覆盖；原两份 APK 和配置保留。使用显式 `-PphoneDeckIsolatedUiPreview` 构建并排 `.dialoguepreview`，桌面名「言渡·对话白」，本机 debug 签名。新包经原有 USB 配对连接当前 Mac，未复制旧包私有数据、未执行独立凭据升级。正式分发仍需原所有者签名。
+- **已交付 APK**：ignored `outputs/android-dialogue-ui/Yandu-dialogue-native-code28.apk`，SHA-256 `050e5eb8855ebb8e5f04af82adf336862ec91d7a112704134a71affd91584474`；从手机读回 APK 与候选逐字节哈希一致。签名、版本、构建报告和来源记录在同目录 `build-verification.json`；原 APK/私有配置备份只在本机受限目录，不能提交或上传。
+- **Samsung 实机 UI**：SM-G9880 / Android 12 上检查竖屏、横屏、三种触发方式选择、动态 Typeless 子菜单、翻译选项保存，以及旧底座布局切换后返回对话白。底部主要操作可见；最后恢复竖屏、对话白、点击听写并保持连接。截图包括 `native-idle.png`、`native-modes.png`、`native-shared.png`、`native-landscape.png`、`native-final.png`。
+- **普通听写回归通过**：复用原 Mac 接收端 `4373995`、Typeless 2.8.1 与 BlackHole。新 APK 启动会话 `cd1db888-103c-4e45-82cb-fbc1fcbdc1ec` 后，`audio.streaming`、`dictation.active`、`typeless.capturing` 全为 true；电脑本机停止后全部为 false，手机显示「电脑端已停止，手机已同步停止」，Android RECORD_AUDIO 有结束时长且不再 running。状态与截图在 `native-session.jsonl` / `native-desktop-stop.png`，未保存音频。
+- **待办与边界**：本轮只同步对话白，极夜黑/常青绿尚未移植。最终落字、Goal/退格/回车实际输入、按住录音、触感手感、翻译/问答和多电脑共享仍待分别验收；一次翻译启动显示电脑未确认，不能把菜单切换通过记为翻译录音通过。iPhone 真机仍未验收。下次获取原签名后再选择是否覆盖旧渠道，不能把新 debug 包当成正式升级包。
+- **资源**：本轮临时手机镜像及电脑停止控制页已正常关闭；现有接收端、8765/8768 ADB 通道保留供用户使用。新 APK 留在手机前台且已停止采音。
+
+## 2026-10-05 Samsung APK 真机验收与入口纠正（上一轮）
+
+- 用户明确纠正本次应测试 Android APK。Android 继续以原生 APK 为主；iPhone 网页适配不能替代 Android APK 交付。最近的对话白/极夜黑/常青绿三套新 UI 仅在 PWA，**尚未同步到 APK，不能报告手机 UI 已全部交付**。
+- 现场 Samsung SM-G9880 / Android 12 装有两份包：`com.codex.phonedeck.preview` 为 `1.6.0-dev.21-ui-preview`（桌面名「言渡 UI 预览」）；`com.codex.phonedeck.desktoppreview` 为 `2.0.0-alpha.1` / versionCode 5（桌面名「言渡」）。后者属于之前独立识别实验路线且禁用旧 USB 自动接入，本轮未卸载或替换任一包。
+- 复用正在运行的 Mac `2.0.0-dev.3` 接收端候选 `4373995`，Typeless 2.8.1 已在真实设置中选中「PhoneDeck Mic - BlackHole 2ch」。恢复 APK 的 `adb reverse tcp:8765 tcp:8765`；在原生 preview 包选择已配对 Mac，显示 Wi-Fi 在线和 Typeless 听写/翻译/问答。保留现有配对，未执行独立凭据升级。
+- **APK 实机通过**：从原生大话筒启动后，Mac 同一会话 `audio.streaming`、`dictation.active`、`typeless.capturing` 均为 true；电脑本机停止后均为 false，APK 显示「电脑端已完成，手机已同步停止」，Android RECORD_AUDIO 操作已有结束时长、没有 running。此轮证明原生开始/停止和电脑停止同步，未证明最终文字插入、首尾音、按住、基础三键或多电脑共享。
+- 此前误用 Samsung Internet PWA 的测试单独记录：HTTPS/配对/真实麦克风/Typeless 识别已发生，电脑停止后网页显示「电脑已停止」且麦克风指示熄灭；专用 TextEdit 文稿未出现转写，输入焦点仍待定位，不能把 PWA 的识别结果记作 APK 出字通过。
+- **待办**：统一 Android APK 的正确兼容入口、补齐原生三套 UI；在明确前台输入目标上完成 APK → Typeless 出字、Goal/退格/回车、按住和共享实测。iPhone 真机仍待验收。不下载识别模型。
+- 本轮仅实机验收及交接记录，未修改产品代码、构建/安装新 APK 或正式发布。证据位于 ignored `outputs/device-acceptance-20261005`（状态事件、原生采集中/停止截图、资源记录），不保存手机音频或提交个人配置。临时手机镜像和临时电脑控制页测试后正常关闭；接收端与原有 8768、新恢复 8765 通道保留供用户继续连接。
+
+## 2026-10-04 Typeless 收尾与会话恢复（最新状态）
+
+- 用户在架构复核后要求开始后续开发。本轮独立分支 `codex/typeless-session-reliability` 基于 `101a789` / PR #36；开始工作树干净，fetch main 后没有待合入新提交。维护原 Windows/Mac 与共用 PWA 候选，不下载模型、不调整 UI 布局或发布版本。
+- Mac 修复 EOF 立即 Dispose/清空 AUHAL 环形缓冲导致截尾：排空最多 3 秒 + 400 ms 静音尾部，设备与会话所有权保留到结束；未放行 pre-roll 丢弃，已经播放的 PCM 在取消接收后仍有界排空。失败释放资源并返回错误，受管 stop 检查实际排空结果，原电脑停止后不补发启动 toggle 的规则保留。
+- PWA 停止预算统一为音频响应 8 秒 + 引擎请求 6 秒，目标总预算 15 秒、浏览器 ACK 16 秒。手机先关麦，心跳继续；收尾失败不再被吞掉后回成功 ACK，页面展示错误并断开不确定会话。重复 stop 加入原收尾任务，排空期间禁止新流抢占；音频响应失败仍尽力停止 managed 引擎，shared 从不代按外部输入法快捷键。Service Worker 升为 `yandu-phone-typeless-v3`。
+- Windows 修复前置检查/按键失败留下租约、同会话重试假成功，以及音频结束后旧租约阻塞下一段的问题；失败先停止对应音频再放开重试，重复 start 等真实确认，预热/确认阶段检查停止意图，AudioEnded 终结旧会话且保留迟到 start 防护。
+- 验证：先用新增用例复现 Mac 3 项、网页会话 1 项、WebPhone 后端 4 项、Windows 启动恢复 3 项旧行为失败，再修复。最终本地 Mac Release 31/31，Desktop Release 63 passed / 1 skipped（Windows 原生项），Node 50/50；Windows Release 构建通过，Windows 会话/租约专项用无 RID 托管模式在 Mac 33/33。已有证书 obsolete / 测试可空性警告未扩大处理。完整 Windows 实际 OS 检查以本轮 PR CI 为准。
+- 浏览器联调使用独立生成音频、测试引擎和 18765/18766/18768：17 个检查点通过，20 次电脑停止到网页清理的中位数 99.97 ms、P95 101.78 ms。覆盖点击/按住、共享单机停后继续供音、权限拒绝与重试、断线、离页、离线重开及主屏幕配对；这些数字不代表真实 Typeless 延迟。脚本支持单独证据目录，本轮在 ignored `outputs/typeless-session-reliability/browser`，结束正常关闭隔离浏览器与接收端。
+- 待办：真实 Samsung/iPhone → Typeless 出字、真实首尾音、电脑停止时手机释放麦克风，以及两 Windows/一 Mac 的共享联合验收。当前 Mac Typeless 仍选择自动麦克风，尚未选择已有的「PhoneDeck Mic - BlackHole 2ch」；本轮自动化不替代该实机步骤。继续保留原测试接收端/ADB 通道供验收，进程信息以 ignored `outputs/device-acceptance-20261004/connection-status.json` 为准。
+
+
+## 2026-10-04 手机网页接回 Typeless（最新状态）
+
+- 用户明确纠正：只更新手机 UI，继续使用 Typeless；项目保留兼容/二开入口，不把本地识别模型作为必需项。分支 `codex/pwa-typeless-compat` 基于 UI PR #35，开始已 fetch main，原分支干净。Windows `1.6.0-dev.16` / Mac `2.0.0-dev.3` 源码候选，不正式发布、不修改签名三产物清单或原生 Android 包。
+- 原 Windows/Mac 接收端复用完整 PWA，回环首页改为外部输入法连接页。共用资源清单 `shared/PhoneWeb/PhoneWeb.props`；`WebPhoneGateway` 改为本机 target 工厂，与模型/识别实现解耦。只通过固定 127.0.0.1:8765 业务 API 连接原音频桥和引擎档案，没有额外识别进程、模型下载或任意代理入口。三款 UI、方式、基础三键保留。
+- 外部目标不再要求 builtInSpeechV1；保留私网 IP、逐设备 Bearer、TLS pin 与 target ID。managed 只消费开始确认后、会话一致、非 stale/unknown 的采集停止；已排空且无替代会话也可确认停止。新旧会话隔离、每会话引擎模式固定，shared 不因单机停止而中断，也不在关供音时替第三方按快捷键。页面取消承诺改为先在电脑结束再关供音。
+- 修复 Mac 普通结束收到迟到手机 stop 时重复 toggle 导致重启听写；hold 键在结束与断流清理时尽力释放。新增回归覆盖真实 TLS 外部引擎状态适配、两个共享目标、陈旧/未知/其他会话、已排空停止、迟到 stop、冻结模式与本机管理 Origin/端口保护。
+- 本地验证：Desktop Release 测试 59 passed / 1 skipped（Windows 原生项），Mac Release 测试 25/25，Windows Release 构建通过，Node PCM/会话 49/49。Windows 测试在 Mac 使用 osx-arm64 托管运行 141 passed / 4 failed；四项均是 Windows 文件锁失败注入的既有用例。后续 PR #36 的 PhoneDeck CI `37258262335` 与 Desktop Preview `37258262128` 已全部通过，Windows 实际 OS 回归通过；Whisper 打包按要求跳过。原 Mac 证书构造器 obsolete 警告未扩大处理。证据保留在 ignored `outputs/typeless-compat/tests` 和 `final-ci.json`。
+- 已在当前真实 Mac 启动原接收端开发进程；BlackHole 2ch 与 CGEvent 辅助功能就绪，确认已安装 Typeless。10 项 HTTPS 静态资源、受保护 API、本机管理跨站与端口隔离检查通过。刚才错误路线下载的模型已删除（190085487 字节），模型目录为空。复用测试数据中的已导出 CA，仅保留公开证书的手机安装，不自动修改信任。
+- 真机待办：当前手机为 USB Samsung SM-G9880 / Android 12，浏览器 Samsung Internet 30.1.0.67；尚未完成网页配对或手机录音。用户找不到 Typeless 麦克风入口，已打开其设置里的麦克风列表，需选择「PhoneDeck Mic - BlackHole 2ch」。**不能报告手机→Typeless转写、电脑停手机停、Goal/退格/回车或 iPhone 已实测成功。** 接收端/ADB/8768 USB 反向通道仅保留供本次用户测试，PID/用途记在 `outputs/device-acceptance-20261004/connection-status.json`，清理时先核对归属。
+- 边界：旧 Mac 没有网页 peer 所需的一次性 QR/逐手机 Bearer；可作为主电脑，但多 Mac 附加电脑需独立安全迁移。Windows 安全扫码 peer 已适配，仍待联合实机。草稿 PR #36；后续输入 requestId 按网页手机身份稳定派生，既保留重试去重，也避免不同网页手机相同请求编号互相吞键。使用说明以 TYPELESS_PWA 为当前入口；独立 Whisper 实验路线保留供二开，PR CI 不自动下载模型，打包改为显式手动运行。
+
+## 2026-10-03 手机 PWA 参考 App 重设计（最新状态）
+
+- 用户否定上一轮配色，明确要求删除并按 Grok、ChatGPT、星巴克手机 App 的 UI 重做。独立分支 `codex/pwa-reference-redesign` 基于 `6f95dae`；开始 fetch 最新 main 后确认没有待合入提交。继续 Desktop `2.0.0-alpha.1` 手机网页外观范围，原生 Android、电脑控制页、旧接收端和版本号均未改。
+- **删除旧方案**：移除十二色色板、旧主题色值、渐变圆钮与装饰环，改成三套完整构图。对话白为开放白底及底部集中操作；极夜黑为黑白画布、左标题与底部左右操作；常青绿为白底、深绿主卡与功能分区。三款使用自己的名称、原有图标和真实状态，没有品牌标志、假聊天记录或与语音无关的功能。
+- **兼容迁移**：`center/dock/panel` 仍作为样式 ID，派生 `chat/grok/green`。新增 `yandu.phone.style`，优先新偏好，否则迁移合法旧 layout，再回退对话白；旧 theme 不再生效，旧键保留供回退。会话进行中禁止换整套风格，麦克风和三键 DOM 不重建；配对、设备与方式偏好不受影响。
+- **视觉修正**：常规白/黑话筒为 160px、绿色 140px，窄屏、短屏和共享按空间调整。补充按钮显式文字色以修复 WebKit 切换风格后部分 SVG 图标沿用旧颜色的问题；绿色三键用短直线分隔。按压、收尾状态、系统减弱动画与浏览器支持时的触感保留。
+- **浏览器检查**：Chromium / WebKit 共 72 组布局/状态与 14 项新旧偏好迁移通过；方式/三键/按住事件及忙碌时换风格保护通过。398 项启用元素对比度检查通过，文字最低 5.28:1、图标最低 7.43:1；320px / 200% 字号允许纵向滚动。390×844 加顶部 47px / 底部 34px 安全区时，三款共享状态的主操作仍在底部安全线之上，绿色末尾前台说明允许轻微纵向滚动。页面脚本异常与功能失败为零；兼容与截图工具日志保留分类。另执行 `node --check ui.js`、`git diff --check` 通过。
+- **交付证据**：ignored `outputs/pwa-reference-redesign` 保存当前源码实际渲染的三款对照图、绑定契约、迁移/布局/交互检查及来源摘要。本分支 PR 和 `verification.json` 记录最终 CI 与四系统预览包核验。上轮十二色方案不再作为待发布界面。
+- **待办**：浏览器截图使用明确的 UI 夹具，不代表真实电脑连接；未替用户安装或修改证书信任。真实 iPhone / 安卓上的主屏幕、系统栏、触感、麦克风及多电脑联动仍按 IPHONE_PWA / DESKTOP_ACCEPTANCE 验收。app.js 的会话/输入逻辑未改，自动化与真实设备证据分开记录。
+
+## 2026-10-03 手机 PWA 十二套配色（已被用户否定，历史记录）
+
+- 用户要求更多配色。独立分支 `codex/pwa-colorways` 基于 `54fa6bd` / PR #33；开始已 fetch 最新 main，确认没有待合入的新提交。继续 Desktop `2.0.0-alpha.1` 手机网页范围，原生 Android 与电脑控制页主题维持原状。
+- 新增樱粉、奶油、薄荷、靛蓝、深海、暮紫，与原六款合计十二套；三种布局均可独立搭配。首页、弹层、方式和基础按键共用主题语义色，旧配色 ID 与 `yandu.phone.theme` 保存格式保持兼容。
+- 深色方案由各主题自身声明，浏览器主题色和主屏幕状态栏声明随选择更新，支持重新打开后恢复。加深原浅色款的录音/错误文字，提高实际状态文字辨识度；声音、会话、停止同步和多电脑共享逻辑未修改。
+- **浏览器验证**：Chromium / WebKit 的 48 项主题点击及重载检查通过；三布局 × 十二色在两个浏览器中完成 72 张截图。320px / 200% 字号下十二项可达；4,752 项启用元素对比检查通过（文字最低 4.51:1，图标最低 4.30:1，阈值分别为 4.5 与 3）；禁用项单独记录。功能断言和页面脚本异常均为零，浏览器兼容/截图诊断原文及分类保留在 `results.json`。另执行 `node --check ui.js`、`git diff --check` 通过。
+- **交付**：本轮 ignored `outputs/pwa-colorways` 保留浏览器报告、三布局十二色截图、新六款/原六款两张对照图，以及从当前源码 CI 构建并核对来源的预览包。构建与包校验以本分支 PR、工件 `verification.json` 为准；不是正式发布，也未替用户安装。
+- **待办**：本次浏览器检查使用隔离 UI 夹具，截图中的电脑名称/连接状态不是实机证据。实际 iPhone / 安卓的证书、系统栏、主屏幕、触感、采音及电脑联动仍按 IPHONE_PWA / DESKTOP_ACCEPTANCE 真机验收。
+
+## 2026-10-03 手机 PWA 界面细节优化（上一轮状态）
+
+- 用户要求继续优化手机 UI。独立分支 `codex/pwa-ui-polish` 基于 PWA `2d40eca` / PR #32；开始已 fetch 最新 main，确认没有待合入的新提交。继续 Desktop `2.0.0-alpha.1` 的手机网页界面范围，不改协议、配置格式或发布版本。
+- **三款构图**：居中款保留一个大话筒和单细环；底座款用连续底部操作区容纳方式、话筒和三键；面板款把方式切换收进同一操作卡，减少卡片与控件之间的空白。选中方式改为浅色按钮，字体、圆角、图标和按压反馈统一，六套主题继续工作。
+- **文字与共享**：缩短待机提示，移除下方重复电脑名和静止音量条；实际音量、连接错误、准备模型及供音说明仍按真实状态显示。三台共享卡的字号增大、重复说明精简，正在转写的电脑用边框与文字标识；名称最多显示两行，DOM和title保留完整名称。方式按钮补完整无障碍名称，减弱动态效果继续生效。
+- **验证**：Node对app.js/ui.js语法检查与git diff --check通过。Chromium/WebKit各45个尺寸/布局/状态场景通过，包括六主题、横屏、外观切换、录音期间禁止切款式、配对表单、三方式/三基础键事件和话筒pointerdown/up；另24个390×844共享场景及12个320×568/100%与200%字号场景通过。模拟顶部47px/底部34px安全区时三布局的基础键与方式切换都在可视区，小屏和大字号可纵向滚动，无横向溢出或脚本错误。证据在 ignored `outputs/pwa-ui-polish`；这是浏览器界面夹具，不是真机或语音识别验收。
+- **交付与待办**：按当前源码触发新Desktop云端构建与浏览器联调，最终结果和包来源记在本分支PR及本轮verification文件。旧PWA候选包保留，不能把旧安装包当作已含此次界面优化。真实iPhone/Android的触感、VoiceOver/TalkBack、刘海/手势区及语音仍按 [IPHONE_PWA](guides/IPHONE_PWA.md) 验收；本轮未安装到用户设备或正式发行。
+
+## 2026-10-03 iPhone / Android 网页 PWA（功能基线）
+
+- 用户明确选择网页/PWA、不上 App Store，优先 UI、按住/点击/三电脑共享、双端停止及流畅度。分支 `codex/iphone-pwa` 基于 `b196611` / PR #31；开始已 fetch main 并确认祖先关系。仍为新 Desktop `2.0.0-alpha.1` 预览，原生 Android dev.21 与旧接收端不改版本。本轮不覆盖既有候选包、不做正式发布。
+- **手机 UI**：极简居中、单手底座、紧凑面板三布局；暖纸/墨色/松绿/淡紫/陶土/雾蓝六主题，大话筒、点击/按住/共享、Goal/退格/回车、按压动画、受支持浏览器的振动及确认反馈。iPhone 不支持网页振动时显示说明。录音时不换方式/布局/目标；真实状态、离线未知、无障碍、200%字号、安全区及横屏均处理。电脑列表只在状态变化时更新节点，避免健康轮询打断手势/焦点。
+- **连接**：主电脑新增独立 HTTPS 8768，仅提供 `/phone`；原生 8765回环/8766固定证书保持。浏览器私有根CA/服务器证书分离，公开根证书通过本机页面导出、由用户手工在手机信任，程序不改系统证书库。地址变动不生成超出已有SAN的新链接，提示重启更新服务器证书。一次性fragment材料取用即清；电脑确认后发放独立Secure/HttpOnly/Strict cookie，精确Origin/Host校验，不能借cookie访问原生或本机API。主屏幕存储与Safari不同时，可在主屏幕App内粘贴新链接完成配对。
+- **多电脑与会话**：网关向最多四个额外电脑做独立凭据/证书固定连接，仅私网IP及固定端点。选择目标必须得到实际健康确认。按住松开/点击停止正常收尾；managed电脑停止立即推送手机，再清理慢端。共享电脑快捷键只结束自己的段，手机继续供音；手机关共享取消尚未完成的电脑段。新 `audioStopV1` `/api/audio/stop` 原子校验owner/session，迟到停止不影响新流；peer需builtInSpeechV1+phoneStopV1+audioStopV1。音频48k/PCM16/mono/20ms，启动缓存1秒、WS积压200ms，peer有界独立队列；音频不落盘，断线/中断不自动重新开麦。
+- **本地构建/测试**：Desktop Release 编译与测试通过，54 passed / 1 skipped（仅Windows原生快捷键测试在macOS跳过）；其中包含真实Kestrel/TLS/WebSocket、三个独立TLS供音接收器、停止所有权、重配撤销、慢电脑隔离、消息碎片、受控按键、错误JSON及证书链/入口隔离。Node22音频DSP/生命周期/会话49/49通过。新PWA没有修改原生Android源码，本轮原生回归由CI单独执行。
+- **浏览器 UI**：Chromium151与WebKit26.5各45组布局/尺寸/状态检查，另做三布局200%字号、软键盘收缩、对比度、列表节点/焦点、配对两形态和移除限制；辅助文字最低对比度4.51:1。三布局图与明细位于ignored `outputs/iphone-pwa/ui`，这些设备状态是明确UI夹具，不是真机连接证据。
+- **真实浏览器联调**：隔离真实DesktopApp、Chromium生成音频、实际AudioWorklet/WebSocket，共17检查点通过，无意外页面/CSP错误。覆盖桌面批准配对、三模式、PCstop后track ended/AudioContext closed、尾帧、共享局部停止不关麦、权限拒绝后重试、断线未知状态/恢复、离开页面清理、离线冷启动自动恢复、无cookie主屏幕手动配对。Service Worker activated，仅缓存12个公开资源。连续20轮PCstop中位101.40ms/P95 102.30ms/max102.46ms，每轮资源/接收端均回到空闲；仅本机生成音频+测试引擎，不是iPhone/Wi-Fi/识别延迟。报告 `outputs/iphone-pwa/integration/results.json`，复跑入口 `desktop/tests-web/browser.integration.mjs`；临时证书/凭据已删除。
+- **验证中修复**：首页尾斜杠重定向循环、缺失apple-touch图标阻止SW安装、迟到ACK/旧socket/启动取消、预录音突发撞发送积压限制、主屏幕独立授权、已消费二维码误显示等待、离线初开无恢复、共享断线显示旧供音及更新期间开麦竞态。新CI锁定Playwright1.62.1，包含Node单测和浏览器集成；四OS原生构建/识别样本/打包保持原流程。云端结果在后续验证记录追加，不能凭配置存在宣称通过。
+- **云端验证**：源码 `269e29d` 的 [Desktop CI 37144944642](https://github.com/leolemon777/PhoneDeck/actions/runs/37144944642) 六作业全通过，Windows Desktop 55/55，Linux/Mac Intel/Mac ARM 各54 passed / 1 Windows-only skipped；四端均完成原生识别样本、打包和归档逐文件校验。新增浏览器作业的49单测及17检查点/20轮停止也通过。[原接收端回归37144944654](https://github.com/leolemon777/PhoneDeck/actions/runs/37144944654) 全通过：Windows144/144、Mac23/23及Android/B03。CI使用PR合并快照 `1c60cbac9be52d1f929bac2dab57a2beefaa5c41`，树 `8c6a9aecdae27281e7e94b0aeeeaff6959aa3b19` 与分支源码完全一致；不将CI识别样本当作手机实机语音验收。
+- **共享布局收尾**：实测截图发现常规390×844共享页的底部键需要额外滚动；现压缩共享专属间距、电平区和话筒尺寸，保留三台状态与关闭共享说明。Chromium/WebKit的24组390×844检查中，基础键及方式切换底边常规在808px以内；加入顶部47px/底部34px模拟安全区后在778px以内。中心话筒常规176px、安全区场景144px。另12组320×568/100%和200%字号检查通过，无横向溢出，允许纵向滚动且不隐藏控件。后续CSS提交的最终CI与候选来源记录在 PR #32 和 ignored `outputs/iphone-pwa/verification.json`，下载包另逐一校验归档、来源树和哈希。
+- **交付与待办**：代码见 [草稿 PR #32](https://github.com/leolemon777/PhoneDeck/pull/32)，依赖 #31。使用步骤及醒来后的设备清单见 [IPHONE_PWA](guides/IPHONE_PWA.md)，打包附该指南。用户允许无法自动验证时先交代码；真实iPhone/Android证书安装、麦克风权限、主屏幕运行、语音首尾/识别、触感、VoiceOver/TalkBack、实际按键输入、不同物理电脑及Wi-Fi性能仍需实测。PWA切后台/锁屏会停止，需要前台；网页暂不提供Android完整宏编辑、文字同步或电脑设置管理。主网关须持续运行。未公开正式发行、未自动安装根证书或替换使用中的接收端。
+
+## 2026-10-02 电脑停止同步手机采音（最新状态）
+
+- 用户要求电脑停止后手机也停止，并明确共享例外为「只停止该电脑转写，手机继续共享」。独立分支 `codex/desktop-stop-sync` 基于三款 UI 的 `180b82c`，保留 Android `1.6.0-dev.21` / 新 Desktop `2.0.0-alpha.1`；开始已拉取核对云端 main。本轮为会话修复，不作正式版本发布。
+- **普通点击/按住**：新 Desktop 通过 `phoneStopV1` / `audio.stopRequestedSessionId` 返回本次 managed 会话停止凭据，按鉴权手机隔离、仅内存保留 60 秒。健康状态原子读取；电脑停止、取消及 managed 异常结束都能通知手机。共享电脑段落停止不产生该凭据，持续供音。
+- **手机同步**：正在进行的 managed 会话每 500ms 独立检查当前目标，避免其他离线电脑的发现检查延迟停止；匹配凭据在开始响应返回前也生效。旧接收端兼容路径只接受开始确认后、明确且新鲜的停止状态；JSON null、旧探针、其他会话/电脑/传输均不误停。清理会话使迟到开始确认失效，后台音频停止带期望 sessionId，防止旧请求关掉下一段录音。继续原有 48 kHz / PCM16 / mono 和尾音路径。
+- **构建与测试**：Android Debug/UI Preview、33 项单元测试、lint 全通过（0 error / 43 warning）；新 Desktop Release 编译和测试通过（31 passed / 1 skipped；跳过项为仅 Windows 的原生快捷键测试，在本次 macOS 环境不可执行）。旧 Windows/macOS 接收端源码未改。
+- **模拟器联调**：Android 14 / API 34 + 真实本机 Kestrel 接收端，使用无输出测试语音引擎、关闭热键/自动输入；模拟器 `-no-audio`，无物理麦克风或真实识别。最终 APK 连续三次点击模式由电脑停止到手机流结束为 0.49 / 0.49 / 0.50 秒；按住时电脑停止在手指释放前结束采音，随后松手不复活会话。保留旧停止凭据时新会话仍正常。
+- **边界验证**：延迟开始确认后电脑先停，手机同步停止且迟到确认不复活；代理旧协议的未知、缓存、其他会话状态均保留录音，新鲜同会话停止可生效。共享连续两次本机段落停止后，同一手机流保持运行，仅点击手机关闭共享才结束；截图确认共享状态。测试脚本改为先移除旧界面 XML 并核对导出成功，避免系统无障碍未空闲时误读旧快照。崩溃日志为空。
+- **产物**：ignored `outputs/desktop-stop-sync/Yandu-desktop-stop-sync-ui-preview.apk`，仍为独立 `.preview` / dev.21-ui-preview / versionCode 27 / 本机调试签名，v2 校验通过；三款 UI 和基础按键保留。构建/测试日志、联调截图、哈希与来源记录同目录。新停止凭据须手机与新 Desktop 同时更新；未替换既有分发包或固定签名 `.desktoppreview` 渠道。
+- **待办**：真实手机与电脑、真实识别/尾音、触感、不同物理电脑同时共享、锁屏及实际网络丢包仍需联合验收。约半秒停止仅为本轮新 Desktop 模拟器结果，旧 Windows 仍受约 3 秒诊断刷新周期影响。模拟器与本机测试引擎的结果不代表这些真机项目通过；原签名渠道升级仍需原密钥及递增版本号。
+
+## 2026-10-02 三套可切换手机 UI（上一轮状态）
+
+- 用户要求「多个款式」「多个 UI」。继续 Android `1.6.0-dev.21` UI 切片、分支 `codex/yandu-phone-workspace` / PR #30（依赖 PR #29）。开始时拉取并核对云端 main，已包含其最新提交。本轮提供三种实际布局，顶部「界面」打开带原生缩略图的选择面板。
+- **极简居中**保留大话筒居中和底部三键；**单手底座**将话筒放入底部固定区，状态靠上；**紧凑面板**把状态、话筒和右侧竖排 Goal/退格/回车放入同一面板。三款均保留点击/按住/共享、完整快捷键、按压动画与系统触感，复用原动作与音频路径。窄屏内容可滚动、方式入口保持底部易触达；横屏使用双栏。
+- 新手机偏好 `home_style_id` 与六套配色、语音方式、电脑配置独立；未知值回到默认居中。切换只重新绑定界面，不重建音频/连接所有者。语音启动、采集或收尾时拒绝打开款式选择；选中款式时再次检查，覆盖面板打开后才开始的会话。关闭面板、返回与旋转保留已选布局。
+- **构建**：`:app:assembleDebug :app:assembleUiPreview :app:testDebugUnitTest :app:lintDebug` 通过；既有 27 项测试，0 失败/0 跳过，lint 0 error / 43 warning。未修改接收端、网络协议或音频参数。
+- **模拟器**：Android 14 / API 34，三款的基础按键、三种语音方式、布局位置差异、配色/语音偏好保留与冷启动保存通过；暖白/深色、横屏、320×640dp / 150% 字体及共享方式均走查。短屏款式列表滚动可选到第三款；打开选择面板后旋转能关闭面板并保留选择。崩溃日志为空。结束恢复模拟器尺寸、字号、旋转设置与暖白居中首页。
+- **产物**：ignored `outputs/yandu-multiple-ui`，`Yandu-multiple-ui-preview.apk` 为独立 `com.codex.phonedeck.preview` / `1.6.0-dev.21-ui-preview` / versionCode 27、本机调试签名。`ui-comparison.png` 从三张真实模拟器截图并排生成；构建日志、各布局/尺寸截图及 `verification.json`、`SHA256SUMS.txt` 同目录保留。此前产物保持原字节。
+- **待办**：本轮没有连接真实手机或电脑；实际触感、在线采音/听写/共享、会话进行中的 UI 切换保护、真实按键发送、多电脑和锁屏仍需联合验收。既有固定签名 `.desktoppreview` 覆盖升级须使用原渠道签名及递增版本；本次仅提供开发预览，未正式发布。
+
+## 2026-10-02 首页方式切换与触感反馈（上一轮状态）
+
+- 用户追加「方式切换也得需要，然后点击特效触感都需要」。继续 Android `1.6.0-dev.21` UI 切片、分支 `codex/yandu-phone-workspace` / PR #30；云端 main 已同步核对，没有新提交需要引入。
+- 首页底部改为「点击 / 按住 / 共享」单选条，背景短滑动，直接保存既有手机偏好并与设置页同步；选择共享仅改变方式，不启动麦克风。启动/采集/收尾期间拒绝切换并提示先结束当前语音；共享服务快照增加本地 `busy` 字段覆盖启动与尾音收尾，网络协议和音频参数不变。
+- 话筒按下缩至 93%、普通按钮 95%，松手短回弹，原生涟漪保留；按住手势显式维护 pressed 状态，取消时释放且不额外点击。方式切换使用轻触感，实际发送确认/失败使用不同系统触感，失败配合短摇动；系统关闭触感或动画时遵从设置，不强制震动或做持续装饰动画。Goal/退格/回车及快捷面板均保留原动作路径。
+- **构建**：Debug/UI Preview、27 项单元测试、lint 全通过；0 失败/0 跳过，lint 0 error / 43 warning。新增触摸监听只处理效果并返回 false，由原生按钮负责 performClick；方式选择在辅助功能树中具有单选和选中语义。
+- **模拟器**：Android 14 / API 34 检查三种方式、唯一选中状态、冷启动保存、设置页同步、选择共享不启动服务；Goal 按下移出取消不发送、话筒按住与松开复位；暖白/深色、横屏、320×640dp / 150% 字体，以及关闭系统动画后的方式切换。未连接真实手机或电脑，没有把离线交互当作语音/按键发送验收。
+- **产物**：ignored `outputs/yandu-phone-feedback`，独立 `.preview` / `1.6.0-dev.21-ui-preview` / versionCode 27、本机调试签名；APK 为 `Yandu-voice-feedback-ui-preview.apk`。构建日志、界面检查材料、录屏及来源/哈希随目录保存；此前极简版 APK 和截图保留原字节。
+- **待办**：真实手机触感强度、系统关闭触感后的物理结果、实际听写/供音/收尾时切换保护、发送确认及长按释放仍需设备联合验收。固定签名 `.desktoppreview` 覆盖安装与正式发布仍需原渠道签名和递增版本。
+
+## 2026-10-02 极简语音手机首页（上一轮状态）
+
+- 用户否定第一版卡片工作台后，明确选择「极简语音：大话筒、少按钮」。继续分支 `codex/yandu-phone-workspace` 和 PR #30，基于云端 `agent/yandu-multi-theme-config` / `5a8da7b`（PR #29）。当前实现以本节为准；首轮工作台截图属于历史。
+- 首页缩减为轻量连接行、184dp 圆形话筒（短屏/横屏 128dp）、真实状态/电平，以及底部模式入口和 Goal/退格/回车。用户确认回撤就是退格；Goal 读取原 `agentGoal` 配置，默认 `/goal`，沿用既有提交偏好，不额外追加回车。完整快捷键入口移到顶部。快捷网格移入底部面板；原有排序、编辑、发送与长按行为保留，关闭面板停止连发并退出编辑，结果反馈在面板中可见。仅多台已配对电脑时显示底部目标切换；连接行始终可以查看电脑。设置首页删除大引导卡。
+- 圆形背景和图形缩放在空闲/启动/停止/共享状态保持一致。竖屏话筒区可滚动，模式和辅助操作固定；横屏为连接与语音双栏。六主题/偏好格式、会话所有权、语音手势、受控按键、采音和鉴权没有变更。
+- **本机构建**：macOS ARM64 / JDK 17，执行 `:app:assembleDebug :app:assembleUiPreview :app:testDebugUnitTest :app:lintDebug` 全通过；27 项测试，0 失败/0 跳过；lint 0 error / 43 warning。
+- **模拟器走查**：Android 14 / API 34。检查暖白/深色首页、设置、横屏、150% 字体、320×640dp 窄屏，点击/按住选择回显，快捷面板打开/编辑/关闭/重开及系统返回。截图均为真实运行的未配对状态，没有虚构在线电脑；该结果不代表录音或实际输入验收。
+- **交付**：独立 `com.codex.phonedeck.preview` / `1.6.0-dev.21-ui-preview` / versionCode 27 的开发预览 APK：`outputs/yandu-phone-workspace/Yandu-minimal-voice-ui-preview.apk`。最新截图使用 `minimal-*` 名称，构建日志为 `minimal-build.log`，校验信息为 `minimal-verification.json`（均 ignored）。该包可调试、使用本机调试签名，不是固定签名 `.desktoppreview` code4 的覆盖升级；旧预览产物保留原字节。
+- **待办**：当前没有连接真实手机；真实采音、点击/按住完整听写、已配对多电脑状态/切换、实机触感、快捷键连发释放和锁屏仍需手机与接收端联合验收。进入既有 `.desktoppreview` 渠道须使用该渠道原签名并递增版本，不能替换为本机调试签名。跨平台验收继续按 DESKTOP_ACCEPTANCE 执行。
+
+## 2026-10-01 多主题与多电脑独立配置（当前）
+
+- 用户明确要求「多主题，多电脑配置」。本轮分支 `agent/yandu-multi-theme-config` 基于 `agent/yandu-ink-ui`，保留言渡名称、黑白话筒图标和圆形入口，加入六套可持久化主题：墨水屏暖白/深色、森林松绿、瓷白淡紫、燕麦陶土、天空雾蓝。Android 页面、原生控件/弹窗和系统栏共用对应令牌；Desktop 浏览器独立保存主题，也可跟随系统。
+- 「设置 → 多电脑配置」按已配对电脑管理，新接收端通过 `desktopSettingsV1` / `GET/POST /api/settings` 保存本机名称、识别语言、自动填入和点击/按住快捷键；远程需 settings scope、匹配 targetComputerId 和原 revision。供音/听写/识别期间拒绝保存；原子写和快捷键注册失败保留旧配置，恢复失败报告真实状态。Windows/X11 使用受控候选；Mac helper 接收固定候选 ID；Wayland 继续通过系统自定义快捷键。
+- 手机外观与点击/按住偏好不随电脑切换，管理配置不切换输入目标。共享组仍同时用于供音和最终文字同步，开关保存在手机；修复 USB fallback 绕过共享组的问题。旧接收端的 `phoneManagedSettingsV1` 输入法配置保留。Desktop 控制页新增本机配置表单，轮询保留草稿、revision 冲突提示刷新、共享供音时暂停保存；错误忙状态不会被误判为配置冲突。
+- **验证**：Android Debug/desktopPreview 构建与 lint 通过（各 0 error / 44 warning），现有测试 27/27；Desktop Release 编译 0 warning / 0 error，测试 28/28、无跳过，包括配置目录/重启隔离、scope/目标/revision/忙状态、原子写回滚、关闭自动填入仍发布结果，以及真实 Windows 热键冲突与恢复。六主题 108 组文字对比度最低 4.579:1，72 项 XML 色值与 token 一致。浏览器模拟覆盖六主题、存储不可用、草稿/冲突/供音竞态和 360px 布局；另对真实隔离接收端做只读表单联调。
+- **Samsung**：已覆盖安装 code4 且保留应用数据，六主题逐一冷启动确认。独立 UI 预览渠道通过固定证书 TLS 读取两套本机接收端，从手机保存电脑1为日语后，电脑2仍为英语并保留不同快捷键，手机主题和默认电脑不变。测试凭据预置在独立预览渠道，不代表相机配对或两台物理电脑；原预览配置已恢复，测试进程和隧道已移除。证据在 ignored `outputs/yandu-multi-theme-config`。
+- **交付**：Android 固定签名渠道 `.desktoppreview` 仍为 `2.0.0-alpha.1`，versionCode 4，文件 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`；最终来源、安装读回哈希和签名记录在 ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code4-multi-20261001`。旧 code2/code3 及9月30日跨平台候选保持原字节，不覆盖历史来源。用户原工作树 `ReceiverStatusWindow.cs` WIP 未改。
+- **边界**：每台电脑需使用包含新设置能力的 Desktop 构建；旧四 OS 候选不会自动获得新接口。Mac helper 本次变更仍需对应 OS CI 编译及真机，Linux 原生按键、实际麦克风识别、不同物理电脑、干净安装验收继续按 DESKTOP_ACCEPTANCE 执行。本轮没有公开正式 Release。
+
+## 2026-10-01 墨水屏主题与圆形话筒已落实到手机（最新）
+
+- 用户反馈主题配色没有进入手机，继续完成实际 UI。分支 `agent/yandu-ink-ui` 基于 `agent/yandu-brand` / PR #27；原工作树的用户 WIP 未改动。
+- Android 沿用 `native_light/native_dark` 配置 ID，更新为暖纸/墨色及反转深色。首页、设置族、系统栏、原生弹窗/控件共用配色；卡片与快捷键采用细边框。品牌使用系统 serif，未引入下载字体或图片依赖。新 Desktop 控制页 CSS 同步使用相同配色，旧 Windows/Mac 接收端未改。
+- 主操作为 112dp 圆形原生 Button，话筒单独居中绘制，文字状态独立在下方；开始/停止/取消的状态、点击/按住/共享模式及可访问描述继续使用原逻辑。启动/采音时用停止图形，减少依赖颜色辨认状态。横屏双栏和大字体滚动结构保留。
+- 固定签名 `.desktoppreview` APK 为 `2.0.0-alpha.1` / **code3**，不可调试；同证书覆盖 code2，不卸载、不清除数据。已装到 Samsung SM-G9880，暖白首页及设置页确认生效，25 个原有快捷键仍在；主题选择通过冷启动验证。原自动旋转与 110% 字体已恢复，结束停留暖白首页。
+- **验证**：Android Debug/desktopPreview 构建与 lint 通过（各 0 error / 44 warning），既有 Android 测试 27/27；Desktop Release 编译 0 warning / 0 error，浏览器核对浅/深背景和主按钮文字颜色通过。18 对主题文字/背景的最低对比度为 5.17:1。Samsung 已走查暖白首页/设置/主题选择、深色首页、横屏及 150% 字体，未见话筒和说明截断。证据在 ignored `outputs/yandu-ink-ui`。
+- **交付**：新候选在 ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code3-ink-20261001`，旧 code2 图标包和 9 月 30 日跨平台候选保持原字节与来源。
+- **待办**：这轮未重做在线语音、真实采音/识别及不同物理电脑同步，也未重新分发或安装四 OS 的新 Desktop 包；继续按 DESKTOP_ACCEPTANCE 验收。仅界面配色与入口外观落地，不将概念图中的最近文字布局或新导航当作已实现。
+
+## 2026-10-01 言渡名称与黑白话筒 APK 图标（最新）
+
+- 用户选定「言渡 · Yandu」，随后明确只要 Notion 风格的话筒 APK 图标。最终图标为原创暖白底、墨黑话筒与细框，无字母；墨水屏首页与圆形语音按钮仍是效果图，本轮未实施布局改版。
+- 工作树继续使用 `PhoneDeck-cross-platform`，独立分支 `agent/yandu-brand` 基于 `agent/cross-platform-release`。Android launcher、首页名称与相关显示文案、新 Desktop 控制页和安装菜单改用新品牌；程序集、包名、协议、配置和证书身份保留兼容。原工作树中的用户 WIP 未修改。
+- 图标母版 `design/yandu-icon.svg`，可选贡献者脚本 `scripts/branding/Build-YanduIcons.ps1`；提交五档日/夜 PNG、API 26 自适应与 API 33 单色图层，以及 1024 px 母版。Desktop favicon 直接嵌入同一 SVG。删除已无引用的旧大底板图片。
+- 新固定签名 APK 为 `com.codex.phonedeck.desktoppreview`、`2.0.0-alpha.1` / versionCode **2**，显示名「言渡」，不可调试。`apksigner` 的 v2 校验通过，新旧 APK 的证书 SHA-256 同为 `3c3567f23b1754c881276595d67330afbd208ccd396302aba8875e78342c1a2b`；可覆盖同渠道 code1。签名私钥没有进入 Git 或交付包，旧三产物更新版本未变。
+- **本地验证**：Android Debug 与 desktopPreview 构建、lint 通过，两个 lint 报告均为 0 error / 44 warning；既有 Android 单元测试 27/27，Desktop 测试 20/20，新 Desktop Release 编译 0 warning / 0 error。实际 APK 资源包含日/夜自适应、单色图层及新名称。
+- **交付**：ignored `outputs/preview-delivery/Yandu-2.0.0-alpha.1-code2-20261001`，包含新 APK、图标与来源/哈希记录。9 月 30 日四 OS 候选及草稿 Release 保留原字节与来源；当前未替换已发布产物。
+- **Samsung 安装**：用户要求将新图标实际装到手机后，已在 Samsung SM-G9880 用 `adb install -r` 将同渠道 code1 覆盖为 code2，首次安装时间未变，未卸载或清除数据。手机读回 APK 的 SHA-256 为 `595f3bfe4b66fbb9a54f9b38efa6c1862ab18d10f968c886788e939d7d8fc123`，与交付包完全一致，安装名称为「言渡」，MainActivity 已打开并处于前台。安装证据在 ignored `outputs/yandu-brand/device-install-20261001/installation.json`。默认 ADB 服务发生 connection reset，使用独立本地端口 15037 完成操作，未重启默认服务。
+- **待办**：launcher 的实际裁切显示未单独走查。跨平台语音和输入的既有真机待办继续按 DESKTOP_ACCEPTANCE 执行，本轮品牌安装不替代这些验收。后续 UI 风格以用户最终选定方案另行实施。
+
+## 2026-09-30 统一跨平台 Desktop alpha 与低配置候选（最新）
+
+- 用户授权执行Windows/Mac/Linux、点击/按住/电脑快捷键、最终文字同步与可下载分发；随后确定内置开源识别、首次下载模型。新增独立Desktop `2.0.0-alpha.1`，源码在 `work/phone-deck/desktop`，不修改旧外部输入法链路及固定三产物更新协议。
+- 工作树 `PhoneDeck-cross-platform`、分支 `agent/cross-platform-release`、[草稿PR #26](https://github.com/leolemon777/PhoneDeck/pull/26) 以 `agent/phone-managed-desktop` 为基线，依赖PR #24。原工作树状态窗口WIP未代提交。
+- 复用v2 PCM48、稳定身份、逐手机Bearer凭据、TLS/证书固定、扫码+本机确认、发现；localhost控制页有限定Host/Origin/FetchSite。模型固定commit/大小/SHA256，音频和结果仅内存；共享供音与managed听写共用会话，取消/撤销/断流不发布迟到结果。
+- 来源电脑仅在用户启动该段且输入焦点未变化时填入；其他电脑保留同步记录，不自动输入/回车。Android显式开启后通过手机中继同一resultId；每端最多100条/30分钟，重启清空，导入结果不回传。只保证仍运行且仍在保留窗口内的重试。
+- 修复公开样本发现的Windows中文argv崩溃、stdin结果不输出、Mac证书加载flag、CI新版VS/Android旧tools包、预览渠道回环地址加载丢失。x64包携带通用与独立AVX2版本，由.NET检测完整CPU/OS特性再选择；ARM64走对应CPU后端。Windows无额外VC++/.NET安装需求；Mac ad-hoc签名；Linux deb声明系统依赖。
+- **验证**：新Desktop20/20（四OS runner均过，含真实Kestrel HTTPS/权限/目标/撤销/结果隔离）、旧Windows144/144、旧Mac23/23、Android27单测+Debug/uiPreview构建/lint。四种Desktop包的[CI 36734226772](https://github.com/leolemon777/PhoneDeck/actions/runs/36734226772)全绿，公开JFK/中文路径/PCM stdin/stdout/无新增录音结果文件实测：Windows16.4s、Linux14.5s、Mac Intel17.5s、Mac ARM38.7s；这些是CI样本时间，不代表用户硬件延迟。
+- **Samsung真实中继**：SM-G9880 + 同一台Windows上两个隔离接收端；公开样本生成6份结果，经真实手机固定TLS双向同步，结果编号/来源/会话/文字相同；无重复、无导入结果回传。验证managed协议、浏览器点击/指针按住/键盘按住、原生Ctrl+Alt+Space及Ctrl+Alt+V。测试用history-only、无麦克风，结束后恢复预览App配对/开关，只移除本轮adb反向端口。证据在ignored `outputs/cross-platform/relay-test`。
+- **Android可分发渠道**：新增不可调试、独立包名 `.desktoppreview`、alpha1/versionCode1、名称Luma Preview；使用新渠道固定RSA3072签名，不沿用CI临时debug签名。本地固定密钥及配置保留在两个工作树的ignored `work/phone-deck/signing/desktop-preview`，原本工作树的副本为长期保管位置；原发布密钥未更换。不得提交/上传私钥，所有者需离机备份并持续复用。通过 `PHONEDECK_SIGNING_PROPERTIES` 指定配置，无配置打包失败。
+- 新渠道首次启动已在Samsung安装检查；默认扫码/TLS、不自动接入旧USB或弹蓝牙授权，未连接时指引扫码并显示“内置识别”，麦克风仅在用户开始时请求权限。原Luma及uiPreview保留旧USB/蓝牙路径。许可文本随新APK打包。
+- 尝试专用FocusSink窗口的实桌面自动填入验收：本机执行会话未获得测试窗口前台焦点，前置断言即停止，未启动该次听写、未向其他窗口输入；两个测试窗口均关闭。因此不计为Windows焦点填入实测通过，仍按DESKTOP_ACCEPTANCE人工验收。
+- Mac快捷键改由自带原生helper在OS主线程运行Cocoa应用循环接收Carbon热键；.NET仅接收固定toggle/start/stop，不再在后台线程调用无应用队列的CFRunLoop。64位SDK不提供旧RunApplicationEventLoop，使用NSApplication.run。helper退出/接收端退出释放快捷键，父进程异常结束时helper自行退出。Mac CI会验证初始化及事件循环不立即结束；物理键、权限和焦点输入仍待所有者验收。包外build.json记录Mac签名后的最终文件哈希，避免签名与包内清单自引用。
+- 下载产物校验实际读取ZIP/tar，对比签名后完整清单、每文件大小/哈希、Unix可执行位及外部归档校验值；Mac清单包含隐藏资源，归档禁止额外合成AppleDouble元数据。安装EXE/deb的整体哈希也覆盖，首次安装行为仍需真机验收。
+- 最后补充自动听写保护：Whisper分段换行/制表及Unicode段落分隔统一成空格后再发布，保证所有电脑收到同一段最终文字；自动填入额外拒绝控制字符。Windows/Mac/X11均检查用户仍按着的组合键，X11先初始化线程锁并用独立XQueryPointer连接检查状态，查询失败只保留记录供复制；Mac文本事件显式清空修饰标志。覆盖多分段、异常控制字符和X11状态掩码的四项测试，避免Linux字符模拟把换行变成回车或把普通文字变成快捷键。已从e46ca69重新构建并核对候选。
+- **最终候选验证**：[Desktop CI 36752538026](https://github.com/leolemon777/PhoneDeck/actions/runs/36752538026)五作业全绿，四OS均完成公开音频识别和下载包校验，两个Mac原生热键helper初始化/循环存活为ready；[既有回归36752538028](https://github.com/leolemon777/PhoneDeck/actions/runs/36752538028)全绿。本地Windows公开样本加速版5.6s、完整模型包逐文件校验通过；APK使用固定证书完成v2验证，最后候选已更新到Samsung，保留旧App数据。
+- **候选交付**：`outputs/preview-delivery/PhoneDeck-2.0.0-alpha.1-safe-voice-20260930`，维护者[发布草稿](https://github.com/leolemon777/PhoneDeck/releases/tag/untagged-80a4da2346374cad39ce)，尚未公开。评审源码e46ca69；本地包及APK从该head构建。CI真实来源23dfa4a是PR临时合并提交，Git源码树27587fc1经GitHub API核对与e46ca69一致，四CI包的manifest保留合并SHA。汇总19个文件加SHA256SUMS，含四OS轻量包、Windows完整模型包、固定签名APK与操作文档；无用户data/录音/私钥。来源详情见CROSS_PLATFORM_EXECUTION和工件verification.json。
+- **待办**：用户澄清没有当前可接入Mac，会回Mac自行操作，见 [DESKTOP_ACCEPTANCE.md](release/DESKTOP_ACCEPTANCE.md)。Linux SSH说明已读，但本机缺 `linux2` 别名/密钥，未连接；没有改网络/代理/SSH配置。仍需干净安装、真实中文麦克风、相机扫码/实网发现、不同物理电脑、焦点自动填入、Mac权限/快捷键、Linux X11/Wayland。不能把CI或两个同机进程写成上述真机验收。
+- 工件只作为alpha候选；Windows发布者签名、Mac Developer ID/notarization及最终公开Release仍未完成。构建、快速开始及可追溯验证分别见 BUILD_PIPELINE、DESKTOP_QUICK_START、CROSS_PLATFORM_EXECUTION。
+
+## 2026-09-30 UI P2 双主题走查全绿 + 预览渠道直启基建（最新）
+
+- 核实设置族六个 Activity 早已全部使用 Console v2 令牌（零硬编码色），文档中
+  "仍是旧令牌形态"的旧表述已纠正。
+- **走查基建**（真机限制倒逼）：该 Samsung 的 `input tap` 触摸注入被系统阻断
+  （keyevent 正常）；uiautomator dump 因搜狗无障碍服务常失败且返回旧文件假象。
+  解决：`app/src/uiPreview/AndroidManifest.xml`（manifest 覆盖，tools:replace 六页
+  exported=true，仅预览渠道）+ `SettingsActivity` 的 `phonedeck_page` 子页直启钩子，
+  全页面可 `am start` 直启自动化。
+- **多 agent 工作流验收**（dwfrun-82b83b2f）：深色九页采集（采集员）、四个 gradle
+  门（assembleDebug/assembleUiPreview/testDebugUnitTest/lintDebug 全过）、三组视觉
+  验收 + 每问题独立复核 + 报告独立通读。结果：**浅色 9/9、深色 9/9 通过**。
+- 唯一报告项（深色快捷列表副标题对比度约 4:1）复核未确认，代码核查销案：
+  副标题即 `theme.muted` #A7B0C0、卡片 `theme.surface` #1B1E24，WCAG 实算 7.64:1。
+- 走查后手机主题已恢复浅色。剩余 UI 欠账：语音各状态、按压/键盘弹出交互态、
+  横屏与其他机型（见 KNOWN_ISSUES #5）。
+
+## 2026-09-30 UI P1 深色主题真机走查通过（最新）
+
+- 手机仍跨网段（192.168.0.195），但深色走查不需要同网段：preview 包为 debug 签名，
+  经 `run-as` 直接改主题 SharedPreferences（theme_id→native_dark）零代码改动完成。
+- **视觉模型验收 5/5 通过**：深色三层结构（背景约 #0D1117/卡片 #1C2128/文字 #E6EDF3）、
+  饱和蓝主按钮 #5B8DEF 配深色文字（非旧淡蓝胶囊）、状态 chip 深色下可辨识（灰点=
+  离线语义正确）、快捷网格文字可读、无截断重叠；底部"输入到"chip 排列正常。
+- 截图证据 `outputs/ui-redesign/console-v2-dark-walkthrough.png`（ignored 目录）；
+  走查后已恢复浅色设置并清理临时文件。
+- 残留（记入 KNOWN_ISSUES #5）：深色在线绿点态建议复验、各语音状态（启动中/采音中/
+  失败/共享）走查仍待做（需要真机交互或网络）、设置页 P2 未迁移。
+- 另：补交 A4 漏提交的 CredentialUpgraderTest.java（7 用例，c05c521）。
+
+## 2026-09-30 SEC-02 修复：8765 回环 Host/Origin 防护上线（最新）
+
+- 用户不在线（决策问答未获回复），手机仍跨网段——转做已量化在案的纯软件安全差距：
+- **LoopbackOriginGuard**（新中间件 + 4 组单测矩阵）：8765 上非 GET 请求强制
+  Host 字面回环（127.0.0.1/localhost/[::1]:8765，拒 DNS 重绑定与端口伪装）+
+  Origin/Referer 同源校验（拒跨站/null origin/沙箱 iframe）。
+- **真实服务器实测**（隔离数据目录、临时停/恢复生产托盘）：恶意 Origin=**403**、
+  原生无 Origin=200、同源=200；生产恢复后 health 200。
+- Windows **144/144**；KNOWN_ISSUES #3、SECURITY.md 残留声明、V13 测试差距注释
+  三处同步翻转。
+- D01/D04–D11 与 B03 打包决策已通过问答提交用户（未获回复，保持待决）。
+
+## 2026-09-30 R0 六小项 + V11/V13 台架化完成（最新）
+
+- 授权执行 R0 前置纯软件项，全部落地：
+  1. **SECURITY.md**（根目录）：漏洞报告入口（私密渠道）、S0-S2 处理目标（建议值非
+     SLA）、安全设计边界与如实声明的残留（8765 Host/Origin 差距）。
+  2. **README 隐私说明**：语音去向（局域网 PCM→自装引擎）、默认不落盘、服务端只存
+     哈希、无遥测无云识别、第三方引擎自理。
+  3. **git 全历史秘密扫描**：自研脚本扫全部 2200 个 blob（gitleaks 核心模式子集：
+     PEM/JKS/AWS AKID/GitHub/Google/Slack token/硬编码长密钥），**零命中**；
+     二进制（PNG/JPEG）跳过。
+  4. **docs/release/KNOWN_ISSUES.md**：真机欠账、CI 假绿历史、8765 Host/Origin 差距、预览
+     签名、UI P2 未竟、Keystore 降级路径、迁移窗口开放态、跨网段限制，分级列出。
+  5. **docs/archive/PAIRING_GUIDE.md**：扫码配对/共享组/凭据升级的图文流程（含校验码核对
+     防抢配、120s/5 次/15s 窗口语义、常见问题表）。
+  6. **docs/release/SUPPORT_MATRIX.md v0**：四端×网络×输入法×虚拟麦克风盘点，大部分组合
+     如实标"待验证"，实测设备唯一真机 SM-G9880。
+- **V11/V13 台架化**（Windows **140/140**，新增 4 用例）：
+  - V11 补时钟回拨用例：待确认态回拨不受影响；材料已消费后回拨不复活（消费判定
+    与时间无关）。
+  - V13 三用例：8766 无/错令牌/伪造 Bearer 全拒且不回退旧头；8765 回环语义+Host/
+    Origin 差距在案（注释记录，修复后补正向断言）；撤销 A 不影响 legacy 共享令牌
+    （身份隔离）+ 未知/已撤销令牌一律 null（抗枚举）。
+- R0 剩余（不可软件消除）：B03 打包候选（需发布序号决策）、V02 外部测试者、
+  最终放行决定。R0_GATE_CHECKLIST 对应行可据此更新。
+
+## 2026-09-30 R0 发布门自查清单（最新）
+
+- 手机仍跨网段（192.168.0.195），真机欠账搁置；用户不在线，选择纯软件核对项：
+  新建 [R0_GATE_CHECKLIST.md](release/R0_GATE_CHECKLIST.md)——按规格 §2.3 R0 行与 §20.2
+  七条硬检查逐条对照实际仓库状态（含本轮实查：当前树无明文密钥、signing/ 被
+  ignore、tracked 截图为自有 UI 截图、Issue 模板存在、Release QUICKSTART 在
+  v1.6.0-beta.1 时点）。
+- 结论：R0 距离 = 6 个文档/扫描小项（SECURITY.md、隐私说明、历史秘密扫描、
+  KNOWN_ISSUES.md、新能力用户文档、支持矩阵 v0）+ B03 打包候选 + V02 外部测试
+  + V11/V13 安全负例台架化 + 用户放行决定。前 6 项与安全负例可纯软件授权完成。
+- 本文档为核对产物，不构成放行。等用户决策。
+
+## 2026-09-30 B01/B02 维护项：第三方声明基线 + 版本核对 + 规格进度快照（最新）
+
+- 手机仍跨网段（192.168.0.195），真机欠账继续搁置，本轮完成维护项：
+  - **docs/release/THIRD_PARTY_NOTICES.md 建立**（DOC-04/REL-11 人工基线）：NAudio 2.2.1/MIT、
+    Makaretu.Dns 2.0.1 + Multicast 0.27.0/MIT、QRCoder 1.6.0/MIT、
+    zxing-android-embedded 4.3.0/Apache-2.0（含 zxing core 3.4.1）全登记，
+    附维护规则（新增依赖同步清单、许可兼容性、发布包附带）。
+  - **版本一致性核对**：Test-ReleaseVersions.puredata 套件通过；M0/M1 系列提交
+    未动发布序号（dev.21/27、dev.16/28 维持）——发布序号只在 B03 打包批次推进
+    （REL-02 纪律）。
+  - **spec plan 第 0 章**新增"M0/M1 执行进度快照"节：八行对账表（M0 两批到
+    B01/B02）+ 协议影响对账（M1-A 落地附件 NET-01…07 目标形态、Bearer 头默认、
+    迁移窗口共存），满足 AGENTS 规则 5 的长期规格同步义务。
+- SBOM 自动化（REL-11）仍留 B03 批次。真机欠账不变（V09/V17/V10/V21 完整形态）。
+
+## 2026-09-30 M1-B 收尾：会话状态机×租约登记集成台架（最新）
+
+- 新增 `SessionManagerLeaseIntegrationTests`（5 用例，**136/136 通过**）：把第一片的
+  SessionLeaseRegistry 真正挂上 DictationSessionManager（注入假引擎/假音频）走完整时序——
+  - V25/R1：Stop 后同 sessionId 迟到 start 在引擎触碰前被拒（ToggleCount 零增长）；
+  - V25/R2：旧会话迟到 stop 不清新会话（B 保持 Active）；
+  - V25/T03→T09：失败启动同 sessionId 可重试成功（Abandon 无墓碑接线验证）；
+  - V20/DEV-04：ACTIVE 态第二会话被拒不抢占；STARTING 态（StartGate 阻塞模拟慢引擎）
+    第二会话同样被拒；停旧后新会话可启动（目标切换先停语义）。
+- M1-B 台架覆盖至此：租约/墓碑/代次（孤立+集成）、V47 冲突、V21 零目标窗口、
+  V22 L1 部分。真机欠账不变（手机仍在 192.168.0.x 跨网段；V09/V17/V10/V21 完整形态
+  等待同网段）。
+
+## 2026-09-30 M1-B 第二片：共享组显式集合（DEV-03）+ V21/V22 台架（最新）
+
+- **共享组语义**（手机端）：Device 增 `sharedGroup`（加密持久化，穿透全部重建点：
+  upsert/saveLanPairing/recordLastGood/mergeDiscovered/saveQrPairing/applyCredentialUpgrade）；
+  **迁移策略**——存量已配对设备首次加载默认入组（不破坏升级前共享使用），**新增配对
+  （扫码/USB/rotate）默认不入组**（DEV-03"新增配对不自动收到音频"）；`setSharedGroup`
+  即时持久化；切普通输入目标不改组（无代码路径触碰，天然成立）。
+- **PhoneAudioService**：LAN 目标循环按 `sharedGroup` 过滤（移除即停发该流——
+  updateTargets 增量语义）；**零目标 15s 停采窗口**（MIC-10 提案：`SharedAudioPolicies
+  .shouldStopForZeroTargets`，elapsedRealtime 单调时钟；用户主动停止即时生效不受影响；
+  USB 直连电脑保持旧兼容路径）。
+- **UI**：设备列表条目「· 共享组」标记 + "⚙ 管理共享组"多选对话框（显式勾选集合）。
+- **台架用例**：SharedGroupPolicyTest（V21 断言：零目标窗口 14.9s/15s/超窗三态）；
+  ConcurrentClientInputTests（V22 L1 可测部分：双客户端并发调用安全无丢失 + requestId
+  按 clientId 分区约定；组合键物理不交错由 SyncRoot 串行保证，真实 SendInput 无法单测
+  注入，属 L3/V27-V28）。
+- 验证：Windows **131/131**、Android 单测 20/20 + assembleDebug + lintDebug 0 error。
+- 边界：V21 完整形态（逐接收端字节计数与麦克风释放时刻）、V41 多机共享压力需真机/
+  多接收端；旧 shared.requested 联动开启保持兼容（D11 窗口内未动）。
+- 真机欠账不变：V09/V17/V10（手机仍在 192.168.0.x 跨网段，192.168.10.x 不可达）。
+
+## 2026-09-30 M1-B 第一片：会话租约/墓碑/代次 + V47 配置冲突
+
+- 按 contracts/session-states.json（M0 冻结夹具）实现 **SessionLeaseRegistry**（新文件）：
+  代次递增（迟到 start 不复活已取消代次，R1）、租约用 **Stopwatch 单调时钟**
+  （墙上时间回拨免疫，PRO-03）、墓碑保留期（60s 提案）内拒绝同 sessionId 复用、
+  保留期后复用为合法新代次、**失败启动清理不写墓碑**（T03→T09，同会话重试合法——
+  与停止墓簿严格区分）、重连窗口（RC1/RC2 15s，MIC-10 提案）、过期租约后台回收。
+- 接线：DictationSessionManager.Start 前置裁决（Idempotent/RejectedTombstoned/
+  RejectedOwned → 对应用户文案）；Stop **先写墓碑再拆引擎**（停止优先）；AudioEnded/
+  Dispose 终结；/api/dictation/start 传 clientId（逐手机会话归属）。
+- **V47（L1 部分）**：ConfigConflictTests 三用例——voice/connection 双修订流独立
+  （内容哈希、同内容幂等）、过期修订显式冲突不自动合并、WriteAtomic 写失败
+  （目标被锁 → UnauthorizedAccessException，端点映射 500）原文件不变。
+- 验证：Windows **129/129**（新增 6 会话用例含 **V25 有界随机竞态矩阵 500 轮×40 步**
+  不变量保持；满额 1000 轮属 L2 台架项）；Server Release 0 警告 0 错误。
+- 边界：租约续期尚未挂到音频流心跳（当前租约为孤儿会话后备，30s 后允许接管——
+  正常会话由 Stop/AudioEnded 即时清理，不依赖租约过期）；重连窗口 CanResume 尚无
+  消费方（RC 续接随 V38/V41 实装）；V47 手机端草稿保留属 L3；共享组（DEV-03/R2）
+  未动。M1-B 剩余：目标隔离强化、共享组、V19–V28/V32–V40 相关实装。
+- 真机欠账不变：V09/V17/V10 待手机与 PC 同网段。
+
+## 2026-09-30 M1-A A5 mDNS 发现层——M1-A 全部完成
+
+- **服务端**（新 `MdnsAdvertiser.cs`，依赖 Makaretu.Dns 2.0.1 + Makaretu.Dns.Multicast
+  0.27.0，均 MIT）：发布 `_phonedeck._tcp`，TXT 字段与 UDP 应答严格同集
+  （computerId/displayName/platform/port/capabilities），**无令牌无指纹**（NET-01/V10）；
+  多播不可用网络优雅降级（Running=false、UDP 8767 回退）；与"局域网发现"开关联动；
+  health 增加 mdnsRunning 字段；启动横幅同步。
+- **Android**（`LanDiscoveryClient`）：`discover()` 并行 UDP 广播与系统 NSD
+  （`_phonedeck._tcp.`），按 computerId 合并去重；`getTxtRecord()` 已在 API 33 移除，
+  走 `getAttributes()` + 纯函数 `decodeAttribute`（可单测）；地址仍过安全过滤；
+  候选一律须经 HTTPS 8766 钉扎+令牌校验。
+- **契约**：`pairing-and-identity.json` 的 futureMdns → **implemented**（库冻结、
+  TXT 字段集、UDP 回退与钉扎规则）；validate.py 通过。
+- **验证**：Windows **120/120**（新增 MdnsAdvertiserTests 三用例：字段同集/无敏感键/
+  无指纹形态值、空平台回退、DNS 标签约束）；Android 三门（新增 decodeAttribute 用例）。
+- **CI 修复**（同日早些）：D12 后未提交的 net8 lock 导致 PR #24 云端 NU1004 变红；
+  已提交 net10 lock 刷新（7628390），**全部检查真实通过**（含 B03 组装作业 2m12s，
+  为 CI 假绿修复后首次真实运行验证）。
+- **M1-A 里程碑**：A1 凭据/撤销 → A2 配对窗口/本机确认 → A3 扫码/Keystore 存储 →
+  A4 rotate/共存窗口/应急撤销 → **A5 mDNS 双通道发现**，配对与授权全链闭环。
+  遗留真机项：V09 真 Wi-Fi/相机扫码、V17 rotate 真机迁移、V10 mDNS 真机互通
+  （均待手机与 PC 同网段；代码路径已就绪零改动）。
+- 下一步：M1-B（会话与配置：停止优先、租约、目标隔离、共享组、V47 配置冲突）。
+
+## 2026-09-30 M1-A A4 凭据轮换 + legacy 应急撤销
+
+按 [M1A_PAIRING_DESIGN.md](design/M1A_PAIRING_DESIGN.md) §5/§9-A4 落地三端，并处置独立复核
+（approved=false，4 问题）。
+
+**做了什么**
+
+- **契约**（contracts/ 三改三增，validate.py 全过）：
+  - `pairing.schema.json` 新增 `credentialRotateRequest`（仅 clientId GUID，
+    additionalProperties:false）与 `credentialRotateResponse`（oneOf 两形态：
+    issued 8 字段**无 ok**；already-upgraded 仅 {ok,status,clientId} 绝无令牌字段）。
+  - `samples/valid` 新增 pairing-rotate-request / -issued / -already-upgraded
+    三样本并登记 manifest；`pairing-and-identity.json` migration 段补 rotate 三语义
+    （already-upgraded 无令牌=G-1 永不重发；Bearer 调用者 403 仅旧头鉴权升级；
+    legacy revoke 先原子持久化再生效=M-2）。
+- **Windows 服务端**（PhoneDeck.Server + Tests 共 5 文件）：
+  - `POST /api/lan/credential/rotate`（Program.cs:550）：仅旧共享令牌头鉴权，
+    Bearer 调用者 403（LanRequestAuthenticator）；同 clientId **单次签发**、重放回
+    already-upgraded（绝无令牌）；per-clientId 3s 限速（单调时钟，内存态）；
+    issued 响应逐字对齐冻结契约、无 ok 字段。
+  - `POST /api/admin/legacy/revoke`（Program.cs:673）：先持久化 revokedAt/墓碑
+    再生效；撤销后旧头一律 401、逐手机凭据不受影响（含重启语义）。
+  - `ClientCredentials.cs`：rotate 签发/撤销/legacy 撤销逐条追加 clients-audit.log
+    （脱敏、500 行轮转）；裸数组旧 clients.json 自动升级为信封格式。
+  - `RotateLegacyTests.cs` 新建 9 用例（单次签发/重放无令牌/撤销后拒绝/Bearer 403
+    判定链/legacy 撤销后旧头全 401 且逐手机凭据不受影响含重启语义/审计脱敏/限速/
+    裸数组升级信封/审计 500 行轮转）。
+- **Android 手机端**：
+  - 新增 `CredentialUpgrader`：rotate 走旧共享令牌头+钉扎 TLS；因冻结契约 issued
+    形态不带 ok，不走强制 ok=true 的 PhoneDeckHttp.readResponse，按 HTTP 状态判定。
+  - `MainActivity.runCredentialUpgrade`：per-computerId 持久化**稳定升级 clientId**
+    （`credential_upgrade_client_id_<computerId>`，读-缺-生成-存），重试沿用同一
+    GUID——服务端只回 already-upgraded，消除孤儿全作用域凭据累积与限速绕过
+    （复核问题 3 修复）；注释写明凭据丢失找回仍走重新扫码配对（G-1/G-2）。
+  - `TargetDeviceManager.applyCredentialUpgrade` 先验证新凭据后替换，旧共享令牌
+    保留到验证成功；`CredentialUpgraderTest` 7 用例。
+
+**复核 4 问题处置**
+
+- 问题 1（issued 带 ok 违冻结契约）：服务端已去 ok（重验 Program.cs:597-610 issued
+  仅 8 冻结字段）；手机端解析本就容忍多余字段，两形态均兼容，无需改动。
+- 问题 3（孤儿凭据累积）：手机端稳定 GUID 修复（见上）。
+- 问题 4（仓库垃圾文件 %TEMP%vtiers.txt、根 nul、android/app/src/nul）：
+  经核实均不在当前工作树（交接员本轮实查 `find . -name nul -o -name *vtiers*`
+  无结果、git porcelain 无 TEMP/nul 匹配）。
+- 问题 2（§5.4 窗口关闭 + UI 消费）**未落地，留待主流程决策**：legacy 共存窗口
+  目前无限期开放直至手工 POST 127.0.0.1:8765/api/admin/legacy/revoke；该端点与
+  /api/admin/clients 的 legacy 条目在 windows 树无 UI 消费（ReceiverStatusWindow.cs
+  为他人未提交 WIP、禁改）。需把分期决策记入 spec plan/HANDOFF 或另立 UI/版本边界任务。
+
+**验证命令与逐门结果**（门由脚本统一执行，均 0 轮重试通过）
+
+| 门 | 命令 | 结果 |
+| --- | --- | --- |
+| Windows 构建+测试 | `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release` + `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release` | 通过（含 rotate 新用例） |
+| Android 单测+组装+lint | `gradlew :app:testDebugUnitTest` + `:app:assembleDebug` + `:app:lintDebug` | 通过 |
+| 契约 | `python contracts/tools/validate.py` | 通过 |
+
+- 契约门交接员本轮**实跑**复核：exit 0，C1–C7 全 PASS（36 合法样本，含 3 个
+  rotate 新样本）。
+- 复核者另跑 `dotnet test PhoneDeck.Server.Tests -c Release` = 117/117（复核时点
+  代码；其后服务端最终改动仅删 issued 响应 ok 一个字段，不在存储层测试覆盖内，
+  最终代码由上表脚本门重验）。
+- 手机端 Agent 另做手工等价验证（非 gradle 门）：javac（JDK17 + android-35 +
+  zxing 4.3.0/3.4.1 + R 桩）编译全部 35 个 main 源文件 OK；JUnitCore 纯 JVM 跑
+  CredentialUpgraderTest + ContractsConformanceTest = 11 tests OK。
+
+**边界（如实区分代码级与真机）**
+
+- **rotate 的手机端真机升级走查（V17 L3）未做**——需要真机连上接收端实测
+  「旧共享令牌 → rotate 签发 → 新凭据验证 → 替换 → already-upgraded 重放」全链路；
+  当前结论基于代码走读 + 单测，不能替代真机验证。
+- **legacy 撤销为代码级验证**（单测含重启语义），未在真机托盘/管理 UI 操作验证。
+- manifest 中 3 个 rotate 样本仍标【目标，A4 设计形态】；端点现已落地
+  （Program.cs:550），后续宜改为实现形态并附源码行号（A2 样本先例）。
+- 设计 §5.1「旧头不能 rotate」与 §5.2「rotate 旧 token 鉴权」文字矛盾（复核
+  非阻断备注 1）：实现与契约均按 §5.2 执行（rotate 仅旧头可调、新头 403），
+  判定正确，建议后续在 §5.1 括注澄清语义。
+- 限速/审计已知残余（复核非阻断备注 2，窗口内可接受）：legacy 持有者可用随机
+  GUID 连续触发签发（限速不跨 clientId）、对既有 clientId 反刷 already-upgraded
+  在限速前返回；如需收紧可加全局签发限速。
+- 工作树仍有其他 Agent 未提交改动（Android 其余文件、ReceiverStatusWindow.cs、
+  packages.lock.json 等），提交前需主流程核查未跟踪文件归属，防误产物混入。
+- 下一步：§5.4 分期决策记录、A5（mDNS 等）按主流程安排；V17 L3 真机验收排队。
+
+## 2026-09-29 M1-A A3 Android 扫码配对 + 首次真机协议闭环（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](design/M1A_PAIRING_DESIGN.md) §9-A3 落地 Android 端：
+  - 新依赖 `com.journeyapps:zxing-android-embedded:4.3.0`（Apache-2.0；注意
+    IntentIntegrator 实际包名是 `com.google.zxing.integration.android`）。
+  - 新增 `QrPairingClient`（QR 载荷严格校验：版本/指纹 64hex/GUID/材料 ≥32；
+    提交挂起 40s；401/403/404/408/429 用户文案；发现层 computerId 匹配）与
+    `KeystoreCipher`（AndroidKeyStore AES-256-GCM，IV‖密文，Keystore 不可导出）。
+  - `TargetDeviceManager`：设备记录新增 clientId 字段；存储整体迁
+    `known_devices_enc`（Keystore 封装，旧明文键读取时自动迁移；Keystore 异常
+    回退明文并告警）；新增 `saveQrPairing`；uiPreview 验收通道允许存 adb 反向的
+    回环地址（包名 .preview 门控，生产包保持严格过滤）。
+  - `PhoneDeckEndpoint/PhoneDeckHttp`：clientId 非空时改发 `Authorization: Bearer`
+    + `X-PhoneDeck-Client`（旧共享令牌头不变）；`MainActivity`：设备列表新增
+    "扫码配对"入口、扫码结果处理、发现→手动地址兜底、配对等待/确认/验证流程；
+    uiPreview 专用测试注入钩子（`phonedeck_qr_test_b64` extra，冷启动/复用两路径）。
+  - 三门通过：`testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+- **首次真机配对协议闭环（V09 通道证据，USB 隧道形态）**：开发版服务端+托盘在本机
+  运行，QR 载荷注入预览包 → TLS 钉扎（真证书）→ 材料提交 → 待确认（SM-G9880）→
+  本机确认 → **签发落库**（clients.json：clientId 9f9d55e3…、四作用域、仅 TokenHash）→
+  手机 Keystore 保存 → Bearer 凭据 health 验证 → 主界面显示已配对在线（截图
+  `outputs/ui-redesign/qr-pairing-after.png`）。测试期间生产托盘/服务端暂停，已恢复
+  并验证 health 200。
+- **V09 完整 L3（真 Wi-Fi + 真相机）待环境**：手机（192.168.0.x）与 PC（192.168.10.x）
+  跨网段且 ping/TCP 均不通，无法直连；相机对准屏幕需人工。补全方式：把手机接入
+  PC 同网段 Wi-Fi 后，托盘"配对新手机…"→ 手机扫码 → 点确认，即完成 V09 L3（全部
+  真实代码路径，无需任何改动）。
+- 下一步 A4：rotate（不重发语义）+ 手机迁移流程 + 共存窗口 + legacy 应急撤销。
+
+## 2026-09-29 M1-A A2 扫码配对窗口实现（最新）
+
+- 按 [M1A_PAIRING_DESIGN.md](design/M1A_PAIRING_DESIGN.md) §9-A2 落地 Windows 端配对闭环：
+  - **服务端**（新增 `PairingWindow.cs`）：窗口 120s 单调时钟、材料 32 字符 base32（160bit）
+    常量时间比对、单次使用、失败 5 次关窗、未知 pairingId=404 不计数（防 LAN 关窗 DoS）；
+    `POST /api/lan/pair/qr` 挂起等待本机确认（30s，单次往返免轮询鉴权），确认后经
+    A1 的 ClientCredentialsStore 签发四作用域凭据（支持手机自带 GUID clientId，冲突重生）；
+    回环 8765 新增 begin/cancel/confirm/deny/status 五个管理端点（配对窗口只经本地 UI）。
+    鉴权中间间对 pair/qr 显式豁免（TLS+材料即授权证明）。
+  - **ControlCenter**（新增 `PairingForm.cs`，新依赖 QRCoder 1.6.0/MIT）：QR 渲染 +
+    手工码 + 材料校验码 + 倒计时 + 确认/拒绝/重新生成；托盘菜单新增"配对新手机…"入口
+    （ReceiverTray.cs，未触碰他人 WIP 的 ReceiverStatusWindow.cs）；窗口关闭自动 cancel。
+  - **契约**：pairing.schema.json 新增 `qrPairRequest`/`qrCredentialsResponse` 定义，
+    两个样本入 manifest，validate.py 全过。
+  - **验收**：`PairingWindowTests` 5 用例（V11：单调时钟过期/单次/5 次关窗/未知
+    pairingId 不计数；V09：确认→签发→可认证、拒绝、取消收束、快照不含凭据字段）；
+    **108/108** 通过、Server 与 ControlCenter 构建 0 警告 0 错误。
+- 验证边界：pair/qr 的 HTTP 端到端（挂起/超时/429 状态码）与托盘确认卡为代码级实现，
+  真机闭环待 A3 手机端就绪后按 V09（L3）执行；QRCoder 依赖已入 ControlCenter
+  packages.lock.json（该 lock 按既定约定未提交，随 lock 批量决策处理）。
+- 下一步 A3：Android 扫码（zxing-android-embedded）+ 配对 UI + Keystore 封装存储。
+
+## 2026-09-29 D03 部分冻结 + M1-A A1 实现（最新）
+
+- **D03 冻结**（随 M1-A 设计评审，回写契约并通过 validate.py）：撤销生效 ≤1s、
+  键释放预算 ≤2s（进行中单个按键事件 ≤500ms 自然完成）、去重 TTL 30s（覆盖最长
+  合法重试预算，本为源码实证值）；租约/墓碑/宏总时长仍待冻结（规格 §22 D03 行已注）。
+- **M1-A A1 落地**（Windows 接收端，设计 §9 第 A1 步）：
+  - 新增 `ClientCredentials.cs`（clients.json：原子写 temp+Replace、损坏备份、
+    **只存令牌 SHA-256 哈希**、签发/认证/撤销；撤销**先持久化再生效**，写盘失败
+    内存回滚可安全重试）与 `ClientSessionRegistry.cs`（逐 clientId CTS，撤销即
+    Cancel 长流令牌）。
+  - `LanRequestAuthenticator.Resolve`：8766 双凭据——`Authorization: Bearer`（返回
+    clientId）或旧 `X-PhoneDeck-Token`（映射 legacy-shared）；无效 bearer 不回退旧头。
+  - Program.cs：中间件改用 Resolve 并写入 `HttpContext.Items["ClientId"]`；
+    `/api/input` 传递 clientId 归因；`/api/audio/stream` 链接"请求取消+客户端撤销令牌"；
+    回环 8765 新增 `GET /api/admin/clients`（脱敏列表）与 `POST /api/admin/clients/revoke`
+    （撤销编排：先持久化→Cancel 长流→中止当前宏）；KeyboardInput 增加执行归属追踪与
+    `RevokeClientInput`，宏步骤间检查撤销标记并中止（组合键在自身 finally 反向释放）。
+  - 验证：`ClientCredentialsTests` 7 用例（签发/认证/撤销往返含重启重载、令牌不落盘、
+    损坏备份、写盘失败一致性、Resolve 六态、**V12 子集 L2 假流：撤销 ≤1s 生效且
+    另一手机零影响**）；Server Release 0 警告 0 错误、**103/103** 通过、契约 validate exit 0。
+- 验证边界：宏撤销中止的按键释放依赖既有 SendChordSafely finally（单测无法注入真实
+  SendInput，留 V12 L3 真机）；管理端点未做 HTTP 集成测试（组件级 L1 覆盖，端到端随
+  A2/A4）；蓝牙输入路径维持无 clientId 归因（现状）；A2（QR 配对窗口）未开始。
+- 改动未含 lock 文件与他人 WIP。
+
+## 2026-09-29 M1-A 配对与授权安全设计定稿（最新）
+
+- 按 D02 已确认方向（成熟加密实现+本机确认+逐手机凭据）完成
+  [M1A_PAIRING_DESIGN.md](design/M1A_PAIRING_DESIGN.md) **v1.0**，并经全新上下文独立评审
+  （17 项意见：高 2/中 6/低 6）全部处置后定稿，结论"修改后可进入实现"。
+- 核心设计：钉扎 TLS 承担全部机密性（无自创密码协议）；QR 配对（120s 单调时钟窗口、
+  一次性材料 ≥32 字符/128bit、5 次失败关窗、托盘本机确认+材料校验码、手工码同源同熵）；
+  clientId+作用域 bearer（control/audio/settings/update-request），**服务端只存令牌哈希、
+  rotate 永不重发**（评审 G-1/G-2 修复：防旧共享令牌持有者冒领）；撤销先持久化后生效、
+  关闭音频长流并反向释放持有键；旧 shared token 迁移窗口含 legacy 应急撤销；
+  USB pair 端点窗口关闭后停发 legacy 凭据。
+- 已知残留：data 克隆冲突检测交 V14；V13 回环 Origin/Host 加固另立任务；mDNS 留 A5。
+- 实现切分 A1–A5 与各步契约任务已定（设计 §9）；A1（Windows 端 clientId/存储/撤销）
+  为下一步，开工前须确认 D03 冻结项（≤1s、键释放预算、去重 TTL）。
+- 本轮无代码改动；设计文档为唯一新增。
+
+## 2026-09-29 D12 执行：.NET 8→10 迁移（最新）
+
+- 用户批准 D12 立项并当日执行：`global.json` 钉 SDK 8.0.425→**10.0.400**（CI 经
+  `global-json-file` 自动跟随）；六个活项目 TargetFramework 迁 **net10.0**
+  （Server、Server.Tests、ControlCenter、Receiver、Receiver.Tests、FocusSink）；
+  artiacts/dist 历史打包副本未动。`X509Certificate2` 构造器过时（SYSLIB0057）三处
+  迁移 `X509CertificateLoader.LoadPkcs12 / LoadPkcs12FromFile`（Windows 两处、Mac 一处）。
+- 重验结果：仓库内直接 dotnet 构建恢复（无需 C:\\ 绕行）；Windows Server Release
+  **0 警告 0 错误、97/97 测试**；Receiver 编译 + **23/23 测试**；ControlCenter 与
+  FocusSink 构建通过。自包含 win-x64 发布还原成功（运行时包可用）。
+- 未免除项：最低 OS 实机矩阵、正式发布打包（自包含/裁剪产物验证）、真机 NAudio
+  回归仍属 R1 候选前必做（规格 §22 D12 行已记录）。
+- 同轮获用户批准：四笔提交已推送并入 PR #24（含本 D12 提交共五笔）；D02 方向确认为
+  “成熟加密实现+本机确认+逐手机凭据”（M1-A 设计据此推进）；UI 预览包安装走查已授权。
+
+## 2026-09-29 M0-B 契约双端消费 + UI 重设计 P1（最新）
+
+- **M0-B 收尾（跨语言消费）**：contracts/ 样本接入两端测试工程并通过构建门。
+  - Windows：新增 `PhoneDeck.Server.Tests/ContractsConformanceTests.cs`（MSTest，6 用例）——
+    全样本严格 JSON 解析；合法请求样本经真实 `TargetEnvelopeValidator.Validate` 通过；
+    4 个非法信封样本被拒绝；宏样本经真实 `KeyboardInput.ValidateMacroSteps`（1 合法通过 +
+    4 非法拒绝）；音频流头样本走与 Program.cs 端点一致的校验链（协议头 0 的
+    “记录在案契约收紧差异”用合法/非 GUID/协议 0 三态固化）。合计 **97/97 通过**。
+  - Android：新增 `app/src/test/.../ContractsConformanceTest.java`（JUnit4，4 用例，内置
+    零依赖 MiniJson 解析器，避开单测环境无 org.json 实现）——全样本解析、v2 信封不变量
+    （含 legacy paste 仅 requestId 的遗留路径）、动作拼写与 `ShortcutButtonConfig` 常量逐字
+    对齐、组合键边界（1–4 键/无重复/holdMs 20–500）接受合法并拒绝 6 个越界样本。
+    `testDebugUnitTest` 18/18 + `assembleDebug` + `lintDebug` 0 error。
+  - 跨语言发现并固化：宏步骤 type 大小写不敏感（接收端 `ToLowerInvariant` 归一），
+    样本 "keychord" 拼写与产品常量 "keyChord" 的差异被确认为合法而非缺陷。
+- **UI 重设计 P1**（用户另行授权“重新设计整个界面”，方案见 [UI_REDESIGN.md](archive/UI_REDESIGN.md)）：
+  `PhoneDeckTheme` 重写 733→约 280 行（令牌 v2：live/onLive 录音红、三组语义容器、
+  primaryContainer 选中、9 套遗留主题实现与 FrostedBackdropView 删除、历史 ID 迁移保留）；
+  深色主按钮改饱和蓝；`VoiceLevelView`（ACTIVE→live、CONNECTING→warning）、
+  `ShortcutKeyView`、`styles.xml` 浅色状态栏残留修正；主控台状态 chip 化、语音主钮 72dp、
+  目标 chip 容器选中态。两轮 `assembleDebug`+`lintDebug` 通过。真机视觉走查待用户同意
+  安装 UI 预览包（独立包名，不动原应用）。
+- 验证边界：以上为代码通过构建/单测；无任何真机输入/音频/走查验收；改动全部未提交。
+- 待办：D01–D12 决策清单与提交切分方案已提交用户待拍板；根目录 `nul` 与
+  `%TEMP%vtiers.txt` 待清理授权；M0-C（需真机 Mac）与 M1 起阶段未开始。
+
+## 2026-09-29 按规格执行·M0 第一批
+
+- 用户授权按 [开源发布规格 1.1](release/OPEN_SOURCE_RELEASE_SPEC.md) 执行 M0 第一批，基线 HEAD a5ade04。
+  本轮六个子任务：现场盘点、规格修订 1.1、文档同步、CI 假绿修复、契约测试台、USB 只读冒烟。
+  全部改动均未提交（已核 `git status`：仅 M/??，无暂存）。
+- 现场盘点（全程只读）：README/HANDOFF/spec plan 三处 diff 为上一轮规格文档遗留，可继续编辑；
+  `ReceiverStatusWindow.cs` 与三个 `packages.lock.json`（ILLink.Tasks 8.0.31→8.0.30，疑 restore
+  环境差异自动产生，已核 diff）为他人源码 WIP，本轮全程 off-limits 未触碰。
+- 规格修订：OPEN_SOURCE_RELEASE_SPEC.md 升 1.1（:3），六项评审结论落档——REVIEW-001/002/003/004/005
+  采纳（§22 新增 D12 .NET 8→10 迁移决策含 2026-09-29 工具链复现事实 :609；§1 行内数值明确为提案值、
+  以 D03/D04 冻结为准；D10 补外测招募；§3.3 补 PhoneDeckDataDirectory.cs；§5 明确 N/A 审批角色），
+  REVIEW-006 部分采纳仅入 §26 修订记录（:671），待 §17/§19 落实，事项仍开放。
+- 文档同步：按规格 §3.2 清理 README/ARCHITECTURE/PROJECT_HANDOVER 共 15 处过时描述
+  （WPF→WinForms 轻量托盘、九主题→浅/深两套、“Mac 未真机”→2026-09-14 两轮真实 Wi-Fi 听写闭环
+  但不等于全场景通过、“缺 LICENSE”→根目录 MIT LICENSE），README 新增「数据目录说明」小节（:145）。
+  发现未改：README.md:59 仍写“蓝紫渐变麦克风”图标（实为 Luma 暖白环体）、PROJECT_HANDOVER/
+  ARCHITECTURE 多处版本号漂移、AGENTS.md 同类过时描述，超出本轮范围可另行安排。
+- CI 修复：ci.yml 消除 B03 假绿——断言步骤移除 continue-on-error，任一上游工件下载失败时降级必写
+  `$GITHUB_STEP_SUMMARY`『B03 SKIPPED (DEGRADED)』并发 `::warning::`（ci.yml:214-241），不再静默通过；
+  其余 11 处 continue-on-error 逐一确认（9 处上传告警 + 2 处下载降级入口）。静态复核通过，
+  未在云端触发实际运行验证。
+- 契约测试台：新增未跟踪 `contracts/`（8 域策略契约、schema、合法/非法样本、tools/validate.py），
+  补齐评审缺口 §16.2 全部 8 行；`X-PhoneDeck-Protocol` 头 `^[1-2]$` 标为契约收紧目标态，
+  description 写明接收端现状（仅拒 >2），新增非法样本固化差异。
+- USB 冒烟：PHONE-A（SM-G9880 / Android 12 / SDK 31）只读 ADB 检查，未安装、卸载或清理任何包；
+  设备现装 `com.codex.phonedeck.preview` 1.6.0-dev.18-ui-preview (versionCode 24)，正式包
+  `com.codex.phonedeck` 未安装。报告 `release-evidence/usb-smoke-2026-09-29/phone-a-report.md`。
+  8 项 NOT_RUN：USB 音频实测、输入注入、配对/授权/撤销、安装/渠道迁移、运行态 dumpsys、
+  蓝牙/LAN 8766/mDNS、Typeless 与三输入法矩阵、锁屏/TLS/iOS。
+- 验证门（各子任务执行并报告，均通过、0 轮返工）：
+  `.\gradlew.bat :app:assembleDebug`；`.\gradlew.bat :app:lintDebug`；
+  `dotnet build work\phone-deck\windows\PhoneDeck.Server\PhoneDeck.Server.csproj -c Release`；
+  `dotnet test work\phone-deck\windows\PhoneDeck.Server.Tests\PhoneDeck.Server.Tests.csproj -c Release`（91 项）；
+  `dotnet build work\phone-deck\macos\PhoneDeck.Receiver\PhoneDeck.Receiver.csproj -c Release`（跨平台编译）；
+  `dotnet test work\phone-deck\macos\PhoneDeck.Receiver.Tests\PhoneDeck.Receiver.Tests.csproj -c Release`（跨平台）。
+  以上仅代表“代码通过构建/测试”；USB 冒烟为只读检查，未安装任何包，渠道迁移决策 D05 未决，
+  两者均不构成 60 组验证中的真机/外部验收。
+- 交接撰写轮亲自复跑：`python tools/validate.py`（contracts/ 下）exit 0——101 个 JSON、31 合法/
+  47 非法样本、24 转移、7+2 规则、16 轨迹全部通过；`dotnet --list-sdks` 仅 9.0.311 / 10.0.400。
+  注：契约子任务汇总字段 `validateExit:2` 与其摘要文字 exit 0 矛盾，以本轮复跑 exit 0 为准，
+  字段疑为中间值笔误；6 组变异测试为子任务报告，本轮未复跑。
+- 环境事实：global.json 钉死 SDK 8.0.425 且 rollForward=disable（global.json:3-4），本机仅存
+  9.0.311/10.0.400，仓库内直接 `dotnet` 构建不可用，本轮以 SDK 10 从 C:\ 目录构建 net8.0 通过；
+  Android 构建须 `JAVA_HOME=E:\Android\Jdk17\jdk-17.0.20.1+1`（见 HANDOFF:972 既有记录）。
+  根目录异常未跟踪文件（仅记录未删，均不应入库）：`nul`（现 51 字节、09-29 13:01，较盘点时的
+  0 字节 12:15 有变化，疑又一 stray 重定向写入；cmd 下 `del nul` 命中设备，清理须用
+  `del \\?\E:\...\nul` 并经用户确认）、`%TEMP%vtiers.txt`（669 字节，规格编写草稿遗留）。
+- 未做与待办：M0-B 剩余消费端接线；M0-C 及 M1 起各阶段；60 组验证中的真机/外部验收（L3/L4）；
+  D01–D12 决策待用户拍板（D05 手机正式安装通道直接阻塞 Samsung 迁移）；REVIEW-006 在 §17/§19 落实；
+  云端 CI 实跑验证 B03 修复；README:59 等遗留过时文案清理；`contracts/`、`docs/release/OPEN_SOURCE_RELEASE_SPEC.md`、
+  `release-evidence/` 及本轮全部改动入库（提交时须一并纳入，避免规格链接悬空）。
+  会话开始前已存在的未跟踪 `docs/archive/UI_REDESIGN.md` 非本轮产物，未触碰。
+
+## 2026-09-29 开源可用性与全端兼容规格（最新文档）
+
+- 用户要求完整 spec，加入各方面验证，供其他模型审查；本轮仅文档，无产品实现/安装/发布。
+- 新增 [开源可用性、全端兼容与发布验收规格 1.0](release/OPEN_SOURCE_RELEASE_SPEC.md)：
+  当前事实与证据边界、R0–R3 分档、完整需求、60 组验证及高风险详细步骤、证据模板、
+  放行标准、实施依赖、待决策和独立模型评审提示。新增设计/性能参数待评审，不冒充批准方案。
+- 基线 HEAD a5ade04；读取时 Windows ReceiverStatusWindow.cs 与 packages.lock.json 已有未提交修改，
+  本轮保留。文档同时说明托盘/直接启动服务的数据目录差异及 B03 CI continue-on-error 的发布门风险。
+- 同步长期规格入口，纠正旧“Mac 未真机/缺 LICENSE/WPF/九主题”摘要的使用边界，保留历史记录。
+- 验证：文档结构校验识别 26 章、80 项唯一需求、60 组完整测试编号；需求均有用例引用，
+  附件本地链接、表格列数、代码围栏、示例 JSON 和空白检查通过，git diff --check 通过。
+  本轮未重跑产品构建、硬件、签名或云端 CI；文档覆盖率不等于产品验证通过率。
+- 待办：其他模型按附件第 24 节独立评审；处理评审意见并冻结 D01–D11 中对应阶段所需决策，
+  再按用户选择的任务实施。手机正式渠道迁移与其他真机验收继续保持原未完成状态。
+
+## 2026-09-21 UI 升级
+
+- 用户追加要求升级 UI，继续沿用 `agent/phone-managed-desktop`；Windows dev.16 / sequence 28，Android dev.21 / code 27。
+- 手机电脑设置加入设备卡片、输入法/连接分页与固定保存，切页保留草稿，离开/刷新提醒；
+  保存仅更新本组 revision，防止另一组远端修改被悄悄覆盖。横屏压缩摘要，保留电脑名称和操作。
+- Windows 原生状态面板采用 Luma 图标、浅/深色卡片和明确状态层级，保持按需创建/关闭释放，不增加常驻渲染器。
+- 最终 Windows 发布、91 项测试与 Android Debug/Preview 构建、14 项测试通过；lint 0 error / 44 warning。
+  Windows 四种状态/主题在 150% DPI 下无文字越界，10 次关闭释放验证通过。
+- Samsung 独立临时包真机验证浅/深色、横屏、150% 字体、读取错误和两组草稿保留；
+  受控接口验证保存一组后另一组仍携带旧 revision，409 时不丢草稿。示例设备明确标注，未读写用户配对。
+  临时包 `com.codex.phonedeck.uireview`、专用 8878 反向端口、测试服务已清理，系统字体保持原 1.1。
+  最终 APK 包名与版本正确，不含验收类。手机正式安装仍因原 Mac 预览证书不可用而待用户选择，不视为完成迁移。
+- 本机 Windows 经签名包 28 更新成功，状态 completed，版本/序号/稳定 computerId 和两份 EXE 哈希匹配。
+  窗口关闭后 12 次只读样本：托盘私有提交 13.96–14.20 MiB，工作集 57.29–58.33 MiB；
+  接收服务另为 25.14–26.03 MiB / 81.01–82.20 MiB。这是现场观测，不是严格同负载性能基准。
+- 产物/证据：ignored `outputs/ui-upgrade/PhoneDeck-28.zip`、`final/memory.json`、
+  `desktop/layout-report.json` 与 `android/verified-final`。截图含示例标记，不冒充真实在线设备。
+- 待办：选择手机正式安装通道并保留五台配对，验收真实配置读写/听写/长时共享/断线；多屏 DPI 切换和其他电脑继续验收。
+  详细界面规则见 [UI 翻新](design/UI_REFRESH.md)，配置协议仍见 [手机统一设置](guides/PHONE_MANAGED_DESKTOP.md)。
+
+## 2026-09-21 手机统一设置与精简桌面
+
+- 用户确认手机集中配置、桌面只负责显示和重连；在 `agent/phone-managed-desktop` 实现。
+  Windows dev.15 / sequence 27，Android dev.20 / code 26。此次实现取代上轮 WPF 优化方案。
+- 新手机「电脑与输入法」逐台管理引擎、键位、USB 恢复、LAN 发现和登录启动。接收端校验目标、revision、忙碌状态与白名单，原子保存并热应用，不重启。
+- WPF 设置/主题/Agent 编辑器及桌面录音热键移除，改为 WinForms 小窗口与托盘；关闭窗口释放控件。保留程序旁 data 默认目录和显式环境变量，避免重启后丢失原电脑身份。
+- 手机布局不再自动接受电脑覆盖；共享麦克风从手机主动启停，不跟随遗留 shared.requested。手机可导入并验证签名更新 ZIP。
+- Windows 构建/发布与 91 项测试通过；Android Debug/Preview、14 项单测与 lint 通过（45 warning、0 error）。配置 API 实测热切换/恢复及无效请求拒绝通过，10 次窗口释放探针通过。
+- Windows 已通过签名更新流程安装，固定产物版本/哈希与身份检查通过。输入法恢复 Typeless，原配对令牌与手机备份一致。
+  私有提交现场观察：旧 UI 185.7 MiB → 新托盘约 13–14 MiB；服务另约 27–29 MiB。工作集和自包含体积另计，不把短时采样当严格性能保证。
+- 手机尚未安装：当前 Samsung 预览包由 Mac 证书签名，本机 Windows 证书不能覆盖。
+  当前 APK、设置和 5 台电脑已备份在 ignored outputs/phone-managed/backup；没有卸载或清理手机数据。
+  已询问用户选择迁回原通道并保留配置，或等待 Mac 原签名。须取得选择再继续迁移和新页面实机走查。
+- 待办：完成手机安装通道选择与迁移；实测手机设置读写、离线/旧 Mac 提示、保存时忙碌保护；真实听写/共享音频/断线/跨 DPI 验收。Mac/iOS 配置接口尚未实现。
+- 具体协议、测量口径与产物路径见 [手机统一设置与精简桌面](guides/PHONE_MANAGED_DESKTOP.md)。
+
+
+## 2026-09-21 Windows 控制台内存优化
+
+- 用户要求降低约 200 MB 的后台占用，同时保持性能；本轮仅修改 Windows 控制台，
+  沿用 1.6 开发线，不修改音频、手机端、协议或发布序号。
+- 排查发现大面积卡片阴影和整窗透明合成占用显著；改用已有细边框与 Windows 11 DWM 圆角，
+  合并重复主题资源。托盘/最小化暂停界面刷新，恢复按原 2.5 秒新鲜度立即补读；网卡枚举移出 UI 线程。
+  热键改为读取实时服务状态，防止后台停止轮询后缓存失效。关闭日志撤销历史、释放资源流/进程/托盘句柄，
+  移除只改变驻留统计的 EmptyWorkingSet。
+- 同机探针对比：旧版隐藏私有提交 210–231 MiB，新版 108.8 MiB；反复恢复后 98.6 MiB。
+  显示工作集 171–178 → 150 MiB；首帧约 730–736 → 584 ms，恢复均值约 8 ms。
+  不把私有提交和任务管理器私有工作集混为同一口径，EXE 体积仍约 154 MiB。
+- 验证：Windows 接收端 Release 构建、86/86 既有测试通过；控制台单文件发布通过。
+  隔离桌面探针已通过隐藏/恢复/最小化、内存 HTTP 热键用例、500 条日志限额和页面/编辑器走查。
+  测试入口不进入普通发行产物；当前安装进程未替换，未触发真实录音或改变配对数据。
+- 待办：长时驻留、多屏/DPI/旧 Windows 与真实手机听写回归；正式发版需递增版本并走既有发行流程。
+  原始数据、复现脚本和限制见 [Windows 内存优化记录](archive/WINDOWS_MEMORY_OPTIMIZATION.md)。
+
 ## 2026-09-14 Luma 图标白底确认
 
 - 用户对比实机后明确选择之前的白色背景。日/夜自适应图标统一改为白底，保留暖白环体、
@@ -60,7 +913,7 @@
 - 新增简洁浅/深主题（保留原九主题及配置）；首页固定电脑状态/设置，网格与语音区分离布局；
   原创线性设置图形、分组导航、全电脑列表、48dp 触摸入口、原生深色对话框及空值摘要修复。
 - 主题切换重绑视图而非 recreate，保留会话所有者；大字体和横屏使用自适应布局。
-  具体范围、设计令牌和后续桌面切片见 [UI_REFRESH.md](UI_REFRESH.md)。
+  具体范围、设计令牌和后续桌面切片见 [UI_REFRESH.md](design/UI_REFRESH.md)。
 - Mac 未携带 Samsung 原开发签名（实际证书 SHA256 前缀 `653884d0`）。新增独立
   `uiPreview` 构建类型，包名 `.preview`、独立数据，不能用作 fleet 载荷，不覆盖原应用。
 - 工具链安装于忽略的外置盘 `work/tools`；JDK 17、SDK 35 和 Gradle 缓存均在此。
@@ -200,7 +1053,7 @@ Android 配置版本：`schemaVersion=1`
 - Windows 成功 run：`outputs/codex-b01-validation/20260910T105926Z-87d4f353`。先前 `20260910T105004Z-74888adf` 因接收端散落 IIS DLL 被正确标为 failed；修正 publish 参数后通过。
 - Android 首次验证遇到 GradleWorkerMain 类加载失败（GRADLE_USER_HOME 位于中文目录）；改用标准用户缓存后，12 项单测、Debug/Release assemble 与 lint 通过（0 errors、33 warnings）。成功 run 为 `outputs/codex-b01-android/20260910T110236Z-9c633c81`，Release 产物为 unsigned，不可交付安装。
 - [PR #7](https://github.com/leolemon777/PhoneDeck/pull/7) 的[云端运行34469445810](https://github.com/leolemon777/PhoneDeck/actions/runs/34469445810)在提交a954ab1全部通过：Windows、Android、macOS、去重前置检查。真实 Mac 待验证。没有安装、重启或更新使用中的设备，不能将构建报告当作产品真机验收。
-- 待办：按 [B02 实施约定](B02_IMPLEMENTATION.md) 完成版本描述、源码/二进制校验和依赖锁，再推进B03候选包。下方原始 B01 声明为历史记录，以独立证据为准。
+- 待办：按 [B02 实施约定](archive/B02_IMPLEMENTATION.md) 完成版本描述、源码/二进制校验和依赖锁，再推进B03候选包。下方原始 B01 声明为历史记录，以独立证据为准。
 
 ## 2026-09-10 B01 原始实现记录（审查前，状态以以上为准）
 
@@ -391,9 +1244,9 @@ Android 配置版本：`schemaVersion=1`
 - **验证**：Windows 61 项单测全绿（新增档案解析/合并/校验、hold 语义、
   覆盖优先级 13 项）；macOS 交叉编译通过 + 20 项测试全绿；Android javac
   全量 26 文件自查通过。**豆包/微信输入法未实装真机验收**（用户决定暂不
-  安装），档案标注 experimental，核对清单见 docs/VOICE_ENGINES.md；
+  安装），档案标注 experimental，核对清单见 docs/guides/VOICE_ENGINES.md；
   Typeless 回归待下次实机使用时观察。共享麦克风（shared）模式零改动。
-- 文档：新增 `docs/VOICE_ENGINES.md`（Schema、示例档案：千问/微信客户端/
+- 文档：新增 `docs/guides/VOICE_ENGINES.md`（Schema、示例档案：千问/微信客户端/
   doubao-murmur、核对清单）；README/SETUP/MACOS_SETUP/ARCHITECTURE/AGENTS
   措辞引擎无关化。
 
@@ -614,7 +1467,7 @@ Android 配置版本：`schemaVersion=1`
 - 为当前 Android 默认布局加入 Mac 兼容映射：Ctrl/Win/Alt → Command/Command/Option；
   Win+Shift+S → Command+Shift+4；Alt+Tab → Command+Tab；Win+Space → Control+Space。
 - 新增 macOS ADB reverse 看门狗、`.app` Info.plist、Apple Silicon/Intel 构建脚本和
-  `docs/MACOS_SETUP.md` 权限/配对/验收说明。
+  `docs/guides/MACOS_SETUP.md` 权限/配对/验收说明。
 - Windows 上 `PhoneDeck.Receiver` Release 构建成功，macOS 测试 10/10 通过；尚未在真实
   Mac 上执行构建、辅助功能授权、CGEvent、USB/Wi-Fi 或三机验收。
 - 本阶段明确不声明 `phoneAudio` / `managedDictation`，`audio.available=false`；Core Audio、

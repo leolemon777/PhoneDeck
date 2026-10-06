@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "service": "phonedeck",
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "port": 8766,
+  "platform": "windows",
+  "accessToken": "PLACEHOLDER-LEAKED-TOKEN",
+  "capabilities": ["fixedAction", "phoneAudio"]
+}

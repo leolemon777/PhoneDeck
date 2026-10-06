@@ -45,15 +45,17 @@ public final class PhoneAudioService extends Service {
 
     static final class Snapshot {
         final boolean running;
+        final boolean busy;
         final int connected;
         final int total;
         final int level;
         final String detail;
         final Map<String, String> receiverStates;
 
-        Snapshot(boolean running, int connected, int total, int level, String detail,
+        Snapshot(boolean running, boolean busy, int connected, int total, int level, String detail,
                  Map<String, String> receiverStates) {
             this.running = running;
+            this.busy = busy;
             this.connected = connected;
             this.total = total;
             this.level = level;
@@ -64,15 +66,23 @@ public final class PhoneAudioService extends Service {
     }
 
     private static volatile Snapshot snapshot = new Snapshot(
-            false, 0, 0, 0, "未开启", java.util.Collections.emptyMap());
+            false, false, 0, 0, 0, "未开启", java.util.Collections.emptyMap());
 
     static Snapshot getSnapshot() {
         return snapshot;
     }
 
+    /// 进程内状态监听：音量每 100 ms 变化一次，只更新快照并回调，不再发系统广播。
+    private static volatile Runnable inProcessListener;
+
+    static void setInProcessListener(Runnable listener) {
+        inProcessListener = listener;
+    }
+
+    private volatile Map<String, Integer> slotByComputer = java.util.Collections.emptyMap();
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService probeExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService probePool = Executors.newFixedThreadPool(6);
     private TargetDeviceManager deviceManager;
     private SharedAudioBroadcaster broadcaster;
     private WifiManager.WifiLock wifiLock;
@@ -85,6 +95,8 @@ public final class PhoneAudioService extends Service {
     private volatile boolean probeInFlight;
     private volatile int knownTotal;
     private volatile int connectedCount;
+    /// M1-B/MIC-10：共享组零可达目标的起始时刻（elapsedRealtime；0=组内有目标）。
+    private volatile long emptyTargetsSinceElapsed;
     private volatile int lastLevel;
     private volatile String statusDetail = "正在准备";
     private final ConcurrentHashMap<String, String> receiverStates =
@@ -104,13 +116,14 @@ public final class PhoneAudioService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        deviceManager = new TargetDeviceManager(this);
+        TranscriptRelay.acquire(this);
+        deviceManager = TargetDeviceManager.get(this);
         createNotificationChannel();
         broadcaster = new SharedAudioBroadcaster(this, new SharedAudioBroadcaster.Listener() {
             @Override
             public void onLevel(int percent) {
                 lastLevel = percent;
-                publishStatus();
+                publishStatus(false);
             }
 
             @Override
@@ -130,7 +143,7 @@ public final class PhoneAudioService extends Service {
                 }
                 connectedCount = connected;
                 statusDetail = connected > 0
-                        ? "正在向 " + connected + " 台电脑供音"
+                        ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
                         : "正在等待音频接收端";
                 publishStatus();
                 updateNotification();
@@ -209,6 +222,7 @@ public final class PhoneAudioService extends Service {
         stopping = true;
         desiredRunning = false;
         startedByLinkage = false;
+        emptyTargetsSinceElapsed = 0L;
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
             broadcaster.stop();
@@ -248,44 +262,34 @@ public final class PhoneAudioService extends Service {
         probeInFlight = true;
         probeExecutor.execute(() -> {
             try {
-                // 主界面可能刚刚删除设备或刷新了配对令牌；每轮探测前重读磁盘。
-                deviceManager.reload();
                 Map<String, SharedAudioBroadcaster.Target> targets = new HashMap<>();
                 Map<String, String> states = new HashMap<>();
                 java.util.List<TargetDeviceManager.Device> devices = deviceManager.list();
                 knownTotal = devices.size();
-                Map<String, LanDiscoveryClient.DiscoveredComputer> discovered = null;
                 int incompatible = 0;
                 int reachable = 0;
                 boolean anyRequested = false;
+                // 只探测共享组：全部并行，与主界面共用结果与各台电脑的离线退避。
+                java.util.List<TargetDeviceManager.Device> group = new java.util.ArrayList<>();
+                Map<String, Integer> slots = new HashMap<>();
                 for (TargetDeviceManager.Device device : devices) {
+                    slots.put(device.computerId, device.slot);
+                    if (device.sharedGroup) {
+                        group.add(device);
+                    }
+                }
+                slotByComputer = slots;
+                Map<String, ConnectionMonitor.Outcome> outcomes =
+                        ConnectionMonitor.get(this).probeAll(group, false);
+                for (TargetDeviceManager.Device device : group) {
+                    // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
                     states.put(device.computerId, "离线");
-                    if (!device.hasLanPairing()) {
+                    ConnectionMonitor.Outcome outcome = outcomes.get(device.computerId);
+                    if (outcome == null) {
                         continue;
                     }
-                    PhoneDeckLanClient.ProbeOutcome outcome =
-                            PhoneDeckLanClient.probe(device, probePool);
                     PhoneDeckLanClient.ProbeResult result = outcome.result;
                     boolean pairingRejected = outcome.pairingRejected;
-                    if (result == null) {
-                        if (discovered == null) {
-                            discovered = LanDiscoveryClient.discover(this, 650);
-                        }
-                        LanDiscoveryClient.DiscoveredComputer found =
-                                discovered.get(device.computerId);
-                        if (found != null && found.port == device.lanPort) {
-                            deviceManager.mergeDiscoveredAddress(
-                                    device.computerId, found.hostAddress);
-                            TargetDeviceManager.Device updated =
-                                    deviceManager.find(device.computerId);
-                            if (updated != null) {
-                                PhoneDeckLanClient.ProbeOutcome retry =
-                                        PhoneDeckLanClient.probe(updated, probePool);
-                                result = retry.result;
-                                pairingRejected |= retry.pairingRejected;
-                            }
-                        }
-                    }
                     if (result == null) {
                         if (pairingRejected) {
                             // 地址可达但令牌/证书被拒：插一次 USB 自动重新配对即可恢复。
@@ -315,6 +319,11 @@ public final class PhoneAudioService extends Service {
                     JSONObject health = PhoneDeckHttp.getJson(
                             PhoneDeckEndpoint.USB, "/api/health", 600, 800);
                     String computerId = health.optString("computerId", "").trim();
+                    // USB is a transport fallback, never permission to expand the explicit group.
+                    TargetDeviceManager.Device usbDevice = deviceManager.find(computerId);
+                    if (usbDevice == null || !usbDevice.sharedGroup) {
+                        computerId = "";
+                    }
                     if (!computerId.isEmpty()) {
                         reachable++;
                         if (isSharedRequested(health)) {
@@ -354,13 +363,29 @@ public final class PhoneAudioService extends Service {
                     return;
                 }
                 if (targets.isEmpty()) {
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (emptyTargetsSinceElapsed == 0L) {
+                        emptyTargetsSinceElapsed = now;
+                    } else if (SharedAudioPolicies.shouldStopForZeroTargets(
+                            emptyTargetsSinceElapsed, now)) {
+                        // MIC-10：组内最后目标离线超过 15s 恢复窗口，停止采集；
+                        // 用户主动停止不受此路径影响（stopShared 即时生效）。
+                        statusDetail = "共享组电脑全部离线，已停止供音";
+                        publishStatus();
+                        handler.post(this::stopShared);
+                        return;
+                    }
                     statusDetail = incompatible > 0
                             ? "在线电脑需要更新接收端或配置虚拟麦克风"
                             : "正在等待在线电脑";
-                } else if (connectedCount > 0) {
-                    statusDetail = "正在向 " + connectedCount + " 台电脑供音";
                 } else {
-                    statusDetail = "已发现 " + targets.size() + " 台音频接收端";
+                    emptyTargetsSinceElapsed = 0L;
+                }
+                if (targets.size() > 0 && connectedCount > 0) {
+                    // 例：“正在向 2/3 台电脑供音 · 3号离线”，逐台说明未接收原因。
+                    statusDetail = MultiComputerStatus.summarize(receiverStates, slotByComputer);
+                } else if (!targets.isEmpty()) {
+                    statusDetail = "已发现 " + targets.size() + " 台音频接收端，正在连接";
                 }
                 publishStatus();
                 updateNotification();
@@ -404,9 +429,20 @@ public final class PhoneAudioService extends Service {
     }
 
     private void publishStatus() {
+        publishStatus(true);
+    }
+
+    private void publishStatus(boolean broadcast) {
         boolean active = desiredRunning && broadcaster != null && broadcaster.isRunning();
-        snapshot = new Snapshot(active, connectedCount, knownTotal, lastLevel,
+        snapshot = new Snapshot(active, desiredRunning || stopping, connectedCount, knownTotal, lastLevel,
                 statusDetail, receiverStates);
+        Runnable listener = inProcessListener;
+        if (listener != null) {
+            listener.run();
+        }
+        if (!broadcast) {
+            return;
+        }
         Intent status = new Intent(ACTION_STATUS).setPackage(getPackageName());
         status.putExtra(EXTRA_RUNNING, active);
         status.putExtra(EXTRA_CONNECTED, connectedCount);
@@ -463,7 +499,7 @@ public final class PhoneAudioService extends Service {
         String text = connectedCount + "/" + knownTotal + " 台电脑正在接收";
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("PhoneDeck 共享麦克风已开启")
+                .setContentTitle(getString(R.string.brand_name) + " 共享麦克风已开启")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)
@@ -483,6 +519,7 @@ public final class PhoneAudioService extends Service {
 
     @Override
     public void onDestroy() {
+        TranscriptRelay.release();
         desiredRunning = false;
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
@@ -490,8 +527,7 @@ public final class PhoneAudioService extends Service {
         }
         releaseLocks();
         probeExecutor.shutdownNow();
-        probePool.shutdownNow();
-        snapshot = new Snapshot(false, 0, knownTotal, 0,
+        snapshot = new Snapshot(false, false, 0, knownTotal, 0,
                 "共享麦克风已关闭", java.util.Collections.emptyMap());
         super.onDestroy();
     }

@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "name": "PhoneDeck",
+  "version": "1.6.0-dev.16",
+  "protocolVersion": 2,
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "capabilities": ["fixedAction"],
+  "audio": { "available": true, "streaming": false, "stale": false },
+  "dictation": { "active": false }
+}

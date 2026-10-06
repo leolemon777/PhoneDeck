@@ -6,6 +6,32 @@ import java.util.ArrayDeque;
 final class SharedAudioPolicies {
     private SharedAudioPolicies() {}
 
+    /// M1-B/MIC-10（V21 断言项）：共享组零可达目标的停采窗口（15s 提案，单调时钟）。
+    static final long ZERO_TARGET_STOP_WINDOW_MS = 15_000;
+
+    static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
+        return emptySinceElapsed > 0L
+                && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
+    }
+
+    /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
+    static final double SILENCE_RMS = 130;
+
+    static boolean isSilent(byte[] pcm) {
+        int samples = pcm.length / 2;
+        if (samples == 0) {
+            return true;
+        }
+        double sum = 0;
+        for (int index = 0; index + 1 < pcm.length; index += 2) {
+            short sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
+            sum += (double) sample * sample;
+        }
+        return Math.sqrt(sum / samples) < SILENCE_RMS;
+    }
+
+    /// 网络短暂卡顿时的有界队列：满了优先丢最旧的静音帧，没有静音才丢最旧帧，
+    /// 尽量不吞字，同时不积累成秒级延迟。
     static final class FrameQueue {
         private final ArrayDeque<byte[]> frames = new ArrayDeque<>();
         private final int capacity;
@@ -23,7 +49,18 @@ final class SharedAudioPolicies {
                 return;
             }
             if (frames.size() == capacity) {
-                frames.removeFirst();
+                java.util.Iterator<byte[]> oldest = frames.iterator();
+                boolean droppedSilence = false;
+                while (oldest.hasNext()) {
+                    if (isSilent(oldest.next())) {
+                        oldest.remove();
+                        droppedSilence = true;
+                        break;
+                    }
+                }
+                if (!droppedSilence) {
+                    frames.removeFirst();
+                }
             }
             frames.addLast(frame);
             notifyAll();
@@ -37,6 +74,19 @@ final class SharedAudioPolicies {
         }
 
         synchronized byte[] poll() {
+            return frames.pollFirst();
+        }
+
+        /// 最多等待 timeoutMs 取下一帧；结束或超时返回 null（用于把两帧合并成一个网络包）。
+        synchronized byte[] poll(long timeoutMs) throws InterruptedException {
+            long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
+            while (frames.isEmpty() && !finished) {
+                long remaining = (deadline - System.nanoTime()) / 1_000_000L;
+                if (remaining <= 0) {
+                    break;
+                }
+                wait(remaining);
+            }
             return frames.pollFirst();
         }
 

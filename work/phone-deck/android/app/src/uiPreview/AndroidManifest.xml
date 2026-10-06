@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- uiPreview 渠道专用：仅安装在验收手机上的调试包，开放各页面直启入口，
+     供 USB 自动化走查（am start）使用；正式渠道不受影响（exported 保持 false）。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <activity android:name="com.codex.phonedeck.SettingsActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.TranscriptSyncActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.ComputerSettingsActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.FleetUpdateActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.KeyPickerActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.ShortcutEditActivity"
+            android:exported="true" tools:replace="android:exported" />
+        <activity android:name="com.codex.phonedeck.ShortcutSettingsActivity"
+            android:exported="true" tools:replace="android:exported" />
+    </application>
+</manifest>

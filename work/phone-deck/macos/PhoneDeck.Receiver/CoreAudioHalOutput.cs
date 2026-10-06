@@ -7,6 +7,10 @@ internal interface IMacAudioOutput : IDisposable
     string DeviceName { get; }
     string DeviceUid { get; }
     void Write(ReadOnlySpan<byte> stereoPcm16);
+    Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds);
+
+    /// <summary>已写入但尚未被渲染的双声道字节，用于静音追赶判断积压。</summary>
+    int BufferedBytes => 0;
 }
 
 internal interface IMacAudioOutputFactory
@@ -117,6 +121,7 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
 
     public string DeviceName { get; }
     public string DeviceUid { get; }
+    public int BufferedBytes => ring.Count;
 
     public void Write(ReadOnlySpan<byte> stereoPcm16)
     {
@@ -125,6 +130,15 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
             return;
         }
         ring.Write(stereoPcm16);
+    }
+
+    public async Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds)
+    {
+        if (disposed || !await ring.WaitForEmptyAsync(timeoutMilliseconds)) return false;
+        // The last render callback has consumed PCM, but Core Audio and the input
+        // method still need to receive it. Keep rendering silence during this tail.
+        await Task.Delay(tailMilliseconds);
+        return !disposed;
     }
 
     private int Render(

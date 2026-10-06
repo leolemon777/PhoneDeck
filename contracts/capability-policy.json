@@ -1,0 +1,46 @@
+{
+  "$comment": "§16.2 第 5 行『能力』剩余项：每端最低版本与旧协议窗口、协商失败的降级矩阵、permissionDenied 与 available/busy 的分离。downgradeMatrix 覆盖 definitions.schema.json 能力枚举全部 10 项（validate.py C7 交叉校验）。versionFacts 为当前已证实版本（release-versions.json）；受维护最低版本窗口为契约目标（D10）。",
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-01", "§16.2 能力行", "§11 CFG-04", "§18 V48", "D10"],
+  "versionFacts": {
+    "windows": { "version": "1.6.0-dev.16", "sequence": 28, "status": "current", "grounding": "work/phone-deck/release-versions.json" },
+    "android": { "versionName": "1.6.0-dev.21", "versionCode": 27, "status": "current", "grounding": "work/phone-deck/release-versions.json" },
+    "macos": { "version": "2.0.0-dev.3", "status": "current", "grounding": "work/phone-deck/release-versions.json" },
+    "ios": { "status": "target", "note": "iOS 尚待开发（AGENTS 基线）；无版本事实" }
+  },
+  "maintainedVersionWindow": {
+    "policy": "维护当前与上一稳定版组合；未知版本不自动扩展支持（§4.3 认证记录模板“未知版本不自动扩展”）",
+    "status": "target",
+    "decision": "D10",
+    "specRef": "§22 D10"
+  },
+  "protocolWindow": {
+    "currentProtocolVersion": 2,
+    "legacyActions": "retained-with-envelope-rules",
+    "rule": "遗留固定动作（无 protocolVersion）继续兼容，但 v2 信封规则不放宽：缺 target 或 protocolVersion 的 LAN 请求不得绕过新会话授权（§8 旧固定动作段）。未来协议 v3 必须整体协商拒绝 v2 客户端未知字段（PRO-01），新能力不由营销版本推断",
+    "compatibilityRecord": "兼容窗口按渠道和客户端版本记录（§8），实现于各端发布说明；本文件 versionFacts 提供当前组合锚点",
+    "status": "current",
+    "grounding": "TargetEnvelopeValidator.cs:29-51（>2 拒绝、=2 强信封、其余遗留）"
+  },
+  "permissionDenied": {
+    "separateFrom": ["available", "busy", "capturing"],
+    "rule": "权限被拒绝是独立状态：available=设备存在、busy=被占用/有会话、capturing=null=探针未知、permissionDenied=系统权限拒绝。四者不得互相冒充；权限拒绝不自动重试，须给出可执行恢复步骤（V03/V07）",
+    "schemaFields": ["health.schema.json#/properties/audio/properties/permissionDenied", "health.schema.json#/properties/voiceEngine/properties/permissionDenied"],
+    "status": "target",
+    "specRef": "§16.2 能力行“supported/available/busy/permissionDenied 分开”"
+  },
+  "downgradeMatrix": {
+    "$comment": "能力缺失时的降级行为：一律“明确禁用入口 + 提示升级”，禁止静默假成功或降级提权（CFG-04/V48）。",
+    "fixedAction": { "missingBehavior": "disable-input-panel", "note": "极旧接收端；无可用降级，提示升级" },
+    "keyChord": { "missingBehavior": "hide-chord-editor", "note": "编辑器隐藏，旧固定动作仍可用（协议 v1 窗口）" },
+    "text": { "missingBehavior": "hide-text-button", "note": "同上" },
+    "macro": { "missingBehavior": "hide-macro-editor", "note": "同上" },
+    "phoneAudio": { "missingBehavior": "disable-voice-modes", "note": "无音频能力时仅保留按键功能（INS-04：无音频驱动仍可用按键）" },
+    "managedDictation": { "missingBehavior": "offer-shared-only", "note": "无受管听写时降级为仅共享供音，并明确标注差异（ENG-02 模式分级 A/B/C/U）" },
+    "sharedMicrophone": { "missingBehavior": "disable-shared", "note": "仅受管听写可用" },
+    "secureLan": { "missingBehavior": "block-lan", "note": "无 HTTPS 通道时禁止 LAN 明文降级（SEC-02），仅 USB 通道可用" },
+    "fleetUpdatesV1": { "missingBehavior": "hide-update-ui", "note": "隐藏统一更新入口，不假称已最新（REL-02）" },
+    "phoneManagedSettingsV1": { "missingBehavior": "read-only-notice", "note": "旧接收端对集中设置显示缺失能力及升级入口，不静默装作保存（CFG-04；样本 capability-health-legacy-no-managed-settings.json）" },
+    "healthEventsV1": { "missingBehavior": "poll-health", "note": "GET /api/events 长轮询：状态版本变化即返回与 /api/health 相同的快照并附 stateVersion；缺失或 404 时回退到 /api/health 轮询" },
+    "phoneStopV1": { "missingBehavior": "legacy-state-stop", "note": "无停止凭据时，手机只依据开始确认之后采样、非 stale、会话一致的 capturing=false 推断电脑端停止；未知/过期状态不作为停止依据" }
+  }
+}

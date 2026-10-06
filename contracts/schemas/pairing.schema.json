@@ -1,0 +1,393 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "https://phonedeck.dev/contracts/schemas/pairing.schema.json",
+ "title": "发现与配对契约（§16.2 第 1 行）",
+ "description": "各文档：UDP 发现应答【当前形态，LanDiscoveryResponder.cs:7-40：监听 8767、魔术串 PHONEDECK-DISCOVER、应答不含令牌/证书指纹】；USB 配对响应【当前形态，Program.cs:381-401：仅 USB 回环请求可达，否则 404】；扫码配对二维码载荷【目标设计，NET-02：QR 绑定电脑身份/证书与一次性高熵材料，短时窗口、限速、用后失效、电脑本地确认】；扫码配对提交/签发响应【目标，M1-A A2 实现形态】；凭据轮换请求/响应【目标，M1-A A4 设计形态：旧共享令牌经 /api/lan/credential/rotate 升级为逐手机凭据，单次签发、永不重发（G-1 处置），见 contracts/pairing-and-identity.json.migration.rotate】。数值参数（有效期 120 秒、每窗口 5 次失败为规格候选值，材料长度/二维码大小为 D02 冻结候选）见 contracts/pairing-and-identity.json。",
+ "oneOf": [
+  {
+   "$ref": "#/definitions/discoveryAdvertisement"
+  },
+  {
+   "$ref": "#/definitions/usbPairResponse"
+  },
+  {
+   "$ref": "#/definitions/qrPairingPayload"
+  },
+  {
+   "$ref": "#/definitions/qrPairRequest"
+  },
+  {
+   "$ref": "#/definitions/qrCredentialsResponse"
+  },
+  {
+   "$ref": "#/definitions/credentialRotateRequest"
+  },
+  {
+   "$ref": "#/definitions/credentialRotateResponse"
+  }
+ ],
+ "definitions": {
+  "certificateSha256Lower": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{64}$",
+   "description": "证书 SHA256 指纹，小写十六进制（LanIdentity.cs:16-17 Convert.ToHexString(...).ToLowerInvariant()）。绑定身份：指纹变化必须拒绝，不得静默接受新证书（规格 §7 NET-04）。"
+  },
+  "discoveryAdvertisement": {
+   "type": "object",
+   "description": "UDP 8767 发现应答【当前】。必须只含身份/端口/能力，绝不含配对令牌或证书指纹；未经认证的发现结果不得触发输入或采音（NET-01）。additionalProperties=false 使“发现应答携带令牌”成为可拒绝的形态违例。",
+   "properties": {
+    "ok": {
+     "const": true
+    },
+    "service": {
+     "const": "phonedeck"
+    },
+    "protocolVersion": {
+     "$ref": "definitions.schema.json#/definitions/protocolVersionV2"
+    },
+    "computerId": {
+     "$ref": "definitions.schema.json#/definitions/computerId"
+    },
+    "displayName": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128
+    },
+    "port": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 65535
+    },
+    "platform": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 32
+    },
+    "capabilities": {
+     "type": "array",
+     "items": {
+      "$ref": "definitions.schema.json#/definitions/capabilityName"
+     },
+     "uniqueItems": true
+    }
+   },
+   "required": [
+    "ok",
+    "service",
+    "protocolVersion",
+    "computerId",
+    "displayName",
+    "port",
+    "capabilities"
+   ],
+   "additionalProperties": false
+  },
+  "usbPairResponse": {
+   "type": "object",
+   "description": "POST /api/lan/pair 响应【当前形态，Program.cs:389-400】。仅当请求来自 USB 回环配对端口时返回，否则 404（Program.cs:383-388，error-codes.json supplementaryStatuses）。accessToken 为共享 LAN 令牌（现状）→ 逐手机凭据迁移见 contracts/pairing-and-identity.json.migration。",
+   "properties": {
+    "ok": {
+     "const": true
+    },
+    "protocolVersion": {
+     "$ref": "definitions.schema.json#/definitions/protocolVersionV2"
+    },
+    "computerId": {
+     "$ref": "definitions.schema.json#/definitions/computerId"
+    },
+    "displayName": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128
+    },
+    "platform": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 32
+    },
+    "addresses": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+     },
+     "uniqueItems": true
+    },
+    "port": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 65535
+    },
+    "certificateSha256": {
+     "$ref": "#/definitions/certificateSha256Lower"
+    },
+    "accessToken": {
+     "$ref": "definitions.schema.json#/definitions/placeholderToken"
+    }
+   },
+   "required": [
+    "ok",
+    "protocolVersion",
+    "computerId",
+    "displayName",
+    "platform",
+    "addresses",
+    "port",
+    "certificateSha256",
+    "accessToken"
+   ],
+   "additionalProperties": false
+  },
+  "qrPairingPayload": {
+   "type": "object",
+   "description": "二维码配对载荷【目标设计，NET-02】。绑定 computerId+证书指纹+一次性高熵材料；有效期/失败次数为规格候选值（§7：120 秒、每窗口 5 次失败后需重新本机开启）；材料长度/二维码大小候选值见 pairing-and-identity.json（D02 冻结）。手工替代方案（相机拒绝/无法扫码）同文件 manualFallback。",
+   "properties": {
+    "version": {
+     "const": 1
+    },
+    "computerId": {
+     "$ref": "definitions.schema.json#/definitions/computerId"
+    },
+    "displayName": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128
+    },
+    "httpsPort": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 65535
+    },
+    "certificateSha256": {
+     "$ref": "#/definitions/certificateSha256Lower"
+    },
+    "pairingId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+     "description": "配对尝试标识（GUID）：单次使用，用于限速与撤销记录（§16.2 身份行 pairingId）。"
+    },
+    "oneTimeMaterial": {
+     "type": "string",
+     "minLength": 32,
+     "maxLength": 512,
+     "pattern": "^PLACEHOLDER",
+     "description": "一次性高熵材料【候选 minLength=32，D02 冻结】。用后失效、不写日志、不进入布局导出（§7 NET-02、SEC-05）。样本必须以 PLACEHOLDER 开头。"
+    },
+    "validSeconds": {
+     "const": 120
+    },
+    "maxFailuresPerWindow": {
+     "const": 5
+    }
+   },
+   "required": [
+    "version",
+    "computerId",
+    "httpsPort",
+    "certificateSha256",
+    "pairingId",
+    "oneTimeMaterial",
+    "validSeconds",
+    "maxFailuresPerWindow"
+   ],
+   "additionalProperties": false
+  },
+  "qrPairRequest": {
+   "type": "object",
+   "description": "POST /api/lan/pair/qr 请求【目标，M1-A A2 实现形态（Program.cs pair/qr 端点）】：手机提交 QR 一次性材料与自报身份；请求挂起等待电脑本机确认（≤30s），单次往返。",
+   "properties": {
+    "pairingId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "oneTimeMaterial": {
+     "type": "string",
+     "minLength": 32,
+     "maxLength": 512,
+     "pattern": "^PLACEHOLDER",
+     "description": "一次性材料提交（D02 冻结 ≥32 字符/≥128bit；比对常量时间）。"
+    },
+    "clientId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+     "description": "手机生成的 GUID；服务端校验格式与冲突后采用，否则重新生成。"
+    },
+    "clientLabel": {
+     "type": "string",
+     "minLength": 0,
+     "maxLength": 64,
+     "description": "自报设备标签，仅展示用途，不作为身份依据（设计 §3 确认防护边界）。"
+    }
+   },
+   "required": [
+    "pairingId",
+    "oneTimeMaterial",
+    "clientId",
+    "clientLabel"
+   ],
+   "additionalProperties": false
+  },
+  "qrCredentialsResponse": {
+   "type": "object",
+   "description": "POST /api/lan/pair/qr 成功响应【目标，A2 实现形态】：本机确认后签发；令牌本体仅此一次出现，服务端只存哈希（设计 §2/§6）。",
+   "properties": {
+    "ok": {
+     "const": true
+    },
+    "clientId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "clientToken": {
+     "type": "string",
+     "pattern": "^PLACEHOLDER",
+     "description": "≥192bit 随机 bearer（base64url）：只出现在本响应，丢失找回=重新扫码配对。"
+    },
+    "scopes": {
+     "type": "array",
+     "items": {
+      "enum": [
+       "control",
+       "audio",
+       "settings",
+       "update-request"
+      ]
+     },
+     "minItems": 4,
+     "maxItems": 4,
+     "uniqueItems": true
+    },
+    "pairingId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "computerId": {
+     "$ref": "definitions.schema.json#/definitions/computerId"
+    },
+    "displayName": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128
+    },
+    "certificateSha256": {
+     "$ref": "#/definitions/certificateSha256Lower"
+    }
+   },
+   "required": [
+    "ok",
+    "clientId",
+    "clientToken",
+    "scopes",
+    "pairingId",
+    "computerId",
+    "displayName",
+    "certificateSha256"
+   ],
+   "additionalProperties": false
+  },
+  "credentialRotateRequest": {
+   "type": "object",
+   "description": "POST /api/lan/credential/rotate 请求【目标，M1-A A4 设计形态（docs/design/M1A_PAIRING_DESIGN.md §5.2）】：旧共享令牌持有者升级为逐手机凭据，无需重新扫码。仅接受旧 token 鉴权；已持 Authorization: Bearer 新凭据的调用者一律 403（旧头/新头不得互获额外能力，设计 §5.1）。",
+   "properties": {
+    "clientId": {
+     "type": "string",
+     "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+     "description": "手机自生成 GUID，升级后凭据沿用；服务端校验格式与冲突后采用，否则重新生成（ClientCredentialsStore.Issue，ClientCredentials.cs:54-77 为 A1 已实现行为）。"
+    }
+   },
+   "required": [
+    "clientId"
+   ],
+   "additionalProperties": false
+  },
+  "credentialRotateResponse": {
+   "type": "object",
+   "description": "POST /api/lan/credential/rotate 响应【目标，M1-A A4 设计形态】oneOf 两形态：issued=单次签发（令牌本体仅此一次出现，服务端只存 SHA-256 哈希）；already-upgraded=同 clientId 重放（G-1 处置：rotate 永不重发，防冒领他人凭据与撤销旁路；绝无令牌字段，additionalProperties=false 使任何令牌字段成为可拒绝的形态违例）。revoked clientId 永不重发，凭据找回唯一路径=重新扫码配对（设计 §5.2/§6）。",
+   "oneOf": [
+    {
+     "type": "object",
+     "description": "首次成功轮换：该手机专属凭据签发一次。",
+     "properties": {
+      "status": {
+       "const": "issued"
+      },
+      "clientId": {
+       "type": "string",
+       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "clientToken": {
+       "type": "string",
+       "pattern": "^PLACEHOLDER",
+       "description": "≥192bit 随机 bearer（base64url）：只出现在本响应一次，永不重发；样本必须以 PLACEHOLDER 开头。"
+      },
+      "scopes": {
+       "type": "array",
+       "items": {
+        "enum": [
+         "control",
+         "audio",
+         "settings",
+         "update-request"
+        ]
+       },
+       "minItems": 4,
+       "maxItems": 4,
+       "uniqueItems": true,
+       "description": "M1-A 签发默认全授予并显式记录（设计 §2）。"
+      },
+      "pairingId": {
+       "type": "string",
+       "pattern": "^rotate-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+       "description": "轮换签发来源标识（rotate-+GUID）：与扫码配对 GUID 区分，审计与撤销可按来源追溯（设计 §5.2/§6）。"
+      },
+      "computerId": {
+       "$ref": "definitions.schema.json#/definitions/computerId"
+      },
+      "displayName": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 128
+      },
+      "certificateSha256": {
+       "$ref": "#/definitions/certificateSha256Lower"
+      }
+     },
+     "required": [
+      "status",
+      "clientId",
+      "clientToken",
+      "scopes",
+      "pairingId",
+      "computerId",
+      "displayName",
+      "certificateSha256"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "description": "同 clientId 再次 rotate：绝不重发令牌本体，仅回状态。该形态不含也不允许任何令牌字段。",
+     "properties": {
+      "ok": {
+       "const": true
+      },
+      "status": {
+       "const": "already-upgraded"
+      },
+      "clientId": {
+       "type": "string",
+       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      }
+     },
+     "required": [
+      "ok",
+      "status",
+      "clientId"
+     ],
+     "additionalProperties": false
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,15 @@
+{
+  "status": "issued",
+  "clientId": "55555555-5555-4555-8555-555555555555",
+  "clientToken": "PLACEHOLDER-ROTATE-CLIENT-TOKEN-BASE64URL",
+  "scopes": [
+    "control",
+    "audio",
+    "settings",
+    "update-request"
+  ],
+  "pairingId": "rotate-66666666-6666-4666-8666-666666666666",
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "certificateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

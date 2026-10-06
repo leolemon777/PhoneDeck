@@ -14,6 +14,10 @@ import java.net.HttpURLConnection;
 
 final class AudioStreamer implements AutoCloseable {
     interface Listener {
+        /// 手机已开始采音（启动缓存会保住首音节）：界面可立即提示“可以说话”，
+        /// 不必等电脑确认。
+        default void onCapturing(String sessionId) {}
+
         void onReady(String sessionId);
         void onLevel(int percent);
         void onStopped(String sessionId, String reason);
@@ -49,6 +53,15 @@ final class AudioStreamer implements AutoCloseable {
     private String activeSessionId;
     private boolean stopRequested;
     private Thread worker;
+
+    /// 按下话筒时预先创建（但不启动）的 AudioRecord：初始化在部分机型上要上百毫秒，
+    /// 放在手指按下到抬起之间完成。未开始录音时不触发系统麦克风指示。
+    private static final long PREPARED_RECORDER_TTL_MS = 5_000;
+    private AudioRecord preparedRecorder;
+    private long preparedAt;
+    private boolean preparing;
+    private final android.os.Handler mainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
 
     AudioStreamer(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -128,10 +141,105 @@ final class AudioStreamer implements AutoCloseable {
         return true;
     }
 
+    /// 预创建麦克风；没有权限、正在录音或已有可用实例时不做任何事。
+    void prepare() {
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        synchronized (syncRoot) {
+            if (preparing || preparedRecorder != null || (worker != null && worker.isAlive())) {
+                return;
+            }
+            preparing = true;
+        }
+        Thread thread = new Thread(() -> {
+            AudioRecord created = null;
+            try {
+                created = createRecorder();
+            } catch (Exception ignored) {
+                // 预创建失败不影响正式开始：runStream 会重新创建并报告真实错误。
+            }
+            synchronized (syncRoot) {
+                preparing = false;
+                if (created != null && preparedRecorder == null
+                        && (worker == null || !worker.isAlive())) {
+                    preparedRecorder = created;
+                    preparedAt = SystemClock.elapsedRealtime();
+                    created = null;
+                }
+            }
+            if (created != null) {
+                created.release();
+            }
+        }, "PhoneDeck-MicrophonePrepare");
+        thread.setPriority(Thread.MAX_PRIORITY);
+        thread.start();
+        mainHandler.postDelayed(this::releaseStalePrepared, PREPARED_RECORDER_TTL_MS + 200);
+    }
+
+    private void releaseStalePrepared() {
+        AudioRecord stale = null;
+        synchronized (syncRoot) {
+            if (preparedRecorder != null
+                    && SystemClock.elapsedRealtime() - preparedAt >= PREPARED_RECORDER_TTL_MS) {
+                stale = preparedRecorder;
+                preparedRecorder = null;
+            }
+        }
+        if (stale != null) {
+            stale.release();
+        }
+    }
+
+    private AudioRecord takePreparedRecorder() {
+        AudioRecord prepared;
+        synchronized (syncRoot) {
+            prepared = preparedRecorder;
+            preparedRecorder = null;
+            if (prepared != null
+                    && (SystemClock.elapsedRealtime() - preparedAt >= PREPARED_RECORDER_TTL_MS
+                    || prepared.getState() != AudioRecord.STATE_INITIALIZED)) {
+                prepared.release();
+                prepared = null;
+            }
+        }
+        return prepared;
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private static AudioRecord createRecorder() {
+        int minimum = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        if (minimum <= 0) {
+            throw new IllegalStateException("手机不支持 48 kHz 麦克风采集");
+        }
+        AudioRecord recorder = new AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                Math.max(minimum * 2, 8192));
+        if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+            recorder.release();
+            throw new IllegalStateException("无法初始化手机麦克风");
+        }
+        return recorder;
+    }
+
     void stop() {
+        stop(null);
+    }
+
+    void stop(String expectedSessionId) {
         final Thread stoppingWorker;
         final String stoppingSession;
         synchronized (syncRoot) {
+            if (expectedSessionId != null && !expectedSessionId.equals(activeSessionId)) {
+                return;
+            }
             if (worker == null || stopRequested) {
                 return;
             }
@@ -215,6 +323,8 @@ final class AudioStreamer implements AutoCloseable {
             String sessionId,
             String targetComputerId,
             PhoneDeckEndpoint endpoint) {
+        // 采音与上传都在本线程：提高到音频优先级，界面繁忙时也不抖动。
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord localRecorder = null;
         String stoppedReason = null;
         final long startedAt = SystemClock.elapsedRealtime();
@@ -223,23 +333,12 @@ final class AudioStreamer implements AutoCloseable {
                     != PackageManager.PERMISSION_GRANTED) {
                 throw new SecurityException("没有手机麦克风权限");
             }
-            int minimum = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            if (minimum <= 0) {
-                throw new IllegalStateException("手机不支持 48 kHz 麦克风采集");
+            localRecorder = takePreparedRecorder();
+            boolean reused = localRecorder != null;
+            if (localRecorder == null) {
+                localRecorder = createRecorder();
             }
-            int bufferSize = Math.max(minimum * 2, 8192);
-            localRecorder = new AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    bufferSize);
-            if (localRecorder.getState() != AudioRecord.STATE_INITIALIZED) {
-                throw new IllegalStateException("无法初始化手机麦克风");
-            }
+            log(sessionId, "recorderReady reused=" + reused, startedAt);
             // 先开录：点击后立刻开始捕获，语音进入 pre-roll 环，
             // 不等 TLS 握手完成，用户立即开口也不会丢第一音节。
             synchronized (syncRoot) {
@@ -250,6 +349,7 @@ final class AudioStreamer implements AutoCloseable {
                 localRecorder.startRecording();
             }
             log(sessionId, "audioRecordStarted", startedAt);
+            listener.onCapturing(sessionId);
 
             Thread connectThread = new Thread(
                     () -> openLink(sessionId, targetComputerId, endpoint),
@@ -449,5 +549,13 @@ final class AudioStreamer implements AutoCloseable {
     @Override
     public void close() {
         stop();
+        AudioRecord prepared;
+        synchronized (syncRoot) {
+            prepared = preparedRecorder;
+            preparedRecorder = null;
+        }
+        if (prepared != null) {
+            prepared.release();
+        }
     }
 }

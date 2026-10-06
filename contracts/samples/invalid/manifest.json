@@ -1,0 +1,381 @@
+{
+  "$comment": "非法样本清单：每条注明 file→schema、违反的契约条款（violates）与规格/源码依据（specRef）。tools/validate.py 要求：样本可解析、必须被对应 schema 拒绝、目录中无未登记样本。",
+  "samples": [
+    {
+      "file": "input-missing-request-id.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "缺字段",
+      "violates": "v2 动作必须携带 requestId（去重键，缺字段拒绝）",
+      "specRef": "规格 §8 PRO-01/PRO-02、§16.2 请求确认；TargetEnvelopeValidator.cs:16-20"
+    },
+    {
+      "file": "input-request-id-too-long.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "超长",
+      "violates": "requestId 去空格后 ≤128 字符（本样本 129）",
+      "specRef": "TargetEnvelopeValidator.cs:16-20"
+    },
+    {
+      "file": "input-future-protocol-version.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "未来版本",
+      "violates": "protocolVersion=3 为未知/未来版本，必须整体拒绝，不得按 v2 语义解释",
+      "specRef": "规格 §8 PRO-01、§16.2 能力；TargetEnvelopeValidator.cs:34-37"
+    },
+    {
+      "file": "input-missing-target-computer-id.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "缺字段",
+      "violates": "v2 请求必须携带 targetComputerId",
+      "specRef": "规格 §8；TargetEnvelopeValidator.cs:42-44（“缺少 targetComputerId”）"
+    },
+    {
+      "file": "input-empty-target-computer-id.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "错误目标",
+      "violates": "targetComputerId 非空（空串=错误目标的形态层违例；身份值不匹配由接收端映射 wrong_target/PD-ERR-400-02）",
+      "specRef": "规格 §8 NET-05；TargetEnvelopeValidator.cs:42-50"
+    },
+    {
+      "file": "input-unknown-action.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "未知动作",
+      "violates": "action 必须来自受控白名单（本样本 runShell 属任意远程执行，被 SEC-04 明确禁止）",
+      "specRef": "规格 §12 SEC-04、§8 INP-01；Program.cs:1123“未知操作”"
+    },
+    {
+      "file": "input-session-id-not-guid.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "格式",
+      "violates": "sessionId 必须为 GUID 规范形式",
+      "specRef": "TargetEnvelopeValidator.cs:21-26；契约钉死 dashed 形式（见 definitions.sessionId）"
+    },
+    {
+      "file": "input-keychord-all-modifiers.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "组合键构成",
+      "violates": "组合键必须含普通键（全修饰键无效；接收端语义要求“恰好 1 个普通键”，schema 表达“至少 1 个”）",
+      "specRef": "规格 §8 INP-01；Program.cs:987-991"
+    },
+    {
+      "file": "input-keychord-duplicate-keys.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "组合键构成",
+      "violates": "组合键不得包含重复键",
+      "specRef": "规格 §8 INP-01；Program.cs:978-982"
+    },
+    {
+      "file": "input-keychord-five-keys.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "超上限",
+      "violates": "组合键 1–4 个（本样本 5）",
+      "specRef": "规格 §8“组合最多 4 键”；Program.cs:969"
+    },
+    {
+      "file": "input-keychord-zero-keys.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "下限",
+      "violates": "组合键至少 1 个键（空数组）",
+      "specRef": "规格 §8；Program.cs:969"
+    },
+    {
+      "file": "input-keychord-missing-keys.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "缺字段",
+      "violates": "action=keyChord 时必须携带 keys",
+      "specRef": "InputCommandProcessor.cs:29-33"
+    },
+    {
+      "file": "input-keychord-holdms-below-range.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "下界外",
+      "violates": "holdMs 必须 ≥20（本样本 19）",
+      "specRef": "规格 §8“holdMs 20–500”；Program.cs:823"
+    },
+    {
+      "file": "input-keychord-holdms-above-range.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "上界外",
+      "violates": "holdMs 必须 ≤500（本样本 501）",
+      "specRef": "规格 §8“holdMs 20–500”；Program.cs:823"
+    },
+    {
+      "file": "input-macro-nine-steps.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "超上限",
+      "violates": "宏 1–8 步（本样本 9；总执行时长与队列上限由 D03 冻结，不沿用历史 20 步）",
+      "specRef": "规格 §8“宏 1–8 步”；Program.cs:849"
+    },
+    {
+      "file": "input-macro-step-delay-above-range.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "上界外",
+      "violates": "宏步骤延迟 0–2000 ms（本样本 2001）",
+      "specRef": "规格 §8；Program.cs:858"
+    },
+    {
+      "file": "input-macro-step-empty-text.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "空值",
+      "violates": "宏 text 步骤内容必须非空",
+      "specRef": "Program.cs:877"
+    },
+    {
+      "file": "input-macro-step-unknown-type.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "未知动作",
+      "violates": "宏步骤类型仅 keychord/text（shellCommand 属任意脚本执行，SEC-04 禁止）",
+      "specRef": "规格 §12 SEC-04；Program.cs:887"
+    },
+    {
+      "file": "input-text-over-4096.json",
+      "schema": "request.input.schema.json",
+      "domain": "request-confirmation",
+      "boundary": "超长",
+      "violates": "文本 ≤4096 码点（本样本 4097；长度单位说明见 definitions.text4096）",
+      "specRef": "规格 §8“文字最多 4096（必须明确跨语言长度单位）”；InputCommandProcessor.cs:11"
+    },
+    {
+      "file": "dictation-missing-session-id.json",
+      "schema": "request.dictation.schema.json",
+      "domain": "session",
+      "boundary": "缺字段",
+      "violates": "听写命令必须携带 sessionId（新会话绑定 sessionId/代次）",
+      "specRef": "规格 §8 PRO-03；TargetEnvelopeValidator.cs:21-26"
+    },
+    {
+      "file": "dictation-mode-wrong-type.json",
+      "schema": "request.dictation.schema.json",
+      "domain": "session",
+      "boundary": "类型",
+      "violates": "mode 必须为小写字符串或省略（本样本为数字；未知模式字符串由接收端按引擎档案拒绝）",
+      "specRef": "DictationSessionManager.cs:315-324"
+    },
+    {
+      "file": "session-state-unknown-state.json",
+      "schema": "session-state.schema.json",
+      "domain": "session",
+      "boundary": "未知状态",
+      "violates": "状态枚举仅 IDLE/STARTING/ACTIVE/STOPPING/ERROR；未知状态必须显式呈现，不得猜成 stopped",
+      "specRef": "规格 §9.1、§16.2 会话“未知状态与过期处理”"
+    },
+    {
+      "file": "session-state-expired-tombstone-missing-session-id.json",
+      "schema": "session-state.schema.json",
+      "domain": "session",
+      "boundary": "过期会话",
+      "violates": "过期/终止会话的墓碑记录仍必须携带 sessionId（迟到 stop 只清理对应旧会话；过期语义另见 session-states.json R2/T11/T12/T20）",
+      "specRef": "规格 §16.2 会话“终止墓碑”、§16.3 规则 2"
+    },
+    {
+      "file": "session-state-negative-generation.json",
+      "schema": "session-state.schema.json",
+      "domain": "session",
+      "boundary": "代次",
+      "violates": "generation 从 0 单调递增（负值非法；迟到旧代次不得复活会话）",
+      "specRef": "规格 §8 PRO-03、§16.3 规则 1"
+    },
+    {
+      "file": "health-unknown-capability.json",
+      "schema": "health.schema.json",
+      "domain": "capability",
+      "boundary": "未知能力",
+      "violates": "能力名必须已注册（remoteShell 类能力在产品中不存在且被 SEC-04 禁止；新增能力须先扩枚举/协议）",
+      "specRef": "规格 §8 PRO-01、§16.2 能力；Program.cs:147-151"
+    },
+    {
+      "file": "health-future-protocol-version.json",
+      "schema": "health.schema.json",
+      "domain": "capability",
+      "boundary": "未来版本",
+      "violates": "health.protocolVersion 当前固定为 2；未来版本不得按 v2 解析（协商不依赖营销版本）",
+      "specRef": "规格 §8 PRO-01；Program.cs:142"
+    },
+    {
+      "file": "health-missing-computer-id.json",
+      "schema": "health.schema.json",
+      "domain": "capability",
+      "boundary": "缺字段",
+      "violates": "health 必须携带 computerId（身份不能用 IP/名称代替）",
+      "specRef": "规格 §8 DEV-01；Program.cs:143"
+    },
+    {
+      "file": "audio-stream-wrong-format.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "格式",
+      "violates": "音频格式头固定 pcm-s16le（未知格式在建流前拒绝，不进入音频状态机）",
+      "specRef": "规格 §8 错误段、§9 MIC-04；Program.cs:410-414"
+    },
+    {
+      "file": "audio-stream-unknown-mode.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "未知枚举",
+      "violates": "音频模式仅 managed/shared",
+      "specRef": "AudioStreamMode.cs:9-26"
+    },
+    {
+      "file": "audio-stream-session-id-not-guid.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "格式",
+      "violates": "音频会话头必须为 GUID",
+      "specRef": "Program.cs:438-446"
+    },
+    {
+      "file": "audio-stream-stereo.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "基线",
+      "violates": "PCM 基线为 mono（channels=1）；实际设备立体声须转换后上传（本样本 channels=2）",
+      "specRef": "规格 §9 MIC-04；AGENTS“USB 音频维持 48 kHz / PCM16 / mono 基线”"
+    },
+    {
+      "file": "config-desktop-missing-target.json",
+      "schema": "request.config-desktop.schema.json",
+      "domain": "config",
+      "boundary": "缺字段",
+      "violates": "配置写入必须携带 targetComputerId（旧读取端兼容，但写入必须带目标与 revision）",
+      "specRef": "规格 §11 CFG-02；DesktopConfiguration.cs:31-35；Program.cs:304-306"
+    },
+    {
+      "file": "config-desktop-missing-revision.json",
+      "schema": "request.config-desktop.schema.json",
+      "domain": "config",
+      "boundary": "缺字段",
+      "violates": "配置写入必须携带当前 revision（丢失 revision 的盲写会覆盖他人修改）",
+      "specRef": "规格 §11 CFG-02、§18 V47；DesktopConfiguration.cs:37-41"
+    },
+    {
+      "file": "config-desktop-binding-overlong.json",
+      "schema": "request.config-desktop.schema.json",
+      "domain": "config",
+      "boundary": "超长",
+      "violates": "快捷键绑定 ≤100 字符（本样本 101）",
+      "specRef": "DesktopConfiguration.cs:59"
+    },
+    {
+      "file": "phone-managed-settings-future-schema-version.json",
+      "schema": "phone-managed-settings.schema.json",
+      "domain": "config",
+      "boundary": "未来版本",
+      "violates": "schemaVersion 仅支持 1；未来 schema 必须拒绝覆写，不得静默兼容写回",
+      "specRef": "规格 §11 CFG-03、§18 V49"
+    },
+    {
+      "file": "error-response-missing-ok.json",
+      "schema": "response.error.schema.json",
+      "domain": "error",
+      "boundary": "缺字段",
+      "violates": "错误响应必须携带 ok=false 标志",
+      "specRef": "Program.cs:84-88 等错误输出形态"
+    },
+    {
+      "file": "error-response-unknown-code.json",
+      "schema": "response.error.schema.json",
+      "domain": "error",
+      "boundary": "未知错误码",
+      "violates": "code 必须来自 error-codes.json 注册表（稳定错误码，未注册码不得出现）",
+      "specRef": "规格 §16.2 错误与诊断；contracts/error-codes.json"
+    },
+    {
+      "file": "pairing-discovery-token-leak.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "boundary": "秘密泄漏",
+      "violates": "UDP 发现应答绝不包含配对令牌/证书指纹（additionalProperties=false 使携带 accessToken 成为形态违例）",
+      "specRef": "规格 §7 NET-01；LanDiscoveryResponder.cs:4-6 注释与应答字段"
+    },
+    {
+      "file": "pairing-qr-short-material.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "boundary": "材料强度",
+      "violates": "一次性材料 minLength=32（候选下限，D02 冻结；本样本 19 字符）",
+      "specRef": "规格 §7 NET-02“一次性高熵材料”；contracts/pairing-and-identity.json qrPairing.oneTimeMaterial"
+    },
+    {
+      "file": "pairing-qr-future-version.json",
+      "schema": "pairing.schema.json",
+      "domain": "pairing",
+      "boundary": "未来版本",
+      "violates": "二维码载荷版本当前仅支持 1；version=2 为未来版本，必须拒绝（不得按 v1 解释）",
+      "specRef": "规格 §8 PRO-01 同类原则；pairing-and-identity.json qrPairing.qrVersion（候选，D02）"
+    },
+    {
+      "file": "identity-unregistered-scope.json",
+      "schema": "identity.schema.json",
+      "domain": "identity",
+      "boundary": "未知作用域",
+      "violates": "凭据作用域仅 control/audio/settings/update-request；shell 类作用域不存在且被 SEC-04 禁止",
+      "specRef": "规格 §7 凭据作用域建议、§12 SEC-04；identity.schema.json credentialScope"
+    },
+    {
+      "file": "identity-missing-client-id.json",
+      "schema": "identity.schema.json",
+      "domain": "identity",
+      "boundary": "缺字段",
+      "violates": "身份记录必须携带 clientId（撤销按 clientId 生效，缺 clientId 的凭据无法撤销）",
+      "specRef": "规格 §7 NET-03、§16.2 身份行"
+    },
+    {
+      "file": "session-tombstone-missing-session-id.json",
+      "schema": "session-tombstone.schema.json",
+      "domain": "session",
+      "boundary": "过期会话",
+      "violates": "墓碑记录必须携带 sessionId：迟到 stop 靠 sessionId+generation 判定 stale，缺 sessionId 的墓碑无法阻止旧请求误伤新会话",
+      "specRef": "规格 §16.2 会话行“终止墓碑”、§16.3 规则 2；session-states.json tombstoneContract"
+    },
+    {
+      "file": "session-tombstone-negative-retention.json",
+      "schema": "session-tombstone.schema.json",
+      "domain": "session",
+      "boundary": "保留时长",
+      "violates": "墓碑保留时长必须为正整数（retentionMs=-1 非法）；保留期有界且至少覆盖去重 TTL",
+      "specRef": "规格 §16.2 会话行；contracts/request-dedup.json dedupCache.ttlMs"
+    },
+    {
+      "file": "config-export-contains-token.json",
+      "schema": "config-export.schema.json",
+      "domain": "config",
+      "boundary": "秘密隔离",
+      "violates": "普通导出不得携带任何配对秘密（accessToken 字段即违例；containsSecrets 恒 false）",
+      "specRef": "规格 §11 CFG-03、§12 SEC-05；contracts/config-policy.json exportIsolation"
+    },
+    {
+      "file": "capability-health-permission-denied-wrong-type.json",
+      "schema": "health.schema.json",
+      "domain": "capability",
+      "boundary": "类型",
+      "violates": "permissionDenied 必须为布尔（字符串 \"yes\" 非法）；权限拒绝是独立布尔状态，不是文案",
+      "specRef": "规格 §16.2 能力行；health.schema.json audio.permissionDenied【目标】"
+    },
+    {
+      "file": "audio-stream-protocol-header-zero.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "契约收紧（记录在案）",
+      "violates": "X-PhoneDeck-Protocol 合法头值钉为 1|2；\"0\" 被本契约拒绝。注意：当前接收端仅拒绝 >2，0/负数值按遗留放行（Program.cs:416-423 + TargetEnvelopeValidator.cs:29-51）——本条为有意收紧【目标态】，是否放宽到与源码一致由 D03 评审决定（与 definitions.sessionId 钉死 GUID 形式同理）",
+      "specRef": "规格 §8 PRO-01；request.audio-stream.schema.json X-PhoneDeck-Protocol description；README 当前事实 vs 契约目标"
+    }
+  ]
+}

@@ -1,12 +1,20 @@
 namespace PhoneDeck.MacReceiver;
 
-/// <summary>A bounded byte ring. Overflow drops the oldest audio; underrun emits silence.</summary>
+/// <summary>
+/// A bounded single-producer/single-consumer byte ring. Overflow drops the oldest
+/// audio; underrun emits silence.
+/// <para>
+/// The consumer is the Core Audio render callback on a real-time thread, so it never
+/// takes a lock: producer and consumer only exchange monotonically increasing byte
+/// positions through volatile reads/writes. Writes are serialized by the caller
+/// (the audio bridge lock); <see cref="Clear"/> is only used when the output stops.
+/// </para>
+/// </summary>
 internal sealed class MacAudioRingBuffer
 {
-    private readonly object syncRoot = new();
     private readonly byte[] data;
-    private int readIndex;
-    private int count;
+    private long writePosition;
+    private long readPosition;
 
     internal MacAudioRingBuffer(int capacity)
     {
@@ -18,54 +26,63 @@ internal sealed class MacAudioRingBuffer
     }
 
     internal int Capacity => data.Length;
-    internal int Count { get { lock (syncRoot) return count; } }
+
+    internal int Count
+    {
+        get
+        {
+            var available = Volatile.Read(ref writePosition) - Volatile.Read(ref readPosition);
+            return (int)Math.Clamp(available, 0, data.Length);
+        }
+    }
+
+    internal async Task<bool> WaitForEmptyAsync(int timeoutMilliseconds)
+    {
+        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        while (Count > 0)
+        {
+            var remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0) return false;
+            await Task.Delay((int)Math.Min(20, remaining));
+        }
+        return true;
+    }
 
     internal void Write(ReadOnlySpan<byte> source)
     {
-        lock (syncRoot)
+        if (source.Length > data.Length)
         {
-            if (source.Length >= data.Length)
-            {
-                source = source[^data.Length..];
-                source.CopyTo(data);
-                readIndex = 0;
-                count = data.Length;
-                return;
-            }
-            var overflow = Math.Max(0, count + source.Length - data.Length);
-            readIndex = (readIndex + overflow) % data.Length;
-            count -= overflow;
-            var writeIndex = (readIndex + count) % data.Length;
-            var first = Math.Min(source.Length, data.Length - writeIndex);
-            source[..first].CopyTo(data.AsSpan(writeIndex, first));
-            source[first..].CopyTo(data);
-            count += source.Length;
+            source = source[^data.Length..];
         }
+        var position = Volatile.Read(ref writePosition);
+        var index = (int)(position % data.Length);
+        var first = Math.Min(source.Length, data.Length - index);
+        source[..first].CopyTo(data.AsSpan(index, first));
+        source[first..].CopyTo(data);
+        // Publish after the bytes are in place; the reader skips anything older than
+        // one capacity behind this position (drop-oldest on overflow).
+        Volatile.Write(ref writePosition, position + source.Length);
     }
 
     internal int Read(Span<byte> destination)
     {
-        lock (syncRoot)
+        var write = Volatile.Read(ref writePosition);
+        var read = Volatile.Read(ref readPosition);
+        if (write - read > data.Length)
         {
-            var copied = Math.Min(count, destination.Length);
-            var first = Math.Min(copied, data.Length - readIndex);
-            data.AsSpan(readIndex, first).CopyTo(destination);
-            data.AsSpan(0, copied - first).CopyTo(destination[first..]);
-            readIndex = (readIndex + copied) % data.Length;
-            count -= copied;
-            destination[copied..].Clear();
-            return copied;
+            read = write - data.Length;
         }
+        var copied = (int)Math.Min(write - read, destination.Length);
+        var index = (int)(read % data.Length);
+        var first = Math.Min(copied, data.Length - index);
+        data.AsSpan(index, first).CopyTo(destination);
+        data.AsSpan(0, copied - first).CopyTo(destination[first..]);
+        Volatile.Write(ref readPosition, read + copied);
+        destination[copied..].Clear();
+        return copied;
     }
 
-    internal void Clear()
-    {
-        lock (syncRoot)
-        {
-            readIndex = 0;
-            count = 0;
-        }
-    }
+    internal void Clear() => Volatile.Write(ref readPosition, Volatile.Read(ref writePosition));
 
     internal static byte[] MonoPcm16ToStereo(ReadOnlySpan<byte> mono)
     {

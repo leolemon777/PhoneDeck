@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>PhoneDeck.Desktop</string>
+<key>CFBundleIdentifier</key><string>com.codex.phonedeck.desktop</string>
+<key>CFBundleName</key><string>Yandu</string>
+<key>CFBundleDisplayName</key><string>言渡 Yandu</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>2.0.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><true/>
+<key>NSLocalNetworkUsageDescription</key><string>Connect to your paired phone for voice and synchronized text.</string>
+<key>NSBonjourServices</key><array><string>_phonedeck._tcp</string></array>
+</dict></plist>

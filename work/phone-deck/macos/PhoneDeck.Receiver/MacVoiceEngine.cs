@@ -38,22 +38,15 @@ internal sealed record MacVoiceEngineProfile(
     internal IReadOnlyList<string> ModeIds => Modes.Select(mode => mode.Id).ToArray();
 }
 
-/// <summary>引擎档案 JSON 解析与校验，格式与 Windows 端共用（见 docs/VOICE_ENGINES.md）。</summary>
+/// <summary>引擎档案 JSON 解析与校验，格式与 Windows 端共用（见 docs/guides/VOICE_ENGINES.md）。</summary>
 internal static class MacVoiceEngineProfileJson
 {
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
-
     internal static MacVoiceEngineProfile Parse(string json, string sourceDescription)
     {
         MacVoiceEngineProfile? profile;
         try
         {
-            profile = JsonSerializer.Deserialize<MacVoiceEngineProfile>(json, Options);
+            profile = JsonSerializer.Deserialize(json, MacFileReadJsonContext.Default.MacVoiceEngineProfile);
         }
         catch (JsonException exception)
         {
@@ -177,14 +170,8 @@ internal sealed class MacVoiceEngineSettings
         {
             if (File.Exists(SettingsPath))
             {
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    ReadCommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                };
-                var loaded = JsonSerializer.Deserialize<MacVoiceEngineSettings>(
-                    File.ReadAllText(SettingsPath), options);
+                var loaded = JsonSerializer.Deserialize(
+                    File.ReadAllText(SettingsPath), MacFileReadJsonContext.Default.MacVoiceEngineSettings);
                 if (loaded is not null)
                 {
                     return loaded;
@@ -288,6 +275,16 @@ internal sealed class MacVoiceEngineCatalog
 
     internal MacVoiceEngineSettings Settings { get; }
 
+    /// <summary>以新的引擎设置生成目录（档案不重新读取）；未知引擎回退到默认引擎。</summary>
+    internal MacVoiceEngineCatalog WithSettings(MacVoiceEngineSettings settings)
+    {
+        var activeId = settings.ActiveEngine?.Trim().ToLowerInvariant();
+        var active = activeId is not null && profiles.TryGetValue(activeId, out var chosen)
+            ? chosen
+            : profiles.TryGetValue(DefaultEngineId, out var fallback) ? fallback : profiles.Values.First();
+        return new MacVoiceEngineCatalog(profiles, active, settings, ReceiverSettings);
+    }
+
     /// <summary>server-settings.json（含旧版 typelessSettingsPath/typelessShortcuts 覆盖）。</summary>
     internal MacReceiverSettings ReceiverSettings { get; }
 
@@ -358,8 +355,24 @@ internal static class MacVoiceEngines
 {
     private static readonly Lazy<MacVoiceEngineCatalog> LazyCatalog =
         new(MacVoiceEngineCatalog.Load);
+    private static MacVoiceEngineCatalog? configured;
 
-    internal static MacVoiceEngineCatalog Catalog => LazyCatalog.Value;
+    /// <summary>手机集中设置写入时串行化；读取端无锁读取当前目录。</summary>
+    internal static readonly object ConfigurationLock = new();
+
+    internal static MacVoiceEngineCatalog Catalog => Volatile.Read(ref configured) ?? LazyCatalog.Value;
+
+    /// <summary>原子写入 voice-engine-settings.json 并立即热应用，无需重启接收端。</summary>
+    internal static void ApplySettings(MacVoiceEngineSettings settings)
+    {
+        lock (ConfigurationLock)
+        {
+            var next = Catalog.WithSettings(settings);
+            DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings,
+                MacFileWriteJsonContext.Default.MacVoiceEngineSettings);
+            Volatile.Write(ref configured, next);
+        }
+    }
 
     internal static MacVoiceEngineProfile Active => Catalog.Active;
 

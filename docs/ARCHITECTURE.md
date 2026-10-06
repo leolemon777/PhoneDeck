@@ -1,24 +1,129 @@
 # PhoneDeck 架构说明
 
+
+## 2026-10-05 多电脑连接与 Receiver.Core
+
+```text
+Android                                   接收端（Windows / macOS）
+TargetDeviceManager.get()  ── 单例 ──┐    shared/Receiver（Receiver.Core.props）
+ConnectionMonitor.get()              │      ClientCredentials · PairingWindow · NativePairingEndpoints
+  ├ probeAll：并行 + 单台退避 + 共享发现│      LanRequestAuthenticator · TargetEnvelopeValidator
+  ├ probeNow：切换目标前确认           │      SessionLeaseRegistry · PhoneStopReceipts · HealthEvents
+  └ 主界面 / 共享服务复用结果 ─────────┘      MdnsAdvertiser · LoopbackOriginGuard · DesktopConfigurationCore
+managed 会话：GET /api/events 长轮询 ──────▶  平台项目：输入注入、音频输出、输入法探测、身份/证书存储
+```
+
+- `ConnectionMonitor`：`Prober`/`Discoverer`/`AddressSink` 可注入，`MultiComputerTest` 用假网络验证 5 台电脑并行、
+  慢电脑不误判、单台退避、一次发现覆盖全部、结果复用保留原采样时刻。
+- `NativePairingEndpoints.Map(app, NativePairingHost)`：两端的 `/api/lan/pair(/qr)`、`/api/lan/credential/rotate`、
+  `/api/admin/*` 与本机管理页 `/admin/pairing` 同一实现；撤销经 `ClientSessionRegistry` 立即取消音频长流。
+- `HealthEvents`：从健康对象的音频/听写/引擎采集/停止凭据字段计算 `stateVersion`，每 50 ms 比较内存快照。
+- `DictationSessionManager` / `MacDictationSessionManager`：`Stop(..., requesterClientId, checkOwner)` 拒绝其他手机；
+  `IsOwnedBy` 控制健康响应中会话字段的可见性。Mac 新增租约与墓碑，迟到 start 不能复活已停止会话。
+- macOS 集中设置：`MacDesktopConfigurationEndpoints` 与 Windows 同协议；`MacVoiceEngines.ApplySettings` 热替换目录，
+  `MacAutoStart` 写入 `~/Library/LaunchAgents/com.phonedeck.receiver.plist`。
+
+## 2026-10-05 语音延迟优化
+
+```text
+手机 AudioRecord(预创建) ─20ms PCM─▶ TLS(TCP_NODELAY) ─▶ 接收端 pre-roll
+   │                                                     │ 引擎确认采集
+   └ 开始采音即提示“可以说话”                              ▼
+                                      裁掉开口前静音(保留150ms) → PcmSilenceCatchUp
+                                                     │ 积压>目标时跳过静音块
+                                                     ▼
+                         常驻输出(SwitchingWaveProvider / 常驻 AUHAL) → VB-CABLE / BlackHole → 输入法
+```
+
+- `shared/Audio/PcmLatency.cs`：两端共用的静音判定、pre-roll 裁剪与 `PcmSilenceCatchUp`；`PhonePcmBuffer`
+  （Windows）与 `MacPhoneAudioBridge.ActiveSession.WriteLive`（Mac）在写入播放缓冲前调用。
+- `PhoneAudioBridge`：常驻 `WasapiPhoneAudioPlayback` + `SwitchingWaveProvider`，会话只挂接/摘除自己的
+  `PhonePcmBuffer`；`IsFaulted` 时下次重建。`TrySupersede` 让同一所有者的同一 shared 会话接管旧连接。
+- `DiagnosticsMonitor`：会话期间 250 ms 刷新，`VoiceEngineStateEvents` 订阅采集会话事件后 `Nudge()`；
+  每次刷新回调 `DictationSessionManager.ObserveEngineCapturing`，连续两次未采集后写 `PhoneStopReceipts`，
+  `/api/health` 按 `ClientId` 返回 `audio.stopRequestedSessionId`（能力 `phoneStopV1`）。
+- Mac：`MacAudioRingBuffer` 以单调递增读写位置实现无锁 SPSC，渲染回调不再取锁；常驻输出时
+  `MacDictationSessionManager` 先触发引擎再等待音频会话。
+- 测量：`scripts/performance/voice-latency-report.py` 按 sessionId 汇总手机 logcat 与接收端日志；
+  `voice-loopback-delay.py` 用同一台电脑的扬声器回环与虚拟声卡录音计算端到端延迟。
+
+## 2026-10-04 Typeless 兼容网页
+
+`shared/PhoneWeb/PhoneWeb.props` 把同一份 PWA、TLS 信任、网页网关和凭据实现嵌入原 Windows/Mac 接收端；没有另开模型服务。`LegacyPhoneWebHost` 提供回环管理页和独立 8768 TLS 浏览器入口，先做端口/Host/Origin 隔离，再让浏览器请求进入网页自身的 cookie 鉴权，不经过旧原生令牌分支。
+
+`WebPhoneGateway` 通过 `Func<string, IWebPhoneTarget>` 创建本机目标，已不依赖 `SpeechSession`。内置实验路线单独构造 `WebPhoneLocalTarget`；外部路线只构造固定 127.0.0.1:8765 的业务目标，调用原有音频、受控输入和听写 API。浏览器表单不能提供这个回环地址；远端电脑仍是私网 IP、固定 API、独立 Bearer 与 TLS pin。
+
+外部 managed 的开始确认时刻与每次健康请求的起始时刻均使用本机单调时钟。只有确认后采样、非 stale/unknown、音频与听写 session 一致（或均已清空且无替代会话）的停止观察才能触发网页停录。shared 显示输入法采集状态，但不因单机停止而结束供音；关供音也不发送第三方快捷键。此路线不创建 `ModelAssets`、Whisper 或转写历史，不承诺取消第三方文字。Mac 的旧永久密钥配对不作为网页 peer 的替代入口，兼容矩阵见 TYPELESS_PWA。
+
+## 2026-10-03 浏览器手机入口
+
+`Desktop/PhoneWeb` 是内嵌静态 PWA：`ui.js` 负责对话白/极夜黑/常青绿三套完整界面，`app.js` 连接用户手势与电脑状态，
+`session.js` 管理唯一活动会话/有界队列，`audio.js` 与 `pcm-worklet.js` 将实际输入采样率转为 48k PCM16 mono。
+Service Worker 只缓存固定公开资源。音频不写文件，生命周期中断先关麦；重连不会自动重启语音。
+
+`BrowserTrust` 为浏览器创建独立根 CA 和有本机地址 SAN 的服务器证书，受限目录存储私钥。
+HTTP 8765 仍只监听回环；原生 HTTPS 8766 仍验证证书固定/Bearer/目标 ID。
+新增 HTTPS 8768 只接受 `/phone`，Host 和写请求/WS Origin 必须匹配。
+用户从本机页面导出公开根证书，在手机手动建立 HTTPS 信任；不自动更改任何系统证书库。
+网页一次性材料在 URL fragment 中取用即删除，需电脑核对批准，授权由 HttpOnly/Secure/Strict cookie 承载。
+cookie 只识别网页手机，不能访问原生 `/api` 或本机 `/local`。
+
+`WebPhoneGateway` 为每个网页手机维护电脑目录、当前确认目标、单个 WS 和会话/停止墓碑。
+主电脑使用 `WebPhoneLocalTarget`，附加电脑使用 `WebPhoneRemoteTarget` 的固定业务路径、独立凭据与 TLS pin；
+不接受 DNS/公网/回环目的地或重定向，不提供通用代理。每手机最多主电脑加四个 peer。
+peer 新增需要其本机一次性 QR 材料+确认，`peers.json` 不向网页返回令牌。
+端点、cookie、资料格式和使用限制详见 [PWA 指南](guides/IPHONE_PWA.md)。
+
+managed 对应选中的单台电脑；电脑本地结束产生 `phoneStopV1` 凭据，网关独立探测活动目标并先推送 `stopped`，
+再清理网络。共享组先由手机明确开麦；各电脑只控制自己的段落，停止不影响其他供音。
+新增 `audioStopV1` / `/api/audio/stop` 使用现有 v2 信封，`StopSupplyAsync` 在同一锁内核对 owner/session 并结束供音。
+PWA 关闭共享会取消尚未提交的段落；旧供音请求不能停止替换后的新会话。
+手机启动缓存最多 1 秒、WS 积压最多 200ms；共享每 peer 队列最多六个20ms帧，managed最多50帧且满时取消而非静默截字。
+健康探测和队列按 peer 独立，慢电脑不阻塞健康电脑。实际设备延迟与锁屏限制仍须实测。
+
+## 2026-10-02 电脑停止联动
+
+新 Desktop `phoneStopV1` 在 `/api/health` 的 `audio.stopRequestedSessionId` 返回本手机 managed
+会话的结束凭据。凭据保留 60 秒且只在内存中；按鉴权 Owner 过滤，USB 为原有 usb-local 身份。
+`SpeechSession.HealthForPhone` 原子取得流、录音与结束凭据，避免跨字段竞态。
+本机停止、取消或 managed 异常结束写入凭据，结束过的 sessionId 继续受原停止墓碑保护。
+shared 的电脑段落结束保持供音，不发停止手机的凭据。
+
+Android `RemoteStopPolicy` 核对会话 ID；调用方先核对目标电脑和传输。明确凭据可在启动响应之前结束
+手机采音；开始响应迟到时不得重置新会话。旧接收端无此能力时，用开始确认的本机单调时刻、健康请求
+起始时刻和探针 age 筛掉开始前/缓存观察，并要求明确的布尔状态；不再把 JSON null 当 false。
+手机先停止 AudioRecord，再按既有尾音路径完成 HTTP；界面恢复空闲，best-effort stop 保持同一会话。
+后台音频停止也带期望 sessionId，避免上一请求的迟到失败/确认关掉下一段录音。
+活动 managed 会话使用独立队列每 500ms 探测当前目标，最多一个请求在途；常规发现检查保持原节奏。
+会话结束/页面销毁后移除轮询；网络错误保持未知，不转换成电脑停止。
+
+## 2026-09-30 新增统一 Desktop 接收端（alpha）
+
+`desktop/PhoneDeck.Desktop` 使用 .NET 10/Kestrel，内嵌本机控制页；HTTP 仅回环，HTTPS 局域网入口沿用逐手机 Bearer、证书固定与扫码双端确认。身份/授权目录独立于旧接收端。受控输入通过 Windows SendInput、macOS CGEvent 或 Linux X11/Wayland 固定输入工具，不接受命令行程序、脚本或任意 shell。
+
+手机 managed start/stop 与共享 PCM 上的电脑本机按键，共用 `SpeechSession`。音频48k PCM16 mono仅在内存中，单段最多两分钟；停止需先收完 PCM，异常/撤销/超时取消；迟到启动由停止墓碑拒绝。Whisper 子进程只收到内存 WAV stdin，最终文本收集完后发布一次。固定 v1.9.4 与模型哈希；Windows 构建增加独立 UTF-8 参数入口以支持中文安装/用户目录，上游源码保持原样。
+
+结果携带 `resultId/sourceComputerId/sessionId/text/createdUtc`，每端内存上限100条、30分钟。`GET /api/transcripts` 只返回供音手机名下、本机新生成的结果；`POST /api/transcripts/receive` 只接收已授权手机的去重结果，接收的记录不会再次对外中继。Android `TranscriptRelay` 显式开启，按共享组转发、离线重试，不存储音频或转写文件。撤销授权只取消对应手机，处理过程中撤销也不会产生文字。源电脑可在焦点仍相同且修饰键已松开时填入文本；被同步的电脑只保留记录。
+
 ## 当前实现与目标架构的边界
 
-源码基线：Android 1.6.0-dev.17 / Windows 接收端 1.6.0-dev.11 /
+源码基线：Android 1.6.0-dev.20 / Windows 接收端 1.6.0-dev.15 /
 macOS 预览 2.0.0-dev.3；当前协议仍为 v2。
 面向 Android/iOS × Windows/macOS 的目标架构、动态多设备模型、逐手机授权、
 会话状态、引擎适配和阶段依赖见 [长期规格 v0.6 第 0 章](../spec%20plan.markdown)。
 这些是后续规划，iOS、无线扫码配对与 Receiver.Core 公共库尚不能当作当前实现。
 
-目前共享请求可由电脑持久化并被手机轮询跟随，授权/重启语义仍需按规格 0.8 迁移；
+新版 Android 的采音只由手机主动开启，不再跟随旧电脑的持久化共享请求；
 当前电脑 LAN 令牌也不能当作已实现逐手机凭据与撤销。
 下文旧版本标记描述各能力引入时的结构，不替代当前支持矩阵或真机验收记录。
 
 ## 当前 Android/Windows 数据流
 
-统一更新使用独立路径：电脑本地更新页 → 签名包/批量请求 → 手机 FleetUpdateActivity 缓存与分发 →
+统一更新使用独立路径：手机导入签名包（或读取电脑缓存）→ 手机 FleetUpdateActivity 校验与分发 →
 各接收端 FleetUpdates 校验与空闲准入 → 独立 FleetUpdateWorker 固定文件替换、健康校验与异常回退。
 Android 通过非导出的只读 UpdateApkProvider 向系统安装器临时授予 APK 读取权；自身包名、签名与版本需一致。
 手机的离线补更队列持久化，主页在前台且目标恢复连接时再次协调，不承诺后台静默分发。
-Mac/iOS 不参与当前安装协议。详见 [统一更新协议](./FLEET_UPDATES.md)。
+Mac/iOS 不参与当前安装协议。详见 [统一更新协议](./guides/FLEET_UPDATES.md)。
 
 ```text
 Android MainActivity
@@ -57,7 +162,7 @@ Windows PhoneDeck.Server        │
 - `PhoneDeckHttp.java` / `PhoneDeckLanClient.java` / `LanDiscoveryClient.java`：并行探测候选
   地址并通过受限 UDP 广播发现接收端；任何发现结果仍需 HTTPS、密钥、证书固定与目标 ID
   校验后才可用于控制和音频。
-- `android/artwork/phonedeck-app-icon-1024.png` 与 `res/mipmap-*`：Android 图标母版及 mdpi–xxxhdpi 确定性切图，清单的普通与圆形图标共用该资源。
+- `design/yandu-icon.svg`、`android/artwork/yandu-app-icon-1024.png` 与 `res/mipmap-*`：黑白话筒 SVG 母版、mdpi–xxxhdpi 切图及自适应/单色图层，清单的普通与圆形图标共用该资源。
 
 ### Windows 主要组件
 
@@ -73,7 +178,9 @@ Windows PhoneDeck.Server        │
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
-- `PhoneDeck.ControlCenter`：.NET 8 WPF 控制台，采用 Web2WPF Aether 主题资源；通过本地健康接口展示接收端、Wi-Fi、音频和 USB 状态，并管理进程、便携设置、Agent 快捷操作与系统托盘。
+- `PhoneDeck.ControlCenter`：.NET 8 WinForms 原生托盘，状态窗口按需创建/销毁；只显示状态、重连和退出。隐藏或最小化后暂停 UI 轮询，不加载 WPF。
+- `DesktopConfigurationEndpoints` / `ConfigurationGate`：手机按电脑编辑引擎与连接设置。写入必须带目标 ID 和读取时的 revision，排斥并发输入/音频，原子落盘后热应用。
+- `ComputerSettingsActivity`：复用固定证书的 HTTPS；USB 回退先验证身份，保存不自动切换目标或重试。不再从电脑自动覆盖手机 Agent 按键。
 
 ### macOS 2.0.0-dev.2 预览组件
 
@@ -91,8 +198,10 @@ Windows PhoneDeck.Server        │
   环形缓冲、managed pre-roll、shared 立即输出、冲突和会话复位。
 
 Mac 现在声明 `phoneAudio/sharedMicrophone/managedDictation`；`audio.available` 仍以实际找到
-BlackHole 为准。源码已跨平台编译并通过测试，但尚未在真实 Mac 上验证 AUHAL、CGEvent、
-TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
+BlackHole 为准。2026-09-14 已在 Apple Silicon Mac（macOS 26.3.1）完成 Samsung→Mac→Typeless
+两轮真实 Wi-Fi 听写最小闭环，实测覆盖 CGEvent、AUHAL/BlackHole、Typeless 采集探针与
+辅助功能权限；但按住模式、翻译/问答、USB 断线恢复、睡眠/重启、Intel、蓝牙和局域网
+防火墙行为仍未验收，不能视为 Mac 全场景通过。
 
 ## 当前单电脑/传输限制
 
@@ -102,7 +211,7 @@ TCC 权限、Kestrel TLS、ADB 或局域网防火墙行为。
 4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
 5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
 6. Windows 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
-7. macOS 双语音模式已有预览源码；真实 BlackHole/Typeless、蓝牙和正式签名仍待验收或接入。
+7. macOS 双语音模式已有预览源码；真实 Mac 已完成两轮 Wi-Fi 听写最小闭环，按住模式、蓝牙和正式签名仍待验收或接入。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -183,7 +292,8 @@ Control / Option / Command，消除自定义组合的歧义。
 
 当前 `1.6.0-dev.5` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
 自动发现、单目标听写和共享麦克风扇出。macOS `2.0.0-dev.2` 已新增兼容相同安全传输的
-CGEvent、AUHAL/BlackHole 和 Typeless 会话预览。仍缺凭据撤销/重配、标准 mDNS/Bonjour、
-真实 Mac 权限/音频验收和 Windows/macOS 三机联合压力测试。
+CGEvent、AUHAL/BlackHole 和 Typeless 会话预览，2026-09-14 在真实 Mac 完成两轮 Wi-Fi
+听写最小闭环。仍缺凭据撤销/重配、标准 mDNS/Bonjour、真实 Mac 全场景验收
+和 Windows/macOS 三机联合压力测试。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。

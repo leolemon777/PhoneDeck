@@ -135,7 +135,7 @@ internal sealed class LanIdentity : IDisposable
         var exported = created.Export(X509ContentType.Pfx, password);
         File.WriteAllBytes(path, exported);
         UnixPermissions.TryRestrictToCurrentUser(path);
-        return new X509Certificate2(
+        return X509CertificateLoader.LoadPkcs12(
             exported,
             password,
             X509KeyStorageFlags.DefaultKeySet);

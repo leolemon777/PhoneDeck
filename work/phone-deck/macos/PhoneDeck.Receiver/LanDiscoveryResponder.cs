@@ -29,17 +29,10 @@ internal sealed class LanDiscoveryResponder : IDisposable
         {
             Console.WriteLine($"局域网发现监听未启用（UDP {DiscoveryPort}）：{exception.Message}");
         }
-        responsePayload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            ok = true,
-            service = "phonedeck",
-            protocolVersion = 2,
-            computerId = identity.ComputerId,
-            displayName = identity.DisplayName,
-            port = httpsPort,
-            platform = identity.Platform,
-            capabilities
-        });
+        responsePayload = JsonSerializer.SerializeToUtf8Bytes(
+            new LanDiscoveryReply(true, "phonedeck", 2, identity.ComputerId, identity.DisplayName,
+                httpsPort, identity.Platform, capabilities),
+            MacApiJsonContext.Default.LanDiscoveryReply);
         worker = new Thread(Run)
         {
             IsBackground = true,
@@ -47,8 +40,19 @@ internal sealed class LanDiscoveryResponder : IDisposable
         };
     }
 
+    private volatile bool enabled = true;
     internal bool PortBound => client is not null;
-    internal bool Running => worker.IsAlive;
+    internal bool Running => enabled && worker.IsAlive;
+
+    /// <summary>手机集中设置可随时开关；关闭时不再应答发现请求。</summary>
+    internal void SetEnabled(bool value)
+    {
+        enabled = value;
+        if (value)
+        {
+            Start();
+        }
+    }
 
     internal void Start()
     {
@@ -82,7 +86,7 @@ internal sealed class LanDiscoveryResponder : IDisposable
             {
                 break;
             }
-            if (remote is null || data.Length > 64)
+            if (!enabled || remote is null || data.Length > 64)
             {
                 continue;
             }

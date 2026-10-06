@@ -13,6 +13,8 @@
 
 ## 源码根目录
 
+2026-09-30 用户已授权执行跨平台、最终文字同步及低配置分发。新增 `work/phone-deck/desktop/PhoneDeck.Desktop` 为独立 `2.0.0-alpha.1` 路线，构建入口 `scripts/build-desktop.ps1`，具体状态见 `docs/release/CROSS_PLATFORM_EXECUTION.md`。旧接收端与签名设备更新链路继续保留；新包不能混入旧固定三产物更新清单。当前 .NET 项目使用 SDK 10（`global.json`），本页较早的 .NET 8 描述仅为历史基线。真实 Mac/Linux 权限和输入必须实机验证。
+
 真正的代码位于 `work/phone-deck`：
 
 - Android：`work/phone-deck/android`
@@ -24,8 +26,8 @@
 
 ## 当前基线
 
-- 当前源码版本：Android 1.6.0-dev.18；Windows 接收端 1.6.0-dev.12（发布序号 24）；macOS 接收端预览 2.0.0-dev.3；iOS 尚待开发；上一实机稳定基线为 1.4.0。本机与Samsung已覆盖更新，具体边界见docs/WINDOWS_ANDROID_DELIVERY.md。
-- Windows/Android 统一更新已加入，协议与发布要求见 docs/FLEET_UPDATES.md。签名包只允许固定三个产物，禁止引入远程命令/脚本或跳过发布者验证。Android APK 签名和更新清单签名独立，私钥不能入 Git。
+- 当前源码版本：Android 1.6.0-dev.21；Windows 接收端 1.6.0-dev.16（发布序号 28）；macOS 接收端预览 2.0.0-dev.3；iOS 尚待开发；上一实机稳定基线为 1.4.0。本机 Windows 已覆盖更新；Samsung 新版因预览签名不同，待用户选择安装通道，见 docs/guides/PHONE_MANAGED_DESKTOP.md。
+- Windows/Android 统一更新已加入，协议与发布要求见 docs/guides/FLEET_UPDATES.md。签名包只允许固定三个产物，禁止引入远程命令/脚本或跳过发布者验证。Android APK 签名和更新清单签名独立，私钥不能入 Git。
 - 当前规格版本：v0.6。第 0 章是面向开源的当前总规划，后续章节保留历史决策；与第 0 章冲突的旧范围、状态和排期不再作为执行依据。用户已确认四端、多设备、多输入法、多模式与主题方向，技术选型与工期仍是建议。
 - 1.5.0 已完成源码、构建/协议、长期签名、Samsung 安装和一轮 ADB 恢复验证；快捷键
   编辑与真实输入、音频、Typeless、连续断线和蓝牙仍待验收。

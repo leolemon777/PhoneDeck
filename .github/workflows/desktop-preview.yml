@@ -1,0 +1,130 @@
+name: Phone Web Compatibility and Optional Desktop Preview
+on:
+  pull_request:
+    paths: ['work/phone-deck/shared/**','work/phone-deck/desktop/**','work/phone-deck/android/**','design/yandu-icon.svg','scripts/build-desktop.ps1','scripts/desktop/**','scripts/tests/Test-Desktop*.py','licenses/desktop/**','docs/DESKTOP_*.md','.github/workflows/desktop-preview.yml','Directory.Build.targets','global.json']
+  workflow_dispatch:
+    inputs:
+      include_model:
+        description: Bundle verified multilingual model for offline first use
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: desktop-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  phone-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: work/phone-deck/desktop/tests-web/package-lock.json
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Verify browser PCM and session lifecycle
+        run: node --test work/phone-deck/desktop/tests-web/audio.test.mjs work/phone-deck/desktop/tests-web/session.test.mjs
+      - name: Install pinned browser test tools
+        working-directory: work/phone-deck/desktop/tests-web
+        run: |
+          npm ci --ignore-scripts
+          npx --no-install playwright install --with-deps chromium --only-shell
+      - name: Exercise phone controls through real receiver and generated browser audio
+        run: node work/phone-deck/desktop/tests-web/browser.integration.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PhoneDeck-Web-Verification
+          retention-days: 7
+          path: |
+            outputs/iphone-pwa/integration/*.json
+            outputs/iphone-pwa/integration/*.png
+          if-no-files-found: warn
+  protocol-tests:
+    name: Web gateway protocol tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Test browser gateway and optional engine contracts without downloading a model
+        run: dotnet test work/phone-deck/desktop/PhoneDeck.Desktop.Tests/PhoneDeck.Desktop.Tests.csproj -c Release --nologo
+  desktop:
+    # Whisper packages remain a deliberately requested developer experiment.
+    # Normal UI/Typeless PR checks must not fetch speech models or publish that route.
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64 }
+          - { os: ubuntu-22.04, rid: linux-x64 }
+          - { os: macos-15-intel, rid: osx-x64 }
+          - { os: macos-latest, rid: osx-arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Prepare verified portable Windows package compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $compilerRoot = Join-Path $env:RUNNER_TEMP 'phonedeck-inno'
+          New-Item -ItemType Directory -Path $compilerRoot -Force | Out-Null
+          $archive = Join-Path $compilerRoot 'tools.innosetup.6.7.3.nupkg'
+          Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/tools.innosetup/6.7.3/tools.innosetup.6.7.3.nupkg' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'F780898E402FF80612CC8D9FCB8C6E02932BD1CB4C900FFDAA31F9341CFB49F4') { throw 'Compiler archive hash mismatch' }
+          dotnet nuget verify $archive --all
+          if ($LASTEXITCODE -ne 0) { throw 'Compiler repository signature verification failed' }
+          [IO.Compression.ZipFile]::ExtractToDirectory($archive, (Join-Path $compilerRoot 'unpacked'))
+          (Join-Path $compilerRoot 'unpacked/tools') | Add-Content $env:GITHUB_PATH
+      - name: Test and package native runtime
+        id: package
+        shell: pwsh
+        env:
+          INCLUDE_MODEL: ${{ inputs.include_model || false }}
+        run: |
+          ./scripts/build-desktop.ps1 -Rid '${{ matrix.rid }}' -IncludeModel:($env:INCLUDE_MODEL -eq 'true') -VerifySpeech
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhoneDeck-Desktop-${{ matrix.rid }}
+          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.package_directory }}/*.zip
+            ${{ steps.package.outputs.package_directory }}/*.gz
+            ${{ steps.package.outputs.package_directory }}/*.exe
+            ${{ steps.package.outputs.package_directory }}/*.deb
+            ${{ steps.package.outputs.package_directory }}/*.build.json
+            ${{ steps.package.outputs.package_directory }}/checksums.sha256
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - name: Build isolated Android preview
+        working-directory: work/phone-deck/android
+        run: bash gradlew :app:assembleUiPreview :app:lintUiPreview :app:testDebugUnitTest --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhoneDeck-Android-Preview
+          path: work/phone-deck/android/app/build/outputs/apk/uiPreview/*.apk
+          retention-days: 7

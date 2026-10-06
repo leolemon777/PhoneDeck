@@ -3,7 +3,10 @@ using System.Text.RegularExpressions;
 
 internal sealed class UsbWatchdog : IDisposable
 {
+    /// <summary>没连上或刚恢复时每 2 秒检查；adb reverse 已在位时放宽到 10 秒（每次只启动一个 adb 进程）。</summary>
     private const int CheckIntervalMilliseconds = 2_000;
+    private const int HealthyIntervalMilliseconds = 10_000;
+    private bool lastCheckHealthy;
     private const string MutexName = @"Local\PhoneDeckUsbReconnect";
     private static readonly Regex ReverseEntryPattern = new(
         @"tcp:8765\s+tcp:8765", RegexOptions.Compiled);
@@ -12,6 +15,8 @@ internal sealed class UsbWatchdog : IDisposable
     private readonly Mutex mutex;
     private readonly bool ownsMutex;
     private Thread? worker;
+    private volatile bool enabled = true;
+    internal void SetEnabled(bool value) { enabled = value; if (value) Start(); }
 
     internal UsbWatchdog(string? configuredAdbPath)
     {
@@ -24,7 +29,7 @@ internal sealed class UsbWatchdog : IDisposable
     internal string? LastRestoredAt { get; private set; }
     internal int RestoreCount { get; private set; }
 
-    internal bool Running => worker?.IsAlive == true;
+    internal bool Running => enabled && worker?.IsAlive == true;
 
     internal void Start()
     {
@@ -60,7 +65,7 @@ internal sealed class UsbWatchdog : IDisposable
         {
             try
             {
-                CheckAndRestore();
+                if (enabled) CheckAndRestore();
             }
             catch (Exception exception)
             {
@@ -69,7 +74,8 @@ internal sealed class UsbWatchdog : IDisposable
             }
             try
             {
-                Task.Delay(CheckIntervalMilliseconds, token).Wait(token);
+                Task.Delay(enabled && lastCheckHealthy ? HealthyIntervalMilliseconds : CheckIntervalMilliseconds,
+                    token).Wait(token);
             }
             catch (OperationCanceledException)
             {
@@ -80,13 +86,15 @@ internal sealed class UsbWatchdog : IDisposable
 
     private void CheckAndRestore()
     {
-        if (RunAdb("get-state", out var stateOutput, out _)?.Trim() != "device")
+        lastCheckHealthy = false;
+        // 没有设备时 reverse --list 直接失败（返回 null），不必再单独跑 get-state。
+        if (RunAdb("reverse --list", out var listOutput, out _) is null)
         {
             return;
         }
-        var reverseList = RunAdb("reverse --list", out var listOutput, out _) ?? string.Empty;
         if (ReverseEntryPattern.IsMatch(listOutput))
         {
+            lastCheckHealthy = true;
             return;
         }
         if (RunAdb("reverse tcp:8765 tcp:8765", out _, out _) is null)

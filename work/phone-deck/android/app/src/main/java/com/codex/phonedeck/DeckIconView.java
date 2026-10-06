@@ -9,6 +9,7 @@ import android.view.View;
 @android.annotation.SuppressLint("ViewConstructor") // Programmatic-only icon, never inflated from XML.
 final class DeckIconView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Path bubble = new android.graphics.Path();
     private final String kind;
 
     DeckIconView(Context context, String kind, int color) {
@@ -29,6 +30,41 @@ final class DeckIconView extends View {
         canvas.translate((getWidth() - 24 * scale) / 2, (getHeight() - 24 * scale) / 2);
         canvas.scale(scale, scale);
         switch (kind) {
+            case "devices":
+                canvas.drawRoundRect(3, 4, 21, 16, 2, 2, paint);
+                canvas.drawLine(12, 16, 12, 20, paint);
+                canvas.drawLine(8, 20, 16, 20, paint);
+                break;
+            case "laptop":
+                canvas.drawRoundRect(5, 5, 19, 15, 1.5f, 1.5f, paint);
+                canvas.drawLine(2.5f, 18.5f, 21.5f, 18.5f, paint);
+                canvas.drawLine(5, 15, 3.5f, 18.5f, paint);
+                canvas.drawLine(19, 15, 20.5f, 18.5f, paint);
+                break;
+            case "translate":
+                canvas.drawLine(4, 5, 12, 5, paint);
+                canvas.drawLine(8, 3, 8, 5, paint);
+                canvas.drawArc(1, -1, 9, 11, 0, 75, false, paint);
+                canvas.drawLine(6, 7, 11, 11.3f, paint);
+                canvas.drawLine(13, 21, 17, 12, paint);
+                canvas.drawLine(17, 12, 21, 21, paint);
+                canvas.drawLine(14.5f, 18, 19.5f, 18, paint);
+                break;
+            case "ask":
+                bubble.reset();
+                bubble.moveTo(4, 5); bubble.lineTo(20, 5); bubble.lineTo(20, 16); bubble.lineTo(10, 16);
+                bubble.lineTo(5, 20); bubble.lineTo(5, 16); bubble.lineTo(4, 16); bubble.close();
+                canvas.drawPath(bubble, paint);
+                canvas.drawArc(10, 7.5f, 14, 11.5f, 180, 230, false, paint);
+                canvas.drawLine(12, 12, 12, 13, paint);
+                break;
+            case "slash":
+                canvas.drawLine(15, 4, 9, 20, paint);
+                break;
+            case "plus":
+                canvas.drawLine(12, 5, 12, 19, paint);
+                canvas.drawLine(5, 12, 19, 12, paint);
+                break;
             case "appearance":
                 canvas.drawCircle(12, 12, 8, paint);
                 canvas.drawLine(12, 4, 12, 20, paint);

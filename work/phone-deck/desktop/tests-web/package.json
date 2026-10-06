@@ -1,0 +1,12 @@
+{
+  "name": "yandu-phone-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test audio.test.mjs session.test.mjs",
+    "test:browser": "node browser.integration.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

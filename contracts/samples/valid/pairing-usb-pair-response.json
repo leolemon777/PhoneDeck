@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "protocolVersion": 2,
+  "computerId": "computer-placeholder-01",
+  "displayName": "PLACEHOLDER-DESKTOP",
+  "platform": "windows",
+  "addresses": ["PLACEHOLDER-ADDRESS-1", "PLACEHOLDER-ADDRESS-2"],
+  "port": 8766,
+  "certificateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "accessToken": "PLACEHOLDER-USB-PAIR-TOKEN"
+}

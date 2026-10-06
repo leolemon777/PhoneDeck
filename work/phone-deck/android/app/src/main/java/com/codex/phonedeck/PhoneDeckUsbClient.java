@@ -35,6 +35,8 @@ final class PhoneDeckUsbClient {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(SERVER + "/api/health").openConnection();
+            connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
+            connection.setRequestProperty("X-PhoneDeck-Device", PhoneDeckHttp.DEVICE_LABEL);
             connection.setConnectTimeout(800);
             connection.setReadTimeout(1200);
             connection.setRequestMethod("GET");
@@ -95,7 +97,7 @@ final class PhoneDeckUsbClient {
             usbFailure = exception;
         }
 
-        TargetDeviceManager deviceManager = new TargetDeviceManager(context);
+        TargetDeviceManager deviceManager = TargetDeviceManager.get(context);
         String activeComputerId = deviceManager.getActiveComputerId();
         if (activeComputerId == null || activeComputerId.isBlank()) {
             if (usbServer != null && !usbServer.computerId.isEmpty()) {
@@ -234,6 +236,8 @@ final class PhoneDeckUsbClient {
         try {
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             connection = (HttpURLConnection) new URL(SERVER + endpoint).openConnection();
+            connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
+            connection.setRequestProperty("X-PhoneDeck-Device", PhoneDeckHttp.DEVICE_LABEL);
             connection.setConnectTimeout(800);
             connection.setReadTimeout(1800);
             connection.setRequestMethod("POST");

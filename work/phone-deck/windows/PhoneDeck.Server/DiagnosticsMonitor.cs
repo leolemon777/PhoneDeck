@@ -24,10 +24,16 @@ internal sealed record DiagnosticsSnapshot
 internal sealed class DiagnosticsMonitor : IDisposable
 {
     internal const int RefreshIntervalMs = 3_000;
+
+    /// <summary>语音会话进行中的刷新间隔：电脑端停止要在亚秒级同步到手机。</summary>
+    internal const int ActiveRefreshIntervalMs = 250;
     internal const int StaleAfterMs = 6_000;
 
     private readonly Func<DiagnosticsSnapshot> reader;
     private readonly int refreshIntervalMs;
+    private readonly Func<bool>? sessionActive;
+    private readonly Action<DiagnosticsSnapshot>? refreshed;
+    private readonly ManualResetEventSlim wake = new(false);
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly CancellationTokenSource cancellation = new();
     private readonly Thread worker;
@@ -35,10 +41,16 @@ internal sealed class DiagnosticsMonitor : IDisposable
 
     internal DiagnosticsSnapshot Current => current;
 
-    internal DiagnosticsMonitor(Func<DiagnosticsSnapshot> reader, int refreshIntervalMs = RefreshIntervalMs)
+    internal DiagnosticsMonitor(
+        Func<DiagnosticsSnapshot> reader,
+        int refreshIntervalMs = RefreshIntervalMs,
+        Func<bool>? sessionActive = null,
+        Action<DiagnosticsSnapshot>? refreshed = null)
     {
         this.reader = reader;
         this.refreshIntervalMs = refreshIntervalMs;
+        this.sessionActive = sessionActive;
+        this.refreshed = refreshed;
         worker = new Thread(Run)
         {
             IsBackground = true,
@@ -55,6 +67,14 @@ internal sealed class DiagnosticsMonitor : IDisposable
     }
 
     internal bool Running => worker.IsAlive;
+
+    /// <summary>会话开始等状态变化时立即刷新一次，并切换到会话期间的快速节奏。</summary>
+    internal void Nudge() => wake.Set();
+
+    internal int CurrentIntervalMs =>
+        sessionActive?.Invoke() == true
+            ? Math.Min(refreshIntervalMs, ActiveRefreshIntervalMs)
+            : refreshIntervalMs;
 
     /// <summary>强制刷新一次（/api/diagnostics 使用）。超时不取消底层读取，
     /// 只是停止等待并返回当前快照；读取仍由信号量保证单线程执行。</summary>
@@ -110,10 +130,19 @@ internal sealed class DiagnosticsMonitor : IDisposable
                 {
                     refreshGate.Release();
                 }
+                try
+                {
+                    refreshed?.Invoke(current);
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"诊断刷新回调失败：{exception.Message}");
+                }
             }
             try
             {
-                Task.Delay(refreshIntervalMs, cancellation.Token).Wait(cancellation.Token);
+                wake.Wait(CurrentIntervalMs, cancellation.Token);
+                wake.Reset();
             }
             catch (OperationCanceledException)
             {
@@ -124,6 +153,7 @@ internal sealed class DiagnosticsMonitor : IDisposable
 
     public void Dispose()
     {
+        // wake 不在此释放：后台线程可能仍在等待它，取消令牌已足以让线程退出。
         cancellation.Cancel();
         refreshGate.Dispose();
         cancellation.Dispose();

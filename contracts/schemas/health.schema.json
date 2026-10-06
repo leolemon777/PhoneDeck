@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/health.schema.json",
+  "title": "GET /api/health 能力协商文档（能力域）",
+  "description": "能力协商入口：手机读取 health 判定接收端能力/状态（Program.cs:128-223）。三层真实状态（手机采音 audio.streaming / 接收端供音 / 引擎采集 voiceEngine.capturing）互不相等；engineCapturing=null 表示探针未知，不得当作 stopped（规格 §9.1）。stale=true 表示快照过期（规格 §9 MIC-09）。capabilities 为受控枚举：新增能力必须先扩展 definitions.capabilityName 并升级协议（规格 §8 PRO-01、§16.2 能力“supported/available/busy/permissionDenied 分开”→ 本文档以 audio.available、busy（配置快照）、capturing 表达）。",
+  "type": "object",
+  "properties": {
+    "ok": { "const": true },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "protocolVersion": { "$ref": "definitions.schema.json#/definitions/protocolVersionV2" },
+    "computerId": { "$ref": "definitions.schema.json#/definitions/computerId" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "architecture": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "definitions.schema.json#/definitions/capabilityName" },
+      "uniqueItems": true,
+      "description": "能力枚举必须全部已注册；未知能力名（如 remoteShell）非法（SEC-04：不存在的能力不可能被协商出来）。"
+    },
+    "audio": {
+      "type": "object",
+      "properties": {
+        "available": { "type": "boolean" },
+        "device": { "type": ["string", "null"] },
+        "streaming": { "type": "boolean" },
+        "sessionId": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"], "enum": ["managed", "shared", null] },
+        "permissionDenied": {
+          "type": "boolean",
+          "description": "【目标字段】权限被拒绝与 available（设备缺失）/busy（占用）分开表达（规格 §16.2 能力行“supported/available/busy/permissionDenied 分开”）；语义见 contracts/capability-policy.json。"
+        },
+        "checkedAtMs": { "type": "integer", "minimum": 0 },
+        "ageMs": { "type": "integer", "minimum": 0 },
+        "lastError": { "type": ["string", "null"] },
+        "stale": { "type": "boolean" },
+        "stopRequestedSessionId": {
+          "type": ["string", "null"],
+          "description": "能力 phoneStopV1：电脑端结束了本手机发起的 managed 会话时返回该 sessionId（仅内存、60 秒、只返回给会话所有者），手机据此立即停止采音；无凭据为 null。"
+        }
+      },
+      "required": ["available", "streaming", "stale"],
+      "additionalProperties": false
+    },
+    "dictation": {
+      "type": "object",
+      "properties": {
+        "active": { "type": "boolean" },
+        "sessionId": { "type": ["string", "null"] }
+      },
+      "required": ["active"],
+      "additionalProperties": false
+    },
+    "voiceEngine": {
+      "type": "object",
+      "properties": {
+        "id": { "type": ["string", "null"] },
+        "displayName": { "type": ["string", "null"] },
+        "experimental": { "type": "boolean" },
+        "capturing": {
+          "type": ["boolean", "null"],
+          "description": "三态：true/false/null(探针未知)。"
+        },
+        "permissionDenied": {
+          "type": "boolean",
+          "description": "【目标字段】引擎/辅助功能权限被拒，独立于 experimental/capturing=null（探针未知）（规格 §16.2 能力行）。"
+        },
+        "virtualCableSelected": { "type": ["boolean", "null"] },
+        "microphone": { "type": ["string", "null"] },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 32 },
+              "label": { "type": ["string", "null"] },
+              "trigger": { "enum": ["toggle", "hold"] },
+              "configured": { "type": "boolean" },
+              "keys": { "type": ["array", "null"], "items": { "type": "string" } }
+            },
+            "required": ["id", "trigger", "configured"],
+            "additionalProperties": false
+          }
+        },
+        "checkedAtMs": { "type": "integer", "minimum": 0 },
+        "ageMs": { "type": "integer", "minimum": 0 },
+        "lastError": { "type": ["string", "null"] },
+        "stale": { "type": "boolean" }
+      },
+      "required": ["experimental", "capturing"],
+      "additionalProperties": false
+    },
+    "shared": {
+      "type": "object",
+      "properties": { "requested": { "type": "boolean" } },
+      "required": ["requested"],
+      "additionalProperties": false,
+      "description": "旧联动开关：仅表示“电脑端曾请求”，持久化请求不得自动开麦（规格 §9 MIC-06、§16.3 R7）。"
+    }
+  },
+  "required": ["ok", "protocolVersion", "computerId", "displayName", "capabilities", "audio", "dictation"],
+  "additionalProperties": true,
+  "$comment": "additionalProperties=true：保留遗留 typeless 块、usbWatchdog、updates 等前向兼容只读字段（Program.cs:170-221）。"
+}

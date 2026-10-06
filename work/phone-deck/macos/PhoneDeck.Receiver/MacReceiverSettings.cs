@@ -11,21 +11,17 @@ internal sealed class MacReceiverSettings
     public string? TypelessSettingsPath { get; init; }
     public TypelessShortcutOverrides TypelessShortcuts { get; init; } = new();
 
+    internal static string SettingsPath => Path.Combine(PhoneDeckDataDirectory.Get(), "server-settings.json");
+
     internal static MacReceiverSettings LoadOrCreate()
     {
-        var path = Path.Combine(PhoneDeckDataDirectory.Get(), "server-settings.json");
+        var path = SettingsPath;
         try
         {
             if (File.Exists(path))
             {
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    ReadCommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                };
-                var loaded = JsonSerializer.Deserialize<MacReceiverSettings>(
-                    File.ReadAllText(path), options);
+                var loaded = JsonSerializer.Deserialize(
+                    File.ReadAllText(path), MacFileReadJsonContext.Default.MacReceiverSettings);
                 if (loaded is not null)
                 {
                     return loaded;

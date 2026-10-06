@@ -50,6 +50,96 @@ public sealed class DictationSessionManagerTests
     }
 
     [TestMethod]
+    public void PreflightFailureDoesNotReserveLeaseOrTurnRetryIntoFalseSuccess()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { UsesVirtualCable = false };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "first", "dictation"));
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "retry", "dictation"));
+        Assert.AreEqual(0, engine.ToggleCount);
+        engine.UsesVirtualCable = true;
+        engine.WaitResults.Enqueue(true);
+        Assert.IsFalse(manager.Start(Guid.NewGuid().ToString(), "fixed", "dictation"));
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void FailedBeginReleasesLeaseAndAudioForRetry()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { FailBegin = true };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "first", "dictation"));
+        Assert.IsFalse(manager.IsActive);
+        Assert.AreEqual(1, audio.StopCalls);
+        engine.FailBegin = false;
+        engine.WaitResults.Enqueue(true);
+        Assert.IsFalse(manager.Start(session, "retry", "dictation"));
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void AudioEndedBuriesOldLeaseAndAllowsImmediateNewSession()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var previous = StartSuccessfulSession(manager, engine);
+        engine.IsCapturingResults.Enqueue(false);
+        manager.AudioEnded(previous);
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(previous, "late", "dictation"));
+        engine.WaitResults.Enqueue(true);
+        var next = Guid.NewGuid().ToString();
+        Assert.IsFalse(manager.Start(next, "new", "dictation"));
+        Assert.AreEqual(next, manager.ActiveSessionId);
+    }
+
+    [TestMethod]
+    public void StopDuringWarmupWinsBeforeEngineShortcutAndKeepsTombstone()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        audio.OnWaitForSession = call => { if (call == 1) manager.Stop(session, "cancel"); };
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "start", "dictation"));
+        Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(session, "late", "dictation"));
+        Assert.AreEqual(0, engine.ToggleCount);
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public async Task DuplicateStartWaitsForActualEngineConfirmation()
+    {
+        using var gate = new ManualResetEventSlim(false);
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController { WaitForCapturingGate = gate };
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        var first = Task.Run(() => manager.Start(session, "first", "dictation"));
+        Task<bool>? duplicate = null;
+        try
+        {
+            Assert.IsTrue(SpinWait.SpinUntil(() => manager.IsActive, 3_000));
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            duplicate = Task.Run(() => { entered.SetResult(); return manager.Start(session, "again", "dictation"); });
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.AreNotSame(duplicate, await Task.WhenAny(duplicate, Task.Delay(100)),
+                "A reserved lease is not confirmation that the engine started");
+        }
+        finally
+        {
+            gate.Set(); await first;
+            if (duplicate is not null) await duplicate;
+        }
+        Assert.IsTrue(await duplicate!);
+        Assert.AreEqual(1, engine.ToggleCount);
+    }
+
+    [TestMethod]
     public void StartWaitsForConcurrentAudioStreamRegistration()
     {
         var audio = new FakeAudioSessionController
@@ -383,8 +473,122 @@ public sealed class DictationSessionManagerTests
         Assert.AreEqual(2, engine.ToggleCount, "Timeout must still release the engine.");
     }
 
+    [TestMethod]
+    public void WarmOutputSkipsAudioWarmupGrace()
+    {
+        var audio = new FakeAudioSessionController { OutputWarm = true };
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+
+        manager.Start(Guid.NewGuid().ToString(), "warm", "dictation");
+
+        Assert.AreEqual(0, audio.WaitTimeouts[0], "常驻输出已运行时不应再等待声卡预热");
+    }
+
+    [TestMethod]
+    public void DesktopStopAfterConfirmationIssuesReceiptOnlyToOwner()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", "phone-a");
+
+        // 确认后宽限期内的“未采集”观测是抖动，不作为电脑端停止依据。
+        manager.ObserveEngineCapturing(false, Environment.TickCount64);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+        manager.ObserveEngineCapturing(true, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+        manager.ObserveEngineCapturing(null, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For("phone-a"));
+
+        var afterGrace = Environment.TickCount64
+            + DictationSessionManager.EngineStopObservationGraceMilliseconds + 50;
+        manager.ObserveEngineCapturing(false, afterGrace);
+        Assert.IsNull(manager.Receipts.For("phone-a"), "单次未采集可能是探针熔断，不能据此停录");
+        manager.ObserveEngineCapturing(true, afterGrace + 50);
+        manager.ObserveEngineCapturing(false, afterGrace + 100);
+        Assert.IsNull(manager.Receipts.For("phone-a"), "中间出现采集观测时重新计数");
+        manager.ObserveEngineCapturing(false,
+            afterGrace + 100 + DictationSessionManager.EngineStopConfirmationMilliseconds);
+
+        Assert.AreEqual(session, manager.Receipts.For("phone-a"));
+        Assert.IsNull(manager.Receipts.For("phone-b"), "凭据不能泄露给其他手机");
+        Assert.IsNull(manager.Receipts.For(null));
+    }
+
+    [TestMethod]
+    public void UnconfirmedOrEndedSessionNeverIssuesReceipt()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        manager.ObserveEngineCapturing(false, Environment.TickCount64 + 10_000);
+        Assert.IsNull(manager.Receipts.For(null));
+
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation");
+        manager.Stop(session, "stop");
+        manager.ObserveEngineCapturing(false, Environment.TickCount64 + 10_000);
+
+        Assert.IsNull(manager.Receipts.For(null), "手机自己停止的会话不需要停止凭据");
+    }
+
+    [TestMethod]
+    public void LocalDesktopStopRecordsReceiptBeforeWaitingForPhoneTail()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation");
+        string? receiptDuringDrain = null;
+        audio.OnWaitForEnd = _ => receiptDuringDrain = manager.Receipts.For(null);
+
+        manager.StopFromDesktop();
+
+        Assert.AreEqual(session, receiptDuringDrain, "手机需要在服务端等尾音之前就收到停止凭据");
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void AnotherPhoneCannotStopTheActiveSession()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", "phone-a");
+
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            manager.Stop(session, "stop-b", "phone-b", checkOwner: true));
+
+        StringAssert.Contains(error.Message, "另一台手机");
+        Assert.IsTrue(manager.IsActive);
+        Assert.IsTrue(manager.IsOwnedBy("phone-a"));
+        Assert.IsFalse(manager.IsOwnedBy("phone-b"));
+        Assert.IsFalse(manager.IsOwnedBy(null));
+        manager.Stop(session, "stop-a", "phone-a", checkOwner: true);
+        Assert.IsFalse(manager.IsActive);
+    }
+
+    [TestMethod]
+    public void UsbAndLegacyTokenShareTheLegacyIdentity()
+    {
+        var audio = new FakeAudioSessionController();
+        var engine = new FakeVoiceEngineController();
+        using var manager = new DictationSessionManager(audio, engine);
+        var session = Guid.NewGuid().ToString();
+        manager.Start(session, "start", "dictation", null);
+
+        Assert.IsTrue(manager.IsOwnedBy(ClientCredentialsStore.LegacySharedClientId));
+        manager.Stop(session, "stop", ClientCredentialsStore.LegacySharedClientId, checkOwner: true);
+        Assert.IsFalse(manager.IsActive);
+    }
+
     private sealed class FakeAudioSessionController : IPhoneAudioSessionController
     {
+        public bool OutputWarm { get; set; }
         public int StopCalls { get; private set; }
         public int WaitForSessionCalls { get; private set; }
         public int BeginPlaybackCalls { get; private set; }
@@ -437,6 +641,7 @@ public sealed class DictationSessionManagerTests
         public int ToggleCount { get; private set; }
         public string LastMode { get; private set; } = "dictation";
         public bool UsesVirtualCable { get; set; } = true;
+        public bool FailBegin { get; set; }
         public int LastWaitTimeoutMilliseconds { get; private set; }
 
         public string EngineDisplayName => "Typeless";
@@ -464,6 +669,7 @@ public sealed class DictationSessionManagerTests
 
         public bool BeginOnce(string requestId, string mode)
         {
+            if (FailBegin) throw new InvalidOperationException("Simulated input failure");
             if (!requestIds.Add(requestId))
             {
                 return true;

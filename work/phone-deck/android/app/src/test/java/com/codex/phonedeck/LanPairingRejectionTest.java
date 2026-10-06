@@ -28,10 +28,11 @@ public final class LanPairingRejectionTest {
     }
 
     @Test
-    public void wrappedCertificatePinningFailuresArePairingRejections() {
+    public void certificateMismatchAtStaleAddressIsNotARejection() {
+        // 旧 IP 被另一台电脑占用时证书不一致：不是撤销，不能提示“配对已失效”。
         Exception wrapped = (Exception) new javax.net.ssl.SSLHandshakeException(
                 "握手失败")
                 .initCause(new CertificateException("电脑证书与 USB 配对记录不一致"));
-        assertTrue(PhoneDeckLanClient.isPairingRejection(wrapped));
+        assertFalse(PhoneDeckLanClient.isPairingRejection(wrapped));
     }
 }

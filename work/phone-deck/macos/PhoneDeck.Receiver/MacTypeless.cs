@@ -29,6 +29,9 @@ internal interface IMacVoiceEngineController : IDisposable
     /// <summary>结束触发：toggle 再按一下；hold 释放按键（幂等，重复 keyup 安全）。
     /// requestId 为 null 表示服务端内部复位，此时不去重。</summary>
     bool End(string mode, string? requestId);
+
+    /// <summary>仅释放已按住的键，不向 toggle 引擎发送启动/停止。</summary>
+    void ReleaseHeldKeys() { }
 }
 
 internal sealed class MacVoiceEngineController(
@@ -156,7 +159,9 @@ internal sealed class MacVoiceEngineController(
     }
 
     /// <summary>退出清理：hold 引擎仍有按键按住时必须释放。</summary>
-    public void Dispose()
+    public void Dispose() => ReleaseHeldKeys();
+
+    public void ReleaseHeldKeys()
     {
         lock (syncRoot)
         {

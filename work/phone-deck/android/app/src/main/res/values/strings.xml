@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="brand_name">言渡</string>
+    <string name="brand_name_latin">Yandu</string>
     <string name="voice_mode_summary">%1$s · %2$s</string>
+    <string name="computer_settings_summary">%1$d 台电脑 · 名称、语音与快捷键独立保存</string>
 </resources>

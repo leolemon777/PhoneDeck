@@ -1,0 +1,39 @@
+{
+  "$comment": "§16.2 第 6 行『音频』剩余项：实际采样率转换语义与队列/尾音数值预算。current 为已证实源码常量（附路径）；candidate 为规格建议值（评审冻结，PERF/D03/D04）；target 为契约目标。注意规格 §9 明示：不能把“停止采音必须快”和“尾帧必须完整”合并为同一个计时指标。",
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9（MIC-03/MIC-04/MIC-05/MIC-10）", "§15（PERF-03/PERF-04/PERF-05）", "§16.2 音频行", "D03/D04"],
+  "sampleRateConversion": {
+    "uploadHz": 48000,
+    "uploadChannels": 1,
+    "uploadFormat": "pcm-s16le（小端）",
+    "deviceRatesAccepted": [8000, 16000, 44100, 48000],
+    "rule": "设备实际采样率≠48000 时必须在上传前重采样到 48 kHz/mono；实际采样率记录用于诊断（health/设备信息），不改变线上的 PCM 基线（MIC-04“实际设备采样率转换明确”）",
+    "schemaField": "request.audio-stream.schema.json#/properties/audio/properties/deviceSampleRateHz",
+    "status": "target（基线 current：48k/PCM16/mono 由 AGENTS 与 MIC-04 固定；转换语义为目标契约）"
+  },
+  "budgets": [
+    { "id": "frameMs", "valueMs": 20, "status": "current", "grounding": "规格 §9 MIC-04：20 ms 帧基线", "note": "帧长契约" },
+    { "id": "stopLocalCaptureP95", "valueMs": 200, "status": "candidate", "specRef": "§15 PERF-03：停止本地采音 p95≤200ms（D04 冻结）" },
+    { "id": "stopLocalCaptureMax", "valueMs": 500, "status": "candidate", "specRef": "§15 PERF-03：停止本地采音最大≤500ms" },
+    { "id": "sharedQueuePerTarget", "valueMs": 120, "status": "current", "grounding": "PhonePcmBuffer.cs:6 SharedQueueMs=120（共享逐端队列目标约 120ms）", "specRef": "§9:219" },
+    { "id": "preRollHoldServer", "valueMs": 1500, "status": "current", "grounding": "PhoneAudioBridge.cs:11 PreRollHoldMs=1500（引擎确认采集前服务端暂存上限，超水位自动放行）", "note": "区别于手机侧 pre-roll ≤1s（下行）" },
+    { "id": "preRollPhone", "valueMs": 1000, "status": "candidate", "specRef": "§9:219：managed pre-roll 最多 1 秒（提案）" },
+    { "id": "drainMax", "valueMs": 3000, "status": "current", "grounding": "PhoneAudioBridge.cs:14 DrainMaxMs=3000（流结束后等待输出排空上限）" },
+    { "id": "outputTailSilenceGuard", "valueMs": 400, "status": "current", "grounding": "PhoneAudioBridge.cs:18 OutputTailMs=400（排空后静音保护）", "specRef": "§9:219 当前事实" },
+    { "id": "stopWaitTotal", "valueMs": 4900, "status": "current", "grounding": "PhoneAudioBridge.cs:19 StopWaitMs=DrainMaxMs+OutputTailMs+1500=4900（停止等待音频收尾总上限）" },
+    { "id": "tailCollectionBudget", "valueMs": 3000, "status": "candidate", "specRef": "§15 PERF-04：正常链路尾音收尾≤3s（提案）" },
+    { "id": "failureHardLimit", "valueMs": 5000, "status": "candidate", "specRef": "§15 PERF-04：失败硬上限提案 5s，不越过安全边界无限等待" },
+    { "id": "reconnectRecoveryWindow", "valueMs": 15000, "status": "candidate", "specRef": "§9 MIC-10：共享组最后目标离线给有限恢复窗口，默认提案 15 秒后停采；§15 PERF-05" }
+  ],
+  "streamConflict": {
+    "rule": "单接收端同一时刻单音频所有者；第二手机不得夺取会话；冲突拒绝映射 busy（PD-ERR-409-01）",
+    "status": "current",
+    "grounding": "PhoneAudioBridge 单活动流 + AudioStreamConflictException → Program.cs:485-489 409",
+    "specRef": "§8 DEV-04、§16.3 R3"
+  },
+  "queueRules": {
+    "sharedIsolation": "共享单次采集、每端独立队列/写入/退避；慢端只影响自身（MIC-05）",
+    "bounded": "所有队列/尾音缓冲有界；掉帧/排队时延可诊断（OBS-02）",
+    "noDiskByDefault": "手机音频默认不落盘（MIC-04/AGENTS）；诊断录音须单独同意、限时、可删除（SEC-06）",
+    "status": "target"
+  }
+}

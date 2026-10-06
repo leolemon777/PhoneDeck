@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phonedeck.dev/contracts/schemas/session-tombstone.schema.json",
+  "title": "会话终止墓碑（§16.2 第 4 行：会话）",
+  "description": "终止墓碑记录【目标结构，§16.2 会话行“终止墓碑”】：会话终止后保留 sessionId/代次/原因，供迟到的 stop/start 按代次判定为 stale（session-states.json T10–T12、T20），避免旧请求复活或误停新会话。保留时长有界（候选值与 D03 决策见 session-states.json tombstoneContract；tools/validate.py 校验本枚举与 tombstoneContract.reasons 一致）。",
+  "type": "object",
+  "properties": {
+    "sessionId": { "$ref": "definitions.schema.json#/definitions/sessionId" },
+    "generation": { "type": "integer", "minimum": 0 },
+    "targetComputerId": { "$ref": "definitions.schema.json#/definitions/targetComputerId" },
+    "ownerClientId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "【目标字段】原会话所有者手机；迟到请求按 owner+代次判定，不以“最新连接”夺权（§16.3 R3）。样本占位。"
+    },
+    "reason": {
+      "enum": ["user-stop", "cancelled", "superseded", "expired", "revoked", "error", "stream-break"],
+      "description": "终止原因枚举；与 session-states.json tombstoneContract.reasons 强一致（validate.py 交叉校验）。"
+    },
+    "recordedAtMs": { "type": "integer", "minimum": 0 },
+    "retentionMs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "本条墓碑保留时长（有界）；到期清除后同 sessionId 的迟到请求按未知/过期会话拒绝（PD-ERR-409-03），不得复活。"
+    }
+  },
+  "required": ["sessionId", "generation", "targetComputerId", "reason", "recordedAtMs", "retentionMs"],
+  "additionalProperties": false
+}

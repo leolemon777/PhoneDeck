@@ -1,8 +1,65 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-05 Android 对话白原生 UI 候选
+
+`uiPreview` 为 `1.6.0-dev.21-ui-preview.2` / versionCode 28，Debug/Release 的基线版本及 `.desktoppreview` 的独立路线保持原值。本轮只更新原生 UI，不构建电脑端、不下载模型、不创建正式 Release。
+
+在 `work/phone-deck/android` 执行（Windows 使用 `gradlew.bat`）：
+
+```sh
+./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest :app:assembleUiPreview :app:lintUiPreview
+# 仅当原 .preview 的签名不可用，需要保留原包并排验收时：
+./gradlew :app:assembleUiPreview :app:lintUiPreview -PphoneDeckIsolatedUiPreview
+```
+
+默认仍生成 `.preview`「言渡 UI 预览」。显式带 `-PphoneDeckIsolatedUiPreview` 时生成 `.dialoguepreview`「言渡·对话白」，使用本机 debug 签名和独立数据目录；不要卸载或清数据来绕过原包签名不一致。两种命令的 APK 输出路径相同，归档时必须另存名称，并记录真实包名、版本、证书、来源及 SHA-256。覆盖安装前先确认签名相同，安装后从设备读回 APK 校验。并排包不复制旧配对记录，可经原有 USB 首次配对连接现有接收端。
+
+上述预览包均不能进入固定三产物更新清单。正式分发仍须所有者长期签名；不能把本机 debug 密钥作为新的正式签名。构建成功与实际手机语音、按键验收须分开报告。
+
+
+## 2026-10-04 外部输入法接收端复用 PWA
+
+当前 Typeless 路线从原 Windows `PhoneDeck.Server` / macOS `PhoneDeck.Receiver` 构建，两个项目导入 `shared/PhoneWeb/PhoneWeb.props`，嵌入共用资源、连接宿主和 QRCoder 1.6.0。包内没有模型或识别运行时，不调用 `scripts/build-desktop.ps1`。旧固定三产物更新清单不变，本轮仅源码候选与实机验收，不正式发布。
+
+修改共用网页/网关时同时运行 Desktop、Windows、Mac 的构建/测试和 Node PCM/会话测试。Windows 文件锁失败注入用例需在 Windows 跑，macOS 上的文件替换语义不能替代。只改共享资源也必须触发 CI；PR 跑三平台网关协议测试与网页测试，不自动构建/下载 Whisper。旧模型路线打包改为手动 workflow_dispatch，默认不把模型打入包；其显式原生识别验收仍可下载临时模型，独立保留供二开。
+
+## 2026-10-03 手机网页 / PWA 预览
+
+`desktop/PhoneDeck.Desktop/PhoneWeb` 静态文件和 `DesktopWebSetup.js` 嵌入新 Desktop 程序，由原跨平台构建入口打包；没有独立 iOS 签名/App Store 工程。仍是 `2.0.0-alpha.1` 开发候选，以提交和产物哈希区分，不替换同名历史候选、不混入旧固定三产物更新包。公开根证书和网页授权均由用户运行接收端时生成，不能包含在发行归档中。
+
+本切片至少执行 Desktop Release build/test，以及 Node 22 的 `node --test work/phone-deck/desktop/tests-web/audio.test.mjs work/phone-deck/desktop/tests-web/session.test.mjs`。Desktop CI 增加后者，并继续原四 OS 编译、原生识别与打包。浏览器集成台架见 `desktop/tests-web`：隔离端口/数据、生成音频、模拟识别引擎、关闭真实输入；真实浏览器结果不替代实际 iPhone 的证书、权限、录音与按键验收。UI/音频/会话变更需同时检查 Service Worker 资源清单及更新版本，不能缓存授权接口或音频。执行结果见 HANDOFF。
+
+## 2026-10-01 多主题、多电脑配置 APK code4（当前切片）
+
+Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，包名 `com.codex.phonedeck.desktoppreview`、versionName `2.0.0-alpha.1` 保持兼容，versionCode 从 3 增至 4。源码新增六套主题及新版 Desktop 逐电脑设置入口，构建仍使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，同时运行 Debug 构建、lint 与单元测试。使用原固定签名覆盖安装（`adb install -r`），不卸载或清除数据；先核对 APK 证书、版本和候选 SHA-256，安装后读回 APK 核对字节及实际版本。是否已安装和通过真机走查以 HANDOFF 的本轮记录为准。
+
+新 Desktop 的 `desktopSettingsV1`、受控热键及本机多主题需要从本轮提交重新构建，并运行 `PhoneDeck.Desktop.Tests`；手机 code4 与 9 月 30 日旧 Desktop 候选搭配时不能获得新增设置接口。Windows/X11/Mac 原生快捷键分别在对应目标 OS 构建，Mac helper 的受控参数纳入同一包。Wayland 仍由系统绑定启动/停止命令，不用编译通过宣称通用热键支持。
+
+每批候选独立记录源码提交、版本、签名与最终字节哈希。旧 code2/code3 APK、四 OS 候选及草稿 Release 保留原来源和验证记录；本轮源码改变不等于桌面安装包已重打包、设备已更新或公开发布。真机范围与剩余门槛见 [UI_REFRESH](design/UI_REFRESH.md)、[DESKTOP_QUICK_START](guides/DESKTOP_QUICK_START.md) 和 HANDOFF。
+
+## 2026-10-01 墨水屏外观 APK code3（历史切片）
+
+该批 Android 固定签名外观候选为 `Yandu-2.0.0-alpha.1-code3-ink-android.apk`，原 `.desktoppreview` 包名、签名和版本名不变，versionCode 为 3。代码实施暖白/墨黑配色、深色版本和圆形语音按钮，使用同一 `assembleDesktopPreview / lintDesktopPreview` 构建入口。覆盖安装用 `adb install -r`，保留应用数据；code2 的图标包及其验证记录仍保留原字节。具体外观和真机范围见 UI_REFRESH。
+
+## 2026-10-01 言渡品牌与 APK code2
+
+新 Android 候选显示名称为「言渡」，使用黑白话筒图标；固定分发渠道的 versionCode 从 1 增至 2，versionName 保持 `2.0.0-alpha.1`，文件名为 `Yandu-2.0.0-alpha.1-code2-android.apk`。仍使用原 `.desktoppreview` 包名和同一长期签名配置，可覆盖同签名的 code1 包。图标原生 XML/PNG 已提交，各 OS 的 Android 构建无需安装图形生成工具；可选重绘脚本和母版见 [BRANDING.md](design/BRANDING.md)。9 月 30 日固定候选与草稿 Release 保留原来源，不用新 APK 覆盖旧候选的校验记录。
+
+## 2026-09-30 跨平台 Desktop alpha 构建入口
+
+新增 `pwsh ./scripts/build-desktop.ps1 -Rid win-x64 -IncludeModel`（在目标OS/架构原生构建，支持 `linux-x64/linux-arm64/osx-x64/osx-arm64`）。依赖 .NET SDK `global.json`、CMake、Git 与 C++ 编译器；Windows Setup 另需 Inno Setup 的 ISCC。`-WhisperSource` 可使用已克隆但必须匹配固定提交且无修改的源码；`-ModelPath` 仅接受大小/哈希完全一致的模型。
+
+默认测试后构建静态 whisper.cpp 和自包含 .NET，生成 ZIP、macOS app tar、Linux tar/deb、构建来源与文件哈希清单；`-IncludeModel` 为完整离线初用包，否则界面只需下载一次模型。新流水线 `.github/workflows/desktop-preview.yml` 只产预览工件，不创建 GitHub Release。Windows native C++ 不依赖另装 VC++ runtime，Windows UTF-8 入口覆盖中文路径。macOS 当前 ad-hoc 签名，正式 Developer ID/notarization 和真实设备验收仍是发布门槛。
+
+`-VerifySpeech` 使用固定哈希模型及upstream公开JFK样本，在中文绝对路径中验证内存stdin、stdout结果和没有新增录音/文字文件；轻量包不会混入测试模型。x64包包含通用与AVX2组件，接收端先检查全部CPU/OS特性后选择。CI的四平台构建均开启此项；macOS打包后验证ad-hoc签名完整性。Windows CI使用固定SHA-256和NuGet仓库签名验证的便携Inno Setup6.7.3，不安装编译器到系统。
+
+该路线独立版本 `2.0.0-alpha.1`，不修改旧固定三产物的签名设备更新链路。Android CI 仍生成独立包名 `.preview` 的 APK；这个渠道供开发验收，正式公开 APK 需要持续使用所有者保管的签名密钥。具体使用/依赖见 `DESKTOP_QUICK_START.md`、`DESKTOP_THIRD_PARTY.md`。
+
+Android可分发候选使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，包名 `.desktoppreview`、版本2.0.0-alpha.1/1、不可调试。通过进程环境 `PHONEDECK_SIGNING_PROPERTIES` 指定固定签名配置，keystore路径相对该文件解析；无固定配置时打包明确失败，不回退随机debug签名。本轮为这个新渠道生成单独的RSA3072长期密钥，放在所有者本地受限且Git忽略的signing目录中；原发布密钥未更换。私钥与密码配置必须备份并长期复用，绝不上传仓库或放入下载包。CI不持有这把私钥，只检查uiPreview构建/测试。
+
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
-B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](MAC_HANDOVER.md)。
+B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](archive/MAC_HANDOVER.md)。
 
 ## 1. 当前基线
 
@@ -206,7 +263,7 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 
 用户流程：任一已接入电脑导入签名包 → 请求批量更新 → 打开手机主页 → 手机校验和分发 → 电脑等待空闲、安装并检查 → 手机系统安装确认。
 离线设备在恢复连接且手机主页前台时补更。输入法/虚拟音频驱动的安装与更新仍由其渠道负责。
-操作细节和回退边界见 [FLEET_UPDATES.md](./FLEET_UPDATES.md)。
+操作细节和回退边界见 [FLEET_UPDATES.md](./guides/FLEET_UPDATES.md)。
 
 ## 7. 现有 CI 的真实覆盖与缺口
 
@@ -244,4 +301,3 @@ CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也
 Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。
-

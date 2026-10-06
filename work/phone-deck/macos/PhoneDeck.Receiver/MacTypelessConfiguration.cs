@@ -21,9 +21,64 @@ internal sealed record MacTypelessConfig(
 
 internal static class MacTypelessConfiguration
 {
+    private sealed class CacheEntry
+    {
+        public MacTypelessConfig? Config;
+        public string? Path;
+        public DateTime WriteTime;
+        public long Length;
+        public long CheckedAt;
+    }
+
+    /// <summary>按设置对象各存一份（引擎目录与 Program 持有不同的设置实例），设置被替换后旧条目随之回收。</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MacReceiverSettings, CacheEntry> Cache = new();
+
+    /// <summary>
+    /// 健康检查每次会读十几次快捷键/麦克风字段：同一设置对象 1 秒内直接复用，
+    /// 超过 1 秒只看文件修改时间与大小，文件变了才重新解析。
+    /// </summary>
     internal static MacTypelessConfig Load(MacReceiverSettings settings)
     {
-        var path = ResolvePath(settings.TypelessSettingsPath);
+        var entry = Cache.GetValue(settings, _ => new CacheEntry());
+        var now = Environment.TickCount64;
+        lock (entry)
+        {
+            // Config 为空即“从未读取”，不依赖 CheckedAt 初值。
+            if (entry.Config is not null && now - entry.CheckedAt < 1_000)
+            {
+                return entry.Config;
+            }
+            var path = ResolvePath(settings.TypelessSettingsPath);
+            DateTime writeTime = default;
+            long length = -1;
+            if (path is not null)
+            {
+                try
+                {
+                    var info = new FileInfo(path);
+                    writeTime = info.LastWriteTimeUtc;
+                    length = info.Length;
+                }
+                catch (IOException)
+                {
+                    // 交给 LoadUncached 报错。
+                }
+            }
+            if (entry.Config is null || entry.Path != path
+                || entry.WriteTime != writeTime || entry.Length != length)
+            {
+                entry.Config = LoadUncached(settings, path);
+                entry.Path = path;
+                entry.WriteTime = writeTime;
+                entry.Length = length;
+            }
+            entry.CheckedAt = now;
+            return entry.Config;
+        }
+    }
+
+    private static MacTypelessConfig LoadUncached(MacReceiverSettings settings, string? path)
+    {
         if (path is null)
         {
             return ApplyOverrides(

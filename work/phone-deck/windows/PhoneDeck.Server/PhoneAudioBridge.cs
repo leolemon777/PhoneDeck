@@ -15,14 +15,23 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     // Provider 为空仅表示 PCM 已被取走；重采样器、WASAPI 和虚拟声卡
     // 仍可能持有最后几帧。继续播放静音，给输出/采集链路完成尾帧的时间。
-    internal const int OutputTailMs = 400;
-    internal const int StopWaitMs = DrainMaxMs + OutputTailMs + 1_500;
+    internal static readonly int OutputTailMs = PcmLatency.OutputTailMs;
+    internal static readonly int StopWaitMs = DrainMaxMs + OutputTailMs + 1_500;
 
     private static readonly int PreRollHoldBytes = SampleRate * 2 * PreRollHoldMs / 1_000;
 
     private readonly SemaphoreSlim streamGate = new(1, 1);
     private readonly object sessionSync = new();
     private readonly Func<IWaveProvider, IPhoneAudioPlayback> createPlayback;
+    private readonly bool keepOutputWarm;
+    private readonly object warmSync = new();
+    private SwitchingWaveProvider? warmSource;
+    private IPhoneAudioPlayback? warmPlayback;
+    /// <summary>手机最近一次请求后保持预热这么久；之后关闭常驻输出，空闲时不占 CPU 与音频引擎。</summary>
+    internal const int WarmIdleMs = 90_000;
+    private long lastPhoneActivity = Environment.TickCount64;
+    private int prewarmQueued;
+    private readonly Timer? idleReaper;
     private CancellationTokenSource? activeCancellation;
     private ActiveStream? activeStream;
     private string? activeSessionId;
@@ -30,14 +39,121 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private string? completedSessionId;
     private bool completedDrainSucceeded;
 
+    /// <summary>同一共享会话重连时等待旧连接让出的上限。</summary>
+    internal const int TakeoverWaitMs = 2_000;
+
     internal PhoneAudioBridge()
-        : this(source => new WasapiPhoneAudioPlayback(source))
+        : this(source => new WasapiPhoneAudioPlayback(source),
+            keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0")
     {
     }
 
-    internal PhoneAudioBridge(Func<IWaveProvider, IPhoneAudioPlayback> createPlayback)
+    internal PhoneAudioBridge(
+        Func<IWaveProvider, IPhoneAudioPlayback> createPlayback,
+        bool keepOutputWarm = false)
     {
         this.createPlayback = createPlayback;
+        this.keepOutputWarm = keepOutputWarm;
+        if (keepOutputWarm)
+        {
+            idleReaper = new Timer(_ => ReleaseIdleOutput(), null, 30_000, 30_000);
+        }
+    }
+
+    /// <summary>手机请求（健康检查、音频）到达：记下时间，若常驻输出已关闭则在后台重新预热。</summary>
+    internal void NotePhoneActivity()
+    {
+        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
+        if (keepOutputWarm && !OutputWarm && Interlocked.Exchange(ref prewarmQueued, 1) == 0)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Prewarm();
+                }
+                finally
+                {
+                    Volatile.Write(ref prewarmQueued, 0);
+                }
+            });
+        }
+    }
+
+    private void ReleaseIdleOutput()
+    {
+        lock (warmSync)
+        {
+            // 会话全程持有 streamGate：计数为 1 说明没有音频流在用常驻输出。
+            if (warmPlayback is null || streamGate.CurrentCount == 0
+                || Environment.TickCount64 - Volatile.Read(ref lastPhoneActivity) <= WarmIdleMs)
+            {
+                return;
+            }
+            warmPlayback.Dispose();
+            warmPlayback = null;
+            warmSource = null;
+        }
+        Console.WriteLine("[audio] 手机已空闲，关闭常驻虚拟声卡输出");
+    }
+
+    /// <summary>常驻输出正在运行：会话开始不再初始化 WASAPI，引擎也无需等待声卡预热。</summary>
+    public bool OutputWarm
+    {
+        get
+        {
+            lock (warmSync)
+            {
+                return warmPlayback is { IsFaulted: false };
+            }
+        }
+    }
+
+    /// <summary>启动时预热常驻输出；失败（例如未安装 VB-CABLE）时保持按会话创建。</summary>
+    internal void Prewarm()
+    {
+        lock (warmSync)
+        {
+            EnsureWarmLocked();
+        }
+    }
+
+    private SwitchingWaveProvider? EnsureWarmLocked()
+    {
+        if (!keepOutputWarm)
+        {
+            return null;
+        }
+        if (warmPlayback is { IsFaulted: false } && warmSource is not null)
+        {
+            return warmSource;
+        }
+        warmPlayback?.Dispose();
+        warmPlayback = null;
+        warmSource = null;
+        try
+        {
+            var source = new SwitchingWaveProvider();
+            var playback = createPlayback(source);
+            try
+            {
+                playback.Play();
+            }
+            catch
+            {
+                playback.Dispose();
+                throw;
+            }
+            warmSource = source;
+            warmPlayback = playback;
+            Console.WriteLine("[audio] 常驻虚拟声卡输出已启动");
+            return source;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"[audio] 常驻输出不可用，改为按会话创建：{exception.Message}");
+            return null;
+        }
     }
 
     private sealed class ActiveStream
@@ -47,7 +163,10 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         public required object PlaybackGate { get; init; }
         public required ManualResetEventSlim Ended { get; init; }
         public required AudioStreamMode Mode { get; init; }
+        public string? OwnerId { get; init; }
         public long StartedAt { get; } = Stopwatch.GetTimestamp();
+        /// <summary>同一共享会话的新连接已接管：旧连接不再排空或补尾音。</summary>
+        public volatile bool Superseded;
         public bool PlaybackReleased;
         public long ReleasedAtMs = -1;
         public bool DrainSucceeded;
@@ -72,6 +191,28 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 return activeSessionId;
             }
+        }
+    }
+
+    internal string? ActiveOwnerId
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                return activeStream?.OwnerId;
+            }
+        }
+    }
+
+    /// <summary>当前音频流是否属于该手机（USB 与旧共享令牌同为 legacy 身份）。</summary>
+    internal bool IsStreamOwnedBy(string? clientId)
+    {
+        lock (sessionSync)
+        {
+            return activeStream is not null && string.Equals(
+                PhoneStopReceipts.NormalizeOwner(activeStream.OwnerId),
+                PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
         }
     }
 
@@ -167,16 +308,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 return;
             }
-            var preRollAudio = stream.Preroll.TakeAll();
-            if (preRollAudio.Length > 0)
-            {
-                stream.Provider.AddSamples(preRollAudio, 0, preRollAudio.Length);
-            }
-            stream.PlaybackReleased = true;
-            stream.ReleasedAtMs = ElapsedMs(stream.StartedAt);
-            Console.WriteLine(
-                $"[audio:{sessionId}] playbackReleased=+{stream.ReleasedAtMs}ms " +
-                $"firstAddSamples=+{stream.ReleasedAtMs}ms preRollBytes={preRollAudio.Length}");
+            ReleasePreRoll(stream, sessionId, "engine");
         }
     }
 
@@ -204,11 +336,19 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         string sessionId,
         AudioStreamMode mode,
         Action<string, AudioStreamMode> sessionEnded,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? ownerId = null)
     {
         if (!await streamGate.WaitAsync(0, cancellationToken))
         {
-            throw new AudioStreamConflictException("已有手机麦克风正在传输");
+            // Wi-Fi 抖动后手机会用同一共享 sessionId 重连，而服务端可能还没发现旧连接
+            // 已断开。只允许同一所有者的同一共享会话接管，其他情况仍是冲突。
+            if (!TrySupersede(sessionId, mode, ownerId)
+                || !await streamGate.WaitAsync(TakeoverWaitMs, cancellationToken))
+            {
+                throw new AudioStreamConflictException("已有手机麦克风正在传输");
+            }
+            Console.WriteLine($"[audio:{sessionId}] sharedReconnectTakeover");
         }
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -219,14 +359,27 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             PlaybackGate = new object(),
             Ended = new ManualResetEventSlim(false),
             Mode = mode,
+            OwnerId = ownerId,
             Provider = new PhonePcmBuffer(mode)
         };
+        SwitchingWaveProvider? warm;
+        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
+        lock (warmSync)
+        {
+            warm = EnsureWarmLocked();
+            warm?.Attach(stream.Provider);
+        }
+        IPhoneAudioPlayback? output = null;
         try
         {
-            using var output = createPlayback(stream.Provider);
-            output.Play();
+            if (warm is null)
+            {
+                output = createPlayback(stream.Provider);
+                output.Play();
+            }
             Console.WriteLine(
-                $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms");
+                $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms " +
+                $"warm={warm is not null}");
 
             // 只有虚拟音频设备已找到且 WASAPI 真正启动后，
             // 才允许听写管理器唤醒 Typeless。
@@ -327,14 +480,15 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             }
 
             // 尾部排空：把已放行的音频完整送入 CABLE 后再停 WASAPI，
-            // 否则 pre-roll 突发灌入的尾部会被提前截断。
+            // 否则 pre-roll 突发灌入的尾部会被提前截断。被同会话新连接接管时
+            // 由新连接继续供音，旧连接直接让出。
             var drainDeadline = Environment.TickCount64 + DrainMaxMs;
-            while (stream.Provider.BufferedBytes > 0
+            while (!stream.Superseded && stream.Provider.BufferedBytes > 0
                 && Environment.TickCount64 < drainDeadline)
             {
                 await Task.Delay(40, CancellationToken.None);
             }
-            if (stream.Provider.BufferedBytes > 0)
+            if (!stream.Superseded && stream.Provider.BufferedBytes > 0)
             {
                 Console.Error.WriteLine(
                     $"[audio:{sessionId}] drainTimeoutBytes={stream.Provider.BufferedBytes}");
@@ -345,20 +499,23 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 Console.WriteLine(
                     $"[audio:{sessionId}] drained=+{ElapsedMs(stream.StartedAt)}ms");
             }
-            if (totalBytes > 0 && stream.ReleasedAtMs >= 0)
+            if (!stream.Superseded && totalBytes > 0 && stream.ReleasedAtMs >= 0)
             {
                 // ReadFully 在输入排空后继续生成静音，不额外打开手机麦克风。
                 await Task.Delay(OutputTailMs, CancellationToken.None);
             }
-            output.Stop();
+            output?.Stop();
             stream.DrainSucceeded = true;
             Console.WriteLine(
                 $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
-                $"bytes={totalBytes} droppedStaleBytes={stream.Provider.DroppedBytes}");
+                $"bytes={totalBytes} droppedStaleBytes={stream.Provider.DroppedBytes} " +
+                $"skippedSilenceBytes={stream.Provider.SkippedSilenceBytes}");
             return totalBytes;
         }
         finally
         {
+            output?.Dispose();
+            warm?.Detach(stream.Provider);
             lock (sessionSync)
             {
                 if (ReferenceEquals(activeCancellation, sessionCancellation))
@@ -379,18 +536,41 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         }
     }
 
+    private bool TrySupersede(string sessionId, AudioStreamMode mode, string? ownerId)
+    {
+        CancellationTokenSource? cancellation;
+        lock (sessionSync)
+        {
+            var current = activeStream;
+            if (mode != AudioStreamMode.Shared || current is null
+                || current.Mode != AudioStreamMode.Shared
+                || !string.Equals(activeSessionId, sessionId, StringComparison.Ordinal)
+                || !string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            current.Superseded = true;
+            cancellation = activeCancellation;
+        }
+        cancellation?.Cancel();
+        return true;
+    }
+
     private static void ReleasePreRoll(ActiveStream stream, string sessionId, string reason)
     {
         var preRollAudio = stream.Preroll.TakeAll();
-        if (preRollAudio.Length > 0)
+        // 开口前的静音只会拉长整段延迟：放行时只保留首个语音块前 LeadInMs。
+        var trimmed = PcmLatency.LeadingSilenceTrimOffset(
+            preRollAudio, PcmLatency.MsToBytes(PcmLatency.LeadInMs));
+        if (preRollAudio.Length > trimmed)
         {
-            stream.Provider.AddSamples(preRollAudio, 0, preRollAudio.Length);
+            stream.Provider.AddSamples(preRollAudio, trimmed, preRollAudio.Length - trimmed);
         }
         stream.PlaybackReleased = true;
         stream.ReleasedAtMs = ElapsedMs(stream.StartedAt);
         Console.WriteLine(
             $"[audio:{sessionId}] playbackReleased=+{stream.ReleasedAtMs}ms " +
-            $"reason={reason} preRollBytes={preRollAudio.Length}");
+            $"reason={reason} preRollBytes={preRollAudio.Length} leadingSilenceTrimmedBytes={trimmed}");
     }
 
     internal static MMDevice? SelectDevice(IEnumerable<MMDevice> devices) =>
@@ -403,11 +583,18 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     public void Dispose()
     {
+        idleReaper?.Dispose();
         CancellationTokenSource? cancellation;
         lock (sessionSync)
         {
             cancellation = activeCancellation;
         }
         cancellation?.Cancel();
+        lock (warmSync)
+        {
+            warmPlayback?.Dispose();
+            warmPlayback = null;
+            warmSource = null;
+        }
     }
 }
