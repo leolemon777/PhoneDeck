@@ -123,6 +123,7 @@ public final class MainActivity extends Activity {
     private String confirmingComputerId;
     private final Runnable carouselSnap = this::snapCarousel;
     private LinearLayout recentList;
+    private View quickRow;
     private LinearLayout targetDockRow;
     private ScrollView shortcutScroll;
     private android.app.Dialog shortcutDialog;
@@ -705,7 +706,8 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         int micSize = dialogue ? (landscape ? 104
-                : getResources().getConfiguration().screenHeightDp < 720 ? 112 : 136)
+                : getResources().getConfiguration().screenHeightDp < 720 ? 112
+                : getResources().getConfiguration().screenHeightDp >= 820 ? 148 : 136)
                 : homeStyle == HomeStyle.PANEL ? (landscape || !compact ? 128 : 104)
                 : homeStyle == HomeStyle.DOCK ? (landscape || compact ? 112 : 160)
                 : landscape || compact ? 128 : 184;
@@ -854,6 +856,7 @@ public final class MainActivity extends Activity {
             voiceCopy.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
             recentList = new LinearLayout(this);
             recentList.setOrientation(LinearLayout.VERTICAL);
+            quickRow = buildQuickRow();
             View commandBar = buildCommandBar();
             int ringSize = micSize + (landscape ? 28 : 40);
             if (!landscape) {
@@ -865,6 +868,7 @@ public final class MainActivity extends Activity {
                 middle.addView(voiceRing, margins(0, dp(compact ? 6 : 10), 0, dp(compact ? 4 : 8), dp(ringSize), dp(ringSize)));
                 middle.addView(voiceCopy);
                 middle.addView(actionFeedback, margins(0, dp(10), 0, 0, -1, -2));
+                middle.addView(quickRow, margins(0, dp(compact ? 14 : 24), 0, 0, -1, -2));
                 middle.addView(recentList, margins(0, dp(compact ? 10 : 16), 0, 0, -1, -2));
                 ScrollView middleScroll = new ScrollView(this);
                 middleScroll.setFillViewport(true);
@@ -888,6 +892,7 @@ public final class MainActivity extends Activity {
                 left.setOrientation(LinearLayout.VERTICAL);
                 left.addView(header);
                 left.addView(computerSection, new LinearLayout.LayoutParams(-1, -2));
+                left.addView(quickRow, margins(dp(20), dp(12), dp(20), 0, -1, -2));
                 left.addView(recentList, margins(dp(20), dp(12), dp(20), dp(12), -1, -2));
                 ScrollView leftScroll = new ScrollView(this);
                 leftScroll.setVerticalScrollBarEnabled(false);
@@ -920,6 +925,7 @@ public final class MainActivity extends Activity {
                 console.addView(right, new LinearLayout.LayoutParams(0, -1, 1f));
                 root.addView(console, new FrameLayout.LayoutParams(-1, -1));
             }
+            loadRecentActions();
             refreshComputerCards();
             refreshRecentList();
             return root;
@@ -1416,6 +1422,55 @@ public final class MainActivity extends Activity {
         return empty;
     }
 
+    // ---------- 常用：配置里排在前面的 4 个按键（不含指令栏已有的回车、退格） ----------
+
+    private View buildQuickRow() {
+        LinearLayout row = new LinearLayout(this);
+        java.util.List<ShortcutButtonConfig> picks = new java.util.ArrayList<>();
+        try {
+            for (ShortcutButtonConfig config : configRepository.load()) {
+                if (picks.size() == 4) break;
+                if (!config.visible || config.isTextAction()
+                        || "enter".equals(config.id) || "backspace".equals(config.id)) continue;
+                picks.add(config);
+            }
+        } catch (Exception ignored) {
+            // 配置损坏时不显示常用行。
+        }
+        row.setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
+        for (int i = 0; i < picks.size(); i++) {
+            ShortcutButtonConfig config = picks.get(i);
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER);
+            tile.setPadding(dp(4), dp(8), dp(4), dp(8));
+            tile.setBackground(theme.pressable(this, theme.surfaceRaised, theme.outline, 16));
+            TextView label = text(config.label, 14, theme.text, Typeface.BOLD);
+            label.setGravity(Gravity.CENTER);
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            tile.addView(label, new LinearLayout.LayoutParams(-1, -2));
+            String chord = config.subtitle().replace(" + ", "+").replace("Backspace", "⌫");
+            TextView keys = text(chord, 11, theme.muted, Typeface.NORMAL);
+            keys.setGravity(Gravity.CENTER);
+            keys.setSingleLine(true);
+            keys.setEllipsize(TextUtils.TruncateAt.END);
+            tile.addView(keys, margins(0, dp(2), 0, 0, -1, -2));
+            tile.setContentDescription(config.label + "，" + config.subtitle() + "，长按查看全部快捷键");
+            tile.setFocusable(true);
+            tile.setOnClickListener(view -> triggerShortcut(view, config));
+            tile.setOnLongClickListener(view -> {
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                showShortcutPanel();
+                return true;
+            });
+            installTouchFeedback(tile);
+            row.addView(tile, margins(i == 0 ? 0 : dp(8), 0, 0, 0, 0, dp(60)));
+            ((LinearLayout.LayoutParams) tile.getLayoutParams()).weight = 1f;
+        }
+        return row;
+    }
+
     // ---------- 指令栏 ----------
 
     private java.util.List<ShortcutButtonConfig> slashCommands() {
@@ -1529,11 +1584,11 @@ public final class MainActivity extends Activity {
         final String target;
         final long at;
 
-        RecentAction(String kind, String title, String target) {
+        RecentAction(String kind, String title, String target, long at) {
             this.kind = kind;
             this.title = title;
             this.target = target;
-            this.at = System.currentTimeMillis();
+            this.at = at;
         }
     }
 
@@ -1544,9 +1599,42 @@ public final class MainActivity extends Activity {
                 : targetDeviceManager.find(targetDeviceManager.getActiveComputerId()) == null ? null
                 : targetDeviceManager.find(targetDeviceManager.getActiveComputerId()).slot + "号 "
                 + targetDeviceManager.find(targetDeviceManager.getActiveComputerId()).displayName;
-        RECENT_ACTIONS.addFirst(new RecentAction(kind, title, target));
+        RECENT_ACTIONS.addFirst(new RecentAction(kind, title, target, System.currentTimeMillis()));
         while (RECENT_ACTIONS.size() > 6) RECENT_ACTIONS.removeLast();
+        saveRecentActions();
         refreshRecentList();
+    }
+
+    /// 只保存操作名称、目标电脑名与时间（不含识别文字或音频），让“刚刚”在进程被系统回收后仍在。
+    private void saveRecentActions() {
+        org.json.JSONArray array = new org.json.JSONArray();
+        try {
+            for (RecentAction action : RECENT_ACTIONS) {
+                array.put(new JSONObject().put("kind", action.kind).put("title", action.title)
+                        .put("target", action.target == null ? JSONObject.NULL : action.target)
+                        .put("at", action.at));
+            }
+        } catch (org.json.JSONException ignored) {
+            return;
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putString("recent_actions", array.toString()).apply();
+    }
+
+    private void loadRecentActions() {
+        if (!RECENT_ACTIONS.isEmpty()) return;
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString("recent_actions", "[]"));
+            for (int i = 0; i < array.length() && i < 6; i++) {
+                JSONObject item = array.getJSONObject(i);
+                RECENT_ACTIONS.addLast(new RecentAction(item.optString("kind", "keys"),
+                        item.optString("title", ""), item.isNull("target") ? null : item.optString("target"),
+                        item.optLong("at", 0)));
+            }
+        } catch (org.json.JSONException ignored) {
+            RECENT_ACTIONS.clear();
+        }
     }
 
     private void recordDictationRecent() {
