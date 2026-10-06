@@ -27,6 +27,11 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private readonly object warmSync = new();
     private SwitchingWaveProvider? warmSource;
     private IPhoneAudioPlayback? warmPlayback;
+    /// <summary>手机最近一次请求后保持预热这么久；之后关闭常驻输出，空闲时不占 CPU 与音频引擎。</summary>
+    internal const int WarmIdleMs = 90_000;
+    private long lastPhoneActivity = Environment.TickCount64;
+    private int prewarmQueued;
+    private readonly Timer? idleReaper;
     private CancellationTokenSource? activeCancellation;
     private ActiveStream? activeStream;
     private string? activeSessionId;
@@ -49,6 +54,47 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     {
         this.createPlayback = createPlayback;
         this.keepOutputWarm = keepOutputWarm;
+        if (keepOutputWarm)
+        {
+            idleReaper = new Timer(_ => ReleaseIdleOutput(), null, 30_000, 30_000);
+        }
+    }
+
+    /// <summary>手机请求（健康检查、音频）到达：记下时间，若常驻输出已关闭则在后台重新预热。</summary>
+    internal void NotePhoneActivity()
+    {
+        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
+        if (keepOutputWarm && !OutputWarm && Interlocked.Exchange(ref prewarmQueued, 1) == 0)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Prewarm();
+                }
+                finally
+                {
+                    Volatile.Write(ref prewarmQueued, 0);
+                }
+            });
+        }
+    }
+
+    private void ReleaseIdleOutput()
+    {
+        lock (warmSync)
+        {
+            // 会话全程持有 streamGate：计数为 1 说明没有音频流在用常驻输出。
+            if (warmPlayback is null || streamGate.CurrentCount == 0
+                || Environment.TickCount64 - Volatile.Read(ref lastPhoneActivity) <= WarmIdleMs)
+            {
+                return;
+            }
+            warmPlayback.Dispose();
+            warmPlayback = null;
+            warmSource = null;
+        }
+        Console.WriteLine("[audio] 手机已空闲，关闭常驻虚拟声卡输出");
     }
 
     /// <summary>常驻输出正在运行：会话开始不再初始化 WASAPI，引擎也无需等待声卡预热。</summary>
@@ -317,6 +363,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             Provider = new PhonePcmBuffer(mode)
         };
         SwitchingWaveProvider? warm;
+        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
         lock (warmSync)
         {
             warm = EnsureWarmLocked();
@@ -536,6 +583,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     public void Dispose()
     {
+        idleReaper?.Dispose();
         CancellationTokenSource? cancellation;
         lock (sessionSync)
         {

@@ -444,12 +444,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        PhoneDeckHttp.appInForeground = false;
         mainHandler.removeCallbacks(nearbyScan);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        PhoneDeckHttp.appInForeground = true;
         mainHandler.post(nearbyScan);
         PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
         if (!latestTheme.id.equals(appliedThemeId)) {
@@ -3342,6 +3344,7 @@ public final class MainActivity extends Activity {
             final long probeStartedAt = SystemClock.elapsedRealtime();
             try {
                 connection = (HttpURLConnection) new URL(SERVER + "/api/health").openConnection();
+                connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
                 connection.setConnectTimeout(1200);
                 connection.setReadTimeout(1200);
                 connection.setRequestMethod("GET");

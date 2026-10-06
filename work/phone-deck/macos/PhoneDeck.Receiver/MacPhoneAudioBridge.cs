@@ -26,6 +26,15 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private readonly bool keepOutputWarm;
     private readonly object warmSync = new();
     private IMacAudioOutput? warmOutput;
+    /// <summary>手机最近一次请求后保持预热这么久；之后关闭常驻输出，空闲时不占 CPU 与 coreaudiod。</summary>
+    internal const int WarmIdleMs = 90_000;
+    private long lastPhoneActivity = Environment.TickCount64;
+    private int warmUsers;
+    private int prewarmQueued;
+    private readonly Timer? idleReaper;
+    private (bool Available, string? DeviceName, string? DeviceUid, string? Error) probeCache;
+    private long probeCachedAt = long.MinValue;
+    private readonly object probeSync = new();
     private ActiveSession? active;
     private string? completedSessionId;
     private bool completedDrainSucceeded;
@@ -34,6 +43,49 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     {
         this.outputFactory = outputFactory;
         this.keepOutputWarm = keepOutputWarm;
+        if (keepOutputWarm)
+        {
+            idleReaper = new Timer(_ => ReleaseIdleOutput(), null, 30_000, 30_000);
+        }
+    }
+
+    /// <summary>手机请求（健康检查、音频）到达：记下时间，若常驻输出已关闭则在后台重新预热。</summary>
+    internal void NotePhoneActivity()
+    {
+        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
+        if (keepOutputWarm && !OutputWarm && Interlocked.Exchange(ref prewarmQueued, 1) == 0)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Prewarm();
+                }
+                finally
+                {
+                    Volatile.Write(ref prewarmQueued, 0);
+                }
+            });
+        }
+    }
+
+    private void ReleaseIdleOutput()
+    {
+        IMacAudioOutput? idle = null;
+        lock (warmSync)
+        {
+            if (warmOutput is not null && warmUsers == 0 && !IsStreaming
+                && Environment.TickCount64 - Volatile.Read(ref lastPhoneActivity) > WarmIdleMs)
+            {
+                idle = warmOutput;
+                warmOutput = null;
+            }
+        }
+        if (idle is not null)
+        {
+            idle.Dispose();
+            Console.WriteLine("[audio] 手机已空闲，关闭常驻 BlackHole 输出");
+        }
     }
 
     /// <summary>BlackHole 常驻输出正在运行（空闲时渲染静音），会话开始无需重建 AUHAL。</summary>
@@ -68,14 +120,17 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     {
         lock (warmSync)
         {
+            Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
             if (warmOutput is not null)
             {
+                warmUsers++;
                 return warmOutput;
             }
             var created = outputFactory.Create();
             if (keepOutputWarm)
             {
                 warmOutput = created;
+                warmUsers++;
             }
             return created;
         }
@@ -85,8 +140,10 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     {
         lock (warmSync)
         {
+            Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
             if (ReferenceEquals(output, warmOutput))
             {
+                warmUsers = Math.Max(0, warmUsers - 1);
                 if (healthy)
                 {
                     return;
@@ -102,8 +159,21 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     internal string? ActiveSessionId { get { lock (syncRoot) return active?.SessionId; } }
     internal AudioStreamMode? ActiveMode { get { lock (syncRoot) return active?.Mode; } }
 
-    internal (bool Available, string? DeviceName, string? DeviceUid, string? Error) Probe() =>
-        outputFactory.Probe();
+    /// <summary>设备探测要枚举全部 Core Audio 设备：3 秒内复用结果（健康检查每 2 秒一次，会话期更频繁）。</summary>
+    internal (bool Available, string? DeviceName, string? DeviceUid, string? Error) Probe()
+    {
+        lock (probeSync)
+        {
+            var now = Environment.TickCount64;
+            if (now - probeCachedAt < 3_000)
+            {
+                return probeCache;
+            }
+            probeCache = outputFactory.Probe();
+            probeCachedAt = now;
+            return probeCache;
+        }
+    }
 
     internal async Task StreamAsync(
         Stream source,
@@ -328,6 +398,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
 
     public void Dispose()
     {
+        idleReaper?.Dispose();
         lock (syncRoot)
         {
             active?.Cancellation.Cancel();

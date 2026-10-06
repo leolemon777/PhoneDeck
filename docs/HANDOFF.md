@@ -1,5 +1,14 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 电脑端资源占用（最新状态）
+
+- 决策与数据见规格顶部同日条目。改动：`Receiver.Core.props` 运行时设置；Mac `MacPhoneAudioBridge`（按需预热、空闲回收、探测缓存）、
+  `MacTypelessConfiguration`（按文件变化缓存）、`Program.cs`（前台头判定、采集状态缓存）、`UsbWatchdog`；Windows `PhoneAudioBridge`
+  （按需预热、空闲回收，用 streamGate 判断无流）、`Program.cs`（前台头）、`UsbWatchdog`；Android 请求带 `X-PhoneDeck-Foreground`。
+- **验证**：Android 构建/测试/lint 通过；Mac 接收端测试 47/47；Windows 测试 179/183（同样 4 项 macOS 基线失败）；Windows Server
+  交叉编译 0 错误。本机 Mac 实测前台→后台→空闲 90 秒后日志出现“关闭常驻 BlackHole 输出”，重新打开 App 立即预热。
+- **未验证**：Windows 实机资源占用与按需预热；按需预热后第一句话的启动延迟（输出已在前台预热，理论不变）未用秒表复测。
+
 ## 2026-10-06 同一 Wi-Fi 免扫码连接与手机端精简（最新状态）
 
 - 同分支 `agent/android-home-cards`。协议与决策见规格顶部同日条目。

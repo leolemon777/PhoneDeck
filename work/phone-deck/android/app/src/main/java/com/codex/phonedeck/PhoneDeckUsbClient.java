@@ -35,6 +35,7 @@ final class PhoneDeckUsbClient {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(SERVER + "/api/health").openConnection();
+            connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
             connection.setConnectTimeout(800);
             connection.setReadTimeout(1200);
             connection.setRequestMethod("GET");
@@ -234,6 +235,7 @@ final class PhoneDeckUsbClient {
         try {
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             connection = (HttpURLConnection) new URL(SERVER + endpoint).openConnection();
+            connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
             connection.setConnectTimeout(800);
             connection.setReadTimeout(1800);
             connection.setRequestMethod("POST");

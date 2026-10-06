@@ -38,6 +38,10 @@ final class PhoneDeckHttp {
     private static final HostnameVerifier PINNED_HOSTNAME_VERIFIER =
             (hostname, session) -> true;
 
+    /// 主界面是否在前台：随每个请求告诉电脑（X-PhoneDeck-Foreground），电脑只在手机前台时
+    /// 预热音频输出，后台保活探测不再让电脑常驻音频线程。
+    static volatile boolean appInForeground;
+
     private PhoneDeckHttp() {
     }
 
@@ -51,6 +55,7 @@ final class PhoneDeckHttp {
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setUseCaches(false);
+        connection.setRequestProperty("X-PhoneDeck-Foreground", appInForeground ? "1" : "0");
         if (endpoint.accessToken != null) {
             if (endpoint.clientId != null) {
                 // M1-A 逐手机凭据：Bearer + 客户端标识（设计 §5.1）。

@@ -52,7 +52,7 @@ var fleetUpdates = new FleetUpdates();
 var configurationGate = new ConfigurationGate();
 using var audioBridge = new PhoneAudioBridge();
 // 常驻虚拟声卡输出放到后台预热，不阻塞 Kestrel 启动。
-_ = Task.Run(audioBridge.Prewarm);
+// 常驻输出改为按需：手机请求到达时预热，手机空闲 90 秒后关闭（见 PhoneAudioBridge.WarmIdleMs）。
 using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -192,6 +192,11 @@ fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
 object BuildHealth(HttpContext context)
 {
     var requesterClientId = context.Items["ClientId"] as string;
+    // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
+    if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
+    {
+        audioBridge.NotePhoneActivity();
+    }
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
     // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
     var snapshot = diagnostics.Current;

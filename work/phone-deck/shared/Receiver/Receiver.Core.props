@@ -4,6 +4,16 @@
     平台差异（按键注入、音频输出、输入法探测、身份与证书存储路径）留在各自项目。
     新增共用文件时加在这里，两端同时获得，避免再出现复制后各自分叉。
   -->
+  <!--
+    接收端常驻后台、只服务少数手机：用工作站 GC（单堆、无后台 GC 线程）而不是 ASP.NET 默认的
+    服务器 GC（每核一个堆和两条 GC 线程），并关闭动态 PGO 插桩与 ICU（代码不依赖区域文化）。
+  -->
+  <PropertyGroup>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Makaretu.Dns" Version="2.0.1" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />

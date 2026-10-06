@@ -44,8 +44,9 @@ using var audioBridge = new MacPhoneAudioBridge(
     new CoreAudioHalOutputFactory(settings.AudioDeviceUid),
     keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0");
 // 常驻 BlackHole 输出放到后台预热，不阻塞 Kestrel 启动。
-_ = Task.Run(audioBridge.Prewarm);
+// 常驻输出改为按需：手机请求到达时预热，手机空闲 90 秒后关闭（见 MacPhoneAudioBridge.WarmIdleMs）。
 using var engineController = new MacVoiceEngineController(keyboard);
+var capturingCache = new CapturingCacheBox();
 using var dictationSessions = new MacDictationSessionManager(audioBridge, engineController);
 var inputProcessor = new InputCommandProcessor(keyboard);
 using var usbWatchdog = new UsbWatchdog(settings.AdbPath);
@@ -188,7 +189,13 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
 object BuildHealth(HttpContext context)
 {
     var requesterClientId = context.Items["ClientId"] as string;
+    // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
+    if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
+    {
+        audioBridge.NotePhoneActivity();
+    }
     var audio = audioBridge.Probe();
+    var capturing = CachedCapturing();
     var engineProfile = MacVoiceEngines.Active;
     var readerConfig = MacTypelessConfiguration.Load(settings);
     bool? virtualCableSelected = engineProfile.VerifiesMicrophone
@@ -251,7 +258,7 @@ object BuildHealth(HttpContext context)
         // 新手机端优先读 voiceEngine 块（含引擎 id 与完整模式列表）。
         typeless = new
         {
-            capturing = engineController.IsCapturing(),
+            capturing,
             virtualCableSelected,
             microphone = MacVoiceEngines.MicrophoneDescription,
             settingsPath = readerConfig.SettingsPath,
@@ -268,12 +275,28 @@ object BuildHealth(HttpContext context)
             id = engineProfile.Id,
             displayName = engineProfile.DisplayName,
             experimental = engineProfile.Experimental,
-            capturing = engineController.IsCapturing(),
+            capturing,
             virtualCableSelected,
             microphone = MacVoiceEngines.MicrophoneDescription,
             modes = engineModes
         }
     };
+}
+
+// 输入法采集状态要查询 Core Audio 进程对象：健康快照（含 /api/events 每 50 ms 的比对）150 ms 内复用。
+// 听写开始/停止的确认仍直接查询（MacDictationSessionManager），不受此缓存影响。
+bool? CachedCapturing()
+{
+    lock (capturingCache)
+    {
+        var now = Environment.TickCount64;
+        if (now - capturingCache.At >= 150)
+        {
+            capturingCache.Value = engineController.IsCapturing();
+            capturingCache.At = now;
+        }
+        return capturingCache.Value;
+    }
 }
 
 app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
@@ -575,3 +598,10 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 await app.RunAsync();
+
+/// <summary>健康快照用的采集状态缓存（见 CachedCapturing）。</summary>
+internal sealed class CapturingCacheBox
+{
+    public long At = long.MinValue;
+    public bool? Value;
+}
