@@ -300,7 +300,8 @@ object BuildHealth(HttpContext context)
 app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
 
 // healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
-app.MapGet("/api/events", async (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
+// 显式 Task<IResult>：否则表达式体 lambda 会绑定到 RequestDelegate 重载，结果被丢弃、应答为空。
+app.MapGet("/api/events", async Task<IResult> (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
     () => BuildHealth(context),
     context.Request.Query["since"].FirstOrDefault(),
     HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),

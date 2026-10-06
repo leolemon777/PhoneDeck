@@ -27,7 +27,7 @@ internal static class MacTypelessConfiguration
         public string? Path;
         public DateTime WriteTime;
         public long Length;
-        public long CheckedAt = long.MinValue;
+        public long CheckedAt;
     }
 
     /// <summary>按设置对象各存一份（引擎目录与 Program 持有不同的设置实例），设置被替换后旧条目随之回收。</summary>
@@ -43,6 +43,7 @@ internal static class MacTypelessConfiguration
         var now = Environment.TickCount64;
         lock (entry)
         {
+            // Config 为空即“从未读取”，不依赖 CheckedAt 初值。
             if (entry.Config is not null && now - entry.CheckedAt < 1_000)
             {
                 return entry.Config;

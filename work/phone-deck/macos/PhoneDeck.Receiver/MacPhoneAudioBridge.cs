@@ -33,7 +33,8 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private int prewarmQueued;
     private readonly Timer? idleReaper;
     private (bool Available, string? DeviceName, string? DeviceUid, string? Error) probeCache;
-    private long probeCachedAt = long.MinValue;
+    private bool probeCached;
+    private long probeCachedAt;
     private readonly object probeSync = new();
     private ActiveSession? active;
     private string? completedSessionId;
@@ -165,12 +166,14 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         lock (probeSync)
         {
             var now = Environment.TickCount64;
-            if (now - probeCachedAt < 3_000)
+            // 不用 long.MinValue 作“从未探测”：now - MinValue 会溢出成负数，缓存永远显得新鲜。
+            if (probeCached && now - probeCachedAt < 3_000)
             {
                 return probeCache;
             }
             probeCache = outputFactory.Probe();
             probeCachedAt = now;
+            probeCached = true;
             return probeCache;
         }
     }

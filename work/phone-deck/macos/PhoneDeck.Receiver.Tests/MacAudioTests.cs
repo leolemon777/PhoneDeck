@@ -362,6 +362,16 @@ public sealed class MacAudioTests
         CollectionAssert.AreEqual(new byte[4], output);
     }
 
+    [TestMethod]
+    public void FirstProbeReturnsTheRealDeviceInsteadOfTheEmptyCache()
+    {
+        // 回归：缓存时间戳曾以 long.MinValue 起步，now - MinValue 溢出为负，首次探测就返回“不可用”。
+        using var bridge = new MacPhoneAudioBridge(new RecordingOutputFactory());
+        var probe = bridge.Probe();
+        Assert.IsTrue(probe.Available);
+        Assert.AreEqual("BlackHole 2ch", probe.DeviceName);
+    }
+
     private sealed class RecordingOutputFactory : IMacAudioOutputFactory
     {
         internal List<RecordingOutput> Outputs { get; } = [];
