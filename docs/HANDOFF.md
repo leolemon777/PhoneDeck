@@ -1,5 +1,14 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 开源准备：README 重写与合入 main（最新状态）
+
+- README 改为面向用户：一句话介绍、三张当前界面截图（模拟器演示数据）、准备清单、Windows/Mac/手机安装、真机验证表、隐私、
+  常见问题、构建。原日期式开发记录不再放 README（历史在本文件和 git）。新增 `README.en.md`。`docs/release/KNOWN_ISSUES.md`
+  按当前状态重写（16 项）。
+- 17 个串联草稿 PR（#24→#41）整体经 #41 合入 main；`agent/phone-managed-desktop` 上未进入链条的 0a15ac8（旧状态窗配色）
+  已被新墨白托盘取代，未合入。
+- **待办**：Mac 辅助功能授权后跑通听写/翻译/问答；Windows 实机跑新托盘与附近连接；之后出预览版 Release（APK + Windows zip + Mac zip）。
+
 ## 2026-10-06 仓库整理（最新状态）
 
 - **文档分类**：`docs/` 根目录只留 HANDOFF / ARCHITECTURE / BUILD_PIPELINE，其余移入 `guides/`（安装部署使用）、`design/`、
