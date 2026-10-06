@@ -28,6 +28,7 @@ internal sealed record QrPairRequest(
     string? ClientId,
     string? ClientLabel);
 internal sealed record PairingAdminRequest(string? PairingId);
+internal sealed record NearbyPairRequest(string? ClientId, string? ClientLabel, string? Nonce);
 
 internal static class NativePairingEndpoints
 {
@@ -95,6 +96,77 @@ internal static class NativePairingEndpoints
                 pairingId = pending.PairingId,
                 computerId = host.ComputerId,
                 displayName = host.DisplayName(),
+                certificateSha256 = host.CertificateSha256,
+            });
+        });
+
+        // 同一 Wi-Fi 免扫码连接：手机发现电脑后提交请求，电脑本机允许后签发逐手机凭据。
+        app.MapPost("/api/lan/pair/request", async (HttpContext context, NearbyPairRequest body) =>
+        {
+            if (context.Connection.LocalPort != host.HttpsPort)
+            {
+                return Results.NotFound();
+            }
+            var status = host.PairingWindows.TryBeginNearbyRequest(
+                body.ClientId, body.ClientLabel, body.Nonce?.Trim().ToLowerInvariant(),
+                out var pending, out _);
+            switch (status)
+            {
+                case NearbyRequestStatus.Invalid:
+                    return Results.BadRequest(new { ok = false, error = "请求格式无效" });
+                case NearbyRequestStatus.Busy:
+                    return Results.Json(new { ok = false, error = "电脑正在确认另一台手机，请稍后再试" },
+                        statusCode: StatusCodes.Status409Conflict);
+                case NearbyRequestStatus.RateLimited:
+                    return Results.Json(new { ok = false, error = "请求过于频繁，请稍后再试" },
+                        statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            if (pending is null)
+            {
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+            bool confirmed;
+            try
+            {
+                confirmed = await pending.Decision.Task.WaitAsync(
+                    TimeSpan.FromSeconds(PairingWindowManager.NearbyConfirmationTimeoutSeconds),
+                    context.RequestAborted);
+            }
+            catch (TimeoutException)
+            {
+                return Results.Json(new { ok = false, error = "电脑上没有人确认，请重试" },
+                    statusCode: StatusCodes.Status408RequestTimeout);
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.StatusCode(499);
+            }
+            finally
+            {
+                host.PairingWindows.FinishNearby(pending.PairingId);
+            }
+            if (!confirmed)
+            {
+                return Results.Json(new { ok = false, error = "电脑端已拒绝本次连接" },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+            var record = host.Credentials.Issue(
+                pending.ClientLabel,
+                new[] { "control", "audio", "settings", "update-request" },
+                pending.PairingId,
+                out var clientToken,
+                pending.ClientId);
+            Console.WriteLine($"附近连接完成：clientId={record.ClientId}（令牌不落日志）");
+            return Results.Ok(new
+            {
+                ok = true,
+                clientId = record.ClientId,
+                clientToken,
+                scopes = record.Scopes,
+                pairingId = pending.PairingId,
+                computerId = host.ComputerId,
+                displayName = host.DisplayName(),
+                platform = host.Platform,
                 certificateSha256 = host.CertificateSha256,
             });
         });
@@ -364,7 +436,7 @@ button.primary{background:var(--accent);color:var(--bg);border-color:var(--accen
 img{width:240px;height:240px;image-rendering:pixelated;background:#fff;padding:8px;border-radius:12px}code{font-size:18px;letter-spacing:1px}
 li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0}ul{list-style:none;padding:0;margin:0}
 </style></head><body>
-<h1>手机配对</h1><p>在手机「添加电脑 → 扫码配对」扫描下方二维码，再在这里确认。每台手机获得独立凭据，可单独撤销。</p>
+<h1>手机配对</h1><p>手机和这台电脑连同一个 Wi-Fi 后会自动发现它；手机上点「连接」时，这里和系统弹框都会请你确认，并显示与手机一致的校验码。旧版手机仍可开启下方扫码窗口。每台手机获得独立凭据，可单独撤销。</p>
 <section id="window"><button class="primary" id="begin">开启 2 分钟配对窗口</button></section>
 <section><h2 style="font-size:17px;margin:0 0 8px">已配对手机</h2><ul id="clients"></ul></section>
 <script>
@@ -374,7 +446,7 @@ async function refresh(){
   const s=await fetch('/api/admin/pairing/status').then(r=>r.json());
   const w=$('window');
   if(!s.open){w.innerHTML='<button class="primary" id="begin">开启 2 分钟配对窗口</button>';$('begin').onclick=()=>post('/api/admin/pairing/begin').then(refresh);}
-  else if(s.pending){w.innerHTML=`<p>手机「${s.pending.clientLabel||'未命名'}」请求配对，校验码 <code>${s.checkCode}</code></p><button class="primary" id="ok">确认</button> <button id="no">拒绝</button>`;
+  else if(s.pending){w.innerHTML=`<p>手机「${(s.pending.clientLabel||'未命名').replace(/[<>&"]/g,'')}」请求${s.nearby?'连接':'配对'}，校验码 <code>${s.checkCode}</code></p><button class="primary" id="ok">确认</button> <button id="no">拒绝</button>`;
     $('ok').onclick=()=>post('/api/admin/pairing/confirm',{pairingId:s.pairingId}).then(refresh);$('no').onclick=()=>post('/api/admin/pairing/deny',{pairingId:s.pairingId}).then(refresh);}
   else{w.innerHTML=`<img alt="配对二维码" src="/api/admin/pairing/qr?t=${s.pairingId}"><p>手动码 <code>${s.manualCode}</code> · 剩余 ${s.remainingSeconds} 秒</p><button id="cancel">取消</button>`;
     $('cancel').onclick=()=>post('/api/admin/pairing/cancel').then(refresh);}

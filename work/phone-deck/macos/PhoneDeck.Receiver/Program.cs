@@ -76,7 +76,7 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 phoneWeb.Map(app);
 
-// Receiver.Core：与 Windows 相同的逐手机凭据、扫码配对、撤销与 mDNS。
+// Receiver.Core：与 Windows 相同的逐手机凭据、免扫码连接（本机确认）、撤销与 mDNS。
 var clientCredentials = new ClientCredentialsStore(
     Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
 var clientSessions = new ClientSessionRegistry();
@@ -85,6 +85,7 @@ var pairingWindows = new PairingWindowManager(
     receiverIdentity.DisplayName,
     lanIdentity.CertificateSha256,
     lanIdentity.HttpsPort);
+MacNearbyPrompt.Attach(pairingWindows);
 using var mdnsAdvertiser = new MdnsAdvertiser();
 
 if (settings.UsbWatchdog)
@@ -126,7 +127,8 @@ app.Use(async (context, next) =>
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料 + 本机确认即授权证明。
     var isPairingBootstrap = context.Connection.LocalPort == lanIdentity.HttpsPort
         && HttpMethods.IsPost(context.Request.Method)
-        && context.Request.Path.StartsWithSegments("/api/lan/pair/qr");
+        && (context.Request.Path.StartsWithSegments("/api/lan/pair/qr")
+            || context.Request.Path.StartsWithSegments("/api/lan/pair/request"));
     var auth = isPairingBootstrap
         ? new LanAuthResult(true, null)
         : LanRequestAuthenticator.Resolve(
@@ -534,7 +536,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
     Console.WriteLine("========================================");
     Console.WriteLine("  PhoneDeck macOS 接收端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
-    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（扫码配对：http://127.0.0.1:8765/admin/pairing）");
+    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（手机连同一 Wi-Fi 自动发现，连接请求在本机弹框确认；管理：http://127.0.0.1:8765/admin/pairing）");
     Console.WriteLine($"  局域网发现：UDP {LanDiscoveryResponder.DiscoveryPort}");
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  输入后端：CGEvent");

@@ -131,7 +131,8 @@ app.Use(async (context, next) =>
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料即授权证明，不经令牌鉴权（设计 §3/§10）。
     var isPairingBootstrap = context.Connection.LocalPort == 8766
         && HttpMethods.IsPost(context.Request.Method)
-        && context.Request.Path.StartsWithSegments("/api/lan/pair/qr");
+        && (context.Request.Path.StartsWithSegments("/api/lan/pair/qr")
+            || context.Request.Path.StartsWithSegments("/api/lan/pair/request"));
     var auth = isPairingBootstrap
         ? new LanAuthResult(true, null)
         : LanRequestAuthenticator.Resolve(

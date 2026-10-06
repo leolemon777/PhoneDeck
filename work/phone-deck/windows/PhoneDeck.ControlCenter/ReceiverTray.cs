@@ -11,6 +11,10 @@ internal sealed class ReceiverTray : ApplicationContext
     private readonly NotifyIcon tray;
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 2500 };
+    // 同一 Wi-Fi 的手机点「连接」时弹出本机确认；只读回环状态，不常驻窗口。
+    private readonly System.Windows.Forms.Timer nearbyTimer = new() { Interval = 2000 };
+    private string? promptedPairingId;
+    private bool nearbyPrompting;
     private readonly RegisteredWaitHandle activation;
     private ReceiverStatusWindow? window;
     private PairingForm? pairingForm;
@@ -32,12 +36,53 @@ internal sealed class ReceiverTray : ApplicationContext
         tray.ContextMenuStrip.Items.Add("退出并停止接收", null, (_, _) => StopAndExit());
         tray.DoubleClick += (_, _) => ShowWindow();
         timer.Tick += async (_, _) => await Refresh();
+        nearbyTimer.Tick += async (_, _) => await CheckNearbyRequest();
+        nearbyTimer.Start();
         activation = ThreadPool.RegisterWaitForSingleObject(activate, (_, _) =>
         {
             try { if (!closing) dispatcher.BeginInvoke((Action)ShowWindow); }
             catch (InvalidOperationException) when (closing) { }
         }, null, Timeout.Infinite, false);
         dispatcher.BeginInvoke((Action)(async () => { if (!hidden) ShowWindow(); await Reconnect(); }));
+    }
+
+    private async Task CheckNearbyRequest()
+    {
+        if (closing || nearbyPrompting || pairingForm != null) return;
+        string? pairingId = null, label = null, code = null;
+        try
+        {
+            using var response = await http.GetAsync("http://127.0.0.1:8765/api/admin/pairing/status");
+            if (!response.IsSuccessStatusCode) return;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("nearby", out var nearby) || !nearby.GetBoolean()
+                || !root.TryGetProperty("pending", out var pending) || pending.ValueKind != JsonValueKind.Object) return;
+            pairingId = root.GetProperty("pairingId").GetString();
+            label = pending.GetProperty("clientLabel").GetString();
+            code = root.GetProperty("checkCode").GetString();
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException
+            or InvalidOperationException or KeyNotFoundException)
+        {
+            return;
+        }
+        if (pairingId is null || pairingId == promptedPairingId) return;
+        promptedPairingId = pairingId;
+        nearbyPrompting = true;
+        try
+        {
+            var answer = MessageBox.Show(
+                $"手机「{label}」请求连接这台电脑。\n\n校验码 {code}\n确认手机上显示的校验码相同，再点「是」允许。",
+                "PhoneDeck · 新手机连接", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2, MessageBoxOptions.DefaultDesktopOnly);
+            var action = answer == DialogResult.Yes ? "confirm" : "deny";
+            using var content = new StringContent(JsonSerializer.Serialize(new { pairingId }),
+                System.Text.Encoding.UTF8, "application/json");
+            using var _ = await http.PostAsync("http://127.0.0.1:8765/api/admin/pairing/" + action, content);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException) { }
+        finally { nearbyPrompting = false; }
     }
 
     /// <summary>M1-A A2：按需弹出的本机信任操作窗（设计 §6：配对确认允许独立窗口）。</summary>
@@ -134,7 +179,7 @@ internal sealed class ReceiverTray : ApplicationContext
     protected override void ExitThreadCore() { closing = true; tray.Visible = false; base.ExitThreadCore(); }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { closing = true; activation.Unregister(null); timer.Dispose(); window?.Dispose(); tray.Icon?.Dispose(); tray.Dispose(); http.Dispose(); dispatcher.Dispose(); }
+        if (disposing) { closing = true; activation.Unregister(null); timer.Dispose(); nearbyTimer.Dispose(); window?.Dispose(); tray.Icon?.Dispose(); tray.Dispose(); http.Dispose(); dispatcher.Dispose(); }
         base.Dispose(disposing);
     }
 }

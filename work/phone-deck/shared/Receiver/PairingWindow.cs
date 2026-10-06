@@ -34,6 +34,18 @@ internal sealed class PairingWindowSession
     public PendingPairingSubmission? Pending { get; set; }
 }
 
+/// <summary>同一 Wi-Fi 免扫码连接请求的结果（/api/lan/pair/request）。</summary>
+internal enum NearbyRequestStatus
+{
+    Pending,
+    /// <summary>已有待确认的请求（扫码或附近）：409。</summary>
+    Busy,
+    /// <summary>一分钟内请求过多：429。</summary>
+    RateLimited,
+    /// <summary>clientId / nonce 不合规：400。</summary>
+    Invalid,
+}
+
 internal sealed class PendingPairingSubmission
 {
     public required string ClientId { get; init; }
@@ -47,6 +59,9 @@ internal sealed class PairingWindowManager
     internal const int ValidSeconds = 120;
     internal const int MaxFailuresPerWindow = 5;
     internal const int ConfirmationTimeoutSeconds = 30;
+    /// <summary>附近请求需要人走到电脑前点允许，确认时限比扫码长。</summary>
+    internal const int NearbyConfirmationTimeoutSeconds = 60;
+    internal const int MaxNearbyRequestsPerMinute = 6;
     private const string Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
     private readonly string computerId;
@@ -56,6 +71,18 @@ internal sealed class PairingWindowManager
     private readonly object gate = new();
     private PairingWindowSession? active;
     private int failures;
+    private PendingPairingSubmission? nearby;
+    private string? nearbyCheckCode;
+    private long nearbyExpiresAtTick;
+    private readonly Queue<long> nearbyRequestTicks = new();
+
+    /// <summary>
+    /// 附近请求到达时触发（锁外调用）：macOS 弹原生确认框；参数为待确认请求与四位校验码。
+    /// 确认/拒绝仍走 <see cref="Confirm"/> / <see cref="Deny"/>，与回环管理页、托盘共用。
+    /// </summary>
+    internal event Action<PendingPairingSubmission, string>? NearbyRequested;
+    /// <summary>附近请求收束（允许、拒绝或超时）时触发，供原生确认框关闭。</summary>
+    internal event Action<string>? NearbyFinished;
 
     /// <summary>单调时钟注入点，仅供测试操纵窗口过期（V11）。</summary>
     internal Func<long> MonotonicClock { get; set; } = () => Environment.TickCount64;
@@ -165,6 +192,10 @@ internal sealed class PairingWindowManager
     {
         lock (gate)
         {
+            if (TakeNearby(pairingId) is { } request)
+            {
+                return request.Decision.TrySetResult(true);
+            }
             if (active?.Pending is not { } pending
                 || !string.Equals(active.PairingId, pairingId, StringComparison.Ordinal))
             {
@@ -179,6 +210,10 @@ internal sealed class PairingWindowManager
     {
         lock (gate)
         {
+            if (TakeNearby(pairingId) is { } request)
+            {
+                return request.Decision.TrySetResult(false);
+            }
             if (active?.Pending is not { } pending
                 || !string.Equals(active.PairingId, pairingId, StringComparison.Ordinal))
             {
@@ -196,6 +231,8 @@ internal sealed class PairingWindowManager
         {
             active?.Pending?.Decision.TrySetResult(false);
             active = null;
+            nearby?.Decision.TrySetResult(false);
+            nearby = null;
         }
     }
 
@@ -204,7 +241,7 @@ internal sealed class PairingWindowManager
     {
         lock (gate)
         {
-            return active?.Pending is not null;
+            return active?.Pending is not null || NearbyPendingLocked();
         }
     }
 
@@ -213,6 +250,20 @@ internal sealed class PairingWindowManager
     {
         lock (gate)
         {
+            if (NearbyPendingLocked() && nearby is { } request)
+            {
+                // 附近请求：无二维码与手动码，只有待确认信息与校验码；open=true 让管理页显示确认区。
+                return new
+                {
+                    ok = true,
+                    open = true,
+                    nearby = true,
+                    pairingId = request.PairingId,
+                    checkCode = nearbyCheckCode,
+                    remainingSeconds = Math.Max(0, (int)((nearbyExpiresAtTick - MonotonicClock()) / 1000)),
+                    pending = new { clientId = request.ClientId, clientLabel = request.ClientLabel },
+                };
+            }
             if (active is not { } session)
             {
                 return new { ok = true, open = false };
@@ -237,6 +288,102 @@ internal sealed class PairingWindowManager
                     : null,
             };
         }
+    }
+
+    /// <summary>
+    /// 同一 Wi-Fi 免扫码连接：手机经 TLS（首次信任并钉扎所见证书）提交 clientId 与随机 nonce，
+    /// 电脑本机弹框由人确认。双方各自计算四位校验码（证书指纹 + clientId + nonce），
+    /// 中间人换证书会让两边数字不同。同一时刻只允许一个待确认请求，每分钟最多 6 次。
+    /// </summary>
+    public NearbyRequestStatus TryBeginNearbyRequest(
+        string? clientId,
+        string? clientLabel,
+        string? nonce,
+        out PendingPairingSubmission? pending,
+        out string checkCode)
+    {
+        pending = null;
+        checkCode = "";
+        if (string.IsNullOrWhiteSpace(clientId) || !Guid.TryParse(clientId, out _)
+            || nonce is null || !System.Text.RegularExpressions.Regex.IsMatch(nonce, "^[0-9a-f]{32}$"))
+        {
+            return NearbyRequestStatus.Invalid;
+        }
+        var label = (clientLabel ?? "").Trim();
+        if (label.Length > 64)
+        {
+            label = label[..64];
+        }
+        PendingPairingSubmission created;
+        lock (gate)
+        {
+            var now = MonotonicClock();
+            if (active?.Pending is not null || NearbyPendingLocked())
+            {
+                return NearbyRequestStatus.Busy;
+            }
+            while (nearbyRequestTicks.Count > 0 && now - nearbyRequestTicks.Peek() >= 60_000)
+            {
+                nearbyRequestTicks.Dequeue();
+            }
+            if (nearbyRequestTicks.Count >= MaxNearbyRequestsPerMinute)
+            {
+                return NearbyRequestStatus.RateLimited;
+            }
+            nearbyRequestTicks.Enqueue(now);
+            created = new PendingPairingSubmission
+            {
+                ClientId = clientId.Trim(),
+                ClientLabel = label.Length == 0 ? "Android 手机" : label,
+                PairingId = Guid.NewGuid().ToString(),
+                Decision = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            };
+            // 已超时但手机连接尚未收束的旧请求：先判为拒绝，再接受新请求。
+            nearby?.Decision.TrySetResult(false);
+            nearby = created;
+            nearbyCheckCode = NearbyCheckCode(certificateSha256, created.ClientId, nonce);
+            nearbyExpiresAtTick = now + NearbyConfirmationTimeoutSeconds * 1000L;
+            checkCode = nearbyCheckCode;
+        }
+        pending = created;
+        NearbyRequested?.Invoke(created, checkCode);
+        return NearbyRequestStatus.Pending;
+    }
+
+    /// <summary>请求结束（含超时、手机断开）后清理，允许下一次请求。</summary>
+    public void FinishNearby(string pairingId)
+    {
+        lock (gate)
+        {
+            if (nearby is { } request && request.PairingId == pairingId)
+            {
+                request.Decision.TrySetResult(false);
+                nearby = null;
+            }
+        }
+        NearbyFinished?.Invoke(pairingId);
+    }
+
+    /// <summary>四位十进制校验码：SHA256("certSha256|clientId|nonce") 前 4 字节大端取模 10000。</summary>
+    internal static string NearbyCheckCode(string certificateSha256, string clientId, string nonce)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(
+            certificateSha256.ToLowerInvariant() + "|" + clientId.ToLowerInvariant() + "|" + nonce));
+        var value = ((uint)hash[0] << 24) | ((uint)hash[1] << 16) | ((uint)hash[2] << 8) | hash[3];
+        return (value % 10000).ToString("D4");
+    }
+
+    private bool NearbyPendingLocked() =>
+        nearby is not null && MonotonicClock() < nearbyExpiresAtTick;
+
+    private PendingPairingSubmission? TakeNearby(string? pairingId)
+    {
+        if (nearby is not { } request || !string.Equals(request.PairingId, pairingId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        nearby = null;
+        return request;
     }
 
     /// <summary>32 字符 base32（A-Z2-7）= 160bit 一次性材料。</summary>
