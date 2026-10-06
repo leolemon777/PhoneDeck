@@ -131,7 +131,7 @@ lint 0 error / 44 warning。桌面已签名更新；手机用户现用预览包�
 
 本地截图和隔离探针位于 ignored `outputs/ui-upgrade/desktop`、`outputs/ui-upgrade/android/verified-final`，
 最终签名包为 `outputs/ui-upgrade/PhoneDeck-28.zip`。UI 托盘私有提交约 14 MiB；其工作集与接收服务另计，
-完整测量口径见 [手机统一设置](PHONE_MANAGED_DESKTOP.md)。
+完整测量口径见 [手机统一设置](../guides/PHONE_MANAGED_DESKTOP.md)。
 
 ## 原手机主页面信息结构
 

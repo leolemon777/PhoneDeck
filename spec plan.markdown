@@ -239,7 +239,7 @@ PWA 在 Desktop `2.0.0-alpha.1` 提供三套完整构图：对话白（开放白
 - 共享：手机先显式开麦，三台电脑各自快捷键控制自己的转写段；一台结束，手机和其他供音保持。手机关闭共享取消尚未结束的电脑转写段，已由电脑完成的结果保留；界面提示先在电脑结束本段。新增 `audioStopV1` 与 `POST /api/audio/stop`（v2 envelope + cancel）；原子核对 owner/供音 session，再停止该流及其当前段，旧请求不影响新流。PWA peer 必须具备 builtInSpeechV1、phoneStopV1、audioStopV1；旧外部 Typeless 接收端提示更新。
 - AudioWorklet 以实际采样率转换到 48 kHz / PCM16 / mono，每帧 20 ms。音频只在内存，启动缓存最多 1 秒、WebSocket 发送积压最多 200 ms；目标独立有界队列，共享慢端可丢旧帧而不阻塞其他端，managed 不静默丢字。心跳、无音频超时、撤销、权限拒绝、麦克风中断和断线都清理会话；恢复连接只恢复控制，不自动开麦。
 - 切后台、离开页面或音频被系统打断时取消采音；有支持时请求屏幕常亮。PWA 为前台路线，不承诺锁屏持续共享。Service Worker 只缓存公开界面和图标，不缓存 API 状态、令牌、音频或后台采音；更新须在空闲时应用。
-- 本切片不迁入 Android 的完整快捷键编辑、文字同步/电脑设置管理。真实 iPhone/Android 的证书安装、权限、主屏幕运行、尾音/识别、触感、物理键盘触发和不同机器实网延迟仍需实测。自动化与真机证据分开记录，见 [iPhone PWA 指南](docs/IPHONE_PWA.md) 与 HANDOFF。
+- 本切片不迁入 Android 的完整快捷键编辑、文字同步/电脑设置管理。真实 iPhone/Android 的证书安装、权限、主屏幕运行、尾音/识别、触感、物理键盘触发和不同机器实网延迟仍需实测。自动化与真机证据分开记录，见 [iPhone PWA 指南](docs/guides/IPHONE_PWA.md) 与 HANDOFF。
 
 ## 2026-10-02 用户确认：电脑停止与手机采音同步
 
@@ -317,21 +317,21 @@ Android 固定签名 `.desktoppreview` / `2.0.0-alpha.1` 的 versionCode 从 3 �
 
 用户反馈手机仍未显示此前效果图的主题配色，要求继续完成。Android code3 将现有浅/深主题更新为暖纸/墨色风格，首页与设置及原生控件统一；底部入口为 112dp 圆形话筒，状态文字放在下方。点击、按住、电脑快捷键和共享会话继续沿用既有行为；本轮没有增加语音入口或协议模式。新 Desktop 控制页配色同步更新，旧接收端保持原渠道。
 
-固定分发包仍为 `.desktoppreview` / 2.0.0-alpha.1，versionCode 从 2 增至 3，用同一签名覆盖升级。既有 theme_id、配对与快捷键配置保留。当前外观和验证边界见 docs/UI_REFRESH.md；此前 code2 的“只改名称图标”是上一交付切片。
+固定分发包仍为 `.desktoppreview` / 2.0.0-alpha.1，versionCode 从 2 增至 3，用同一签名覆盖升级。既有 theme_id、配对与快捷键配置保留。当前外观和验证边界见 docs/design/UI_REFRESH.md；此前 code2 的“只改名称图标”是上一交付切片。
 
 ## 2026-10-01 用户确认：言渡 · Yandu 与 APK 图标
 
 产品对外名称为「言渡 · Yandu」，副标题「多设备语音输入」。用户最终指定 APK 图标使用 Notion 风格的黑白话筒，不含字母或品牌文字；早先的墨绿 Y 对话框方案由本决定替代。提供 API 26 自适应和 API 33 单色图层。
 
-`.desktoppreview` 固定签名渠道 versionName 仍为 2.0.0-alpha.1，versionCode 从 1 增至 2，用于原预览包覆盖升级。协议、包名、偏好配置和证书身份作为兼容标识保留。详情见 docs/BRANDING.md。墨水屏首页和圆形语音按钮仍在概念图评审，本次只实施名称与图标。
+`.desktoppreview` 固定签名渠道 versionName 仍为 2.0.0-alpha.1，versionCode 从 1 增至 2，用于原预览包覆盖升级。协议、包名、偏好配置和证书身份作为兼容标识保留。详情见 docs/design/BRANDING.md。墨水屏首页和圆形语音按钮仍在概念图评审，本次只实施名称与图标。
 
 ## 2026-09-30 用户授权：跨平台、最终文字同步与低配置安装
 
-用户要求执行 Windows/macOS/Linux 多电脑、统一输入法与三种入口（按住、点击、各电脑快捷键），并在电脑提交后同步最终文字，供 GitHub 用户下载使用，尽量减少配置。Linux 从原暂缓范围移入本轮；旧档位定义不自动覆盖本轮新增平台。执行记录见 docs/CROSS_PLATFORM_EXECUTION.md。
+用户要求执行 Windows/macOS/Linux 多电脑、统一输入法与三种入口（按住、点击、各电脑快捷键），并在电脑提交后同步最终文字，供 GitHub 用户下载使用，尽量减少配置。Linux 从原暂缓范围移入本轮；旧档位定义不自动覆盖本轮新增平台。执行记录见 docs/release/CROSS_PLATFORM_EXECUTION.md。
 
 用户已选定默认内置开源识别、首次下载模型，无需安装输入法和虚拟声卡。来源电脑仅在用户开启该段且焦点未变化时自动填入；其他共享组电脑保留同一份临时结果，任何听写不自动回车。现有 Typeless 路径保留。
 
-本轮新增Desktop `2.0.0-alpha.1`、Android独立 `com.codex.phonedeck.desktoppreview` 固定签名渠道（versionCode1），不进入旧签名设备更新清单。Windows/Mac Intel/Mac ARM/Linux x64 CI已完成协议、原生识别公开样本与打包；Windows+Samsung已验证6份结果双向同步及点击/按住/电脑快捷键。Mac由用户回到电脑后自行验收；Linux SSH别名/密钥在当前机器缺失，未接入执行机。真实麦克风、焦点输入、相机扫码/实网发现、不同物理电脑和干净安装仍待验收，不代表立即公开正式Release。步骤见 docs/DESKTOP_ACCEPTANCE.md。
+本轮新增Desktop `2.0.0-alpha.1`、Android独立 `com.codex.phonedeck.desktoppreview` 固定签名渠道（versionCode1），不进入旧签名设备更新清单。Windows/Mac Intel/Mac ARM/Linux x64 CI已完成协议、原生识别公开样本与打包；Windows+Samsung已验证6份结果双向同步及点击/按住/电脑快捷键。Mac由用户回到电脑后自行验收；Linux SSH别名/密钥在当前机器缺失，未接入执行机。真实麦克风、焦点输入、相机扫码/实网发现、不同物理电脑和干净安装仍待验收，不代表立即公开正式Release。步骤见 docs/release/DESKTOP_ACCEPTANCE.md。
 
 Mac快捷键由内置原生helper在主线程接收，退出及父进程异常结束时释放；CI检查事件循环存活，物理操作仍由所有者验收。各桌面包同时提供外置build.json与SHA256，Mac清单记录签名后最终字节，不把签名前文件哈希当成签名后证据。
 
@@ -363,7 +363,7 @@ validate.py 消费；规格数值冻结记录见附件 §22/§26 与 contracts J
 ## 2026-09-29 开源可用性与全端兼容专项评审
 
 用户要求形成完整 spec，包含各方面兼容要求和验证部分，供其他模型独立审查。
-专项附件为 [开源可用性、全端兼容与发布验收规格 1.0](docs/OPEN_SOURCE_RELEASE_SPEC.md)。
+专项附件为 [开源可用性、全端兼容与发布验收规格 1.0](docs/release/OPEN_SOURCE_RELEASE_SPEC.md)。
 附件可独立阅读，包含当前事实、R0–R3 发布范围、需求编号、60 组验证、证据模板、发布门、
 M0–M5/B01–B06 依赖、待决策项及可直接复制的评审任务。
 
@@ -387,7 +387,7 @@ M0–M5/B01–B06 依赖、待决策项及可直接复制的评审任务。
 横屏收起重复设备摘要，保留目标名称、分页及保存操作；大字体可滚动。
 Windows 状态窗沿用手机配色与 Luma 图标，显示连接、输入法和音频状态，保留重连入口；
 用原生控件与简单绘制实现，按需创建、关闭释放，不增加常驻渲染器或配置页面。
-验证与手机正式安装的签名限制见 docs/UI_REFRESH.md、docs/HANDOFF.md。
+验证与手机正式安装的签名限制见 docs/design/UI_REFRESH.md、docs/HANDOFF.md。
 
 ## 当前变更：手机统一设置与精简桌面（2026-09-21）
 
@@ -403,7 +403,7 @@ Android 的布局、主题和工作模式属于手机，不再被不同电脑的
 忙碌、目标错配、过期版本、无效白名单键位及落盘失败均拒绝，不重启接收器。
 保留输入协议 v2、PCM 48 kHz/16-bit/mono、点击/按住、尾音和重连基线。
 Mac 尚未实现本配置接口，手机明确提示升级，不宣称 Mac/iOS 已迁移。
-协议、实测和剩余限制见 docs/PHONE_MANAGED_DESKTOP.md 与 docs/HANDOFF.md。
+协议、实测和剩余限制见 docs/guides/PHONE_MANAGED_DESKTOP.md 与 docs/HANDOFF.md。
 
 ## 当前新增：一端发起的设备统一更新（2026-09-10）
 
@@ -416,7 +416,7 @@ Mac 尚未实现本配置接口，手机明确提示升级，不宣称 Mac/iOS �
 安卓安装需遵循系统权限和确认，不能将等待确认或取消报告为成功。Mac/iOS 安装尚未实现。
 更新包限制固定产物，独立校验发布者签名与哈希；禁止任意路径、URL、远程命令和脚本执行。
 电脑使用独立更新进程，保留身份及配置，版本/发布序号/设备身份检查失败则回退；断电恢复仍需本地修复。
-详细操作、信任根和清单协议见 docs/FLEET_UPDATES.md，验证事实见 docs/HANDOFF.md 最新记录。
+详细操作、信任根和清单协议见 docs/guides/FLEET_UPDATES.md，验证事实见 docs/HANDOFF.md 最新记录。
 
 ## 当前修复：停止时保护尾音（2026-09-10）
 
@@ -770,7 +770,7 @@ Windows 与 Mac 都应提供：
 全部电脑列表、设置分组、纯文字快捷卡、统一线性功能图形及系统深色控件同步调整。
 不改协议、音频、签名渠道或布局 schema。Windows 视觉统一与 macOS 管理外壳为后续切片，
 未完成前不称“所有端翻新完毕”。UI 预览包使用独立 `.preview` 包名和数据，不能作为统一更新载荷；
-生产包仍须原签名、递增版本与真实语音回归。实现/视觉验证见 docs/UI_REFRESH.md。
+生产包仍须原签名、递增版本与真实语音回归。实现/视觉验证见 docs/design/UI_REFRESH.md。
 
 2026-09-14 用户追加要求下线原九套经典主题、只保留简洁浅/深两套，这是当时的切片范围。
 2026-10-01 用户进一步明确要求多主题；当前六套主题、逐电脑配置与保存归属以上方最新决定为准。

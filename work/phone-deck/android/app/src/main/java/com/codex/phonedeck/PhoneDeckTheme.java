@@ -20,7 +20,7 @@ import java.util.Set;
 ///   primaryContainer / onPrimaryContainer（选中容器）；
 /// - 状态：live / onLive（"正在采音"的墨色，与错误 danger 分离）及
 ///   success / warning / danger 的容器色。
-/// 当前外观及验证记录见 docs/UI_REFRESH.md。
+/// 当前外观及验证记录见 docs/design/UI_REFRESH.md。
 final class PhoneDeckTheme {
     static final String PREFS_NAME = "PhoneDeckSettings";
     static final String PREF_THEME_ID = "theme_id";

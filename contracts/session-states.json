@@ -1,6 +1,6 @@
 {
-  "$comment": "PhoneDeck 语音会话状态机与 §16.3 七条竞态规则的可执行表达。状态机：IDLE → STARTING → ACTIVE → STOPPING → IDLE，失败进入 ERROR 并清理资源（docs/OPEN_SOURCE_RELEASE_SPEC.md §9.1）。转移表 transitions + 竞态轨迹 traces 由 tools/validate.py 逐条模拟执行：每条 trace 从 start 状态起按事件序列走转移表，终态必须等于 expect。session 选择器语义：new=开启新会话并接管所有者；match=事件会话必须等于当前活动会话；stale=事件会话与当前活动会话不同（含无活动会话）→ 只允许被标记为 stale-ignored/rejected 的转移；any=不限；none=与会话无关的事件。",
-  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §9.1", "§16.3"],
+  "$comment": "PhoneDeck 语音会话状态机与 §16.3 七条竞态规则的可执行表达。状态机：IDLE → STARTING → ACTIVE → STOPPING → IDLE，失败进入 ERROR 并清理资源（docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9.1）。转移表 transitions + 竞态轨迹 traces 由 tools/validate.py 逐条模拟执行：每条 trace 从 start 状态起按事件序列走转移表，终态必须等于 expect。session 选择器语义：new=开启新会话并接管所有者；match=事件会话必须等于当前活动会话；stale=事件会话与当前活动会话不同（含无活动会话）→ 只允许被标记为 stale-ignored/rejected 的转移；any=不限；none=与会话无关的事件。",
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9.1", "§16.3"],
   "evidence": {
     "receiverStateMachine": "work/phone-deck/windows/PhoneDeck.Server/DictationSessionManager.cs（Start/Stop/ResetFailedStart/AudioEnded/Dispose）",
     "audioBridge": "work/phone-deck/windows/PhoneDeck.Server/PhoneAudioBridge.cs（单音频所有者；AudioStreamConflictException → 409）",
@@ -285,14 +285,14 @@
       "id": "RC1",
       "rule": 1,
       "title": "仅用户仍授权、未过期、未主动停止的会话可自动恢复；用户停止立即取消恢复资格，managed 默认失败收尾",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §9 断开恢复段（MIC-10/§16.2 会话行“重连窗口”）",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9 断开恢复段（MIC-10/§16.2 会话行“重连窗口”）",
       "traces": ["RC1-a-user-stopped-no-resume", "RC1-b-managed-fails-closed"]
     },
     {
       "id": "RC2",
       "rule": 2,
       "title": "shared 会话在有限恢复窗口内自动重连（候选 15s，MIC-10）；窗口耗尽停采；恢复不继承另一手机所有权",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §9 MIC-10、§15 PERF-05",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9 MIC-10、§15 PERF-05",
       "traces": ["RC2-a-authorized-shared-resumes"]
     }
   ],
@@ -301,35 +301,35 @@
       "id": "R1",
       "rule": 1,
       "title": "start 与 stop 同时到达：stop 获得本代次终止语义；已取消 session 不再被迟到 start 建立",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 1",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 1",
       "traces": ["R1-a-start-then-stop-wins", "R1-b-late-start-not-resurrect"]
     },
     {
       "id": "R2",
       "rule": 2,
       "title": "旧 stop 晚到：只能清理对应旧 session，不能停止新 session",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 2",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 2",
       "traces": ["R2-a-old-stop-after-new-session", "R2-b-old-stop-when-idle"]
     },
     {
       "id": "R3",
       "rule": 3,
       "title": "新连接替换旧 socket：先验证所有者和代次，不以“最新连接”自动夺权",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 3",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 3",
       "traces": ["R3-a-second-phone-connection-rejected"]
     },
     {
       "id": "R4",
       "rule": 4,
       "title": "启动部分成功：音频/引擎任一失败清理本会话；引擎仍可能采集时上报未知/需本机处理，不假报停止",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 4",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 4",
       "traces": ["R4-a-partial-start-failure", "R4-b-stop-unconfirmed-reports-unknown"]
     },
     {
       "id": "R5",
       "rule": 5,
       "title": "引擎 hold：正常停止与异常断流都释放本会话持有键；进程强杀不能依赖 finally，须单列测试与恢复设计",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 5",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 5",
       "traces": ["R5-a-stream-break-releases-keys", "R5-b-abnormal-stop-still-releases"],
       "nonFinallyScenarios": ["接收端进程强杀：由测试与恢复设计单独覆盖（规格 §18 V28），不得以 finally 覆盖此规则"]
     },
@@ -337,14 +337,14 @@
       "id": "R6",
       "rule": 6,
       "title": "软件更新/配置写入：准入与输入/音频活动使用统一互斥规则，避免检查空闲后新会话穿入",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 6",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 6",
       "traces": ["R6-a-config-write-rejected-while-active", "R6-b-config-write-rejected-during-starting"]
     },
     {
       "id": "R7",
       "rule": 7,
       "title": "App 重启：清除运行授权，保留设备/布局；不会因为持久化 shared 请求或过期租约开麦",
-      "specRef": "docs/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 7",
+      "specRef": "docs/release/OPEN_SOURCE_RELEASE_SPEC.md §16.3 规则 7",
       "traces": ["R7-a-restart-clears-authorization", "R7-b-persisted-shared-request-no-mic"]
     }
   ],

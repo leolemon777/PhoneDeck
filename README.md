@@ -7,25 +7,25 @@
 **2026-10-05 Android APK 已同步一套「对话白」。** 原生 Java 首页采用白底留白、底部大话筒、点击/按住/共享及 Goal/退格/回车，继续调用电脑 Typeless，不下载语音模型。听写/翻译/问答等电脑模式收进右上角菜单。Samsung 已安装独立「言渡·对话白」预览并验证普通听写开始、电脑停止后手机同步关麦；其他语音模式及最终文字输入仍须分项验收。本机缺少旧 APK 签名，原包与配置保留；安装渠道和证据见 [交接记录](docs/HANDOFF.md)，构建命令见 [构建流程](docs/BUILD_PIPELINE.md)。另外两套新网页风格尚未同步到 APK。
 
 
-**2026-10-04 当前开发路线：手机供音，电脑使用 Typeless。** 新手机网页复用原 Windows / macOS 外部输入法接收端，保留对话白、极夜黑、常青绿，以及点击、按住、共享和基础按键。此路线不创建或下载本地语音模型。最新运行步骤和兼容范围见 [Typeless 手机网页](docs/TYPELESS_PWA.md)。下面的统一 Desktop / Whisper 记录是独立实验路线，保留供二开，不是手机 UI 的前置依赖。
+**2026-10-04 当前开发路线：手机供音，电脑使用 Typeless。** 新手机网页复用原 Windows / macOS 外部输入法接收端，保留对话白、极夜黑、常青绿，以及点击、按住、共享和基础按键。此路线不创建或下载本地语音模型。最新运行步骤和兼容范围见 [Typeless 手机网页](docs/guides/TYPELESS_PWA.md)。下面的统一 Desktop / Whisper 记录是独立实验路线，保留供二开，不是手机 UI 的前置依赖。
 
-多设备语音输入。Android 显示名称为「言渡」，提供八套可切换配色（墨白、暖纸、松绿、淡紫、陶土、雾蓝、墨白深色、极夜）、圆形话筒入口和原创黑白话筒图标；品牌和覆盖升级说明见 [BRANDING](docs/BRANDING.md)。PhoneDeck 保留为兼容工程名及当前仓库地址。
+多设备语音输入。Android 显示名称为「言渡」，提供八套可切换配色（墨白、暖纸、松绿、淡紫、陶土、雾蓝、墨白深色、极夜）、圆形话筒入口和原创黑白话筒图标；品牌和覆盖升级说明见 [BRANDING](docs/design/BRANDING.md)。PhoneDeck 保留为兼容工程名及当前仓库地址。
 
-2026-10-03 新增 **iPhone / Android 网页 PWA 预览**，无需 App Store。新版 Desktop 提供手机安全网页、电脑确认配对、对话白、极夜黑、常青绿三套完整手机界面，以及按住、点击和多电脑共享。普通语音跟随电脑停止，共享时各电脑独立结束；手机关闭共享会取消未结束的电脑段落。首次需按电脑指引导入自己的公开证书；使用时保持网页前台。浏览器自动化结果与真机待验项目见 [使用与验收指南](docs/IPHONE_PWA.md)，不能把此预览视为 iOS 锁屏或原生全功能支持。
+2026-10-03 新增 **iPhone / Android 网页 PWA 预览**，无需 App Store。新版 Desktop 提供手机安全网页、电脑确认配对、对话白、极夜黑、常青绿三套完整手机界面，以及按住、点击和多电脑共享。普通语音跟随电脑停止，共享时各电脑独立结束；手机关闭共享会取消未结束的电脑段落。首次需按电脑指引导入自己的公开证书；使用时保持网页前台。浏览器自动化结果与真机待验项目见 [使用与验收指南](docs/guides/IPHONE_PWA.md)，不能把此预览视为 iOS 锁屏或原生全功能支持。
 
 2026-10-02 手机 UI 开发预览提供**三套首页**：极简居中、单手底座、紧凑面板，从顶部「界面」切换，可独立搭配六套配色。三款均有点击/按住/共享、Goal、退格、回车，完整快捷键收进顶部入口；按钮具有按压、回弹和系统触感反馈。正在进行的语音结束后才能从首页换方式或 UI，选择共享仍需手动开麦。当前为独立 `.preview` 开发包，模拟器检查不代表实际触感或语音验收；最新证据与安装渠道边界见 [交接记录](docs/HANDOFF.md)。
 
-2026-10-01 新增 **多主题、多电脑配置**：手机在「设置 → 外观主题」选择墨水屏暖白、墨水屏深色、森林松绿、瓷白淡紫、燕麦陶土或天空雾蓝。在「设置 → 多电脑配置」选择已配对电脑，逐台设置电脑名称、内置识别语言、识别后自动填入及点击/按住快捷键；这些设置保存到对应电脑，管理配置不会切换当前输入目标。手机主题与点击/按住模式保持手机自己的选择。新版 Desktop 本机控制页也可独立选主题、编辑本机配置。使用步骤与验收边界见 [快速开始](docs/DESKTOP_QUICK_START.md)。
+2026-10-01 新增 **多主题、多电脑配置**：手机在「设置 → 外观主题」选择墨水屏暖白、墨水屏深色、森林松绿、瓷白淡紫、燕麦陶土或天空雾蓝。在「设置 → 多电脑配置」选择已配对电脑，逐台设置电脑名称、内置识别语言、识别后自动填入及点击/按住快捷键；这些设置保存到对应电脑，管理配置不会切换当前输入目标。手机主题与点击/按住模式保持手机自己的选择。新版 Desktop 本机控制页也可独立选主题、编辑本机配置。使用步骤与验收边界见 [快速开始](docs/guides/DESKTOP_QUICK_START.md)。
 
 2026-09-30 新增 **2.0.0-alpha.1 跨平台 Desktop 接收端**：Windows/macOS/Linux 共用本地 Whisper 识别，手机点击、按住、电脑快捷键使用同一条语音链路。最终文字经配对手机同步到选定共享组；接收端保留临时记录，当前触发电脑仅在焦点未改变时自动填入。下载包自带 .NET 与识别组件，默认首次下载一次中文/多语言模型，也可构建完整离线包。首次按系统提示授权并扫码确认，无需另外安装输入法或虚拟声卡。
 
-使用方法见 [跨平台快速开始](docs/DESKTOP_QUICK_START.md)，实施与验收状态见 [执行记录](docs/CROSS_PLATFORM_EXECUTION.md)。alpha候选已打包，当前放在维护者发布草稿中供真机验收，尚未公开Release。这是新增的预览路线，不能宣称三平台均已实机验收；Linux X11 与 Wayland 的输入能力不同，iPhone 已新增上述网页/PWA 前台预览，原生客户端尚未实现。下面保留的 Windows/Mac 外部输入法说明适用于旧接收端，两种接收端需分别运行。
+使用方法见 [跨平台快速开始](docs/guides/DESKTOP_QUICK_START.md)，实施与验收状态见 [执行记录](docs/release/CROSS_PLATFORM_EXECUTION.md)。alpha候选已打包，当前放在维护者发布草稿中供真机验收，尚未公开Release。这是新增的预览路线，不能宣称三平台均已实机验收；Linux X11 与 Wayland 的输入能力不同，iPhone 已新增上述网页/PWA 前台预览，原生客户端尚未实现。下面保留的 Windows/Mac 外部输入法说明适用于旧接收端，两种接收端需分别运行。
 
 > **English** — The new 2.0.0-alpha.1 desktop candidate uses local Whisper on Windows, macOS and Linux. Android supplies microphone audio and can relay each final result to selected computers. Desktop packages include the runtime; the model downloads once, with no external input method or virtual audio driver. Candidate packages are in a maintainer draft pending actual-device acceptance. The public [v1.6.0-beta.1 release](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.1) is the legacy external-dictation route. Docs are Chinese-first; English contributions welcome.
 
 PhoneDeck 把一台闲置 Android 手机变成电脑的语音输入面板和可编程快捷键控制台。手机麦克风负责采集声音，电脑端语音输入软件负责语音转文字；手机还可以发送复制、粘贴、截图、F1 等快捷键。长期目标是 Android / iOS 手机自由搭配多台 Windows / macOS 电脑，提供共享麦克风、可选语音输入法和主题。iOS 原生客户端尚待开发，PWA 与 Mac 仍为预览；实验引擎不等于正式支持。
 
-当前源码为 **Android 1.6.0-dev.21 / Windows 接收端 1.6.0-dev.16**。本轮实现、手机安装通道限制与未验收项见 [手机统一设置记录](docs/PHONE_MANAGED_DESKTOP.md)。上一版完整实机稳定基线是
+当前源码为 **Android 1.6.0-dev.21 / Windows 接收端 1.6.0-dev.16**。本轮实现、手机安装通道限制与未验收项见 [手机统一设置记录](docs/guides/PHONE_MANAGED_DESKTOP.md)。上一版完整实机稳定基线是
 **PhoneDeck 1.4.0**。1.5.0 已通过 Android、Windows 构建、长期签名、真机安装和
 一轮真实 ADB 服务断开/恢复验证，但仍需完成快捷键编辑、真实输入、连续断线、
 VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向已启动
@@ -38,17 +38,17 @@ VB-CABLE、Typeless 和蓝牙验收后才能视为正式稳定版。macOS 方向
 iOS 网页先行/原生后续、主题与状态统一、签名分发和维护体系。第一轮容量目标为一台手机连接
 五台电脑，后续按实测扩展。方向已确认，技术方案和排期为建议；不代表上述能力已经实现。
 
-新的完整评审附件：[开源可用性、全端兼容与发布验收规格 1.0](docs/OPEN_SOURCE_RELEASE_SPEC.md)
+新的完整评审附件：[开源可用性、全端兼容与发布验收规格 1.0](docs/release/OPEN_SOURCE_RELEASE_SPEC.md)
 （2026-09-29，待评审）。其中包含需求、兼容矩阵、60 组验证和发布门槛；不代表这些验收已经通过。
 
 | 浅色主题 | 深色主题 |
 |---|---|
-| ![PhoneDeck 手机端控制台（浅色）](./work/phone-deck/phonedeck-screen-light.png) | ![PhoneDeck 手机端控制台（深色）](./work/phone-deck/phonedeck-screen-dark.png) |
+| ![PhoneDeck 手机端控制台（浅色）](./docs/images/android-home-light.png) | ![PhoneDeck 手机端控制台（深色）](./docs/images/android-home-dark.png) |
 
 ## 项目所有者真正想实现什么
 
 1. 闲置 Android / iOS 手机长期作为辅助键盘和手机麦克风使用（iOS 为后续目标）。
-2. 手机一键唤醒或停止电脑端语音输入软件（Typeless 为默认，档案化适配豆包、微信输入法等，见 docs/VOICE_ENGINES.md）。
+2. 手机一键唤醒或停止电脑端语音输入软件（Typeless 为默认，档案化适配豆包、微信输入法等，见 docs/guides/VOICE_ENGINES.md）。
 3. 点击模式用同一个主按钮开始/停止；按住模式仍是按下开始、松开停止。
 4. 快捷键按钮可由用户修改，例如把“截屏”改为 F1，或配置 Ctrl+C、Ctrl+Shift+S。
 5. 加入 `/goal`、`/plan`、`/compact` 等文本命令，并为 Codex、Claude Code、ZCode、Cursor 提供语义化预设。
@@ -60,7 +60,7 @@ iOS 网页先行/原生后续、主题与状态统一、签名分发和维护体
 
 ## 当前已经可以使用的功能
 
-- Windows/Android 设备统一更新：手机导入签名包或读取已接入电脑的缓存，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/FLEET_UPDATES.md)。
+- Windows/Android 设备统一更新：手机导入签名包或读取已接入电脑的缓存，手机协调分发、逐台反馈，电脑自动替换与失败回退；安卓按系统提示安装。未接入过的电脑首次使用需先安装接入版本，详见 [统一更新说明](./docs/guides/FLEET_UPDATES.md)。
 - 原生 Android Java App，最低 Android 8.0（API 26）。
 - Windows x64、.NET 8 自包含接收端。
 - USB ADB 反向隧道，服务仅监听 `127.0.0.1:8765`。
@@ -72,8 +72,8 @@ iOS 网页先行/原生后续、主题与状态统一、签名分发和维护体
 - 共享模式使用 Android 麦克风前台服务，可在后台/锁屏继续；通知和主按钮均可停止，
   服务采用 `START_NOT_STICKY`，App 或手机重启后不会自动恢复采音。
 - Windows 通过 NAudio/WASAPI 将音频写入 `CABLE Input (VB-Audio Virtual Cable)`。
-- 语音引擎档案化：内置 Typeless（自动读取其配置与快捷键，失败退回 RightAlt）、豆包、微信输入法，支持切换式（按一下）与按住式（hold）触发；用户可在 data 目录的 voice-engines 子目录放置 JSON 零代码新增/覆盖引擎，详见 [docs/VOICE_ENGINES.md](./docs/VOICE_ENGINES.md)。
-- 手机「设置 → 多电脑配置」逐台管理已配对电脑。新跨平台 Desktop 提供名称、内置识别语言、自动填入与两种语音快捷键；旧 Windows 接收端继续提供输入法、快捷键、USB 恢复/局域网发现/登录启动，见 [手机统一设置](docs/PHONE_MANAGED_DESKTOP.md)。在线保存到明确电脑，离线或冲突时保留修改并提示。
+- 语音引擎档案化：内置 Typeless（自动读取其配置与快捷键，失败退回 RightAlt）、豆包、微信输入法，支持切换式（按一下）与按住式（hold）触发；用户可在 data 目录的 voice-engines 子目录放置 JSON 零代码新增/覆盖引擎，详见 [docs/guides/VOICE_ENGINES.md](./docs/guides/VOICE_ENGINES.md)。
+- 手机「设置 → 多电脑配置」逐台管理已配对电脑。新跨平台 Desktop 提供名称、内置识别语言、自动填入与两种语音快捷键；旧 Windows 接收端继续提供输入法、快捷键、USB 恢复/局域网发现/登录启动，见 [手机统一设置](docs/guides/PHONE_MANAGED_DESKTOP.md)。在线保存到明确电脑，离线或冲突时保留修改并提示。
 - 三款首页的圆形话筒依状态切换话筒/停止图形，说明显示“开始说话 / 取消启动 / 停止说话”；按住模式支持按下说话、松开停止。
 - 输入目标编号放在固定语音面板右下方，可单手切换在线电脑。
 - 手机端音量条、震动、等待、成功和失败反馈。
@@ -138,7 +138,7 @@ iOS 网页先行/原生后续、主题与状态统一、签名分发和维护体
   Wi-Fi 听写最小闭环（仅点击模式最小路径）；按住模式、翻译/问答、USB 断线恢复、Intel、
   蓝牙及 Developer ID 签名公证仍未验收或接入。
 
-Mac 构建、权限、配对与验收步骤见 [docs/MACOS_SETUP.md](./docs/MACOS_SETUP.md)。
+Mac 构建、权限、配对与验收步骤见 [docs/guides/MACOS_SETUP.md](./docs/guides/MACOS_SETUP.md)。
 
 ## 当前尚未实现
 
@@ -218,7 +218,7 @@ PhoneDeck/
 
 ## 快速构建
 
-详细环境配置见 [docs/SETUP.md](./docs/SETUP.md)，完整流程、签名渠道及门槛见
+详细环境配置见 [docs/guides/SETUP.md](./docs/guides/SETUP.md)，完整流程、签名渠道及门槛见
 [docs/BUILD_PIPELINE.md](./docs/BUILD_PIPELINE.md)。以下命令从仓库根目录执行。
 
 统一开发构建入口（当前宿主支持的目标、测试、单文件检查与报告归档；要求 PowerShell 7）：
@@ -287,7 +287,7 @@ zsh scripts/macos/Build-PhoneDeckReceiver.sh
 
 ## 外部依赖
 
-- [Typeless](https://www.typeless.com/)：电脑端语音转文字（默认引擎），用户自行安装。其他引擎（豆包、微信输入法、千问输入法等）同样由用户自行安装，可用内置档案或自定义 JSON 适配，见 [docs/VOICE_ENGINES.md](./docs/VOICE_ENGINES.md)。
+- [Typeless](https://www.typeless.com/)：电脑端语音转文字（默认引擎），用户自行安装。其他引擎（豆包、微信输入法、千问输入法等）同样由用户自行安装，可用内置档案或自定义 JSON 适配，见 [docs/guides/VOICE_ENGINES.md](./docs/guides/VOICE_ENGINES.md)。
 - [VB-CABLE](https://vb-audio.com/Cable/)：Windows 虚拟音频设备，用户自行安装。
 - Android SDK Platform Tools：ADB USB 通道。
 - NAudio 2.2.1：Windows 接收端 NuGet 依赖。

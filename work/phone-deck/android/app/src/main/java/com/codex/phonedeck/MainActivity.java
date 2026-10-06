@@ -3234,16 +3234,6 @@ public final class MainActivity extends Activity {
         return node.optBoolean("virtualCableSelected", false);
     }
 
-    private static String typelessModeLabel(String mode) {
-        if ("translation".equals(mode)) {
-            return "翻译";
-        }
-        if ("ask".equals(mode)) {
-            return "问答";
-        }
-        return "听写";
-    }
-
     private String typelessIdleActionLabel() {
         if ("translation".equals(selectedTypelessMode)) {
             return "点击开始翻译";

@@ -57,5 +57,5 @@
 | 项 | 状态 |
 |---|---|
 | 第三方依赖 | 见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)（全部 MIT/Apache-2.0 兼容） |
-| 支持窗口/SLA | 未承诺（[SECURITY.md](../SECURITY.md) 建议值） |
+| 支持窗口/SLA | 未承诺（[SECURITY.md](../../SECURITY.md) 建议值） |
 | 已知限制 | [KNOWN_ISSUES](KNOWN_ISSUES.md) |

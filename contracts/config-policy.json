@@ -1,6 +1,6 @@
 {
   "$comment": "§16.2 第 7 行『配置』剩余项：原子保存算法、崩溃恢复期望值、迁移/备份、导出秘密隔离。atomicWrite 为已证实源码事实；crashRecovery 为期望值夹具（由 §18 V59 故障注入在 L2 执行，本表是判定基准而非已执行证据）；exportForbiddenFields 由 tools/validate.py C7 对导出样本做全树键名扫描。",
-  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §11（CFG-02/CFG-03）", "§13 REL-09", "§12 SEC-05", "§18 V47/V49/V59"],
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §11（CFG-02/CFG-03）", "§13 REL-09", "§12 SEC-05", "§18 V47/V49/V59"],
   "atomicWrite": {
     "status": "current",
     "grounding": "DesktopConfiguration.cs:68-82 WriteAtomic（临时文件+独占写+Flush(true)+Move 覆盖+finally 清理临时文件）",

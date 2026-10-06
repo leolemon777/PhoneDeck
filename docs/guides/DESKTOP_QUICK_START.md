@@ -2,7 +2,7 @@
 
 2026-10-03：新版源码增加 iPhone / Android **网页/PWA** 入口，无需 App Store。先完成下方电脑安装、模型准备，手机端改按 [PWA 首次连接指南](IPHONE_PWA.md) 操作：主电脑 HTTPS 8768、公开证书信任、电脑确认配对与主屏幕入口。以下 Android APK 的扫码、文字同步和配置管理说明仅适用于原生客户端；网页当前覆盖三种语音入口、三布局六主题及基础键。浏览器需前台使用，真机验收仍待完成。
 
-2026-10-01 更新：Android code4 提供六套主题和「多电脑配置」，保留圆形话筒入口及黑白话筒图标；可覆盖同签名的原 Luma Preview / 言渡 code2/code3。逐电脑设置需要本轮新版 Desktop 接收端，9 月 30 日旧候选包需更新后才能显示该配置页。PhoneDeck 工程名、包名和旧候选文件名保留兼容，详见 [品牌说明](BRANDING.md)。实际安装及验收状态以 HANDOFF 为准。
+2026-10-01 更新：Android code4 提供六套主题和「多电脑配置」，保留圆形话筒入口及黑白话筒图标；可覆盖同签名的原 Luma Preview / 言渡 code2/code3。逐电脑设置需要本轮新版 Desktop 接收端，9 月 30 日旧候选包需更新后才能显示该配置页。PhoneDeck 工程名、包名和旧候选文件名保留兼容，详见 [品牌说明](../design/BRANDING.md)。实际安装及验收状态以 HANDOFF 为准。
 
 这是新的统一桌面接收端。Windows/macOS/Linux 使用同一份手机协议、同一套本地识别引擎和最终文字记录。旧 Windows/Mac 接收端仍保留；两者占用相同端口，启动新版前请先退出旧接收端。
 
@@ -47,7 +47,7 @@
 
 本版本是 `2.0.0-alpha.1`。它不参与旧版签名设备更新流程；不要把这些新包放入旧设备更新清单。目前不能宣称所有 Mac/Linux 桌面已实机验收。发布正式版前需要 Windows/Mac/Linux 的首次安装、权限、输入、语音、同步及断线验收。
 
-Android分发渠道为 `com.codex.phonedeck.desktoppreview`，使用保存在所有者本地的固定签名。这个渠道默认扫码/TLS连接，不自动接入旧USB接收端或在启动时请求蓝牙权限；原Luma保留旧USB/蓝牙入口。CI的 `.preview` APK只供开发验收，临时debug签名不用于公开持续更新。Mac自行验收可按 [真机步骤](DESKTOP_ACCEPTANCE.md) 操作。
+Android分发渠道为 `com.codex.phonedeck.desktoppreview`，使用保存在所有者本地的固定签名。这个渠道默认扫码/TLS连接，不自动接入旧USB接收端或在启动时请求蓝牙权限；原Luma保留旧USB/蓝牙入口。CI的 `.preview` APK只供开发验收，临时debug签名不用于公开持续更新。Mac自行验收可按 [真机步骤](../release/DESKTOP_ACCEPTANCE.md) 操作。
 
 构建范围为 Windows x64、Mac Intel/Apple Silicon、Linux x64/arm64（匹配架构原生构建）。系统基线为 Windows 10/11 x64、macOS 14+、Ubuntu 22.04/24.04 桌面，其他 Linux 发行版先按技术预览对待；运行时支持范围参照 [Microsoft .NET 10 系统矩阵](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)。Android 原生最低8.0；iPhone 采用本轮 PWA 前台预览，原生客户端尚未实现。
 

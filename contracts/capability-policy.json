@@ -1,6 +1,6 @@
 {
   "$comment": "§16.2 第 5 行『能力』剩余项：每端最低版本与旧协议窗口、协商失败的降级矩阵、permissionDenied 与 available/busy 的分离。downgradeMatrix 覆盖 definitions.schema.json 能力枚举全部 10 项（validate.py C7 交叉校验）。versionFacts 为当前已证实版本（release-versions.json）；受维护最低版本窗口为契约目标（D10）。",
-  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-01", "§16.2 能力行", "§11 CFG-04", "§18 V48", "D10"],
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §8 PRO-01", "§16.2 能力行", "§11 CFG-04", "§18 V48", "D10"],
   "versionFacts": {
     "windows": { "version": "1.6.0-dev.16", "sequence": 28, "status": "current", "grounding": "work/phone-deck/release-versions.json" },
     "android": { "versionName": "1.6.0-dev.21", "versionCode": 27, "status": "current", "grounding": "work/phone-deck/release-versions.json" },

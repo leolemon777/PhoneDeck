@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 /// <summary>
 /// M1-A A4 验收（V17 服务端子集，L1/L2）：旧共享令牌升级与 legacy 应急撤销。
-/// 依据 docs/M1A_PAIRING_DESIGN.md §5：rotate 单次签发（G-1 永不重发，重放只回
+/// 依据 docs/design/M1A_PAIRING_DESIGN.md §5：rotate 单次签发（G-1 永不重发，重放只回
 /// already-upgraded 三字段状态）、revoked 永不重发、仅旧共享令牌可调（Bearer 调用者 403）、
 /// 同 clientId 简单限速（≥3s、单调时钟）；legacy 撤销先持久化再生效，此后旧令牌一切请求
 /// 401 且逐手机凭据不受影响；clients.json 升级为 {version,legacyRevokedAt,clients} 信封

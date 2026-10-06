@@ -67,7 +67,7 @@ package:com.codex.phonedeck.preview
 
 说明：任务指定对 `com.codex.phonedeck` 查版本；因该正式包未安装，对实际存在的同族包 `com.codex.phonedeck.preview` 补做同类只读 `dumpsys package` 查询以取得版本，属同类只读操作。
 
-版本对照：设备上的预览包 1.6.0-dev.18-ui-preview（versionCode 24）落后于仓库当前源码基线 Android 1.6.0-dev.21（见 AGENTS.md「当前基线」；其同时载明 Samsung 新版因预览签名不同、安装通道待用户选择，见 docs/PHONE_MANAGED_DESKTOP.md）。本次按只读约束未做任何更新。
+版本对照：设备上的预览包 1.6.0-dev.18-ui-preview（versionCode 24）落后于仓库当前源码基线 Android 1.6.0-dev.21（见 AGENTS.md「当前基线」；其同时载明 Samsung 新版因预览签名不同、安装通道待用户选择，见 docs/guides/PHONE_MANAGED_DESKTOP.md）。本次按只读约束未做任何更新。
 
 ## 3. adb reverse 通道
 

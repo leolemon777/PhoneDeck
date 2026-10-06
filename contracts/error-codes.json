@@ -1,5 +1,5 @@
 {
-  "$comment": "PhoneDeck 错误分类 → HTTP/产品错误码映射。分类来源 docs/OPEN_SOURCE_RELEASE_SPEC.md §8（错误分为未授权、错误目标、能力不支持、忙碌、配置冲突、过期会话、输入权限不足、音频设备缺失、探针未知、超时；请求格式/大小错误在进入输入或音频状态机前拒绝）。status=current 表示映射已由当前源码行为证实（附 grounding 路径）；status=target 表示契约目标映射，冻结于 D03（规格 §22）。tools/validate.py 校验本文件与 schemas/response.error.schema.json 的 errorCode 枚举完全一致。",
+  "$comment": "PhoneDeck 错误分类 → HTTP/产品错误码映射。分类来源 docs/release/OPEN_SOURCE_RELEASE_SPEC.md §8（错误分为未授权、错误目标、能力不支持、忙碌、配置冲突、过期会话、输入权限不足、音频设备缺失、探针未知、超时；请求格式/大小错误在进入输入或音频状态机前拒绝）。status=current 表示映射已由当前源码行为证实（附 grounding 路径）；status=target 表示契约目标映射，冻结于 D03（规格 §22）。tools/validate.py 校验本文件与 schemas/response.error.schema.json 的 errorCode 枚举完全一致。",
   "productCodePrefix": "PD-ERR",
   "categories": [
     {

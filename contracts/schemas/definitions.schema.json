@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://phonedeck.dev/contracts/schemas/definitions.schema.json",
   "title": "PhoneDeck 协议共用字段定义（draft-07）",
-  "description": "协议骨架字段约束。骨架 protocolVersion/requestId/sessionId/targetComputerId 与 LAN 头 X-PhoneDeck-Token 见 docs/OPEN_SOURCE_RELEASE_SPEC.md §8；字段上限来自当前源码：TargetEnvelopeValidator.cs（requestId/sessionId/targetComputerId 校验）、InputCommandProcessor.cs 与 Program.cs（动作/组合键/宏上限）。",
+  "description": "协议骨架字段约束。骨架 protocolVersion/requestId/sessionId/targetComputerId 与 LAN 头 X-PhoneDeck-Token 见 docs/release/OPEN_SOURCE_RELEASE_SPEC.md §8；字段上限来自当前源码：TargetEnvelopeValidator.cs（requestId/sessionId/targetComputerId 校验）、InputCommandProcessor.cs 与 Program.cs（动作/组合键/宏上限）。",
   "definitions": {
     "protocolVersionV2": {
       "type": "integer",

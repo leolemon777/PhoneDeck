@@ -29,4 +29,4 @@ USB 开发验收可复用 `adb reverse tcp:8768 tcp:8768`，手机使用 `https:
 - 会话/传输接口：`IWebPhoneTarget`，本机目标通过工厂注入；原接收端使用固定回环 API，实验 Desktop 的内置识别 target 独立保留。
 - Windows / Mac 的原构建入口会嵌入网页与 QRCoder；不需要 `scripts/build-desktop.ps1` 的 Whisper 构建步骤。模型代码没有链接进这两个原接收端。
 
-自动化结果和当前真机待办见 [HANDOFF](HANDOFF.md)。证书安装、手机实际录音、Typeless 转写和多人/多电脑同时使用必须单独验收。
+自动化结果和当前真机待办见 [HANDOFF](../HANDOFF.md)。证书安装、手机实际录音、Typeless 转写和多人/多电脑同时使用必须单独验收。

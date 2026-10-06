@@ -591,11 +591,6 @@ internal sealed class MacKeyboardInput
         SendChord(keys, 45);
     }
 
-    private void SendModifierOnly(string name)
-    {
-        SendChord([MapKeyName(name)], 55);
-    }
-
     private bool ExecuteOnce(string? requestId, Action execute)
     {
         lock (syncRoot)

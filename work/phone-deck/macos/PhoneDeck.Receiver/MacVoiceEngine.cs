@@ -38,7 +38,7 @@ internal sealed record MacVoiceEngineProfile(
     internal IReadOnlyList<string> ModeIds => Modes.Select(mode => mode.Id).ToArray();
 }
 
-/// <summary>引擎档案 JSON 解析与校验，格式与 Windows 端共用（见 docs/VOICE_ENGINES.md）。</summary>
+/// <summary>引擎档案 JSON 解析与校验，格式与 Windows 端共用（见 docs/guides/VOICE_ENGINES.md）。</summary>
 internal static class MacVoiceEngineProfileJson
 {
     internal static MacVoiceEngineProfile Parse(string json, string sourceDescription)

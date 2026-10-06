@@ -3,7 +3,7 @@
 > 文档版本：1.1 · 日期：2026-09-29 · 状态：**已完成独立评审（结论：可执行）；本版并入评审问题处理，未批准实施的部分保留为提案**。
 > 交付目的：让其他模型、开发者和测试者能独立审查范围、设计、依赖与验证充分性，再按任务实施。
 > 本轮授权：编写规格与验证计划；不包含产品实现、安装迁移、发布 Release 或改变仓库可见性。
-> 产品长期决策入口仍为根目录 [spec plan.markdown](../spec%20plan.markdown)。本文是其开源发布专项评审附件，不另建互相竞争的长期计划。
+> 产品长期决策入口仍为根目录 [spec plan.markdown](../../spec plan.markdown)。本文是其开源发布专项评审附件，不另建互相竞争的长期计划。
 
 评审导航：第 3 节看事实，第 4 节看兼容范围，第 6–15 节看 80 项需求，第 18 节看 60 组验证，
 第 20 节看发布门，第 22 节看待决策项，第 24 节可直接复制给评审模型。
@@ -86,9 +86,9 @@ README/ARCHITECTURE/PROJECT_HANDOVER/AGENTS 中部分 WPF、九主题、Mac 未�
 
 ### 3.3 证据入口
 
-- [版本描述](../work/phone-deck/release-versions.json)、[Android 构建](../work/phone-deck/android/app/build.gradle)、[CI](../.github/workflows/ci.yml)。
-- [交接记录](HANDOFF.md)、[集中设置](PHONE_MANAGED_DESKTOP.md)、[UI 验证](UI_REFRESH.md)、[Mac 搭建](MACOS_SETUP.md)。
-- [架构](ARCHITECTURE.md)、[构建流程](BUILD_PIPELINE.md)、[统一更新](FLEET_UPDATES.md)、[引擎说明](VOICE_ENGINES.md)。
+- [版本描述](../../work/phone-deck/release-versions.json)、[Android 构建](../../work/phone-deck/android/app/build.gradle)、[CI](../../.github/workflows/ci.yml)。
+- [交接记录](../HANDOFF.md)、[集中设置](../guides/PHONE_MANAGED_DESKTOP.md)、[UI 验证](../design/UI_REFRESH.md)、[Mac 搭建](../guides/MACOS_SETUP.md)。
+- [架构](../ARCHITECTURE.md)、[构建流程](../BUILD_PIPELINE.md)、[统一更新](../guides/FLEET_UPDATES.md)、[引擎说明](../guides/VOICE_ENGINES.md)。
 - Windows：`Program.cs`、`DesktopConfigurationEndpoints.cs`、`DictationSessionManager.cs`、`PhoneAudioBridge.cs`、`FleetUpdates.cs`、`UpdateFileTransaction.cs`、`PhoneDeckDataDirectory.cs`。
 - Android：`MainActivity.java`、`TargetDeviceManager.java`、`VoiceSessionCoordinator.java`、`PhoneAudioService.java`、`SharedAudioBroadcaster.java`、`ComputerSettingsActivity.java`。
 - Mac：`Program.cs`、`MacKeyboardInput.cs`、`MacDictationSessionManager.cs`、`MacPhoneAudioBridge.cs`、`LanIdentity.cs`。

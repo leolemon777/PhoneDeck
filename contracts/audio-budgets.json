@@ -1,6 +1,6 @@
 {
   "$comment": "§16.2 第 6 行『音频』剩余项：实际采样率转换语义与队列/尾音数值预算。current 为已证实源码常量（附路径）；candidate 为规格建议值（评审冻结，PERF/D03/D04）；target 为契约目标。注意规格 §9 明示：不能把“停止采音必须快”和“尾帧必须完整”合并为同一个计时指标。",
-  "specRefs": ["docs/OPEN_SOURCE_RELEASE_SPEC.md §9（MIC-03/MIC-04/MIC-05/MIC-10）", "§15（PERF-03/PERF-04/PERF-05）", "§16.2 音频行", "D03/D04"],
+  "specRefs": ["docs/release/OPEN_SOURCE_RELEASE_SPEC.md §9（MIC-03/MIC-04/MIC-05/MIC-10）", "§15（PERF-03/PERF-04/PERF-05）", "§16.2 音频行", "D03/D04"],
   "sampleRateConversion": {
     "uploadHz": 48000,
     "uploadChannels": 1,

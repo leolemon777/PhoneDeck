@@ -1,7 +1,7 @@
 # M1-A 配对与授权安全设计（D02 方向落地）
 
 > 版本 1.0（独立评审修订版）· 日期 2026-09-29 · 依据：用户已确认 D02 方向"成熟加密实现 + 本机确认 + 逐手机凭据"。
-> 上游约束：[开源发布规格](OPEN_SOURCE_RELEASE_SPEC.md) §7（NET-01…NET-08）、§12（SEC-02/03/05）、§16.2 前两行与候选参数注（安全评审前不自创密码协议）；契约夹具 `contracts/pairing-and-identity.json`、`schemas/pairing.schema.json`、`schemas/identity.schema.json`。
+> 上游约束：[开源发布规格](../release/OPEN_SOURCE_RELEASE_SPEC.md) §7（NET-01…NET-08）、§12（SEC-02/03/05）、§16.2 前两行与候选参数注（安全评审前不自创密码协议）；契约夹具 `contracts/pairing-and-identity.json`、`schemas/pairing.schema.json`、`schemas/identity.schema.json`。
 > 本文档只做设计；§12 评审记录含阻断项处置，按第 9 节切分实现。
 
 ## 1. 现状基线（全部已核源码）

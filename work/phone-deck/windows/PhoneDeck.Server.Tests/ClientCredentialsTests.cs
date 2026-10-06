@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 /// <summary>
 /// M1-A A1 验收：L1（凭据存储/鉴权解析）+ V12 子集（L2 假流撤销）。
-/// 依据 docs/M1A_PAIRING_DESIGN.md §2/§5/§6：服务端只存哈希、rotate 永不重发、
+/// 依据 docs/design/M1A_PAIRING_DESIGN.md §2/§5/§6：服务端只存哈希、rotate 永不重发、
 /// 撤销先持久化再生效、长流即时终止、跨手机零影响（≤1s 预算，D03 冻结）。
 /// </summary>
 [TestClass]

@@ -35,7 +35,7 @@ Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，�
 
 新 Desktop 的 `desktopSettingsV1`、受控热键及本机多主题需要从本轮提交重新构建，并运行 `PhoneDeck.Desktop.Tests`；手机 code4 与 9 月 30 日旧 Desktop 候选搭配时不能获得新增设置接口。Windows/X11/Mac 原生快捷键分别在对应目标 OS 构建，Mac helper 的受控参数纳入同一包。Wayland 仍由系统绑定启动/停止命令，不用编译通过宣称通用热键支持。
 
-每批候选独立记录源码提交、版本、签名与最终字节哈希。旧 code2/code3 APK、四 OS 候选及草稿 Release 保留原来源和验证记录；本轮源码改变不等于桌面安装包已重打包、设备已更新或公开发布。真机范围与剩余门槛见 [UI_REFRESH](UI_REFRESH.md)、[DESKTOP_QUICK_START](DESKTOP_QUICK_START.md) 和 HANDOFF。
+每批候选独立记录源码提交、版本、签名与最终字节哈希。旧 code2/code3 APK、四 OS 候选及草稿 Release 保留原来源和验证记录；本轮源码改变不等于桌面安装包已重打包、设备已更新或公开发布。真机范围与剩余门槛见 [UI_REFRESH](design/UI_REFRESH.md)、[DESKTOP_QUICK_START](guides/DESKTOP_QUICK_START.md) 和 HANDOFF。
 
 ## 2026-10-01 墨水屏外观 APK code3（历史切片）
 
@@ -43,7 +43,7 @@ Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，�
 
 ## 2026-10-01 言渡品牌与 APK code2
 
-新 Android 候选显示名称为「言渡」，使用黑白话筒图标；固定分发渠道的 versionCode 从 1 增至 2，versionName 保持 `2.0.0-alpha.1`，文件名为 `Yandu-2.0.0-alpha.1-code2-android.apk`。仍使用原 `.desktoppreview` 包名和同一长期签名配置，可覆盖同签名的 code1 包。图标原生 XML/PNG 已提交，各 OS 的 Android 构建无需安装图形生成工具；可选重绘脚本和母版见 [BRANDING.md](BRANDING.md)。9 月 30 日固定候选与草稿 Release 保留原来源，不用新 APK 覆盖旧候选的校验记录。
+新 Android 候选显示名称为「言渡」，使用黑白话筒图标；固定分发渠道的 versionCode 从 1 增至 2，versionName 保持 `2.0.0-alpha.1`，文件名为 `Yandu-2.0.0-alpha.1-code2-android.apk`。仍使用原 `.desktoppreview` 包名和同一长期签名配置，可覆盖同签名的 code1 包。图标原生 XML/PNG 已提交，各 OS 的 Android 构建无需安装图形生成工具；可选重绘脚本和母版见 [BRANDING.md](design/BRANDING.md)。9 月 30 日固定候选与草稿 Release 保留原来源，不用新 APK 覆盖旧候选的校验记录。
 
 ## 2026-09-30 跨平台 Desktop alpha 构建入口
 
@@ -59,7 +59,7 @@ Android可分发候选使用 `:app:assembleDesktopPreview :app:lintDesktopPrevie
 
 核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
-B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](MAC_HANDOVER.md)。
+B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](archive/MAC_HANDOVER.md)。
 
 ## 1. 当前基线
 
@@ -263,7 +263,7 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 
 用户流程：任一已接入电脑导入签名包 → 请求批量更新 → 打开手机主页 → 手机校验和分发 → 电脑等待空闲、安装并检查 → 手机系统安装确认。
 离线设备在恢复连接且手机主页前台时补更。输入法/虚拟音频驱动的安装与更新仍由其渠道负责。
-操作细节和回退边界见 [FLEET_UPDATES.md](./FLEET_UPDATES.md)。
+操作细节和回退边界见 [FLEET_UPDATES.md](./guides/FLEET_UPDATES.md)。
 
 ## 7. 现有 CI 的真实覆盖与缺口
 

@@ -786,9 +786,6 @@ internal sealed record DictationCommand(
     string? TargetComputerId,
     string? Mode);
 internal sealed record SharedMicrophoneRequest(bool Requested);
-internal sealed record VoiceEngineConfigRequest(
-    string? ActiveEngine,
-    Dictionary<string, Dictionary<string, string>>? ShortcutOverrides);
 
 internal static class KeyboardInput
 {

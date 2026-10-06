@@ -69,7 +69,7 @@ internal sealed record VoiceEngineProfile
     internal IReadOnlyList<string> ModeIds => Modes.Select(mode => mode.Id).ToArray();
 }
 
-/// <summary>引擎档案 JSON 解析与校验。档案格式见 docs/VOICE_ENGINES.md。</summary>
+/// <summary>引擎档案 JSON 解析与校验。档案格式见 docs/guides/VOICE_ENGINES.md。</summary>
 internal static class VoiceEngineProfileJson
 {
     private static readonly JsonSerializerOptions Options = new()

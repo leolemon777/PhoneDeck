@@ -72,7 +72,7 @@ cookie 只识别网页手机，不能访问原生 `/api` 或本机 `/local`。
 主电脑使用 `WebPhoneLocalTarget`，附加电脑使用 `WebPhoneRemoteTarget` 的固定业务路径、独立凭据与 TLS pin；
 不接受 DNS/公网/回环目的地或重定向，不提供通用代理。每手机最多主电脑加四个 peer。
 peer 新增需要其本机一次性 QR 材料+确认，`peers.json` 不向网页返回令牌。
-端点、cookie、资料格式和使用限制详见 [PWA 指南](IPHONE_PWA.md)。
+端点、cookie、资料格式和使用限制详见 [PWA 指南](guides/IPHONE_PWA.md)。
 
 managed 对应选中的单台电脑；电脑本地结束产生 `phoneStopV1` 凭据，网关独立探测活动目标并先推送 `stopped`，
 再清理网络。共享组先由手机明确开麦；各电脑只控制自己的段落，停止不影响其他供音。
@@ -123,7 +123,7 @@ macOS 预览 2.0.0-dev.3；当前协议仍为 v2。
 各接收端 FleetUpdates 校验与空闲准入 → 独立 FleetUpdateWorker 固定文件替换、健康校验与异常回退。
 Android 通过非导出的只读 UpdateApkProvider 向系统安装器临时授予 APK 读取权；自身包名、签名与版本需一致。
 手机的离线补更队列持久化，主页在前台且目标恢复连接时再次协调，不承诺后台静默分发。
-Mac/iOS 不参与当前安装协议。详见 [统一更新协议](./FLEET_UPDATES.md)。
+Mac/iOS 不参与当前安装协议。详见 [统一更新协议](./guides/FLEET_UPDATES.md)。
 
 ```text
 Android MainActivity

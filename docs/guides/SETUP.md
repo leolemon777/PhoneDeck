@@ -1,7 +1,7 @@
 # 新电脑开发、构建与运行
 
 核对日期：2026-09-10。本文负责开发环境和运行接线；编译、测试、签名、打包、CI 与发布门槛统一见
-[BUILD_PIPELINE.md](./BUILD_PIPELINE.md)。当前 Android/Windows 可开发运行，Mac 为待真机验收的预览，iOS 尚无工程。
+[BUILD_PIPELINE.md](../BUILD_PIPELINE.md)。当前 Android/Windows 可开发运行，Mac 为待真机验收的预览，iOS 尚无工程。
 
 ## 1. 获取源码
 
@@ -31,7 +31,7 @@ VB-CABLE、BlackHole 与输入法不属于编译依赖，也不随本仓库分�
 
 ## 3. 构建与 Android 签名渠道
 
-从仓库根目录执行 [构建手册第 4 节](./BUILD_PIPELINE.md#4-当前可执行的构建命令) 的命令。
+从仓库根目录执行 [构建手册第 4 节](../BUILD_PIPELINE.md#4-当前可执行的构建命令) 的命令。
 Android 包含 assemble、单元测试与 lint；Windows 同时发布接收端和控制台。
 统一更新只替换两个 EXE，控制台须带 `IncludeNativeLibrariesForSelfExtract=true` 发布参数。
 

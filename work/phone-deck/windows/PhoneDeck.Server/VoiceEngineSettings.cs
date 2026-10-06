@@ -74,7 +74,7 @@ internal sealed class VoiceEngineSettings
                     "{\n"
                     + "  // 语音引擎设置。改动后重启 PhoneDeck.Server.exe 生效。\n"
                     + "  // activeEngine：当前语音转文字引擎，可选内置 typeless/doubao/wetype，\n"
-                    + "  // 或 data\\voice-engines\\ 目录中扩展档案的 id。详见 docs/VOICE_ENGINES.md。\n"
+                    + "  // 或 data\\voice-engines\\ 目录中扩展档案的 id。详见 docs/guides/VOICE_ENGINES.md。\n"
                     + "  \"activeEngine\": \"typeless\",\n"
                     + "  // shortcutOverrides：手动指定某引擎某模式的快捷键，优先级最高。\n"
                     + "  // 无配置可读的引擎（如微信输入法）必须在这里填写才能使用，例如：\n"
@@ -88,20 +88,5 @@ internal sealed class VoiceEngineSettings
             // 设置模板写入失败不影响启动。
         }
         return new VoiceEngineSettings();
-    }
-
-    internal static void Save(VoiceEngineSettings settings)
-    {
-        try
-        {
-            Directory.CreateDirectory(
-                Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings,
-                new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch (Exception exception)
-        {
-            Console.WriteLine($"写入 voice-engine-settings.json 失败：{exception.Message}");
-        }
     }
 }

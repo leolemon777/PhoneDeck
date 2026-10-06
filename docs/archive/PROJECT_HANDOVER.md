@@ -4,12 +4,12 @@
 > 适用读者：接手开发的人、开源社区贡献者、以及未来的项目所有者本人。
 > 本文档是全项目一页式总览；细节按"文档地图"一节深入。
 
-当前完整路线以 [长期规格 v0.6 第 0 章](../spec%20plan.markdown) 为准：
+当前完整路线以 [长期规格 v0.6 第 0 章](../../spec plan.markdown) 为准：
 Android/iOS × Windows/macOS、五机首轮容量、无线首次配对、引擎兼容分级、
 双语音模式、主题与开源发行。iOS 尚待开发；Mac 已于 2026-09-14 在 Apple Silicon
 真机完成两轮 Wi-Fi 听写最小闭环，但不等于 Mac 全场景验收。
 本文后续部署、界面和待办保留原交接快照，最新执行状态以 HANDOFF.md 为准。
-当前 Windows/Android 已加入签名包统一更新；旧电脑首次接入和使用方法见 [统一更新说明](./FLEET_UPDATES.md)。
+当前 Windows/Android 已加入签名包统一更新；旧电脑首次接入和使用方法见 [统一更新说明](../guides/FLEET_UPDATES.md)。
 
 ---
 
@@ -102,7 +102,7 @@ PhoneDeck开发工作区\
 - health 双块兼容：旧 `typeless` 块从当前引擎映射（旧手机端不受影响）+ 新 `voiceEngine` 块（id/displayName/modes[]/trigger/configured），Android 优先读新块、动态渲染模式 chips 与引擎名；
 - 控制台设置页"语音引擎"卡：引擎切换 + 快捷键覆盖，保存即重启接收端。
 
-完整 Schema、示例档案（千问/微信客户端/doubao-murmur）、新引擎核对清单：**[docs/VOICE_ENGINES.md](./VOICE_ENGINES.md)**。
+完整 Schema、示例档案（千问/微信客户端/doubao-murmur）、新引擎核对清单：**[docs/guides/VOICE_ENGINES.md](../guides/VOICE_ENGINES.md)**。
 
 ## 6. Android 端要点
 
@@ -138,7 +138,7 @@ macOS `Build-PhoneDeckReceiver.sh`（打 .app）。
 ## 9. 未完成事项与风险（交接时必读）
 
 1. **dev.13/dev.8/dev.3 均未部署**：运行目录 `PhoneDeck电脑控制台` 还是旧版（Windows dev.7 / Android dev.12）。部署时**只换 EXE/APK，绝不动 data**。
-2. **豆包/微信输入法未实装验收**（所有者决定不安装不测试）：档案标注 experimental，靠 `docs/VOICE_ENGINES.md` 核对清单 + 社区回馈修正。
+2. **豆包/微信输入法未实装验收**（所有者决定不安装不测试）：档案标注 experimental，靠 `docs/guides/VOICE_ENGINES.md` 核对清单 + 社区回馈修正。
 3. **Typeless 回归未做**：引擎改造后（协议双块、接口重构）建议下次实机听写时观察；单测已覆盖逻辑层。
 4. **macOS 端整体仍是预览**：2026-09-14 已在 Apple Silicon Mac 完成两轮真实 Wi-Fi 听写最小闭环（Core Audio/BlackHole/Typeless/CGEvent）；按住模式、翻译/问答、三机共享等仍未验收。
 5. 开源基础件已具备（根目录 MIT LICENSE、Issue 模板、三平台 CI）；依赖/资产授权盘点、历史秘密扫描与正式发布流程仍未完成；仓库不打包 Typeless/VB-CABLE/BlackHole 等第三方软件。
@@ -152,9 +152,9 @@ macOS `Build-PhoneDeckReceiver.sh`（打 .app）。
 | `spec plan.markdown` | 产品规格 v0.4（**改代码前必读**） |
 | `AGENTS.md` | Agent 协作规范与不可破坏约束 |
 | `docs/ARCHITECTURE.md` | 数据流图与各文件职责 |
-| `docs/SETUP.md` / `MACOS_SETUP.md` | 两平台安装步骤 |
-| `docs/VOICE_ENGINES.md` | 语音引擎档案 Schema、示例、核对清单 |
-| `docs/WINDOWS_WIFI_DEPLOY.md` | Wi-Fi 部署 |
+| `docs/guides/SETUP.md` / `MACOS_SETUP.md` | 两平台安装步骤 |
+| `docs/guides/VOICE_ENGINES.md` | 语音引擎档案 Schema、示例、核对清单 |
+| `docs/guides/WINDOWS_WIFI_DEPLOY.md` | Wi-Fi 部署 |
 | `docs/HANDOFF.md` | **逐版本开发日志**（根因分析、验收记录，最长） |
 | 本文档 | 全项目一页式交接总览 |
 

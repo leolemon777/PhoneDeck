@@ -71,7 +71,7 @@ SCHEMAS_DIR_NAME = "schemas"
 DOMAINS = {"request-confirmation", "session", "capability", "audio", "config", "error",
            "pairing", "identity"}
 EXPECTED_ERROR_CATEGORIES = {
-    # docs/OPEN_SOURCE_RELEASE_SPEC.md §8 错误段：未授权、错误目标、能力不支持、忙碌、
+    # docs/release/OPEN_SOURCE_RELEASE_SPEC.md §8 错误段：未授权、错误目标、能力不支持、忙碌、
     # 配置冲突、过期会话、输入权限不足、音频设备缺失、探针未知、超时；
     # 另含“请求格式/大小错误”（进入输入或音频状态机前拒绝）。
     "bad_request",

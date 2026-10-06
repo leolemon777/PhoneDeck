@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * M1-A A4：旧共享令牌 → 逐手机凭据升级客户端（docs/M1A_PAIRING_DESIGN.md §5.2）。
+ * M1-A A4：旧共享令牌 → 逐手机凭据升级客户端（docs/design/M1A_PAIRING_DESIGN.md §5.2）。
  * rotate 用旧共享令牌头鉴权（PhoneDeckEndpoint.accessToken 即旧 lanToken），
  * 服务端生成该手机专属 clientId+令牌并只返回一次；同手机再次 rotate 返回
  * already-upgraded 状态而非令牌本体（rotate 永不重发，G-1 处置）。

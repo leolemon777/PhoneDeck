@@ -288,7 +288,7 @@
   },
   "credentialRotateRequest": {
    "type": "object",
-   "description": "POST /api/lan/credential/rotate 请求【目标，M1-A A4 设计形态（docs/M1A_PAIRING_DESIGN.md §5.2）】：旧共享令牌持有者升级为逐手机凭据，无需重新扫码。仅接受旧 token 鉴权；已持 Authorization: Bearer 新凭据的调用者一律 403（旧头/新头不得互获额外能力，设计 §5.1）。",
+   "description": "POST /api/lan/credential/rotate 请求【目标，M1-A A4 设计形态（docs/design/M1A_PAIRING_DESIGN.md §5.2）】：旧共享令牌持有者升级为逐手机凭据，无需重新扫码。仅接受旧 token 鉴权；已持 Authorization: Bearer 新凭据的调用者一律 403（旧头/新头不得互获额外能力，设计 §5.1）。",
    "properties": {
     "clientId": {
      "type": "string",

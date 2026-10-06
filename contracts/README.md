@@ -1,6 +1,6 @@
 # PhoneDeck 契约测试台（contracts/）
 
-按《开源可用性、全端兼容与发布验收规格》[docs/OPEN_SOURCE_RELEASE_SPEC.md](../docs/OPEN_SOURCE_RELEASE_SPEC.md)
+按《开源可用性、全端兼容与发布验收规格》[docs/release/OPEN_SOURCE_RELEASE_SPEC.md](../docs/release/OPEN_SOURCE_RELEASE_SPEC.md)
 §16.1 建立：**先固定行为，再提取公共核心**。本目录只保存契约（JSON Schema、正/反样本、
 错误映射、状态转移、参数策略），四端（Android Java / Windows C# / macOS C# / 未来 iOS Swift）
 消费**同一批**夹具，等价行为测试通过后再考虑提取 Receiver.Core。本目录不包含任何产品实现，
