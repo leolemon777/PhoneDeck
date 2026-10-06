@@ -44,7 +44,7 @@ internal sealed record PairingPendingInfo(string ClientId, string ClientLabel);
 
 /// <summary>
 /// 回环配对状态三种形态：关闭 {ok,open:false}；附近请求 {…,nearby,pendings}；扫码窗口 {…,qrPayload,manualCode,…}。
-/// 各分支不用的字段为空、不输出。
+/// 各分支不用的字段为空、不输出；pending 始终输出（无待确认时为 null，旧客户端据此轮询）。
 /// </summary>
 internal sealed record PairingStatusSnapshot(
     bool Ok,
@@ -56,4 +56,4 @@ internal sealed record PairingStatusSnapshot(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CheckCode = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RemainingSeconds = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? FailuresRemaining = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PairingPendingInfo? Pending = null);
+    PairingPendingInfo? Pending = null);

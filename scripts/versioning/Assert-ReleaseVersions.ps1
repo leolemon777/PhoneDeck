@@ -353,7 +353,7 @@ function Get-SourceSnapshot {
     $androidName = $Matches[1]
 
     $macProgram = Read-Utf8Text -Path $Paths.MacProgram
-    if ($macProgram -notmatch '(?m)^\s*version = "([^"]+)",\s*$') {
+    if ($macProgram -notmatch '(?m)^\s*(?:version|\["version"\])\s*=\s*"([^"]+)",\s*$') {
         throw "Could not read macOS health version from $($Paths.MacProgram)"
     }
     $macHealth = $Matches[1]
@@ -611,7 +611,7 @@ function Sync-ProductSources {
     $macProgram = Read-Utf8Text -Path $Paths.MacProgram
     $macProgram2 = [regex]::Replace(
         $macProgram,
-        '(?m)^(\s*version = ")[^"]+(",\s*)$',
+        '(?m)^(\s*(?:version|\["version"\])\s*=\s*")[^"]+(",\s*)$',
         "`${1}$($Descriptor.MacVersion)`${2}",
         1
     )

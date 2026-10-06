@@ -123,7 +123,7 @@ internal sealed class PairingWindowManager
                 QrPayloadJson = JsonSerializer.Serialize(
                     new QrPairingPayload(1, computerId, displayName, httpsPort, certificateSha256,
                         pairingId, material, ValidSeconds, MaxFailuresPerWindow),
-                    ReceiverApiJsonContext.Default.QrPairingPayload),
+                    PairingPayloadJsonContext.Default.QrPairingPayload),
                 ManualCode = FormatManualCode(material),
                 MaterialCheckCode = MaterialCheckCode(material),
                 ExpiresAtTick = MonotonicClock() + ValidSeconds * 1000L,
