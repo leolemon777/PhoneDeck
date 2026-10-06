@@ -1,4 +1,34 @@
-# PhoneDeck 第二台 Windows 电脑部署
+# 言渡 Windows 电脑部署
+
+## 2026-10-06 当前流程（同一 Wi-Fi 免扫码，取代下方旧流程）
+
+**打包**（任意平台，Mac 上可交叉编译；产物放 ignored 的 `outputs/`）：
+
+```bash
+dotnet publish work/phone-deck/windows/PhoneDeck.Server/PhoneDeck.Server.csproj -c Release -r win-x64 \
+  --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableWindowsTargeting=true
+dotnet publish work/phone-deck/windows/PhoneDeck.ControlCenter/PhoneDeck.ControlCenter.csproj -c Release -r win-x64 \
+  --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableWindowsTargeting=true
+```
+
+文件夹放 `PhoneDeck.Server.exe`、`PhoneDeck.ControlCenter.exe`（必须同目录）和 `scripts/windows/Enable-PhoneDeckLan.ps1`。
+
+**在每台 Windows 上**：
+
+1. 安装 VB-CABLE（装完重启）与 Typeless，Typeless 麦克风选 `CABLE Output (VB-Audio Virtual Cable)`。
+2. 以管理员运行 `Enable-PhoneDeckLan.ps1`（本地子网放行 TCP 8766、UDP 8767、UDP 5353）。
+3. 双击 `PhoneDeck.ControlCenter.exe`：托盘出现言渡图标并自动启动接收端，状态窗口检查清单应全部打勾；
+   托盘菜单可勾选“开机启动”。
+4. 手机连同一 Wi-Fi，首页出现“附近 · 点按连接”的电脑卡片，点它；电脑弹出“新手机连接”，核对四位校验码后点“允许”。
+   隔着路由器时在手机“添加电脑 → 输入地址”填这台电脑的局域网 IP。USB 首次配对仍可用。
+
+数据目录默认在 exe 同目录的 `data/`。旧接收端（如 1.6.0-dev.6）没有“附近连接”接口，手机点卡片会提示版本太旧，需按本流程更新。
+Windows 托盘新界面与连接窗口尚未在 Windows 实机验收。
+
+---
+
+## 旧流程（1.6.0-dev.2，USB 配对脚本，保留备查）
+
 
 ## 前提
 

@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 
 function Ensure-PhoneDeckFirewallRule {
     param(
@@ -27,5 +27,7 @@ function Ensure-PhoneDeckFirewallRule {
 
 Ensure-PhoneDeckFirewallRule -RuleName 'PhoneDeck Secure LAN (TCP 8766)' -Protocol TCP -LocalPort 8766
 Ensure-PhoneDeckFirewallRule -RuleName 'PhoneDeck Discovery (UDP 8767)' -Protocol UDP -LocalPort 8767
+# 同一 Wi-Fi 免扫码连接：手机用 mDNS（_phonedeck._tcp）发现电脑。
+Ensure-PhoneDeckFirewallRule -RuleName 'PhoneDeck mDNS (UDP 5353)' -Protocol UDP -LocalPort 5353
 
 Write-Host '规则同时适用于专用/公用网络，但只接受本地子网来源。'
