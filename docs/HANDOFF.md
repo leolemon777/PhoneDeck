@@ -1,5 +1,15 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 电脑端墨白界面（最新状态）
+
+- 设计稿在 Android UI 设计画布最下两行（Windows 托盘与确认、Mac 本机状态页）；决策见规格顶部同日条目。
+- **验证**：Mac 测试 48/48；Windows 179/183（同 4 项 macOS 基线失败）；Windows Server 与 ControlCenter 交叉编译 0 错误 0 警告；
+  Android 构建/测试/lint 通过并安装到 Samsung。Mac 原生版实测：状态页深浅色与手机宽度排版、`/api/admin/presence` 识别
+  `SM-G9880 · USB`、根路径跳转；连接请求卡用浏览器内模拟数据验证渲染与转义（未再触发真实请求，避免系统确认框被误点）。
+- **发现**：用户 Typeless 麦克风原为“Auto-detect（MacBook Air 麦克风）”，状态页提示后已改为 BlackHole；辅助功能仍未授权。
+- **未验证**：Windows 托盘新窗口在 Windows 实机的显示与 DPI 缩放、开机启动开关；`AXIsProcessTrustedWithOptions` 弹框效果
+  （由 Claude 进程启动时归属不同）。ad-hoc 签名每次重建会改变 cdhash，辅助功能授权可能需要重新勾选。
+
 ## 2026-10-06 Mac 原生精简接收端（最新状态）
 
 - 决策、范围与数据见规格顶部同日条目。新增文件：`shared/Receiver/ReceiverJsonContexts.cs`、`ReceiverApiModels.cs`、

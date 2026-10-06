@@ -3345,6 +3345,7 @@ public final class MainActivity extends Activity {
             try {
                 connection = (HttpURLConnection) new URL(SERVER + "/api/health").openConnection();
                 connection.setRequestProperty("X-PhoneDeck-Foreground", PhoneDeckHttp.appInForeground ? "1" : "0");
+                connection.setRequestProperty("X-PhoneDeck-Device", PhoneDeckHttp.DEVICE_LABEL);
                 connection.setConnectTimeout(1200);
                 connection.setReadTimeout(1200);
                 connection.setRequestMethod("GET");

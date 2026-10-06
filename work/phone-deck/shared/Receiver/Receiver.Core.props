@@ -30,6 +30,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)NativePairingEndpoints.cs" Link="Core/NativePairingEndpoints.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)PairingWindow.cs" Link="Core/PairingWindow.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)PhoneStopReceipts.cs" Link="Core/PhoneStopReceipts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)PhonePresence.cs" Link="Core/PhonePresence.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ReceiverStatusPage.cs" Link="Core/ReceiverStatusPage.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ReceiverJsonContexts.cs" Link="Core/ReceiverJsonContexts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ReceiverApiModels.cs" Link="Core/ReceiverApiModels.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SessionLeaseRegistry.cs" Link="Core/SessionLeaseRegistry.cs" />

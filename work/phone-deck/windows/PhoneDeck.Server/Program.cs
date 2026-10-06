@@ -97,6 +97,7 @@ if (serverSettings.LanDiscovery)
 var clientCredentials = new ClientCredentialsStore(
     Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
 var clientSessions = new ClientSessionRegistry();
+var phonePresence = new PhonePresence();
 var pairingWindows = new PairingWindowManager(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName,
@@ -152,6 +153,10 @@ app.Use(async (context, next) =>
         return;
     }
     context.Items["ClientId"] = auth.ClientId;
+    phonePresence.Observe(context.Connection.LocalPort, auth.ClientId,
+        context.Request.Headers.UserAgent.FirstOrDefault(),
+        context.Request.Headers.ContainsKey("X-PhoneDeck-Foreground"),
+        context.Request.Headers["X-PhoneDeck-Device"].FirstOrDefault());
     await next();
 });
 
@@ -478,7 +483,7 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
     clientCredentials,
     clientSessions,
     pairingWindows,
-    KeyboardInput.RevokeClientInput));
+    KeyboardInput.RevokeClientInput) { Presence = phonePresence });
 
 app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken cancellationToken) =>
 {

@@ -4,7 +4,7 @@
 /// - 8765 /api/lan/pair：USB 回环签发旧共享令牌（旧入口撤销后 410）；
 /// - 8766 /api/lan/credential/rotate：旧共享令牌升级为逐手机凭据；
 /// - 8765 /api/admin/*：开启/确认/拒绝配对、列出与撤销手机、应急撤销旧入口；
-/// - 8765 /admin/pairing：本机配对管理页（二维码、确认、撤销），macOS 无托盘时使用。
+/// - 8765 /admin/pairing：本机状态页（连接状态、检查清单、新手机确认、撤销），见 ReceiverStatusPage。
 /// 撤销会通过 <see cref="ClientSessionRegistry"/> 立即终止该手机的音频长流。
 /// </summary>
 internal sealed record NativePairingHost(
@@ -18,7 +18,11 @@ internal sealed record NativePairingHost(
     ClientCredentialsStore Credentials,
     ClientSessionRegistry Sessions,
     PairingWindowManager PairingWindows,
-    Action<string> RevokeInput);
+    Action<string> RevokeInput)
+{
+    /// <summary>最近来过请求的手机（本机状态页、托盘显示用）。</summary>
+    internal PhonePresence Presence { get; init; } = new();
+}
 
 internal sealed record ClientRevokeRequest(string? ClientId);
 internal sealed record RotateRequest(string? ClientId);
@@ -352,44 +356,32 @@ internal static class NativePairingEndpoints
         });
 
 #endif
+        // 本机状态页：最近来过请求的手机（仅 8765 回环）。
+        app.MapGet("/api/admin/presence", (HttpContext context) =>
+        {
+            if (context.Connection.LocalPort != 8765)
+            {
+                return Results.NotFound();
+            }
+            var labels = host.Credentials.ListRedacted()
+                .Where(record => record.RevokedAtUtc is null)
+                .ToDictionary(record => record.ClientId, record => record.Label, StringComparer.Ordinal);
+            return Results.Ok(new System.Text.Json.Nodes.JsonObject
+            {
+                ["ok"] = true,
+                ["phones"] = host.Presence.Snapshot(clientId =>
+                    clientId is not null && labels.TryGetValue(clientId, out var label) ? label : null),
+            });
+        });
+
         app.MapGet("/admin/pairing", (HttpContext context) =>
             context.Connection.LocalPort != 8765
                 ? Results.NotFound()
-                : Results.Content(AdminPage, "text/html; charset=utf-8"));
+                : Results.Content(ReceiverStatusPage.Html, "text/html; charset=utf-8"));
+#if PHONEDECK_LITE
+        // 精简版没有 iPhone 浏览器网关占用根路径：本机打开 http://127.0.0.1:8765/ 直接到状态页。
+        app.MapGet("/", (HttpContext context) =>
+            context.Connection.LocalPort != 8765 ? Results.NotFound() : Results.Redirect("/admin/pairing"));
+#endif
     }
-
-    /// <summary>本机配对管理页：只经 8765 回环提供，写操作受 LoopbackOriginGuard 同源校验。</summary>
-    private const string AdminPage = """
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>手机配对</title><style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#111;--muted:#666;--line:#ddd;--accent:#111}
-@media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--muted:#999;--line:#333;--accent:#eee}}
-body{margin:0;padding:24px 16px;font:15px/1.5 -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:560px;margin-inline:auto}
-h1{font-size:22px;margin:0 0 4px}p{color:var(--muted);margin:4px 0 16px}button{font:inherit;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
-button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}section{border-top:1px solid var(--line);padding:16px 0}
-img{width:240px;height:240px;image-rendering:pixelated;background:#fff;padding:8px;border-radius:12px}code{font-size:18px;letter-spacing:1px}
-li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0}ul{list-style:none;padding:0;margin:0}
-</style></head><body>
-<h1>手机配对</h1><p>手机和这台电脑连同一个 Wi-Fi 后会自动发现它；手机上点「连接」时，这里和系统弹框都会请你确认，并显示与手机一致的校验码。旧版手机仍可开启下方扫码窗口。每台手机获得独立凭据，可单独撤销。</p>
-<section id="window"><button class="primary" id="begin">开启 2 分钟配对窗口</button></section>
-<section><h2 style="font-size:17px;margin:0 0 8px">已配对手机</h2><ul id="clients"></ul></section>
-<script>
-const $=id=>document.getElementById(id);
-const post=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.json().catch(()=>({})));
-async function refresh(){
-  const s=await fetch('/api/admin/pairing/status').then(r=>r.json());
-  const w=$('window');
-  if(!s.open){w.innerHTML='<button class="primary" id="begin">开启 2 分钟配对窗口</button>';$('begin').onclick=()=>post('/api/admin/pairing/begin').then(refresh);}
-  else if(s.pending){w.innerHTML=`<p>手机「${(s.pending.clientLabel||'未命名').replace(/[<>&"]/g,'')}」请求${s.nearby?'连接':'配对'}，校验码 <code>${s.checkCode}</code></p><button class="primary" id="ok">确认</button> <button id="no">拒绝</button>`;
-    $('ok').onclick=()=>post('/api/admin/pairing/confirm',{pairingId:s.pairingId}).then(refresh);$('no').onclick=()=>post('/api/admin/pairing/deny',{pairingId:s.pairingId}).then(refresh);}
-  else{w.innerHTML=`<img alt="配对二维码" src="/api/admin/pairing/qr?t=${s.pairingId}"><p>手动码 <code>${s.manualCode}</code> · 剩余 ${s.remainingSeconds} 秒</p><button id="cancel">取消</button>`;
-    $('cancel').onclick=()=>post('/api/admin/pairing/cancel').then(refresh);}
-  const c=await fetch('/api/admin/clients').then(r=>r.json());
-  $('clients').innerHTML='';
-  for(const x of c.clients||[]){if(x.revokedAtUtc)continue;const li=document.createElement('li');li.textContent=x.label||x.clientId;
-    const b=document.createElement('button');b.textContent='撤销';b.onclick=()=>post(x.legacy?'/api/admin/legacy/revoke':'/api/admin/clients/revoke',{clientId:x.clientId}).then(refresh);li.append(b);$('clients').append(li);}
-}
-refresh();setInterval(refresh,1500);
-</script></body></html>
-""";
 }

@@ -42,6 +42,15 @@ final class PhoneDeckHttp {
     /// 预热音频输出，后台保活探测不再让电脑常驻音频线程。
     static volatile boolean appInForeground;
 
+    /// 手机型号（如 SM-G9880），电脑状态页据此显示“哪台手机连着”；只保留可打印 ASCII。
+    static final String DEVICE_LABEL = deviceLabel();
+
+    private static String deviceLabel() {
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
+        String cleaned = model.replaceAll("[^\\x20-\\x7E]", "").trim();
+        return cleaned.isEmpty() ? "Android" : cleaned.length() > 64 ? cleaned.substring(0, 64) : cleaned;
+    }
+
     private PhoneDeckHttp() {
     }
 
@@ -56,6 +65,7 @@ final class PhoneDeckHttp {
         connection.setReadTimeout(readTimeout);
         connection.setUseCaches(false);
         connection.setRequestProperty("X-PhoneDeck-Foreground", appInForeground ? "1" : "0");
+        connection.setRequestProperty("X-PhoneDeck-Device", DEVICE_LABEL);
         if (endpoint.accessToken != null) {
             if (endpoint.clientId != null) {
                 // M1-A 逐手机凭据：Bearer + 客户端标识（设计 §5.1）。

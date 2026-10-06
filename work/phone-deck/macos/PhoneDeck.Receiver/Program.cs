@@ -38,6 +38,12 @@ var capabilities = new[]
     "phoneAudio", "sharedMicrophone", "managedDictation", "phoneStopV1", "healthEventsV1",
     "phoneManagedSettingsV1"
 };
+// 再次双击 App：已有接收端在跑就只打开它的状态页，不再启动第二个（端口会冲突）。
+if (MacLaunch.ReceiverAlreadyRunning())
+{
+    MacLaunch.OpenStatusPage();
+    return;
+}
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
 #if PHONEDECK_PHONE_WEB
@@ -93,6 +99,7 @@ phoneWeb.Map(app);
 var clientCredentials = new ClientCredentialsStore(
     Path.Combine(PhoneDeckDataDirectory.Get(), "clients.json"));
 var clientSessions = new ClientSessionRegistry();
+var phonePresence = new PhonePresence();
 var pairingWindows = new PairingWindowManager(
     receiverIdentity.ComputerId,
     receiverIdentity.DisplayName,
@@ -158,6 +165,10 @@ app.Use(async (context, next) =>
         return;
     }
     context.Items["ClientId"] = auth.ClientId;
+    phonePresence.Observe(context.Connection.LocalPort, auth.ClientId,
+        context.Request.Headers.UserAgent.FirstOrDefault(),
+        context.Request.Headers.ContainsKey("X-PhoneDeck-Foreground"),
+        context.Request.Headers["X-PhoneDeck-Device"].FirstOrDefault());
     await next();
 });
 
@@ -193,7 +204,7 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
     pairingWindows,
     // macOS 没有跨请求按住的普通按键；撤销后音频长流由 clientSessions 终止，
     // managed 会话随断流复位输入法。
-    _ => { }));
+    _ => { }) { Presence = phonePresence });
 
 // 健康应答用 JsonObject 组装（原生编译不能序列化匿名对象），字段与旧版逐字一致。
 JsonObject BuildHealth(HttpContext context)
@@ -557,10 +568,15 @@ app.MapPost("/api/input", (InputCommand command) =>
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
+    // 缺辅助功能权限：请系统弹出授权提示，并打开状态页说明下一步。
+    if (!keyboard.IsAccessibilityTrusted && !MacLaunch.RequestAccessibility())
+    {
+        MacLaunch.OpenStatusPage();
+    }
     Console.WriteLine("========================================");
     Console.WriteLine("  PhoneDeck macOS 接收端已启动");
     Console.WriteLine("  USB 通道：127.0.0.1:8765");
-    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（手机连同一 Wi-Fi 自动发现，连接请求在本机弹框确认；管理：http://127.0.0.1:8765/admin/pairing）");
+    Console.WriteLine($"  Wi-Fi 通道：HTTPS {lanIdentity.HttpsPort}（手机连同一 Wi-Fi 自动发现，连接请求在本机弹框确认；状态页：http://127.0.0.1:8765/admin/pairing）");
     Console.WriteLine($"  局域网发现：UDP {LanDiscoveryResponder.DiscoveryPort}");
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
     Console.WriteLine("  输入后端：CGEvent");
