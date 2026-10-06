@@ -123,6 +123,16 @@ public final class MainActivity extends Activity {
     private String confirmingComputerId;
     private final Runnable carouselSnap = this::snapCarousel;
     private LinearLayout recentList;
+    /// 同一 Wi-Fi 里发现、尚未连接的电脑（computerId → 发现结果）。
+    private final java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> nearbyComputers =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /// 发现与重新配对共用一个按需线程，空闲 20 秒后释放。
+    private final java.util.concurrent.ExecutorService nearbyExecutor =
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 20, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.LinkedBlockingQueue<>());
+    private volatile boolean nearbyScanInFlight;
+    private boolean nearbyPairingInFlight;
+    private final Runnable nearbyScan = this::scanNearbyComputers;
     private View quickRow;
     private LinearLayout targetDockRow;
     private ScrollView shortcutScroll;
@@ -321,7 +331,6 @@ public final class MainActivity extends Activity {
         configRepository = new ShortcutConfigRepository(this);
         targetDeviceManager = TargetDeviceManager.get(this);
         setContentView(createInterface());
-        maybeHandlePairingTestHook(getIntent());
         registerSharedAudioStatusReceiver();
         // 共享麦克风音量每 100 ms 更新：走进程内回调，合并成至多一个待处理的界面刷新。
         PhoneAudioService.setInProcessListener(() -> {
@@ -428,12 +437,20 @@ public final class MainActivity extends Activity {
             ConnectionMonitor.get(this).reset();
             testConnection();
             testLanConnections();
+            mainHandler.post(nearbyScan);
         });
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        mainHandler.removeCallbacks(nearbyScan);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        mainHandler.post(nearbyScan);
         PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
         if (!latestTheme.id.equals(appliedThemeId)) {
             // Rebind views only: recreating would destroy active audio/connection owners.
@@ -1150,6 +1167,7 @@ public final class MainActivity extends Activity {
                 .append(confirmingComputerId).append('|').append(effectiveSelectedMode()).append('|')
                 .append(isVoiceInteractionBusy()).append('|').append(dictationActive).append('|');
         for (EngineMode mode : activeTypelessModes()) signature.append(mode.id).append(',');
+        for (String nearbyId : new java.util.TreeSet<>(nearbyComputers.keySet())) signature.append("N:").append(nearbyId).append(',');
         for (TargetDeviceManager.Device device : devices) {
             signature.append(device.computerId).append(',').append(device.slot).append(',')
                     .append(device.displayName).append(',').append(device.platform).append(',')
@@ -1171,7 +1189,7 @@ public final class MainActivity extends Activity {
         lastComputerCardsSignature = signature;
         computerCardRow.removeAllViews();
         carouselIds.clear();
-        if (devices.isEmpty()) {
+        if (devices.isEmpty() && nearbyComputers.isEmpty()) {
             computerCardRow.addView(emptyComputerCard(),
                     new LinearLayout.LayoutParams(carouselCardWidth + dp(56), -2));
             updateCarouselDots(0);
@@ -1189,6 +1207,9 @@ public final class MainActivity extends Activity {
                     : peekComputerCard(device, shared, sharedStates.get(device.computerId));
             computerCardRow.addView(card, margins(0, 0, dp(10), 0, carouselCardWidth, -1));
             carouselIds.add(device.computerId);
+        }
+        for (LanDiscoveryClient.DiscoveredComputer computer : sortedNearby()) {
+            computerCardRow.addView(nearbyComputerCard(computer), margins(0, 0, dp(10), 0, carouselCardWidth, -1));
         }
         if (devices.size() < TargetDeviceManager.MAX_DEVICES) {
             computerCardRow.addView(addComputerCard(), margins(0, 0, 0, 0, carouselCardWidth, -1));
@@ -1393,9 +1414,9 @@ public final class MainActivity extends Activity {
                 android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
         add.addView(new DeckIconView(this, "plus", theme.muted), new LinearLayout.LayoutParams(dp(24), dp(24)));
         add.addView(text("添加电脑", 14, theme.muted, Typeface.NORMAL), marginTop(dp(8)));
-        add.setContentDescription("扫码配对一台新电脑");
+        add.setContentDescription("添加电脑：同一 Wi-Fi 里的电脑会自动出现");
         add.setFocusable(true);
-        add.setOnClickListener(view -> launchQrPairingScan());
+        add.setOnClickListener(view -> showAddComputerHelp());
         installTouchFeedback(add);
         return add;
     }
@@ -1409,17 +1430,43 @@ public final class MainActivity extends Activity {
         empty.setBackground(dashed);
         empty.addView(new DeckIconView(this, "laptop", theme.muted), new LinearLayout.LayoutParams(dp(28), dp(28)));
         empty.addView(text("连接第一台电脑", 20, theme.text, Typeface.BOLD), marginTop(dp(10)));
-        TextView body = text("在电脑上打开言渡的配对二维码，用手机扫一下即可。", 13, theme.muted, Typeface.NORMAL);
+        TextView body = text("在电脑上打开言渡接收端，手机连同一个 Wi-Fi，电脑会自动出现在这里。", 13, theme.muted, Typeface.NORMAL);
         body.setLineSpacing(0, 1.3f);
         empty.addView(body, marginTop(dp(6)));
-        Button scan = smallButton("扫码配对");
-        scan.setTextColor(theme.onPrimary);
-        scan.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 22));
-        scan.setPadding(dp(20), 0, dp(20), 0);
-        scan.setOnClickListener(view -> launchQrPairingScan());
-        installTouchFeedback(scan);
-        empty.addView(scan, margins(0, dp(14), 0, 0, -2, dp(44)));
+        Button retry = smallButton("重新查找");
+        retry.setTextColor(theme.onPrimary);
+        retry.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 22));
+        retry.setPadding(dp(20), 0, dp(20), 0);
+        retry.setOnClickListener(view -> {
+            showActionFeedback("●  正在查找同一 Wi-Fi 里的电脑…", theme.muted);
+            scanNearbyComputers();
+        });
+        installTouchFeedback(retry);
+        empty.addView(retry, margins(0, dp(14), 0, 0, -2, dp(44)));
         return empty;
+    }
+
+    /// 附近（同一 Wi-Fi）尚未连接的电脑：虚线卡，点按请求连接，电脑上点「允许」后加入。
+    private View nearbyComputerCard(LanDiscoveryClient.DiscoveredComputer computer) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 24);
+        dashed.setStroke(dp(1), theme.primary, dp(6), dp(4));
+        card.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
+        card.addView(new DeckIconView(this, "macos".equalsIgnoreCase(computer.platform) ? "laptop" : "devices",
+                theme.primary), new LinearLayout.LayoutParams(dp(22), dp(22)));
+        TextView name = text(computer.displayName, 17, theme.text, Typeface.NORMAL);
+        name.setMaxLines(1);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(name, margins(0, dp(10), 0, 0, -1, -2));
+        card.addView(text("附近 · 点按连接", 12, theme.primary, Typeface.BOLD), margins(0, dp(4), 0, 0, -1, -2));
+        card.setContentDescription("附近的电脑 " + computer.displayName + "，点按连接，然后在电脑上点允许");
+        card.setFocusable(true);
+        card.setOnClickListener(view -> startNearbyPairing(computer));
+        installTouchFeedback(card);
+        return card;
     }
 
     // ---------- 常用：配置里排在前面的 4 个按键（不含指令栏已有的回车、退格） ----------
@@ -2339,7 +2386,7 @@ public final class MainActivity extends Activity {
             chip.setEnabled(true);
             chip.setContentDescription(device.slot + "号电脑 " + device.displayName
                     + (sharedState == null ? "" : "，共享状态" + sharedState)
-                    + (pairingRejected ? "，配对已失效，请重新扫码配对（也可用 USB 连接一次自动修复）" : "")
+                    + (pairingRejected ? "，配对已失效，请长按电脑卡片选「重新配对」（也可用 USB 连接一次自动修复）" : "")
                     + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线")
                     + "，长按删除这台电脑");
             chip.setOnClickListener(view -> selectTargetDevice(device, chip));
@@ -2359,8 +2406,8 @@ public final class MainActivity extends Activity {
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
         if (devices.isEmpty()) {
             new android.app.AlertDialog.Builder(this).setTitle("连接第一台电脑")
-                    .setMessage("方式一：在电脑托盘菜单选择「配对新手机…」，用本机扫码配对。\n方式二：用 USB 线连接电脑并允许调试，自动完成首次配对。")
-                    .setPositiveButton("扫码配对", (dialog, which) -> launchQrPairingScan())
+                    .setMessage("在电脑上打开言渡接收端，手机连同一个 Wi-Fi，电脑会自动出现在首页；也可以用 USB 线连接电脑并允许调试，自动完成首次配对。")
+                    .setPositiveButton("查找附近电脑", (dialog, which) -> showAddComputerHelp())
                     .setNegativeButton("知道了", null).show();
             return;
         }
@@ -2391,7 +2438,7 @@ public final class MainActivity extends Activity {
                     selectTargetDevice(devices.get(which), statusText);
                 })
                 .setNeutralButton("电脑设置", (dialog, which) -> startActivity(new Intent(this, ComputerSettingsActivity.class)))
-                .setPositiveButton("扫码配对新电脑", (dialog, which) -> launchQrPairingScan())
+                .setPositiveButton("添加电脑", (dialog, which) -> showAddComputerHelp())
                 .setNegativeButton("取消", null).show();
     }
 
@@ -2418,7 +2465,7 @@ public final class MainActivity extends Activity {
 
     private void showManageComputerActions(TargetDeviceManager.Device device) {
         String[] actions = {"重命名", "上移一位", "下移一位",
-                device.sharedGroup ? "移出共享组" : "加入共享组", "重新扫码配对", "删除这台电脑"};
+                device.sharedGroup ? "移出共享组" : "加入共享组", "重新配对", "删除这台电脑"};
         new AlertDialog.Builder(this).setTitle(device.slot + "号 · " + device.displayName)
                 .setItems(actions, (dialog, which) -> {
                     if (which == 0) {
@@ -2434,7 +2481,7 @@ public final class MainActivity extends Activity {
                         showActionFeedback(device.sharedGroup ? "✓  已移出共享组" : "✓  已加入共享组",
                                 theme.success);
                     } else if (which == 4) {
-                        launchQrPairingScan();
+                        repairComputer(device);
                     } else {
                         confirmDeleteTargetDevice(device);
                     }
@@ -2471,7 +2518,7 @@ public final class MainActivity extends Activity {
     private void showJoinSharedGroupDialog() {
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
         if (devices.isEmpty()) {
-            showActionFeedback("✕  先扫码配对一台电脑，再开启共享麦克风", theme.warning);
+            showActionFeedback("✕  先连接一台电脑，再开启共享麦克风", theme.warning);
             return;
         }
         String activeId = targetDeviceManager.getActiveComputerId();
@@ -2539,188 +2586,215 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("取消", null).show();
     }
 
-    /// M1-A A3：启动扫码（zxing-android-embedded 的 CaptureActivity 自行处理相机权限与取景）。
-    private void launchQrPairingScan() {
-        new com.google.zxing.integration.android.IntentIntegrator(this)
-                .setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE)
-                .setPrompt("对准电脑上的 PhoneDeck 配对二维码")
-                .setBeepEnabled(false)
-                .setOrientationLocked(true)
-                .initiateScan();
-    }
+    // ---------- 同一 Wi-Fi 免扫码连接 ----------
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        com.google.zxing.integration.android.IntentResult scan =
-                com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(
-                        requestCode, resultCode, data);
-        if (scan != null) {
-            handleQrPairingScanResult(scan.getContents());
-        }
-    }
+    private static final int NEARBY_SCAN_INTERVAL_MS = 15_000;
 
-    /// uiPreview 验收通道专用（包名 .preview 门槛，生产 debug/release 不响应）：
-    /// --es phonedeck_qr_test_b64 <base64(QR JSON)> [--es phonedeck_qr_address <host>]
-    /// 直接注入扫码结果，用于无相机或网络受限环境的自动化协议验收（真 TLS/材料/确认链路不变）。
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        maybeHandlePairingTestHook(intent);
-    }
-
-    private void maybeHandlePairingTestHook(android.content.Intent intent) {
-        if (intent == null || !getPackageName().endsWith(".preview")
-                || !intent.hasExtra("phonedeck_qr_test_b64")) {
-            return;
-        }
-        String qr;
-        try {
-            qr = new String(java.util.Base64.getDecoder().decode(
-                    intent.getStringExtra("phonedeck_qr_test_b64")),
-                    java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException exception) {
-            showActionFeedback("✕  测试注入参数无效", theme.danger);
-            return;
-        }
-        try {
-            QrPairingClient.QrPayload payload = QrPairingClient.parseQr(qr);
-            String address = intent.getStringExtra("phonedeck_qr_address");
-            if (address == null || address.isBlank()) {
-                resolveAddressAndPair(payload, null);
-            } else {
-                runQrPairing(payload, address.trim());
-            }
-        } catch (IllegalArgumentException exception) {
-            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
-        }
-    }
-
-    private void handleQrPairingScanResult(String qrText) {
-        if (qrText == null || qrText.isBlank()) {
-            showActionFeedback("✕  未扫码或已取消", theme.muted);
-            return;
-        }
-        QrPairingClient.QrPayload payload;
-        try {
-            payload = QrPairingClient.parseQr(qrText);
-        } catch (IllegalArgumentException exception) {
-            showActionFeedback("✕  " + exception.getMessage(), theme.danger);
-            return;
-        }
-        if (targetDeviceManager.find(payload.computerId) != null) {
-            new AlertDialog.Builder(this).setTitle("该电脑已配对")
-                    .setMessage("「" + payload.displayName + "」已在设备列表中。继续将签发新的独立凭据。")
-                    .setPositiveButton("继续", (dialog, which) -> resolveAddressAndPair(payload, null))
-                    .setNegativeButton("取消", null).show();
-            return;
-        }
-        resolveAddressAndPair(payload, null);
-    }
-
-    /// 发现层匹配 QR 的 computerId；不可用时提示手动输入地址（设计 §4）。
-    private void resolveAddressAndPair(QrPairingClient.QrPayload payload, String knownAddress) {
-        AlertDialog progress = new AlertDialog.Builder(this)
-                .setTitle("扫码配对")
-                .setMessage("正在定位「" + payload.displayName + "」…\n请在电脑上点击「确认配对」。")
-                .setCancelable(false)
-                .show();
-        new Thread(() -> {
-            java.util.List<String> addresses = knownAddress != null
-                    ? java.util.Collections.singletonList(knownAddress)
-                    : QrPairingClient.matchDiscovery(this, payload.computerId);
-            runOnUiThread(() -> {
-                progress.dismiss();
-                if (addresses.isEmpty()) {
-                    promptManualAddressAndPair(payload);
-                    return;
+    /// 首页在前台时约每 15 秒查找一次附近的言渡电脑（NSD + UDP，约 1.2 秒）；语音进行中暂停。
+    private void scanNearbyComputers() {
+        mainHandler.removeCallbacks(nearbyScan);
+        if (isFinishing() || isDestroyed()) return;
+        if (!nearbyScanInFlight && !nearbyPairingInFlight && !isVoiceInteractionBusy()) {
+            nearbyScanInFlight = true;
+            final android.content.Context app = getApplicationContext();
+            nearbyExecutor.execute(() -> {
+                java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> found;
+                try {
+                    found = LanDiscoveryClient.discover(app, 1200);
+                } catch (Exception exception) {
+                    found = java.util.Collections.emptyMap();
                 }
-                runQrPairing(payload, addresses.get(0));
+                final java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> result = found;
+                mainHandler.post(() -> {
+                    nearbyScanInFlight = false;
+                    applyNearbyResults(result);
+                });
             });
-        }, "qr-pairing-discovery").start();
+        }
+        mainHandler.postDelayed(nearbyScan, NEARBY_SCAN_INTERVAL_MS);
     }
 
-    private void promptManualAddressAndPair(QrPairingClient.QrPayload payload) {
+    private void applyNearbyResults(java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> found) {
+        if (isFinishing() || isDestroyed() || targetDeviceManager == null) return;
+        java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> next = new java.util.HashMap<>();
+        for (LanDiscoveryClient.DiscoveredComputer computer : found.values()) {
+            if (targetDeviceManager.find(computer.computerId) == null && computer.port > 0
+                    && TargetDeviceManager.isAddressCandidateSafe(computer.hostAddress)) {
+                next.put(computer.computerId, computer);
+            }
+        }
+        boolean changed = !next.keySet().equals(nearbyComputers.keySet());
+        nearbyComputers.clear();
+        nearbyComputers.putAll(next);
+        if (changed) {
+            lastComputerCardsSignature = null;
+            refreshComputerCards();
+        }
+    }
+
+    private java.util.List<LanDiscoveryClient.DiscoveredComputer> sortedNearby() {
+        java.util.List<LanDiscoveryClient.DiscoveredComputer> list = new java.util.ArrayList<>(nearbyComputers.values());
+        list.sort((a, b) -> a.displayName.compareToIgnoreCase(b.displayName));
+        return list;
+    }
+
+    /// “添加电脑”：列出附近未连接的电脑；没有时说明怎么让电脑出现。
+    private void showAddComputerHelp() {
+        java.util.List<LanDiscoveryClient.DiscoveredComputer> nearby = sortedNearby();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle("添加电脑");
+        if (nearby.isEmpty()) {
+            builder.setMessage("1. 在电脑上打开言渡接收端。\n2. 手机和电脑连同一个 Wi-Fi。\n\n电脑会自动出现在首页，点一下再到电脑上点「允许」即可。"
+                    + "\n\n也可以用 USB 线连接电脑并允许调试，自动完成首次配对。");
+        } else {
+            String[] labels = new String[nearby.size()];
+            for (int i = 0; i < nearby.size(); i++) {
+                labels[i] = nearby.get(i).displayName + "  ·  " + platformLabel(nearby.get(i).platform);
+            }
+            builder.setItems(labels, (dialog, which) -> startNearbyPairing(nearby.get(which)));
+        }
+        builder.setPositiveButton("重新查找", (dialog, which) -> {
+            showActionFeedback("●  正在查找同一 Wi-Fi 里的电脑…", theme.muted);
+            scanNearbyComputers();
+        }).setNeutralButton("输入地址", (dialog, which) -> promptComputerAddress())
+                .setNegativeButton("关闭", null).show();
+    }
+
+    /// 手机与电脑隔着路由器（不同网段）时发现不到，可输入电脑的局域网 IP 直接连接。
+    private void promptComputerAddress() {
         android.widget.EditText input = new android.widget.EditText(this);
-        input.setHint("例如 192.168.1.23");
+        input.setSingleLine(true);
+        input.setHint("例如 192.168.0.102");
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)});
         new AlertDialog.Builder(this).setTitle("输入电脑地址")
-                .setMessage("未在局域网发现「" + payload.displayName
-                        + "」。请输入电脑的局域网 IP（电脑端状态窗可见）。")
+                .setMessage("在电脑的言渡接收端窗口或网络设置里可以看到局域网 IP。")
                 .setView(input)
                 .setPositiveButton("连接", (dialog, which) -> {
-                    String address = input.getText().toString().trim();
-                    if (!TargetDeviceManager.isAddressCandidateSafe(address)) {
-                        showActionFeedback("✕  地址无效", theme.danger);
+                    String host = input.getText().toString().trim();
+                    if (!TargetDeviceManager.isAddressCandidateSafe(host)) {
+                        showActionFeedback("✕  请输入局域网 IP，例如 192.168.0.102", theme.warning);
                         return;
                     }
-                    runQrPairing(payload, address);
+                    showActionFeedback("●  正在联系 " + host + "…", theme.muted);
+                    nearbyExecutor.execute(() -> {
+                        LanDiscoveryClient.DiscoveredComputer found = LanDiscoveryClient.queryHost(host, 1200);
+                        mainHandler.post(() -> {
+                            if (found == null || found.port <= 0) {
+                                showActionFeedback("✕  " + host + " 上没有找到言渡电脑，请确认接收端已打开", theme.warning);
+                            } else {
+                                startNearbyPairing(found);
+                            }
+                        });
+                    });
                 })
                 .setNegativeButton("取消", null).show();
     }
 
-    /// 提交配对并保存凭据；请求最长挂起 30s 等待电脑本机确认。
-    private void runQrPairing(QrPairingClient.QrPayload payload, String host) {
-        String clientId = java.util.UUID.randomUUID().toString();
-        String label = android.os.Build.MODEL == null ? "Android 手机" : android.os.Build.MODEL;
+    /// 长按卡片“重新配对”：在 Wi-Fi 里找到这台电脑后重新请求连接，换发独立凭据。
+    private void repairComputer(TargetDeviceManager.Device device) {
+        showActionFeedback("●  正在 Wi-Fi 里查找 " + device.displayName + "…", theme.muted);
+        final android.content.Context app = getApplicationContext();
+        nearbyExecutor.execute(() -> {
+            LanDiscoveryClient.DiscoveredComputer match = null;
+            try {
+                match = LanDiscoveryClient.discover(app, 1500).get(device.computerId);
+            } catch (Exception ignored) {
+                // 下方提示 USB 修复。
+            }
+            final LanDiscoveryClient.DiscoveredComputer found = match;
+            mainHandler.post(() -> {
+                if (found != null && TargetDeviceManager.isAddressCandidateSafe(found.hostAddress)) {
+                    startNearbyPairing(found);
+                } else {
+                    showActionFeedback("✕  没在 Wi-Fi 里找到 " + device.displayName
+                            + "；确认电脑已打开言渡并连同一个 Wi-Fi，或用 USB 连接一次自动修复", theme.warning);
+                }
+            });
+        });
+    }
+
+    private void startNearbyPairing(LanDiscoveryClient.DiscoveredComputer computer) {
+        if (nearbyPairingInFlight) return;
+        if (isVoiceInteractionBusy()) {
+            showActionFeedback("✕  请先结束语音，再连接新电脑", theme.warning);
+            return;
+        }
+        if (!targetDeviceManager.canAdd(computer.computerId)) {
+            showActionFeedback("✕  已连接 " + TargetDeviceManager.MAX_DEVICES
+                    + " 台电脑，请先长按删除一台", theme.danger);
+            return;
+        }
+        nearbyPairingInFlight = true;
+        final String clientId = java.util.UUID.randomUUID().toString();
+        final String nonce = NearbyPairingClient.newNonce();
+        final String label = Build.MODEL == null || Build.MODEL.isBlank() ? "Android 手机" : Build.MODEL;
         AlertDialog waiting = new AlertDialog.Builder(this)
-                .setTitle("等待电脑确认")
-                .setMessage("已向「" + payload.displayName + "」提交配对。\n请在电脑上点击「确认配对」（30 秒内）。")
+                .setTitle("连接 " + computer.displayName)
+                .setMessage("正在联系电脑…")
+                .setNegativeButton("关闭", null)
                 .setCancelable(false)
                 .show();
         new Thread(() -> {
             String failure = null;
+            String certificate = null;
             org.json.JSONObject issued = null;
             try {
-                issued = QrPairingClient.submit(host, payload, clientId, label);
+                certificate = PhoneDeckHttp.fetchCertificateSha256(computer.hostAddress, computer.port, 3000);
+                final String code = NearbyPairingClient.checkCode(certificate, clientId, nonce);
+                runOnUiThread(() -> waiting.setMessage("请到「" + computer.displayName + "」上点「允许」。\n\n校验码  " + code
+                        + "\n电脑上显示的数字应与这里相同。"));
+                issued = NearbyPairingClient.request(computer.hostAddress, computer.port,
+                        computer.computerId, certificate, clientId, label, nonce);
+            } catch (java.io.IOException exception) {
+                failure = "连不上这台电脑，请确认手机和电脑在同一个 Wi-Fi";
             } catch (Exception exception) {
                 failure = exception.getMessage();
             }
-            final org.json.JSONObject result = issued;
             final String error = failure;
+            final String pin = certificate;
+            final org.json.JSONObject result = issued;
             runOnUiThread(() -> {
-                waiting.dismiss();
+                nearbyPairingInFlight = false;
+                if (waiting.isShowing()) waiting.dismiss();
+                if (isFinishing() || isDestroyed()) return;
                 if (error != null || result == null || !result.optBoolean("ok", false)) {
-                    showActionFeedback("✕  " + (error == null ? "配对失败" : error), theme.danger);
+                    showActionFeedback("✕  " + (error == null ? "连接失败" : error), theme.danger);
                     return;
                 }
-                TargetDeviceManager.Device saved = targetDeviceManager.saveQrPairing(
-                        payload.computerId,
-                        payload.displayName,
-                        "windows",
-                        java.util.Collections.singletonList(host),
-                        payload.httpsPort,
+                String name = result.optString("displayName", computer.displayName);
+                TargetDeviceManager.Device saved = targetDeviceManager.savePairedComputer(
+                        computer.computerId, name,
+                        result.optString("platform", computer.platform),
+                        java.util.Collections.singletonList(computer.hostAddress),
+                        computer.port,
                         result.optString("clientToken"),
                         result.optString("clientId", clientId),
-                        payload.certificateSha256);
+                        pin);
                 if (saved == null) {
-                    showActionFeedback(targetDeviceManager.canAdd(payload.computerId)
-                            ? "✕  凭据保存失败"
-                            : "✕  已配对 " + TargetDeviceManager.MAX_DEVICES
-                                    + " 台电脑，请先长按删除一台再配对", theme.danger);
+                    showActionFeedback("✕  凭据保存失败", theme.danger);
                     return;
                 }
-                new Thread(() -> {
-                    boolean verified = QrPairingClient.verifyCredential(
-                            host, payload.computerId, payload.httpsPort,
-                            result.optString("clientToken"),
-                            result.optString("clientId", clientId),
-                            payload.certificateSha256);
-                    runOnUiThread(() -> {
-                        new AlertDialog.Builder(this).setTitle(verified ? "配对成功" : "配对完成")
-                                .setMessage("「" + payload.displayName + "」已保存独立凭据"
-                                        + (verified ? "，并已通过连接验证。" : "。连接验证未通过，稍后可在设置中重试。"))
-                                .setPositiveButton("好的", null).show();
-                        refreshTargetSwitcher();
-                        testConnection();
-                    });
-                }, "qr-pairing-verify").start();
+                nearbyComputers.remove(computer.computerId);
+                lanPairingRejected.remove(computer.computerId);
+                if (!isVoiceInteractionBusy()) {
+                    targetDeviceManager.select(computer.computerId);
+                    applyStoredTarget();
+                }
+                lastComputerCardsSignature = null;
+                refreshTargetSwitcher();
+                recordRecent("devices", "连接新电脑");
+                showActionFeedback("✓  已连接 " + saved.slot + "号电脑 · " + name, theme.success);
+                ConnectionMonitor.get(this).reset();
+                testConnection();
+                testLanConnections();
             });
-        }, "qr-pairing-submit").start();
+        }, "nearby-pairing").start();
     }
 
     /// M1-A A4：当前目标 legacy-only 且 LAN 在线时，弹一次「升级为独立凭据」
     /// （设计 §5.2 首连强提示）。取消也算已提示（per-computerId 标志），之后
-    /// 仍可经电脑端配对窗口扫码获得独立凭据。语音进行中不打断，留到下一轮。
+    /// 仍可经电脑端重新配对获得独立凭据。语音进行中不打断，留到下一轮。
     private void maybePromptCredentialUpgrade() {
         if (isFinishing() || isDestroyed() || targetComputerId == null) {
             return;
@@ -2751,7 +2825,7 @@ public final class MainActivity extends Activity {
                 .setTitle("升级为独立凭据")
                 .setMessage("「" + device.displayName + "」仍在使用旧版共享令牌。\n\n"
                         + "升级为这台手机专属的独立凭据：\n"
-                        + "· 不影响现有使用，无需重新扫码\n"
+                        + "· 不影响现有使用，无需重新配对\n"
                         + "· 电脑端可按手机逐个撤销授权")
                 .setPositiveButton("升级", (dialog, which) -> runCredentialUpgrade(target, endpoint))
                 .setNegativeButton("取消", null)
@@ -2766,7 +2840,7 @@ public final class MainActivity extends Activity {
         // 稳定升级 GUID（schema credentialRotateRequest.clientId：“升级后凭据沿用”）：
         // 首次升级生成并持久化，此后重试沿用同一 clientId——服务端对它只回
         // already-upgraded 而不再签发新凭据，避免孤儿凭据累积，也让本机重试
-        // 落入 per-clientId 限速桶。凭据丢失的找回路径仍是重新扫码配对（G-1/G-2）。
+        // 落入 per-clientId 限速桶。凭据丢失的找回路径仍是重新配对（G-1/G-2）。
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String upgradeKey = PREF_CREDENTIAL_UPGRADE_CLIENT_ID + device.computerId;
         String clientId = preferences.getString(upgradeKey, null);
@@ -2797,9 +2871,9 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 if (result.alreadyUpgraded) {
-                    // rotate 永不重发（G-1）：凭据丢失只能重新扫码配对找回。
+                    // rotate 永不重发（G-1）：凭据丢失只能重新配对找回。
                     showActionFeedback("该电脑已为此手机签发过独立凭据，不再重发；"
-                            + "如本机凭据丢失，请重新扫码配对", theme.warning);
+                            + "如本机凭据丢失，请长按电脑卡片选「重新配对」", theme.warning);
                     return;
                 }
                 if (saveResult == null || saveResult.device == null) {
@@ -2841,7 +2915,7 @@ public final class MainActivity extends Activity {
         if (!isDeviceOnline(device.computerId)) {
             if (Boolean.TRUE.equals(lanPairingRejected.get(device.computerId))) {
                 showActionFeedback("✕  " + device.displayName
-                        + " 的配对已失效；请重新扫码配对，或用 USB 连接一次自动修复", theme.warning);
+                        + " 的配对已失效；请长按电脑卡片选「重新配对」，或用 USB 连接一次自动修复", theme.warning);
             } else {
                 showActionFeedback("✕  " + device.displayName + " 当前未连接", theme.danger);
             }
@@ -2888,7 +2962,7 @@ public final class MainActivity extends Activity {
                     if (outcome.pairingRejected) {
                         lanPairingRejected.put(device.computerId, Boolean.TRUE);
                         showActionFeedback("✕  " + device.displayName
-                                + " 的配对已失效，请重新扫码配对", theme.warning);
+                                + " 的配对已失效，请长按电脑卡片选「重新配对」", theme.warning);
                     } else if (isUsbTargetOnline() && isDeviceOnline(device.computerId)) {
                         // 局域网不可达但 USB 仍连着这台电脑：沿用已校验的 USB 通道。
                         finishTargetSelection(device, source);
@@ -3314,12 +3388,22 @@ public final class MainActivity extends Activity {
                     String healthPlatform = health.optString("platform", "windows");
                     TargetDeviceManager.Device existingDevice =
                             targetDeviceManager.find(healthComputerId);
+                    // 有独立凭据的电脑只是 Wi-Fi 不通时保留凭据；被电脑拒绝（401/403）才用 USB 换回共享令牌。
                     boolean lanPairingNeedsRefresh = existingDevice == null
                             || !existingDevice.hasLanPairing()
-                            || !lanTargets.containsKey(healthComputerId);
+                            || !lanTargets.containsKey(healthComputerId)
+                            && (!existingDevice.hasClientCredential()
+                            || Boolean.TRUE.equals(lanPairingRejected.get(healthComputerId)));
                     if (supportsSecureLan && lanPairingNeedsRefresh) {
                         try {
-                            PhoneDeckLanClient.pairOverUsb(targetDeviceManager);
+                            TargetDeviceManager.Device repaired =
+                                    PhoneDeckLanClient.pairOverUsb(targetDeviceManager);
+                            mainHandler.post(() -> {
+                                if (lanPairingRejected.remove(repaired.computerId) != null) {
+                                    lastComputerCardsSignature = null;
+                                    refreshComputerCards();
+                                }
+                            });
                         } catch (Exception ignored) {
                             // USB 主功能继续可用；配对失败会在界面保持 USB 状态。
                         }
@@ -3873,7 +3957,7 @@ public final class MainActivity extends Activity {
                 : shared ? "各台电脑用自己的快捷键开始和停止"
                 : recording ? holdMode ? "松开即可结束" : "电脑端停止也会同步结束"
                 : !connected ? (targetDeviceManager != null && targetDeviceManager.list().isEmpty()
-                        ? "扫码配对一台电脑后即可说话" : "左右滑动电脑卡片，选一台在线的电脑")
+                        ? "手机和电脑连同一个 Wi-Fi，电脑会出现在上方" : "左右滑动电脑卡片，选一台在线的电脑")
                 : modeHint != null ? modeHint
                 : holdMode ? "按下开始，松开结束" : "轻点开始，再点结束");
         if (voiceMeter != null) voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.INVISIBLE);
@@ -4034,7 +4118,7 @@ public final class MainActivity extends Activity {
                 showConnection(targetDisplayName + " · 需要重新配对", theme.warning);
                 showActionFeedback(isDesktopPreviewChannel()
                         ? "✕  配对已失效，请重新扫描电脑二维码"
-                        : "✕  配对已失效；请重新扫码配对 " + targetDisplayName + "，或用 USB 连接一次自动修复", theme.danger);
+                        : "✕  配对已失效；请长按电脑卡片选「重新配对」 " + targetDisplayName + "，或用 USB 连接一次自动修复", theme.danger);
             } else if (isBluetoothTargetOnline()) {
                 showConnection(targetDisplayName + " · 仅蓝牙在线", theme.warning);
                 showActionFeedback("✕  当前电脑的蓝牙只能发送快捷键；请连接 Wi-Fi 或 USB",
@@ -4582,7 +4666,7 @@ public final class MainActivity extends Activity {
         } else if (targetComputerId != null) {
             showConnection(targetDisplayName + " · 当前离线", theme.muted);
         } else {
-            showConnection(isDesktopPreviewChannel() ? "点击这里扫码连接电脑" : "等待电脑连接", theme.muted);
+            showConnection(isDesktopPreviewChannel() ? "点击这里连接电脑" : "等待电脑连接", theme.muted);
         }
     }
 
@@ -4671,6 +4755,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        nearbyExecutor.shutdownNow();
         if (homeStyleDialog != null) homeStyleDialog.dismiss();
         if (shortcutDialog != null) shortcutDialog.dismiss();
         TranscriptRelay.release();

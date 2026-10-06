@@ -103,8 +103,6 @@ androidComponents {
 
 dependencies {
     testImplementation "junit:junit:4.13.2"
-    // M1-A A3：扫码配对（zxing-android-embedded，Apache-2.0，含核心解码库）。
-    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
 }
 
 tasks.configureEach {

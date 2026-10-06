@@ -36,13 +36,21 @@ final class LanDiscoveryClient {
         final String displayName;
         final String hostAddress;
         final int port;
+        /// "windows" / "macos" / "unknown"（来自 TXT 或 UDP 应答）。
+        final String platform;
 
         DiscoveredComputer(String computerId, String displayName,
                            String hostAddress, int port) {
+            this(computerId, displayName, hostAddress, port, "unknown");
+        }
+
+        DiscoveredComputer(String computerId, String displayName,
+                           String hostAddress, int port, String platform) {
             this.computerId = computerId;
             this.displayName = displayName;
             this.hostAddress = hostAddress;
             this.port = port;
+            this.platform = platform == null || platform.isBlank() ? "unknown" : platform;
         }
     }
 
@@ -209,7 +217,8 @@ final class LanDiscoveryClient {
         if (value == null || value.length == 0) {
             return null;
         }
-        String text = new String(value, java.nio.charset.StandardCharsets.US_ASCII).trim();
+        // 电脑名可能是中文（如“往里走的MacBook Air”），TXT 值按 UTF-8 解码。
+        String text = new String(value, java.nio.charset.StandardCharsets.UTF_8).trim();
         return text.isEmpty() ? null : text;
     }
 
@@ -231,10 +240,33 @@ final class LanDiscoveryClient {
             String displayName = decodeAttribute(attributes.get("displayName"));
             found.putIfAbsent(computerId, new DiscoveredComputer(
                     computerId, displayName == null ? computerId : displayName,
-                    address, info.getPort()));
+                    address, info.getPort(), decodeAttribute(attributes.get("platform"))));
         } catch (Exception ignored) {
             // 单条候选解析失败忽略。
         }
+    }
+
+    /// 手动地址：直接向这台主机的 UDP 8767 问身份（跨路由/子网时广播发现不到，单播仍可达）。
+    static DiscoveredComputer queryHost(String host, int timeoutMs) {
+        Map<String, DiscoveredComputer> found = new ConcurrentHashMap<>();
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(Math.max(200, timeoutMs));
+            byte[] magic = MAGIC.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            for (int attempt = 0; attempt < 2 && found.isEmpty(); attempt++) {
+                sendTo(socket, magic, host);
+                byte[] buffer = new byte[MAX_PACKET_BYTES];
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                try {
+                    socket.receive(packet);
+                    parseResponse(packet, found);
+                } catch (SocketTimeoutException timeout) {
+                    // 再试一次。
+                }
+            }
+        } catch (Exception ignored) {
+            // 返回 null，由调用方提示。
+        }
+        return found.isEmpty() ? null : found.values().iterator().next();
     }
 
     private static void sendTo(DatagramSocket socket, byte[] payload, String host) {
@@ -267,7 +299,8 @@ final class LanDiscoveryClient {
                     computerId,
                     body.optString("displayName", "未命名电脑"),
                     packet.getAddress().getHostAddress(),
-                    body.optInt("port", 0)));
+                    body.optInt("port", 0),
+                    body.optString("platform", "unknown")));
         } catch (Exception ignored) {
             // 非 PhoneDeck 或损坏的应答直接忽略。
         }

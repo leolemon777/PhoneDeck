@@ -1,5 +1,24 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 同一 Wi-Fi 免扫码连接与手机端精简（最新状态）
+
+- 同分支 `agent/android-home-cards`。协议与决策见规格顶部同日条目。
+- **接收端（Receiver.Core）**：`PairingWindowManager.TryBeginNearbyRequest/FinishNearby/NearbyCheckCode`，
+  `/api/lan/pair/request`；Windows/Mac `Program.cs` 鉴权旁路加入该路径；`MacNearbyPrompt` 弹系统确认框；
+  Windows `ReceiverTray` 后台检查并弹框；管理页文案与转义。
+- **Android**：删除 `QrPairingClient`、zxing、androidx 占位类；新增 `NearbyPairingClient`、`PhoneDeckHttp.fetchCertificateSha256`、
+  `LanDiscoveryClient.queryHost` 与平台字段；首页附近卡片、添加电脑说明/输入地址、长按“重新配对”。
+- **验证**：Android assemble + 单元测试 + lint 通过；Mac 接收端测试 47/47；Windows 测试 179/183，失败的 4 项
+  （凭据文件只读与 rotate 限速）在未改动的基线提交上于 macOS 同样失败，属平台差异；Windows ControlCenter/Server
+  以 `EnableWindowsTargeting` 交叉编译 0 错误。本机 Mac 接收端实测：curl 提交附近请求 → 系统确认框出现、管理页显示
+  校验码（与手机公式对真实证书计算一致）→ 拒绝返回 403、对话框自动关闭。Samsung 实测：附近卡片显示同网段
+  Windows 电脑「往里走的COMPUTE」（未点击连接）；APK 561 KB、PSS 约 83 MB；“配对已失效”误报修复后恢复为在线。
+- **未验证**：手机点附近卡片到电脑点允许的完整闭环（手机与本机 Mac 不在同一网段，且那台 Windows 是旧接收端）；
+  Windows 托盘弹框未在 Windows 实机运行；输入地址路径未实测。
+- **本机环境**：Mac 接收端以本分支 Release 重启，数据目录 `outputs/device-acceptance-20261004/data`，已开 USB 恢复与
+  局域网发现（原设置备份为 `server-settings.json.bak-20261006`）。由 Claude 进程启动时提示“辅助功能未授权”，
+  键盘输入需用户在终端启动接收端或给对应进程授权。
+
 ## 2026-10-05 Android 首页：方案二电脑大卡轮播（最新状态）
 
 - 分支 `agent/android-home-cards`（PR #41），基于 `agent/multi-pc`。先实现方向 A 卡片列表，随后按用户在设计画布确认的

@@ -24,7 +24,7 @@ final class CredentialUpgrader {
     static final String STATUS_ALREADY_UPGRADED = "already-upgraded";
 
     static final class RotateResult {
-        /** true=服务端确认已升级过且不再重发令牌，找回只能重新扫码配对。 */
+        /** true=服务端确认已升级过且不再重发令牌，找回只能重新配对。 */
         final boolean alreadyUpgraded;
         final String clientToken;
         final String clientId;
@@ -152,7 +152,7 @@ final class CredentialUpgrader {
     /** 与服务端 rotate 错误路径对齐的用户文案（401/404/429）。 */
     private static String friendlyError(int status, String serverMessage) {
         switch (status) {
-            case 401: return "旧共享令牌已失效，请重新扫码配对";
+            case 401: return "旧共享令牌已失效，请长按电脑卡片选「重新配对」";
             case 404: return "电脑端版本过旧，不支持凭据升级，请先更新电脑端";
             case 429: return "升级请求过于频繁，请稍后再试";
             default: return serverMessage == null || serverMessage.isBlank()

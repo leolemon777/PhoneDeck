@@ -124,11 +124,11 @@ public final class ComputerSettingsActivity extends Activity {
         }
         if (known.isEmpty()) {
             LinearLayout empty = card(page); add(empty, text("连接第一台电脑", 18, theme.text, true), 0);
-            add(empty, text("在每台电脑打开言渡接收器，显示配对二维码；回到首页的电脑列表扫码添加。旧接收器也可通过 USB 首次配对。", 14, theme.muted, false), 8);
+            add(empty, text("在每台电脑打开言渡接收器，手机连同一个 Wi-Fi，电脑会自动出现在首页，点一下再到电脑上点「允许」。旧接收器也可通过 USB 首次配对。", 14, theme.muted, false), 8);
         }
         add(page, action("添加电脑 · 配对说明", false, () -> new AlertDialog.Builder(this)
                 .setTitle("添加另一台电脑")
-                .setMessage("1. 在 Windows、Mac 或 Linux 电脑启动言渡接收器。\n2. 手机和电脑连接同一网络，在电脑点击「显示配对二维码」。\n3. 回到手机首页，打开电脑列表，选择「扫码配对」，在电脑确认手机。\n\n配对后会出现在这里；配置电脑不会自动切换输入目标。")
+                .setMessage("1. 在 Windows、Mac 或 Linux 电脑启动言渡接收器。\n2. 手机和电脑连同一个 Wi-Fi，电脑会自动出现在首页。\n3. 在首页点这台电脑，再到电脑上点「允许」（核对校验码）。\n\n配对后会出现在这里；配置电脑不会自动切换输入目标。")
                 .setPositiveButton("知道了", null).show()), 20);
         add(page, text("在这里管理设置不会切换当前输入目标。\n布局、主题和语音工作方式在手机设置中统一调整。", 12, theme.muted, false), 24);
     }

@@ -159,6 +159,55 @@ final class PhoneDeckHttp {
         return previous == null ? created : previous;
     }
 
+    /**
+     * 首次连接（同一 Wi-Fi 免扫码）时读取电脑 TLS 证书指纹：握手只记录叶证书 SHA-256，
+     * 不发送任何数据就关闭。随后的配对请求钉扎这个指纹；中间人换证书会让手机与电脑
+     * 显示的四位校验码不同，由用户在电脑确认框上核对。
+     */
+    static String fetchCertificateSha256(String host, int port, int timeoutMs) throws Exception {
+        final String[] captured = new String[1];
+        X509TrustManager capture = new X509TrustManager() {
+            @Override
+            public void checkClientTrusted(X509Certificate[] chain, String authType)
+                    throws CertificateException {
+                throw new CertificateException("PhoneDeck 手机端不接受客户端证书");
+            }
+
+            @Override
+            public void checkServerTrusted(X509Certificate[] chain, String authType)
+                    throws CertificateException {
+                if (chain == null || chain.length == 0) {
+                    throw new CertificateException("电脑没有提供证书");
+                }
+                try {
+                    byte[] digest = MessageDigest.getInstance("SHA-256").digest(chain[0].getEncoded());
+                    StringBuilder hex = new StringBuilder(64);
+                    for (byte value : digest) hex.append(String.format(Locale.ROOT, "%02x", value));
+                    captured[0] = hex.toString();
+                } catch (Exception exception) {
+                    throw new CertificateException("无法读取电脑证书", exception);
+                }
+            }
+
+            @Override
+            public X509Certificate[] getAcceptedIssuers() {
+                return new X509Certificate[0];
+            }
+        };
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, new TrustManager[]{capture}, new SecureRandom());
+        try (java.net.Socket plain = new java.net.Socket()) {
+            plain.connect(new java.net.InetSocketAddress(host, port), timeoutMs);
+            plain.setSoTimeout(timeoutMs);
+            try (javax.net.ssl.SSLSocket secure = (javax.net.ssl.SSLSocket) context.getSocketFactory()
+                    .createSocket(plain, host, port, true)) {
+                secure.startHandshake();
+            }
+        }
+        if (captured[0] == null) throw new java.io.IOException("没有读到电脑证书");
+        return captured[0];
+    }
+
     private static String normalizePin(String pin) {
         return pin.replace(":", "").trim().toLowerCase(Locale.ROOT);
     }

@@ -131,17 +131,15 @@ final class PhoneDeckLanClient {
         }
     }
 
-    /// 判定一次探测失败是否意味着“需要重新配对”而不是单纯离线：
-    /// 服务端明确拒绝令牌（401/403），或证书指纹与配对记录不一致。
+    /// 判定一次探测失败是否意味着“需要重新配对”而不是单纯离线：只有服务端明确拒绝
+    /// 令牌（401/403）才算。证书不一致说明旧 IP 上换成了另一台电脑（IP 会被重新分配，
+    /// 不能当身份），按“这台电脑不在这个地址”处理，不提示重新配对。
     static boolean isPairingRejection(Exception exception) {
         Throwable current = exception;
         while (current != null) {
             if (current instanceof PhoneDeckHttp.ResponseException) {
                 int status = ((PhoneDeckHttp.ResponseException) current).status;
                 return status == 401 || status == 403;
-            }
-            if (current instanceof java.security.cert.CertificateException) {
-                return true;
             }
             current = current.getCause();
         }
@@ -159,7 +157,7 @@ final class PhoneDeckLanClient {
                     device.certificateSha256,
                     "Wi-Fi",
                     device.computerId,
-                    // M1-A：有 clientId 的设备（扫码配对/rotate 升级）必须走
+                    // M1-A：有 clientId 的设备（Wi-Fi 配对/rotate 升级）必须走
                     // Bearer + X-PhoneDeck-Client；旧共享令牌头只服务 legacy 设备。
                     device.clientId);
             JSONObject health = PhoneDeckHttp.getJson(

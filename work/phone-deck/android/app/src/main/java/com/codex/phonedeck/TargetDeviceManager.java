@@ -270,10 +270,14 @@ final class TargetDeviceManager {
         String lastGood = base.lastGoodAddress != null
                 && safeAddresses.contains(base.lastGoodAddress)
                 ? base.lastGoodAddress : null;
+        // USB 只签发电脑的共享令牌：保存时不能再带旧的逐手机 clientId（否则 Bearer 组合无效、
+        // 电脑一直回 401，显示“配对已失效”）。之后可经升级提示换领新的独立凭据。
+        String token = accessToken.trim();
+        String clientId = null;
         Device paired = new Device(
                 base.computerId, base.displayName, base.platform,
                 base.slot, System.currentTimeMillis(), safeAddresses, port,
-                accessToken.trim(), base.clientId, base.sharedGroup,
+                token, clientId, base.sharedGroup,
                 certificateSha256.trim().toLowerCase(), lastGood, base.nameLocked);
         devices.remove(base);
         devices.add(paired);
@@ -532,8 +536,8 @@ final class TargetDeviceManager {
         editor.apply();
     }
 
-    /// M1-A A3：保存扫码配对得到的逐手机凭据（Bearer）。
-    synchronized Device saveQrPairing(
+    /// 保存配对（同一 Wi-Fi 免扫码连接）得到的逐手机凭据（Bearer）。
+    synchronized Device savePairedComputer(
             String computerId,
             String displayName,
             String platform,
@@ -599,7 +603,7 @@ final class TargetDeviceManager {
 
     /**
      * M1-A A4：保存 rotate 签发的逐手机凭据（设计 §5.5 回退纪律）。
-     * 先用新凭据经 Bearer health 验证（QrPairingClient.verifyCredential，
+     * 先用新凭据经 Bearer health 验证（NearbyPairingClient.verifyCredential，
      * 首选 rotate 刚成功的主机，其次 last-good 与其余候选地址），验证成功
      * 才替换设备记录；失败不动存储，旧共享令牌保持可用并返回失败原因。
      * 验证含网络请求，且不能持有本类锁等网络（会卡 UI 线程的读操作），
@@ -619,13 +623,13 @@ final class TargetDeviceManager {
             return CredentialUpgradeResult.failure("该电脑没有可用的局域网配对");
         }
         if (device.hasClientCredential()) {
-            // 并发路径（如重新扫码配对）已写入独立凭据：无需也不应覆盖。
+            // 并发路径（如重新配对）已写入独立凭据：无需也不应覆盖。
             return CredentialUpgradeResult.success(device);
         }
         String token = clientToken.trim();
         String id = clientId.trim();
         for (String host : upgradeVerifyHosts(device, preferredHost)) {
-            if (QrPairingClient.verifyCredential(
+            if (NearbyPairingClient.verifyCredential(
                     host, device.computerId, device.lanPort,
                     token, id, device.certificateSha256)) {
                 return commitCredentialUpgrade(device.computerId, token, id, host);
@@ -635,7 +639,7 @@ final class TargetDeviceManager {
     }
 
     /// 验证地址顺序：rotate 刚成功的主机 → last-good → 其余候选（去重）。
-    /// preview 验收通道沿用 saveQrPairing 的宽松地址规则（允许 adb 反向回环）。
+    /// preview 验收通道沿用 savePairedComputer 的宽松地址规则（允许 adb 反向回环）。
     private List<String> upgradeVerifyHosts(Device device, String preferredHost) {
         ArrayList<String> hosts = new ArrayList<>();
         String[] ordered = {preferredHost, device.lastGoodAddress};
