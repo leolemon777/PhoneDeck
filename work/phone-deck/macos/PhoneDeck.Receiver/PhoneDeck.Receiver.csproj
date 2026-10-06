@@ -23,6 +23,8 @@
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <StripSymbols>true</StripSymbols>
     <DefineConstants>$(DefineConstants);PHONEDECK_LITE</DefineConstants>
+    <!-- 原生编译多出 ILCompiler 包，单独锁定，保证普通构建与精简版都能在锁定模式下还原。 -->
+    <NuGetLockFilePath>packages.aot.lock.json</NuGetLockFilePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(PublishAot)' != 'true'">
     <DefineConstants>$(DefineConstants);PHONEDECK_PHONE_WEB</DefineConstants>
