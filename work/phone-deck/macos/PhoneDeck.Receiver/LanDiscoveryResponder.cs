@@ -29,17 +29,10 @@ internal sealed class LanDiscoveryResponder : IDisposable
         {
             Console.WriteLine($"局域网发现监听未启用（UDP {DiscoveryPort}）：{exception.Message}");
         }
-        responsePayload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            ok = true,
-            service = "phonedeck",
-            protocolVersion = 2,
-            computerId = identity.ComputerId,
-            displayName = identity.DisplayName,
-            port = httpsPort,
-            platform = identity.Platform,
-            capabilities
-        });
+        responsePayload = JsonSerializer.SerializeToUtf8Bytes(
+            new LanDiscoveryReply(true, "phonedeck", 2, identity.ComputerId, identity.DisplayName,
+                httpsPort, identity.Platform, capabilities),
+            MacApiJsonContext.Default.LanDiscoveryReply);
         worker = new Thread(Run)
         {
             IsBackground = true,

@@ -34,6 +34,12 @@ internal static class HealthEvents
 
     internal static JsonNode Snapshot(object health)
     {
+        if (health is JsonObject built)
+        {
+            // 原生编译：接收端直接组装 JsonObject（每次新建），就地加上 stateVersion。
+            built["stateVersion"] = StateVersion(built);
+            return built;
+        }
         var node = JsonSerializer.SerializeToNode(health, Json)
             ?? throw new InvalidOperationException("健康快照为空");
         node["stateVersion"] = StateVersion(node);

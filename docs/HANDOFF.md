@@ -1,5 +1,17 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-06 Mac 原生精简接收端（最新状态）
+
+- 决策、范围与数据见规格顶部同日条目。新增文件：`shared/Receiver/ReceiverJsonContexts.cs`、`ReceiverApiModels.cs`、
+  `macos/PhoneDeck.Receiver/MacJsonContexts.cs`；构建脚本加 `lite|full`。
+- **验证**：Mac 测试 48/48（新增首次探测回归用例）；Windows 测试 179/183（同样 4 项 macOS 基线失败，另 2 项快照测试改为
+  与生产相同的 Web 序列化）；Windows Server/ControlCenter 交叉编译 0 错误；Android 单元测试通过。原生版功能实测见规格。
+- **本机部署**：`~/Applications/PhoneDeck Receiver.app`（ad-hoc 签名，Bundle ID `com.codex.phonedeck.receiver`）；接收端数据
+  已复制到默认目录 `~/Library/Application Support/PhoneDeck`（原 `outputs/device-acceptance-20261004/data` 保留），电脑身份不变。
+  当前由 Claude 进程直接运行，日志 `~/Library/Logs/PhoneDeckReceiver.log`；从 Claude 的 shell `open` 该 App 失败（-10810）。
+- **待用户**：双击该 App 启动并在“辅助功能”授权（新二进制需重新授权，否则按键/输入法快捷键无效）。
+- **未验证**：原生版真实听写/翻译/问答（需辅助功能授权）、mDNS、x64 原生构建、Windows 原生编译。
+
 ## 2026-10-06 电脑端资源占用（最新状态）
 
 - 决策与数据见规格顶部同日条目。改动：`Receiver.Core.props` 运行时设置；Mac `MacPhoneAudioBridge`（按需预热、空闲回收、探测缓存）、

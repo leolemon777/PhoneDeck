@@ -53,11 +53,6 @@ internal sealed class ClientCredentialsStore
     /// <summary>迁移窗口内旧共享令牌的隐式身份（NET-07 / 设计 §5.1）。</summary>
     public const string LegacySharedClientId = "legacy-shared";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-    };
-
     /// <summary>rotate 同 clientId 两次进入签发路径的最小间隔（设计 §5.2：简单限速，内存态）。</summary>
     private const long RotateMinIntervalMs = 3_000;
 
@@ -313,12 +308,14 @@ internal sealed class ClientCredentialsStore
                 if (text.TrimStart().StartsWith("["))
                 {
                     // A1 裸数组旧格式：读取容忍，下一次写盘升级为信封。
-                    records = JsonSerializer.Deserialize<List<ClientCredentialRecord>>(
-                        text) ?? new List<ClientCredentialRecord>();
+                    records = JsonSerializer.Deserialize(
+                        text, CredentialsJsonContext.Default.ListClientCredentialRecord)
+                        ?? new List<ClientCredentialRecord>();
                 }
                 else
                 {
-                    var envelope = JsonSerializer.Deserialize<ClientCredentialsFileEnvelope>(text);
+                    var envelope = JsonSerializer.Deserialize(
+                        text, CredentialsJsonContext.Default.ClientCredentialsFileEnvelope);
                     records = envelope?.Clients ?? new List<ClientCredentialRecord>();
                     legacyRevokedAtUtc = envelope?.LegacyRevokedAtUtc;
                 }
@@ -355,7 +352,7 @@ internal sealed class ClientCredentialsStore
                 LegacyRevokedAtUtc = legacyRevokedAtUtc,
                 Clients = records,
             },
-            JsonOptions));
+            CredentialsJsonContext.Default.ClientCredentialsFileEnvelope));
         if (File.Exists(filePath))
         {
             File.Replace(temporaryPath, filePath, null);

@@ -30,6 +30,10 @@ internal static partial class DesktopConfiguration
     internal static string Revision<T>(T settings) => Convert.ToHexString(
         SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(settings)));
 
+    /// <summary>原生编译用：按编译期元数据序列化后取哈希（同一进程内读写一致即可）。</summary>
+    internal static string Revision<T>(T settings, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(settings, typeInfo)));
+
     internal static void CheckTarget(string? target, string actual)
     {
         if (!string.Equals(target, actual, StringComparison.OrdinalIgnoreCase))
@@ -49,6 +53,23 @@ internal static partial class DesktopConfiguration
         try
         {
             File.WriteAllText(temporary, content);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    /// <summary>原生编译用：typeInfo 须来自 WriteIndented、默认命名的上下文，输出与旧格式一致。</summary>
+    internal static void WriteAtomic<T>(string path, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(file, value, typeInfo);
+                file.Flush(true);
+            }
             File.Move(temporary, path, overwrite: true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }

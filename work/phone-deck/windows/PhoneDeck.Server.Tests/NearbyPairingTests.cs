@@ -40,7 +40,7 @@ public sealed class NearbyPairingTests
         Assert.AreEqual("3120", code);
         Assert.AreEqual("3120", notifiedCode);
 
-        var snapshot = JsonSerializer.Serialize(manager.StatusSnapshot());
+        var snapshot = JsonSerializer.Serialize(manager.StatusSnapshot(), ReceiverApiJsonContext.Default.PairingStatusSnapshot);
         StringAssert.Contains(snapshot, "\"nearby\":true");
         StringAssert.Contains(snapshot, "\"checkCode\":\"3120\"");
         StringAssert.Contains(snapshot, "Galaxy S20");

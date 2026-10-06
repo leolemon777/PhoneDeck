@@ -41,19 +41,12 @@ internal sealed record MacVoiceEngineProfile(
 /// <summary>引擎档案 JSON 解析与校验，格式与 Windows 端共用（见 docs/VOICE_ENGINES.md）。</summary>
 internal static class MacVoiceEngineProfileJson
 {
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
-
     internal static MacVoiceEngineProfile Parse(string json, string sourceDescription)
     {
         MacVoiceEngineProfile? profile;
         try
         {
-            profile = JsonSerializer.Deserialize<MacVoiceEngineProfile>(json, Options);
+            profile = JsonSerializer.Deserialize(json, MacFileReadJsonContext.Default.MacVoiceEngineProfile);
         }
         catch (JsonException exception)
         {
@@ -177,14 +170,8 @@ internal sealed class MacVoiceEngineSettings
         {
             if (File.Exists(SettingsPath))
             {
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    ReadCommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                };
-                var loaded = JsonSerializer.Deserialize<MacVoiceEngineSettings>(
-                    File.ReadAllText(SettingsPath), options);
+                var loaded = JsonSerializer.Deserialize(
+                    File.ReadAllText(SettingsPath), MacFileReadJsonContext.Default.MacVoiceEngineSettings);
                 if (loaded is not null)
                 {
                     return loaded;
@@ -381,7 +368,8 @@ internal static class MacVoiceEngines
         lock (ConfigurationLock)
         {
             var next = Catalog.WithSettings(settings);
-            DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings);
+            DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings,
+                MacFileWriteJsonContext.Default.MacVoiceEngineSettings);
             Volatile.Write(ref configured, next);
         }
     }

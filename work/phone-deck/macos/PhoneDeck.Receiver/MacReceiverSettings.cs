@@ -20,14 +20,8 @@ internal sealed class MacReceiverSettings
         {
             if (File.Exists(path))
             {
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    ReadCommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                };
-                var loaded = JsonSerializer.Deserialize<MacReceiverSettings>(
-                    File.ReadAllText(path), options);
+                var loaded = JsonSerializer.Deserialize(
+                    File.ReadAllText(path), MacFileReadJsonContext.Default.MacReceiverSettings);
                 if (loaded is not null)
                 {
                     return loaded;

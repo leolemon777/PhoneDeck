@@ -1,5 +1,22 @@
 # 言渡 · Yandu 产品规格与开发计划
 
+## 2026-10-06 用户确认：Mac 接收端原生编译为精简信号接收端
+
+用户要求“电脑端就一个很小很小的信号接收端”，确认走原生编译（Native AOT）而非重写。
+
+- **构建**：`scripts/macos/Build-PhoneDeckReceiver.sh [arm64|x64] [lite|full]`，默认 `lite` 为 `PublishAot` 原生版
+  （需要 Xcode 命令行工具），`full` 为原 JIT 单文件版。普通 `dotnet build` / 测试仍是 JIT。
+- **精简版范围**：不含 iPhone 浏览器网关（PhoneWeb，HTTPS 8768 与本机根证书）和旧版手机扫码用的二维码图片
+  （`PHONEDECK_LITE`，管理页仍显示手动码）；其余协议、配对、音频、按键、局域网发现与 JIT 版一致。
+- **代码改造**：JSON 全部改为编译期元数据（`ReceiverJsonContexts`、`MacJsonContexts`）；接口应答从匿名对象改为具名
+  record（`ReceiverApiModels`）或 `JsonObject`（健康、诊断、配置快照）。逐个接口比对 JIT 版前后应答的字段结构一致。
+- **实测（本机 Mac，Apple Silicon）**：物理内存 75 MB（JIT）→ 21 MB（原生），手机 App 前台 CPU 约 0.4%，线程 20；
+  可执行文件 16 MB。原生版通过健康、长轮询、Wi-Fi 鉴权 401、按键与配置错误分支、UDP 发现、免扫码连接请求与系统
+  确认框、共享模式音频流；手机实机在线。mDNS 广播在本机无法自测（JIT 版同样查询不到），需第二台设备验证。
+- **顺带修复**：Mac 健康检查缓存以 `long.MinValue` 起步导致溢出，上一提交起一直报告“音频不可用”；`/api/events`
+  因表达式体 lambda 绑定到 RequestDelegate 重载而返回空应答（自 healthEventsV1 引入起，手机长轮询从未生效）。
+- Windows 接收端尚未原生编译（共享代码已兼容，NAudio/WinForms 托盘需另行验证）。
+
 ## 2026-10-06 用户要求：电脑端内存与 CPU 降下来
 
 - **运行时**：Receiver.Core.props 统一设为工作站 GC、关闭并发 GC、关闭动态 PGO、InvariantGlobalization（代码无区域文化依赖）。

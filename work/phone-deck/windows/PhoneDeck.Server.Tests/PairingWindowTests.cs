@@ -55,7 +55,7 @@ public sealed class PairingWindowTests
             session.ManualCode);
         // 状态快照（回环 8765 → 本地托盘 UI）含渲染所需的 QR 载荷/手工码/校验码，
         // 但不含任何凭据字段；材料卫生的"不落日志/导出/审计"在端点与存储层另行保证（SEC-05）。
-        var snapshotJson = JsonSerializer.Serialize(manager.StatusSnapshot());
+        var snapshotJson = JsonSerializer.Serialize(manager.StatusSnapshot(), ReceiverApiJsonContext.Default.PairingStatusSnapshot);
         Assert.IsTrue(snapshotJson.Contains("\"qrPayload\""));
         Assert.IsTrue(snapshotJson.Contains("\"manualCode\""));
         Assert.IsFalse(snapshotJson.Contains("clientToken"));

@@ -47,15 +47,11 @@ internal static class NativePairingEndpoints
             switch (status)
             {
                 case PairingSubmitStatus.WindowNotOpen:
-                    return Results.NotFound(new { ok = false, error = "配对窗口未开启" });
+                    return Results.NotFound(ApiResult.Fail("配对窗口未开启"));
                 case PairingSubmitStatus.MaterialInvalid:
-                    return Results.Json(
-                        new { ok = false, error = "配对材料无效或已使用" },
-                        statusCode: StatusCodes.Status401Unauthorized);
+                    return Results.Json(ApiResult.Fail("配对材料无效或已使用"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status401Unauthorized);
                 case PairingSubmitStatus.FailureLimit:
-                    return Results.Json(
-                        new { ok = false, error = "失败次数过多，请在电脑上重新开启配对" },
-                        statusCode: StatusCodes.Status429TooManyRequests);
+                    return Results.Json(ApiResult.Fail("失败次数过多，请在电脑上重新开启配对"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status429TooManyRequests);
             }
             if (pending is null)
             {
@@ -70,15 +66,11 @@ internal static class NativePairingEndpoints
             }
             catch (TimeoutException)
             {
-                return Results.Json(
-                    new { ok = false, error = "本机确认超时，请重试" },
-                    statusCode: StatusCodes.Status408RequestTimeout);
+                return Results.Json(ApiResult.Fail("本机确认超时，请重试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status408RequestTimeout);
             }
             if (!confirmed)
             {
-                return Results.Json(
-                    new { ok = false, error = "电脑端已拒绝本次配对" },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return Results.Json(ApiResult.Fail("电脑端已拒绝本次配对"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status403Forbidden);
             }
             var record = host.Credentials.Issue(
                 pending.ClientLabel,
@@ -87,17 +79,8 @@ internal static class NativePairingEndpoints
                 out var clientToken,
                 pending.ClientId);
             Console.WriteLine($"配对完成：clientId={record.ClientId} pairingId={pending.PairingId}（材料与令牌不落日志）");
-            return Results.Ok(new
-            {
-                ok = true,
-                clientId = record.ClientId,
-                clientToken,
-                scopes = record.Scopes,
-                pairingId = pending.PairingId,
-                computerId = host.ComputerId,
-                displayName = host.DisplayName(),
-                certificateSha256 = host.CertificateSha256,
-            });
+            return Results.Ok(new PairIssuedResponse(true, record.ClientId, clientToken, record.Scopes,
+                pending.PairingId, host.ComputerId, host.DisplayName(), null, host.CertificateSha256));
         });
 
         // 同一 Wi-Fi 免扫码连接：手机发现电脑后提交请求，电脑本机允许后签发逐手机凭据。
@@ -113,13 +96,11 @@ internal static class NativePairingEndpoints
             switch (status)
             {
                 case NearbyRequestStatus.Invalid:
-                    return Results.BadRequest(new { ok = false, error = "请求格式无效" });
+                    return Results.BadRequest(ApiResult.Fail("请求格式无效"));
                 case NearbyRequestStatus.Busy:
-                    return Results.Json(new { ok = false, error = "电脑正在确认另一台手机，请稍后再试" },
-                        statusCode: StatusCodes.Status409Conflict);
+                    return Results.Json(ApiResult.Fail("电脑正在确认另一台手机，请稍后再试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status409Conflict);
                 case NearbyRequestStatus.RateLimited:
-                    return Results.Json(new { ok = false, error = "请求过于频繁，请稍后再试" },
-                        statusCode: StatusCodes.Status429TooManyRequests);
+                    return Results.Json(ApiResult.Fail("请求过于频繁，请稍后再试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status429TooManyRequests);
             }
             if (pending is null)
             {
@@ -134,8 +115,7 @@ internal static class NativePairingEndpoints
             }
             catch (TimeoutException)
             {
-                return Results.Json(new { ok = false, error = "电脑上没有人确认，请重试" },
-                    statusCode: StatusCodes.Status408RequestTimeout);
+                return Results.Json(ApiResult.Fail("电脑上没有人确认，请重试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status408RequestTimeout);
             }
             catch (OperationCanceledException)
             {
@@ -147,8 +127,7 @@ internal static class NativePairingEndpoints
             }
             if (!confirmed)
             {
-                return Results.Json(new { ok = false, error = "电脑端已拒绝本次连接" },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return Results.Json(ApiResult.Fail("电脑端已拒绝本次连接"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status403Forbidden);
             }
             var record = host.Credentials.Issue(
                 pending.ClientLabel,
@@ -157,18 +136,8 @@ internal static class NativePairingEndpoints
                 out var clientToken,
                 pending.ClientId);
             Console.WriteLine($"附近连接完成：clientId={record.ClientId}（令牌不落日志）");
-            return Results.Ok(new
-            {
-                ok = true,
-                clientId = record.ClientId,
-                clientToken,
-                scopes = record.Scopes,
-                pairingId = pending.PairingId,
-                computerId = host.ComputerId,
-                displayName = host.DisplayName(),
-                platform = host.Platform,
-                certificateSha256 = host.CertificateSha256,
-            });
+            return Results.Ok(new PairIssuedResponse(true, record.ClientId, clientToken, record.Scopes,
+                pending.PairingId, host.ComputerId, host.DisplayName(), host.Platform, host.CertificateSha256));
         });
 
         // M1-A A2 回环配对管理（设计 §3/§10：配对窗口只经本地 UI 开启，无 HTTP 外部入口）。
@@ -184,18 +153,11 @@ internal static class NativePairingEndpoints
             }
             if (host.PairingWindows.HasPendingConfirmation())
             {
-                return Results.Conflict(new { ok = false, error = "有待确认的配对提交" });
+                return Results.Conflict(ApiResult.Fail("有待确认的配对提交"));
             }
             var session = host.PairingWindows.Begin();
-            return Results.Ok(new
-            {
-                ok = true,
-                pairingId = session.PairingId,
-                qrPayload = session.QrPayloadJson,
-                manualCode = session.ManualCode,
-                checkCode = session.MaterialCheckCode,
-                validSeconds = PairingWindowManager.ValidSeconds,
-            });
+            return Results.Ok(new PairingBeginResponse(true, session.PairingId, session.QrPayloadJson,
+                session.ManualCode, session.MaterialCheckCode, PairingWindowManager.ValidSeconds));
         });
         app.MapPost("/api/admin/pairing/cancel", (HttpContext context) =>
         {
@@ -204,20 +166,20 @@ internal static class NativePairingEndpoints
                 return Results.NotFound();
             }
             host.PairingWindows.Cancel();
-            return Results.Ok(new { ok = true });
+            return Results.Ok(ApiResult.Success);
         });
         app.MapPost("/api/admin/pairing/confirm", (HttpContext context, PairingAdminRequest body) =>
             context.Connection.LocalPort != 8765
                 ? Results.NotFound()
                 : host.PairingWindows.Confirm(body.PairingId)
-                    ? Results.Ok(new { ok = true })
-                    : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
+                    ? Results.Ok(ApiResult.Success)
+                    : Results.NotFound(ApiResult.Fail("没有待确认的配对")));
         app.MapPost("/api/admin/pairing/deny", (HttpContext context, PairingAdminRequest body) =>
             context.Connection.LocalPort != 8765
                 ? Results.NotFound()
                 : host.PairingWindows.Deny(body.PairingId)
-                    ? Results.Ok(new { ok = true })
-                    : Results.NotFound(new { ok = false, error = "没有待确认的配对" }));
+                    ? Results.Ok(ApiResult.Success)
+                    : Results.NotFound(ApiResult.Fail("没有待确认的配对")));
 
         app.MapPost("/api/lan/pair", (HttpContext context) =>
         {
@@ -230,24 +192,12 @@ internal static class NativePairingEndpoints
             if (host.Credentials.LegacyRevoked)
             {
                 // 设计 §5.6：旧入口关闭后此端点停止签发共享令牌（410），不再制造 legacy 凭据。
-                return Results.Json(
-                    new { ok = false, error = "旧共享令牌入口已关闭，请在电脑上扫码配对获取独立凭据" },
-                    statusCode: StatusCodes.Status410Gone);
+                return Results.Json(ApiResult.Fail("旧共享令牌入口已关闭，请在电脑上扫码配对获取独立凭据"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status410Gone);
             }
-            return Results.Ok(new
-            {
-                ok = true,
-                protocolVersion = 2,
-                computerId = host.ComputerId,
-                displayName = host.DisplayName(),
-                platform = host.Platform,
-                addresses = host.CandidateAddresses(),
-                port = host.HttpsPort,
-                certificateSha256 = host.CertificateSha256,
-                accessToken = host.SharedAccessToken,
-                // 设计 §5.6/§5.2：提示旧共享令牌可在手机端升级为独立凭据，无需重新扫码。
-                upgradeHint = "共享令牌仅供旧版本使用；升级手机 App 后可用它换领该手机独立凭据，无需重新扫码"
-            });
+            // 设计 §5.6/§5.2：提示旧共享令牌可在手机端升级为独立凭据，无需重新扫码。
+            return Results.Ok(new UsbPairResponse(true, 2, host.ComputerId, host.DisplayName(), host.Platform,
+                host.CandidateAddresses(), host.HttpsPort, host.CertificateSha256, host.SharedAccessToken,
+                "共享令牌仅供旧版本使用；升级手机 App 后可用它换领该手机独立凭据，无需重新扫码"));
         });
 
         // M1-A A4 旧共享令牌升级（设计 §5.2）：仅 8766、仅旧共享令牌鉴权可调；手机无需重新扫码
@@ -262,14 +212,12 @@ internal static class NativePairingEndpoints
             // Bearer/逐手机凭据调用者不获新能力（设计 §5.1）：新头不得重入签发。
             if (!LanRequestAuthenticator.IsLegacySharedCaller(context.Items["ClientId"] as string))
             {
-                return Results.Json(
-                    new { ok = false, error = "请使用旧共享令牌升级" },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return Results.Json(ApiResult.Fail("请使用旧共享令牌升级"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status403Forbidden);
             }
             var clientId = body.ClientId?.Trim();
             if (string.IsNullOrWhiteSpace(clientId) || !Guid.TryParse(clientId, out _))
             {
-                return Results.BadRequest(new { ok = false, error = "clientId 必须为手机生成的 GUID" });
+                return Results.BadRequest(ApiResult.Fail("clientId 必须为手机生成的 GUID"));
             }
             RotateResult rotation;
             try
@@ -285,36 +233,18 @@ internal static class NativePairingEndpoints
             switch (rotation.Outcome)
             {
                 case RotateOutcome.Revoked:
-                    return Results.Json(
-                        new { ok = false, error = "该 clientId 已撤销，凭据找回需重新扫码配对" },
-                        statusCode: StatusCodes.Status403Forbidden);
+                    return Results.Json(ApiResult.Fail("该 clientId 已撤销，凭据找回需重新扫码配对"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status403Forbidden);
                 case RotateOutcome.RateLimited:
-                    return Results.Json(
-                        new { ok = false, error = "rotate 请求过于频繁，请稍后重试" },
-                        statusCode: StatusCodes.Status429TooManyRequests);
+                    return Results.Json(ApiResult.Fail("rotate 请求过于频繁，请稍后重试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: StatusCodes.Status429TooManyRequests);
                 case RotateOutcome.AlreadyUpgraded:
                     // G-1 处置：该形态仅 {ok,status,clientId} 三字段，绝无令牌本体。
-                    return Results.Ok(new
-                    {
-                        ok = true,
-                        status = "already-upgraded",
-                        clientId = rotation.Record!.ClientId,
-                    });
+                    return Results.Ok(new RotateAlreadyUpgradedResponse(true, "already-upgraded", rotation.Record!.ClientId));
                 default:
                     var record = rotation.Record!;
                     // issued 形态逐字对齐冻结契约 credentialRotateResponse（additionalProperties:false，
                     // 属性表无 ok 字段）；already-upgraded 形态则冻结为 {ok,status,clientId} 三字段。
-                    return Results.Ok(new
-                    {
-                        status = "issued",
-                        clientId = record.ClientId,
-                        clientToken = rotation.Token,
-                        scopes = record.Scopes,
-                        pairingId = record.PairingId,
-                        computerId = host.ComputerId,
-                        displayName = host.DisplayName(),
-                        certificateSha256 = host.CertificateSha256,
-                    });
+                    return Results.Ok(new RotateIssuedResponse("issued", record.ClientId, rotation.Token!,
+                        record.Scopes, record.PairingId, host.ComputerId, host.DisplayName(), host.CertificateSha256));
             }
         });
 
@@ -325,23 +255,29 @@ internal static class NativePairingEndpoints
             {
                 return Results.NotFound();
             }
-            var clients = host.Credentials.ListRedacted().Select(record => (object)record).ToList();
+            // 记录与合成的 legacy 条目字段不同，用 JsonObject 组装（原生编译可序列化）。
+            var clients = new System.Text.Json.Nodes.JsonArray();
+            foreach (var record in host.Credentials.ListRedacted())
+            {
+                clients.Add(System.Text.Json.JsonSerializer.SerializeToNode(
+                    record, ReceiverApiJsonContext.Default.ClientCredentialRecord));
+            }
             if (!host.Credentials.LegacyRevoked)
             {
                 // 设计 §5.3（M-4 处置）：legacy 未撤销时附加合成条目，显式列出旧入口，
                 // 供托盘"应急撤销旧入口"定位；撤销后该条目消失（入口已关闭）。
-                clients.Add(new
+                clients.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
                 {
-                    clientId = ClientCredentialsStore.LegacySharedClientId,
-                    label = "未升级旧凭据（legacy 入口）",
-                    legacy = true,
+                    ["clientId"] = ClientCredentialsStore.LegacySharedClientId,
+                    ["label"] = "未升级旧凭据（legacy 入口）",
+                    ["legacy"] = true,
                 });
             }
-            return Results.Ok(new
+            return Results.Ok(new System.Text.Json.Nodes.JsonObject
             {
-                ok = true,
-                clients,
-                legacyRevokedAt = host.Credentials.LegacyRevokedAtUtc,
+                ["ok"] = true,
+                ["clients"] = clients,
+                ["legacyRevokedAt"] = host.Credentials.LegacyRevokedAtUtc,
             });
         });
         app.MapPost("/api/admin/clients/revoke", (HttpContext context, ClientRevokeRequest body) =>
@@ -353,13 +289,13 @@ internal static class NativePairingEndpoints
             var clientId = body.ClientId?.Trim();
             if (string.IsNullOrWhiteSpace(clientId))
             {
-                return Results.BadRequest(new { ok = false, error = "缺少 clientId" });
+                return Results.BadRequest(ApiResult.Fail("缺少 clientId"));
             }
             try
             {
                 if (!host.Credentials.Revoke(clientId))
                 {
-                    return Results.NotFound(new { ok = false, error = "未知 clientId" });
+                    return Results.NotFound(ApiResult.Fail("未知 clientId"));
                 }
             }
             catch (Exception exception)
@@ -370,7 +306,7 @@ internal static class NativePairingEndpoints
             }
             host.Sessions.Cancel(clientId);
             host.RevokeInput(clientId);
-            return Results.Ok(new { ok = true, clientId });
+            return Results.Ok(new ApiClientResult(true, clientId));
         });
 
         // M1-A A4 legacy 应急撤销（设计 §5.3，M-4 处置）：仅 8765 回环。store 内先原子持久化
@@ -395,29 +331,27 @@ internal static class NativePairingEndpoints
             // 与逐手机撤销同一编排（设计 §6）：持久化成功后终止旧入口的长流与持有键。
             host.Sessions.Cancel(ClientCredentialsStore.LegacySharedClientId);
             host.RevokeInput(ClientCredentialsStore.LegacySharedClientId);
-            return Results.Ok(new
-            {
-                ok = true,
-                legacyRevokedAt = host.Credentials.LegacyRevokedAtUtc,
-            });
+            return Results.Ok(new LegacyRevokeResponse(true, host.Credentials.LegacyRevokedAtUtc));
         });
 
+#if !PHONEDECK_LITE
+        // 旧版手机扫码用的二维码图片；原生精简版（PHONEDECK_LITE）不含 QRCoder，管理页仍显示手动码。
         app.MapGet("/api/admin/pairing/qr", (HttpContext context) =>
         {
             if (context.Connection.LocalPort != 8765)
             {
                 return Results.NotFound();
             }
-            var status = System.Text.Json.JsonSerializer.SerializeToElement(host.PairingWindows.StatusSnapshot());
-            if (!status.TryGetProperty("qrPayload", out var payload) || payload.GetString() is not { Length: > 0 } json)
+            if (host.PairingWindows.StatusSnapshot().QrPayload is not { Length: > 0 } json)
             {
-                return Results.NotFound(new { ok = false, error = "配对窗口未开启" });
+                return Results.NotFound(ApiResult.Fail("配对窗口未开启"));
             }
             using var data = QRCoder.QRCodeGenerator.GenerateQrCode(json, QRCoder.QRCodeGenerator.ECCLevel.M);
             using var png = new QRCoder.PngByteQRCode(data);
             return Results.File(png.GetGraphic(6), "image/png");
         });
 
+#endif
         app.MapGet("/admin/pairing", (HttpContext context) =>
             context.Connection.LocalPort != 8765
                 ? Results.NotFound()

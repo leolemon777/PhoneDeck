@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Security;
 
 namespace PhoneDeck.MacReceiver;
@@ -13,43 +14,68 @@ internal static class MacDesktopConfigurationEndpoints
         Func<bool> busy, Func<MacReceiverSettings> read, Action<MacReceiverSettings> replace,
         UsbWatchdog usb, LanDiscoveryResponder lan)
     {
-        object Connection() => new
-        {
-            usbWatchdog = read().UsbWatchdog,
-            lanDiscovery = read().LanDiscovery,
-            autoStart = MacAutoStart.Enabled
-        };
-        object Snapshot()
+        MacConnectionState Connection() => new(read().UsbWatchdog, read().LanDiscovery, MacAutoStart.Enabled);
+        string ConnectionRevision(MacConnectionState state) =>
+            DesktopConfiguration.Revision(state, MacApiJsonContext.Default.MacConnectionState);
+        string VoiceRevision(MacVoiceEngineSettings settings) =>
+            DesktopConfiguration.Revision(settings, MacFileWriteJsonContext.Default.MacVoiceEngineSettings);
+        // 配置快照用 JsonObject 组装（原生编译不能序列化匿名对象），字段与旧版一致。
+        JsonObject Snapshot()
         {
             lock (MacVoiceEngines.ConfigurationLock)
             {
                 var catalog = MacVoiceEngines.Catalog;
                 var connection = Connection();
-                return new
+                var overrides = new JsonObject();
+                foreach (var (engineId, bindings) in catalog.Settings.ShortcutOverrides
+                    ?? new Dictionary<string, Dictionary<string, string>>())
                 {
-                    ok = true,
-                    computerId,
-                    busy = busy(),
-                    voiceRevision = DesktopConfiguration.Revision(catalog.Settings),
-                    connectionRevision = DesktopConfiguration.Revision(connection),
-                    connection,
-                    activeEngine = catalog.Active.Id,
-                    shortcutOverrides = catalog.Settings.ShortcutOverrides
-                        ?? new Dictionary<string, Dictionary<string, string>>(),
-                    engines = catalog.Profiles.Select(profile => new
+                    var modes = new JsonObject();
+                    foreach (var (mode, binding) in bindings)
                     {
-                        id = profile.Id,
-                        displayName = profile.DisplayName,
-                        experimental = profile.Experimental,
-                        verifiesMicrophone = profile.VerifiesMicrophone,
-                        modes = profile.Modes.Select(mode => new
+                        modes[mode] = binding;
+                    }
+                    overrides[engineId] = modes;
+                }
+                var engines = new JsonArray();
+                foreach (var profile in catalog.Profiles)
+                {
+                    var modes = new JsonArray();
+                    foreach (var mode in profile.Modes)
+                    {
+                        modes.Add((JsonNode)new JsonObject
                         {
-                            id = mode.Id,
-                            label = mode.Label ?? mode.Id,
-                            trigger = mode.Trigger,
-                            defaultKeys = mode.MacKeys ?? mode.Keys
-                        }).ToArray()
-                    }).ToArray()
+                            ["id"] = mode.Id,
+                            ["label"] = mode.Label ?? mode.Id,
+                            ["trigger"] = mode.Trigger,
+                            ["defaultKeys"] = mode.MacKeys ?? mode.Keys
+                        });
+                    }
+                    engines.Add((JsonNode)new JsonObject
+                    {
+                        ["id"] = profile.Id,
+                        ["displayName"] = profile.DisplayName,
+                        ["experimental"] = profile.Experimental,
+                        ["verifiesMicrophone"] = profile.VerifiesMicrophone,
+                        ["modes"] = modes
+                    });
+                }
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["computerId"] = computerId,
+                    ["busy"] = busy(),
+                    ["voiceRevision"] = VoiceRevision(catalog.Settings),
+                    ["connectionRevision"] = ConnectionRevision(connection),
+                    ["connection"] = new JsonObject
+                    {
+                        ["usbWatchdog"] = connection.UsbWatchdog,
+                        ["lanDiscovery"] = connection.LanDiscovery,
+                        ["autoStart"] = connection.AutoStart
+                    },
+                    ["activeEngine"] = catalog.Active.Id,
+                    ["shortcutOverrides"] = overrides,
+                    ["engines"] = engines
                 };
             }
         }
@@ -60,34 +86,33 @@ internal static class MacDesktopConfigurationEndpoints
                 DesktopConfiguration.CheckTarget(target, computerId);
                 if (!gate.Apply(busy, change))
                 {
-                    return Results.Json(new { ok = false, error = "正在输入或供音，请停止后保存" }, statusCode: 409);
+                    return Results.Json(ApiResult.Fail("正在输入或供音，请停止后保存"), ReceiverApiJsonContext.Default.ApiResult, statusCode: 409);
                 }
                 return Results.Ok(Snapshot());
             }
             catch (ArgumentException exception)
             {
-                return Results.BadRequest(new { ok = false, error = exception.Message });
+                return Results.BadRequest(ApiResult.Fail(exception.Message));
             }
             catch (InvalidOperationException exception)
             {
-                return Results.Json(new { ok = false, error = exception.Message }, statusCode: 409);
+                return Results.Json(ApiResult.Fail(exception.Message), ReceiverApiJsonContext.Default.ApiResult, statusCode: 409);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
             {
-                return Results.Json(new { ok = false, error = "保存失败，请检查电脑权限或磁盘后重试" }, statusCode: 500);
+                return Results.Json(ApiResult.Fail("保存失败，请检查电脑权限或磁盘后重试"), ReceiverApiJsonContext.Default.ApiResult, statusCode: 500);
             }
         }
 
         app.MapGet("/api/config/desktop", () => Results.Ok(Snapshot()));
         app.MapPost("/api/config/desktop/voice", (DesktopVoiceRequest request) => Apply(request.TargetComputerId, () =>
         {
-            DesktopConfiguration.CheckRevision(request.Revision,
-                DesktopConfiguration.Revision(MacVoiceEngines.Catalog.Settings));
+            DesktopConfiguration.CheckRevision(request.Revision, VoiceRevision(MacVoiceEngines.Catalog.Settings));
             MacVoiceEngines.ApplySettings(MacVoiceSettingsValidator.ValidateVoice(MacVoiceEngines.Catalog, request));
         }));
         app.MapPost("/api/config/desktop/connection", (DesktopConnectionRequest request) => Apply(request.TargetComputerId, () =>
         {
-            DesktopConfiguration.CheckRevision(request.Revision, DesktopConfiguration.Revision(Connection()));
+            DesktopConfiguration.CheckRevision(request.Revision, ConnectionRevision(Connection()));
             var old = read();
             var next = new MacReceiverSettings
             {
@@ -105,7 +130,8 @@ internal static class MacDesktopConfigurationEndpoints
             }
             try
             {
-                DesktopConfiguration.WriteAtomic(MacReceiverSettings.SettingsPath, next);
+                DesktopConfiguration.WriteAtomic(MacReceiverSettings.SettingsPath, next,
+                    MacFileWriteJsonContext.Default.MacReceiverSettings);
             }
             catch
             {

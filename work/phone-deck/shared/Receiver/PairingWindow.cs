@@ -120,18 +120,10 @@ internal sealed class PairingWindowManager
             {
                 Material = material,
                 PairingId = pairingId,
-                QrPayloadJson = JsonSerializer.Serialize(new
-                {
-                    version = 1,
-                    computerId,
-                    displayName,
-                    httpsPort,
-                    certificateSha256,
-                    pairingId,
-                    oneTimeMaterial = material,
-                    validSeconds = ValidSeconds,
-                    maxFailuresPerWindow = MaxFailuresPerWindow,
-                }),
+                QrPayloadJson = JsonSerializer.Serialize(
+                    new QrPairingPayload(1, computerId, displayName, httpsPort, certificateSha256,
+                        pairingId, material, ValidSeconds, MaxFailuresPerWindow),
+                    ReceiverApiJsonContext.Default.QrPairingPayload),
                 ManualCode = FormatManualCode(material),
                 MaterialCheckCode = MaterialCheckCode(material),
                 ExpiresAtTick = MonotonicClock() + ValidSeconds * 1000L,
@@ -246,47 +238,34 @@ internal sealed class PairingWindowManager
     }
 
     /// <summary>回环管理端点快照：含手工码/校验码/剩余秒数/待确认信息（供托盘 UI）。</summary>
-    public object StatusSnapshot()
+    public PairingStatusSnapshot StatusSnapshot()
     {
         lock (gate)
         {
             if (NearbyPendingLocked() && nearby is { } request)
             {
                 // 附近请求：无二维码与手动码，只有待确认信息与校验码；open=true 让管理页显示确认区。
-                return new
-                {
-                    ok = true,
-                    open = true,
-                    nearby = true,
-                    pairingId = request.PairingId,
-                    checkCode = nearbyCheckCode,
-                    remainingSeconds = Math.Max(0, (int)((nearbyExpiresAtTick - MonotonicClock()) / 1000)),
-                    pending = new { clientId = request.ClientId, clientLabel = request.ClientLabel },
-                };
+                return new PairingStatusSnapshot(true, true,
+                    Nearby: true,
+                    PairingId: request.PairingId,
+                    CheckCode: nearbyCheckCode,
+                    RemainingSeconds: Math.Max(0, (int)((nearbyExpiresAtTick - MonotonicClock()) / 1000)),
+                    Pending: new PairingPendingInfo(request.ClientId, request.ClientLabel));
             }
             if (active is not { } session)
             {
-                return new { ok = true, open = false };
+                return new PairingStatusSnapshot(true, false);
             }
-            var remaining = Math.Max(0, (int)((session.ExpiresAtTick - MonotonicClock()) / 1000));
-            return new
-            {
-                ok = true,
-                open = MonotonicClock() < session.ExpiresAtTick,
-                pairingId = session.PairingId,
-                qrPayload = session.QrPayloadJson,
-                manualCode = session.ManualCode,
-                checkCode = session.MaterialCheckCode,
-                remainingSeconds = remaining,
-                failuresRemaining = MaxFailuresPerWindow - failures,
-                pending = session.Pending is { } pending
-                    ? new
-                    {
-                        clientId = pending.ClientId,
-                        clientLabel = pending.ClientLabel,
-                    }
-                    : null,
-            };
+            return new PairingStatusSnapshot(true, MonotonicClock() < session.ExpiresAtTick,
+                PairingId: session.PairingId,
+                QrPayload: session.QrPayloadJson,
+                ManualCode: session.ManualCode,
+                CheckCode: session.MaterialCheckCode,
+                RemainingSeconds: Math.Max(0, (int)((session.ExpiresAtTick - MonotonicClock()) / 1000)),
+                FailuresRemaining: MaxFailuresPerWindow - failures,
+                Pending: session.Pending is { } pending
+                    ? new PairingPendingInfo(pending.ClientId, pending.ClientLabel)
+                    : null);
         }
     }
 
