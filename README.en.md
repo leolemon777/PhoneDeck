@@ -8,6 +8,8 @@ Speak into the phone and the text appears on your computer. One phone can drive 
 
 > **Status: technical preview.** The core path works on the author's devices, but it has not yet been through clean installs by outside users. See [Verification](#verification) for what has been tested on real hardware. Issues are welcome.
 
+The goal is to use a phone you already own instead of buying a separate microphone or a headset for its microphone. Any cost of your chosen dictation app is separate.
+
 | Idle | Dictating | Shared mic |
 |---|---|---|
 | ![Idle](docs/images/android-home-light.png) | ![Dictating](docs/images/android-recording.png) | ![Shared microphone](docs/images/android-shared.png) |
@@ -69,7 +71,7 @@ If the phone and computer are on different subnets (for example behind a second 
 
 | Platform | Tested on real hardware | Not yet tested |
 |---|---|---|
-| Android | Tap and hold dictation, stop sync, shared mic on/off, dark theme and offline-computer hints on a Samsung phone | Other phones, landscape, long shared sessions |
+| Android | Tap and hold dictation, stop sync, shared mic on/off, dark theme, offline-computer hints, landscape layout and system-bar spacing on a Samsung phone | Other phones, long shared sessions, font scaling and accessibility |
 | Windows | The new tray, nearby pairing with Allow, dictation and shortcuts (two PCs) | High-DPI scaling, start at login |
 | macOS | The slim native receiver: dictation with Accessibility granted, status page, USB and Wi-Fi, nearby pairing | Translate / ask one by one, Intel |
 | Several computers | One phone with a Mac and two Windows PCs, discovered on the same Wi-Fi, switched by swiping | Shared mic feeding several computers at once |
@@ -116,3 +118,7 @@ Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). AI
 ## License
 
 [MIT](LICENSE). Shortcut and process names in the voice engine profiles come from public sources. Typeless, Doubao, WeChat, VB-CABLE, BlackHole and other names are trademarks of their respective owners.
+
+## Community
+
+Thanks to the [LINUX DO](https://linux.do/) community for providing a place to share and discuss open-source projects. Feedback and contributions to Yandu are welcome.

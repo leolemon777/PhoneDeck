@@ -1,5 +1,7 @@
 # PhoneDeck 架构说明
 
+> 当前主线为 v1.6.0-beta.3 技术预览：Android dev.22/code28、Windows dev.17/sequence29、macOS dev.4/bundle3。
+> 版本来自 `release-versions.json`；历史结构按日期保留，支持与真机范围以 [支持矩阵](release/SUPPORT_MATRIX.md) 和 HANDOFF 最新记录为准。
 
 ## 2026-10-05 多电脑连接与 Receiver.Core
 
@@ -107,14 +109,14 @@ Android `RemoteStopPolicy` 核对会话 ID；调用方先核对目标电脑和�
 
 ## 当前实现与目标架构的边界
 
-源码基线：Android 1.6.0-dev.20 / Windows 接收端 1.6.0-dev.15 /
-macOS 预览 2.0.0-dev.3；当前协议仍为 v2。
+源码基线：Android 1.6.0-dev.22 / Windows 接收端 1.6.0-dev.17 /
+macOS 预览 2.0.0-dev.4；当前协议仍为 v2。
 面向 Android/iOS × Windows/macOS 的目标架构、动态多设备模型、逐手机授权、
 会话状态、引擎适配和阶段依赖见 [长期规格 v0.6 第 0 章](../spec%20plan.markdown)。
-这些是后续规划，iOS、无线扫码配对与 Receiver.Core 公共库尚不能当作当前实现。
+Receiver.Core、逐手机凭据/撤销、mDNS 与附近确认已实现；原生 iOS 与更广泛的平台/输入法认证仍为后续规划。
 
 新版 Android 的采音只由手机主动开启，不再跟随旧电脑的持久化共享请求；
-当前电脑 LAN 令牌也不能当作已实现逐手机凭据与撤销。
+附近确认签发逐手机凭据；旧 LAN 共享令牌仅供迁移兼容，可从本机状态页关闭。
 下文旧版本标记描述各能力引入时的结构，不替代当前支持矩阵或真机验收记录。
 
 ## 当前 Android/Windows 数据流
@@ -169,8 +171,8 @@ Windows PhoneDeck.Server        │
 - `Program.cs`：Kestrel、本地 API、Typeless 快捷键读取、SendInput 和请求去重。
 - `InputCommandProcessor.cs`：协议 v2 信封、目标电脑和动作验证。
 - `ReceiverIdentity.cs`：首次启动生成并持久化稳定电脑 ID。
-- `LanIdentity.cs`：生成并持久化局域网 TLS 证书和随机访问密钥；配对资料只允许从 USB
-  loopback 端口读取。Wi-Fi 端口独立监听 8766，未携带正确密钥返回 401。
+- `LanIdentity.cs`：生成并持久化局域网 TLS 证书和旧版随机访问密钥。USB 配对资料只从 loopback 读取；
+  Wi-Fi 8766 的附近配对需四位校验码与本机确认，其余业务验证逐手机凭据或迁移期旧令牌。
 - `LanDiscoveryResponder.cs`：在 UDP 8767 回应不含密钥的最小身份信息，供已配对手机更新
   候选 IP；不会绕过 HTTPS 鉴权。
 - `PhoneAudioBridge.cs` / `DictationSessionManager.cs`：WASAPI 音频与 Typeless 会话所有权；
@@ -178,11 +180,11 @@ Windows PhoneDeck.Server        │
 - `PhoneDeckRuntimeAbstractions.cs` / `PhoneDeck.Server.Tests`：隔离真实音频与 Typeless 控制，回归验证失败重试、状态探针不可用和断流恢复。
 - `TypelessStateProbe.cs`：枚举 Windows 采集端的 Core Audio 会话，核对 Typeless 进程是否真正处于录音状态，不再只依赖服务内部布尔值。
 - `BluetoothReceiver.cs`：发现已配对手机、RFCOMM 连接、执行动作和返回 ACK。
-- `PhoneDeck.ControlCenter`：.NET 8 WinForms 原生托盘，状态窗口按需创建/销毁；只显示状态、重连和退出。隐藏或最小化后暂停 UI 轮询，不加载 WPF。
+- `PhoneDeck.ControlCenter`：.NET 10 WinForms 原生托盘，状态窗口按需创建/销毁，支持连接批准、撤销、开机启动、重连和退出。隐藏或最小化后暂停 UI 轮询，不加载 WPF。
 - `DesktopConfigurationEndpoints` / `ConfigurationGate`：手机按电脑编辑引擎与连接设置。写入必须带目标 ID 和读取时的 revision，排斥并发输入/音频，原子落盘后热应用。
 - `ComputerSettingsActivity`：复用固定证书的 HTTPS；USB 回退先验证身份，保存不自动切换目标或重试。不再从电脑自动覆盖手机 Agent 按键。
 
-### macOS 2.0.0-dev.2 预览组件
+### macOS 预览组件
 
 - `macos/PhoneDeck.Receiver/Program.cs`：Kestrel 本地 HTTP 8765、安全 HTTPS 8766、健康检查、USB 配对和协议 v2 输入入口。
 - `MacKeyboardInput.cs`：CGEvent 输入后端、macOS 虚拟键码白名单、Unicode 文字、请求去重、宏限制和异常按键释放。
@@ -199,19 +201,18 @@ Windows PhoneDeck.Server        │
 
 Mac 现在声明 `phoneAudio/sharedMicrophone/managedDictation`；`audio.available` 仍以实际找到
 BlackHole 为准。2026-09-14 已在 Apple Silicon Mac（macOS 26.3.1）完成 Samsung→Mac→Typeless
-两轮真实 Wi-Fi 听写最小闭环，实测覆盖 CGEvent、AUHAL/BlackHole、Typeless 采集探针与
-辅助功能权限；但按住模式、翻译/问答、USB 断线恢复、睡眠/重启、Intel、蓝牙和局域网
-防火墙行为仍未验收，不能视为 Mac 全场景通过。
+两轮真实 Wi-Fi 听写最小闭环。10 月 6–7 日进一步验证原生精简版、点击/按住、电脑停止同步关麦、
+USB/Wi-Fi、附近确认与三电脑切换。翻译/问答、长时间共享、完整断线/睡眠/重启矩阵、Intel 与正式签名仍未验收。
 
-## 当前单电脑/传输限制
+## 当前传输与验证限制
 
 1. Android USB 服务器地址仍为 `http://127.0.0.1:8765`。
 2. ADB reverse 只能指向当前 USB 主机。
 3. Android 蓝牙传输只保存一个 socket。
-4. 已有 USB 首次配对、HTTPS 鉴权和自定义 UDP 发现，但尚无二维码/验证码配对、凭据撤销或标准 mDNS 浏览。
+4. 已有 USB 首次配对、HTTPS 逐手机鉴权/撤销、UDP 与 mDNS；原生 Android 不再扫码，附近确认使用四位校验码。mDNS 单独成功、跨网段与 IPv6-only 未完成硬件矩阵。
 5. 多步宏已进入实验实现，仍缺完整真机输入、焦点保障和失败策略验收。
-6. Windows 音频/Typeless 已有显式会话清理，但三台电脑联合切换和异常网络场景仍待硬件验收。
-7. macOS 双语音模式已有预览源码；真实 Mac 已完成两轮 Wi-Fi 听写最小闭环，按住模式、蓝牙和正式签名仍待验收或接入。
+6. 一台手机在 Mac + 两台 Windows 间切换已实测；多电脑同时共享供音与异常网络矩阵仍待硬件验收。
+7. macOS 精简版已验证核心听写；其不含 iPhone 网页网关，完整版网页、蓝牙与正式签名仍有独立验收边界。
 
 ## 已实现的协议 v2 基础与目标分层
 
@@ -264,7 +265,7 @@ Control / Option / Command，消除自定义组合的歧义。
 - USB 共享切换器模式中只有当前物理端口在线；手机根据新主机健康响应自动更新目标。
 - 局域网模式必须使用独立的已鉴权入口，不能把当前 localhost API 原样开放。
 
-## 版本演进边界
+## 历史版本演进边界（引入时的范围，不代表当前缺口）
 
 ### 1.5.0 可以做
 
@@ -290,10 +291,9 @@ Control / Option / Command，消除自定义组合的歧义。
 - 语音交接；
 - USB 共享切换器验证。
 
-当前 `1.6.0-dev.5` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
+当时的 `1.6.0-dev.5` 已完成 Windows 安全 Wi-Fi 入口、USB 自动配对、无线心跳、受限 UDP
 自动发现、单目标听写和共享麦克风扇出。macOS `2.0.0-dev.2` 已新增兼容相同安全传输的
 CGEvent、AUHAL/BlackHole 和 Typeless 会话预览，2026-09-14 在真实 Mac 完成两轮 Wi-Fi
-听写最小闭环。仍缺凭据撤销/重配、标准 mDNS/Bonjour、真实 Mac 全场景验收
-和 Windows/macOS 三机联合压力测试。
+听写最小闭环。当时缺少的凭据撤销/重配与 mDNS 已在后续实现；当前仍缺全平台场景与联合压力验收。
 
 完整字段、UX、安全和验收要求以根目录 `spec plan.markdown` 为准。

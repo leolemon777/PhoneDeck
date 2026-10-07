@@ -1,5 +1,24 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-07 开源收尾与 v1.6.0-beta.3（最新状态）
+
+- **源码**：#49 横屏系统栏/挖孔留白与走查记录已合入 main。当前批次为 Android dev.22/code28、Windows dev.17/sequence29、Mac dev.4/bundle3；
+  用版本描述 + `Assert-ReleaseVersions.ps1 -Sync` 同步所有主线字段。独立 Desktop alpha/code4 保持原路线；UI 预览为 dev.22-ui-preview.1/code29。
+- **文档**：中英文 README 增加节省麦克风/耳机硬件费用的初衷与 LINUX DO 社区链接；支持矩阵、AGENTS、架构、构建说明与引擎设置指南
+  统一到附近确认、逐手机撤销、.NET 10、Mac 精简版和已有真机记录。保留日期式历史，旧缺口不再当作当前状态。
+- **依赖/声明**：删除 WinForms 托盘已无调用的 QRCoder 引用并更新锁；Windows Server 与 Mac full 的网页依赖继续保留。
+  更新直接/传递依赖清单，附上上游许可证文本与来源哈希；发布包保留 .NET 运行时自身的许可/第三方声明。
+- **验证**：本机 Android assembleDebug、testDebugUnitTest（46/46）、lintDebug 通过；Mac Release 测试 48/48；
+  版本一致性与 60 项纯数据检查、契约 C1–C7（106 个 JSON、36 有效/47 无效样本）全部通过。版本纯数据脚本在 Mac 需显式 TEMP 与 pwsh PATH；
+  首次缺少 TEMP 的环境错误已在隔离目录重跑通过。Windows 特有测试与 B03 等以本批 PR 的实际 CI job 为准，不能使用 Mac 上已知的平台差异失败代替 Windows 结果。
+- **分发**：[v1.6.0-beta.3](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.3) 使用新的技术预览标签；
+  APK 沿用 beta.2 的开发机调试证书，Windows 为自包含双 EXE ZIP，Mac 为 arm64 lite/ad-hoc ZIP。最终源码提交、版本、证书、测试与哈希
+  记录在该批 Release 的 `BUILD_PROVENANCE.json` / `SHA256SUMS.txt`；原 beta.2 资产不替换，本批不进入签名统一更新渠道，也不自动安装到作者设备。
+- **旧 PR**：#2 的整套旧首页/Agent 同步已被后续决策取代，不整体合并。当前实现已有安全 SendInput、断流清理和按需预热；
+  旧诊断日志落盘、设备 ID 缓存与额外标点热键别名尚未迁入，保留分支差异供以后单独评估，不声明全部旧提交已合并。7 个 Dependabot 大版本升级继续独立审查。
+- **待办**：外部用户干净安装/升级/卸载；同一手机多电脑同时共享与长时间异常恢复；翻译/问答、其他输入法/机型、Intel、字体缩放/读屏、
+  Windows 高 DPI/开机启动；长期正式签名、Mac 公证与 Windows 精简编译。以前的设备走查不等于本批字节的新安装验收。
+
 ## 2026-10-07 v1.6.0-beta.2 发布与真机走查（最新状态）
 
 - **发布**：[v1.6.0-beta.2](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.2)（Pre-release，标签指向 b03a828）：

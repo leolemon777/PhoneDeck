@@ -23,8 +23,8 @@ android {
         applicationId "com.codex.phonedeck"
         minSdk 26
         targetSdk 35
-        versionCode 27
-        versionName "1.6.0-dev.21"
+        versionCode 28
+        versionName "1.6.0-dev.22"
         resValue "string", "app_name", "言渡"
     }
 
@@ -89,8 +89,8 @@ android {
 androidComponents {
     onVariants(selector().withBuildType("uiPreview")) { variant ->
         variant.outputs.each { output ->
-            output.versionName.set("1.6.0-dev.21-ui-preview.2")
-            output.versionCode.set(28)
+            output.versionName.set("1.6.0-dev.22-ui-preview.1")
+            output.versionCode.set(29)
         }
     }
     onVariants(selector().withBuildType("desktopPreview")) { variant ->
