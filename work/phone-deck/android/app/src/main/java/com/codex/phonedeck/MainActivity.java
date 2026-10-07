@@ -119,9 +119,14 @@ public final class MainActivity extends Activity {
     private final java.util.List<String> carouselIds = new java.util.ArrayList<>();
     private int carouselCardWidth;
     private boolean carouselTouching;
+    /// 手势开始时的横向位置：单步翻页的基准（无论拖多远甩多快，一次手势只翻一格）。
+    private int carouselDragStartScrollX;
+    /// 手势确定的翻页目标卡片；-1 表示没有强制目标，按最近卡片对齐。
+    private int carouselForcedIndex = -1;
     /// 正在确认的电脑（滑到或点到它后，实时探测成功才真正切换）。
     private String confirmingComputerId;
     private final Runnable carouselSnap = this::snapCarousel;
+    private final Runnable carouselOneStep = this::applyCarouselOneStep;
     private LinearLayout recentList;
     /// 同一 Wi-Fi 里发现、尚未连接的电脑（computerId → 发现结果）。
     private final java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> nearbyComputers =
@@ -1059,17 +1064,7 @@ public final class MainActivity extends Activity {
         computerCardRow = new LinearLayout(this);
         computerCardRow.setPadding(dp(16), dp(4), column - dp(16) - carouselCardWidth, dp(4));
         computerCarousel.addView(computerCardRow, new HorizontalScrollView.LayoutParams(-2, -2));
-        computerCarousel.setOnTouchListener((view, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                carouselTouching = true;
-                mainHandler.removeCallbacks(carouselSnap);
-            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                carouselTouching = false;
-                scheduleCarouselSnap();
-            }
-            return false;
-        });
+        attachCarouselGesture(computerCarousel);
         computerCarousel.setOnScrollChangeListener((view, x, y, oldX, oldY) -> {
             updateCarouselDots(nearestCarouselIndex());
             if (!carouselTouching) scheduleCarouselSnap();
@@ -1097,27 +1092,79 @@ public final class MainActivity extends Activity {
         mainHandler.postDelayed(carouselSnap, 120);
     }
 
-    /// 松手或惯性滚动停下后对齐到最近的卡片；停稳在另一台电脑上即开始确认切换。
+    /// 统一的轮播手势跟踪：装在滚动容器与每张卡片上（可点击的卡片会先收到触摸）。
+    /// 返回 false，不拦截：单击仍走卡片 OnClickListener，拖动由滚动容器接管。
+    private void attachCarouselGesture(View view) {
+        view.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                carouselTouching = true;
+                carouselDragStartScrollX = computerCarousel == null ? 0 : computerCarousel.getScrollX();
+                carouselForcedIndex = -1;
+                mainHandler.removeCallbacks(carouselSnap);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                carouselTouching = false;
+                mainHandler.removeCallbacks(carouselOneStep);
+                mainHandler.postDelayed(carouselOneStep, 80);
+            }
+            return false;
+        });
+    }
+
+    /// 手势结束后延迟执行：此时滚动/惯性已推进一段，用最新位置判方向。
+    private void applyCarouselOneStep() {
+        if (computerCarousel == null || carouselTouching) return;
+        int step = carouselStep();
+        if (step <= 0) return;
+        int count = Math.max(1, computerCardRow == null ? 1 : computerCardRow.getChildCount());
+        int startIndex = Math.max(0, Math.min(count - 1,
+                Math.round(carouselDragStartScrollX / (float) step)));
+        int current = computerCarousel.getScrollX();
+        int target;
+        if (Math.abs(current - carouselDragStartScrollX) < dp(24)) {
+            target = startIndex; // 位移极小（点击/回弹）：原地不动
+        } else {
+            int dir = current > carouselDragStartScrollX ? 1 : -1;
+            target = Math.max(0, Math.min(count - 1, startIndex + dir)); // 一次手势只翻一格
+        }
+        carouselForcedIndex = target;
+        mainHandler.removeCallbacks(carouselSnap);
+        computerCarousel.smoothScrollTo(target * step, 0);
+    }
+
+    /// 对齐到目标卡片：手势确定的单步目标优先，否则最近卡片。仅视觉对齐，不触发切换。
     private void snapCarousel() {
         if (computerCarousel == null || carouselTouching) return;
-        int index = nearestCarouselIndex();
+        int count = Math.max(1, computerCardRow == null ? 1 : computerCardRow.getChildCount());
+        int index = carouselForcedIndex >= 0
+                ? Math.min(carouselForcedIndex, count - 1)
+                : nearestCarouselIndex();
         int target = index * carouselStep();
         if (Math.abs(computerCarousel.getScrollX() - target) > dp(2)) {
             computerCarousel.smoothScrollTo(target, 0);
             return;
         }
-        onCarouselSettled(index);
+        carouselForcedIndex = -1;
     }
 
-    private void onCarouselSettled(int index) {
-        if (index >= carouselIds.size() || confirmingComputerId != null) return;
-        String computerId = carouselIds.get(index);
+    /// 点按电脑卡片：未居中的卡片滚动到中央浏览；已居中的卡片才确认切换；离线电脑拒绝切换。
+    private void onComputerCardTap(String computerId) {
+        if (confirmingComputerId != null) return;
         if (sameComputer(computerId, targetDeviceManager.getActiveComputerId())) return;
+        int index = carouselIds.indexOf(computerId);
+        if (index < 0) return;
+        if (index != nearestCarouselIndex()) {
+            computerCarousel.smoothScrollTo(index * carouselStep(), 0);
+            return;
+        }
         TargetDeviceManager.Device device = targetDeviceManager.find(computerId);
         if (device == null) return;
+        if (!isDeviceOnline(computerId)) {
+            showActionFeedback("✕  这台电脑离线，无法切换", theme.warning);
+            return;
+        }
         if (isVoiceInteractionBusy()) {
             showActionFeedback("✕  请先停止当前语音，再切换电脑", theme.warning);
-            scrollCarouselToActive(true);
             return;
         }
         confirmingComputerId = device.computerId;
@@ -1127,12 +1174,11 @@ public final class MainActivity extends Activity {
         if (!targetSwitchInFlight) finishCarouselConfirmation();
     }
 
-    /// 切换确认结束（成功或失败）：卡片回到当前电脑。
+    /// 切换确认结束（成功或失败）：保持用户所在的卡片视图，不拽回任何位置。
     private void finishCarouselConfirmation() {
         confirmingComputerId = null;
         lastComputerCardsSignature = null;
         refreshComputerCards();
-        scrollCarouselToActive(true);
     }
 
     private void scrollCarouselToActive(boolean animated) {
@@ -1191,10 +1237,12 @@ public final class MainActivity extends Activity {
     /// 每 2 秒的健康检查都会调用：内容没变就不重建，否则会打断滑动、长按与读屏焦点。
     private void refreshComputerCards() {
         if (computerCardRow == null || targetDeviceManager == null) return;
+        if (carouselTouching) return; // 拖动中不重建，等松手后的下一轮刷新
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
         String signature = computerCardsSignature(devices);
         if (signature.equals(lastComputerCardsSignature) && computerCardRow.getChildCount() > 0) return;
         boolean first = lastComputerCardsSignature == null || computerCardRow.getChildCount() == 0;
+        int previousScrollX = computerCarousel == null ? 0 : computerCarousel.getScrollX();
         lastComputerCardsSignature = signature;
         computerCardRow.removeAllViews();
         carouselIds.clear();
@@ -1214,17 +1262,34 @@ public final class MainActivity extends Activity {
             View card = selected || confirming
                     ? heroComputerCard(device, selected, confirming, shared, sharedStates.get(device.computerId))
                     : peekComputerCard(device, shared, sharedStates.get(device.computerId));
+            final String tappedComputerId = device.computerId;
+            card.setOnClickListener(view -> onComputerCardTap(tappedComputerId));
+            attachCarouselGesture(card);
             computerCardRow.addView(card, margins(0, 0, dp(10), 0, carouselCardWidth, -1));
             carouselIds.add(device.computerId);
         }
         for (LanDiscoveryClient.DiscoveredComputer computer : sortedNearby()) {
-            computerCardRow.addView(nearbyComputerCard(computer), margins(0, 0, dp(10), 0, carouselCardWidth, -1));
+            View nearbyCard = nearbyComputerCard(computer);
+            attachCarouselGesture(nearbyCard);
+            computerCardRow.addView(nearbyCard, margins(0, 0, dp(10), 0, carouselCardWidth, -1));
         }
         if (devices.size() < TargetDeviceManager.MAX_DEVICES) {
-            computerCardRow.addView(addComputerCard(), margins(0, 0, 0, 0, carouselCardWidth, -1));
+            View addCard = addComputerCard();
+            attachCarouselGesture(addCard);
+            computerCardRow.addView(addCard, margins(0, 0, 0, 0, carouselCardWidth, -1));
         }
-        if (first || confirmingComputerId == null) {
+        if (first) {
             scrollCarouselToActive(!first);
+        } else if (computerCarousel != null) {
+            // 刷新只重建卡片内容：保持用户当前浏览位置，不再拽回当前电脑。
+            computerCarousel.post(() -> {
+                if (computerCarousel == null || carouselTouching) return;
+                int max = Math.max(0, computerCardRow.getWidth() - computerCarousel.getWidth());
+                int restore = Math.min(Math.max(previousScrollX, 0), max);
+                computerCarousel.scrollTo(restore, 0);
+                updateCarouselDots(nearestCarouselIndex());
+                scheduleCarouselSnap();
+            });
         } else {
             updateCarouselDots(nearestCarouselIndex());
         }
