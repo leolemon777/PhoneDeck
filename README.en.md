@@ -69,10 +69,10 @@ If the phone and computer are on different subnets (for example behind a second 
 
 | Platform | Tested on real hardware | Not yet tested |
 |---|---|---|
-| Android | Install, home screen, tap-mode dictation and stop sync on a Samsung phone | Other phones, the full hold-mode flow, long shared sessions |
-| Windows | Dictation and shortcuts with the previous tray (1.6.0-dev.16) on the author's PC | The new tray UI and nearby pairing, DPI scaling |
-| macOS | Minimal Wi-Fi dictation loop (2026-09-14); the new slim receiver's status page and USB detection | Dictate / translate / ask with the new receiver after Accessibility is granted, Intel |
-| Several computers | Automated tests for the protocol and parallel probing | Three computers online at once, mDNS discovery across real devices |
+| Android | Tap and hold dictation, stop sync, shared mic on/off, dark theme and offline-computer hints on a Samsung phone | Other phones, landscape, long shared sessions |
+| Windows | The new tray, nearby pairing with Allow, dictation and shortcuts (two PCs) | High-DPI scaling, start at login |
+| macOS | The slim native receiver: dictation with Accessibility granted, status page, USB and Wi-Fi, nearby pairing | Translate / ask one by one, Intel |
+| Several computers | One phone with a Mac and two Windows PCs, discovered on the same Wi-Fi, switched by swiping | Shared mic feeding several computers at once |
 | iPhone | — | No native client yet; there is an experimental web version |
 
 ## Privacy

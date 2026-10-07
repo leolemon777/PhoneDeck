@@ -3928,6 +3928,15 @@ public final class MainActivity extends Activity {
                 : "开始手机语音输入");
         // 居中卡片不是当前目标（确认中/离线/附近卡片）：不能对着看不见的电脑说话。
         boolean focusBlocked = carouselFocusMismatch() && !isVoiceInteractionBusy();
+        if (focusBlocked) {
+            // 长条不做半透明；用浅底浅字表示“现在不能按”，原因写在条上。
+            typelessButton.setBackground(voiceButtonBackground(theme.surfaceRaised, theme.surfaceRaised));
+            typelessButton.setTextColor(theme.muted);
+            if (voiceIcon != null) {
+                voiceIcon.setColor(theme.muted);
+                voiceIcon.setStopGlyph(false);
+            }
+        }
         if (holdMode) {
             setControlEnabled(typelessButton, (!typelessInFlight || holdGestureActive) && !focusBlocked);
             return;
