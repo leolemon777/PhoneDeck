@@ -7,8 +7,8 @@
   <PropertyGroup>
     <Version>1.6.0</Version>
     <AssemblyVersion>1.6.0.0</AssemblyVersion>
-    <FileVersion>1.6.0.28</FileVersion>
-    <InformationalVersion>1.6.0-dev.16</InformationalVersion>
-    <PhoneDeckReleaseSequence>28</PhoneDeckReleaseSequence>
+    <FileVersion>1.6.0.29</FileVersion>
+    <InformationalVersion>1.6.0-dev.17</InformationalVersion>
+    <PhoneDeckReleaseSequence>29</PhoneDeckReleaseSequence>
   </PropertyGroup>
 </Project>

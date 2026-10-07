@@ -38,7 +38,8 @@ PhoneDeck 的"手机控制听写"不绑定某一家语音转文字软件。电�
 
 ## 配置文件位置
 
-数据目录（`PHONEDECK_DATA_DIR` 环境变量，默认接收器 EXE 旁 `data\`）：
+数据目录可由 `PHONEDECK_DATA_DIR` 指定。Windows 托盘默认使用 EXE 旁的 `data\`，
+直接启动 Server 默认使用 `%LocalAppData%\PhoneDeck`；固定启动方式，避免生成另一套电脑身份。
 
 ```
 data\
@@ -48,8 +49,9 @@ data\
 ```
 
 macOS 端数据目录默认是 `~/Library/Application Support/PhoneDeck/`。
-所有改动**重启接收器后生效**；Windows 端也可以在控制台（设置 → 语音引擎）
-界面修改，保存时自动重启。
+日常在手机的「电脑设置」修改引擎与快捷键：按目标电脑和配置 revision 校验，
+空闲时原子保存并热应用，无需重启。直接手改 JSON 文件后需重启接收端。
+电脑托盘主要负责状态与连接管理，已没有旧版「设置 → 语音引擎」窗口。
 
 ### voice-engine-settings.json
 

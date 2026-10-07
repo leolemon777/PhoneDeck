@@ -1,5 +1,21 @@
 # PhoneDeck 构建、打包与发布流程
 
+## 2026-10-07 主线 beta.3 分发与版本收尾（当前）
+
+主线公开版本为 `v1.6.0-beta.3` 技术预览：Android `1.6.0-dev.22`/code28，Windows 接收端与托盘
+`1.6.0-dev.17`/sequence29，Mac `2.0.0-dev.4`/CFBundleVersion3。各端内部版本不同是显式版本组，不强改为同一个数。
+唯一来源为 `work/phone-deck/release-versions.json`；改描述后执行 `Assert-ReleaseVersions.ps1 -Sync`，再用默认只读模式校验。
+Mac 历史 dev.3/bundle2 保留在原标签记录，新批次按 dev.4/bundle3 递增。独立 Desktop alpha/code4 保持原路线。
+独立 UI 预览本批为 `1.6.0-dev.22-ui-preview.1`/code29，不进入主线更新清单。
+
+公开包是 APK、Windows x64 ZIP、macOS arm64 lite ZIP，加 `SHA256SUMS.txt` 与构建来源记录。
+APK 沿用 beta.2 调试证书；Windows 无代码签名，Mac ad-hoc，无公证。它们是手动安装的技术预览，不能进入固定三产物的签名更新渠道。
+每批从选定提交重新构建，归档源码提交、工具链、内部版本、安装证书、最终哈希、测试与未验证项；附带 LICENSE、第三方声明与安装步骤。
+已发布的 beta.2 字节不替换，新源码使用新标签。先完成包与校验，创建草稿 Release 上传后核对，再按授权发布 Pre-release。
+设备安装是独立动作，本批不自动覆盖作者正在使用的设备；旧真机证据与本批字节的新安装结果分开报告。
+
+下面按日期记录的切片说明是当时范围；第 1–8 节为当前操作基线。未完成的长期签名、干净安装与硬件矩阵不能因普通 CI 通过而标成完成。
+
 ## 2026-10-05 Android 对话白原生 UI 候选
 
 `uiPreview` 为 `1.6.0-dev.21-ui-preview.2` / versionCode 28，Debug/Release 的基线版本及 `.desktoppreview` 的独立路线保持原值。本轮只更新原生 UI，不构建电脑端、不下载模型、不创建正式 Release。
@@ -29,7 +45,7 @@
 
 本切片至少执行 Desktop Release build/test，以及 Node 22 的 `node --test work/phone-deck/desktop/tests-web/audio.test.mjs work/phone-deck/desktop/tests-web/session.test.mjs`。Desktop CI 增加后者，并继续原四 OS 编译、原生识别与打包。浏览器集成台架见 `desktop/tests-web`：隔离端口/数据、生成音频、模拟识别引擎、关闭真实输入；真实浏览器结果不替代实际 iPhone 的证书、权限、录音与按键验收。UI/音频/会话变更需同时检查 Service Worker 资源清单及更新版本，不能缓存授权接口或音频。执行结果见 HANDOFF。
 
-## 2026-10-01 多主题、多电脑配置 APK code4（当前切片）
+## 2026-10-01 多主题、多电脑配置 APK code4（独立实验路线）
 
 Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，包名 `com.codex.phonedeck.desktoppreview`、versionName `2.0.0-alpha.1` 保持兼容，versionCode 从 3 增至 4。源码新增六套主题及新版 Desktop 逐电脑设置入口，构建仍使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，同时运行 Debug 构建、lint 与单元测试。使用原固定签名覆盖安装（`adb install -r`），不卸载或清除数据；先核对 APK 证书、版本和候选 SHA-256，安装后读回 APK 核对字节及实际版本。是否已安装和通过真机走查以 HANDOFF 的本轮记录为准。
 
@@ -57,7 +73,7 @@ Android 固定签名候选为 `Yandu-2.0.0-alpha.1-code4-multi-android.apk`，�
 
 Android可分发候选使用 `:app:assembleDesktopPreview :app:lintDesktopPreview`，包名 `.desktoppreview`、版本2.0.0-alpha.1/1、不可调试。通过进程环境 `PHONEDECK_SIGNING_PROPERTIES` 指定固定签名配置，keystore路径相对该文件解析；无固定配置时打包明确失败，不回退随机debug签名。本轮为这个新渠道生成单独的RSA3072长期密钥，放在所有者本地受限且Git忽略的signing目录中；原发布密钥未更换。私钥与密码配置必须备份并长期复用，绝不上传仓库或放入下载包。CI不持有这把私钥，只检查uiPreview构建/测试。
 
-核对日期：2026-09-10。依据源码、现有脚本与 PR #5 的 CI 结果整理。
+核对日期：2026-10-07。依据 main 源码、构建脚本、版本描述与最近三平台 CI 整理。
 产品范围和工作优先级由 [总计划第 0 章](../spec%20plan.markdown) 管理；本文负责构建操作和交付门槛。
 B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb1e052通过云端，尚未完成正式签名发行与逐设备验收。Mac迁移入口见[MAC_HANDOVER.md](archive/MAC_HANDOVER.md)。
 
@@ -65,15 +81,14 @@ B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb
 
 | 组件 | 源码/工具链 | 当前产物与边界 |
 |---|---|---|
-| Android | Java 17；AGP 8.7.3；Gradle Wrapper 8.9；compile/target SDK 35；min SDK 26 | dev.17 / versionCode 23；debug APK 已在 Samsung Android 12 覆盖安装 |
-| Windows 接收端 | .NET 8，win-x64；NAudio 2.2.1 | dev.11 / 更新序号 23；自包含 EXE，86 项接收端测试通过 |
-| Windows 控制台 | .NET 8 WPF/Windows Forms，win-x64 | 独立 EXE；统一更新包需要单文件携带原生依赖；尚无独立产品版本字段 |
-| macOS 接收端 | .NET 8；osx-arm64 / osx-x64 源码与脚本 | dev.3 预览；`.app` 使用 ad-hoc 签名，真实 Mac 输入/音频尚待验收 |
+| Android | Java 17；AGP 8.7.3；Gradle Wrapper 8.9；compile/target SDK 35；min SDK 26 | dev.22 / versionCode 28，调试签名技术预览 |
+| Windows 接收端 | .NET 10，win-x64；NAudio 2.2.1 | dev.17 / 更新序号 29；自包含单文件 EXE |
+| Windows 托盘 | .NET 10 WinForms，win-x64 | 与接收端同版本；单文件内嵌原生依赖，无 WPF |
+| macOS 接收端 | .NET 10；osx-arm64 / osx-x64 构建脚本 | dev.4 / bundle3；公开 arm64 lite Native AOT，ad-hoc；Intel 未实机认证 |
 | iOS | 尚无客户端工程 | 先做音频/本地网络原型，再建立 Xcode 构建链；目前不产出 IPA |
 
-这些新改动在 `agent/fleet-updates` / [PR #5](https://github.com/leolemon777/PhoneDeck/pull/5)，核对时 PR 尚未合并。
-新开发者应明确检出所需提交；克隆默认 main 不代表已经取得上述版本。
-实际安装状态：本机与手机已更新，另一台 Windows 仍为 dev.6，需要一次性接入。
+旧主线更新与 #49 横屏修复已合入；公开下载的源码以对应 release tag 为准。
+作者 Samsung、两台 Windows 与 Apple Silicon Mac 的核心链路已有真机记录，支持范围见 SUPPORT_MATRIX；本批重新构建不代表设备已自动更新。
 
 构建目录与运行目录分开。仓库只保存源码、公开公钥、示例和脚本；APK、EXE、ZIP、签名私钥、data 与缓存不进 Git。
 
@@ -108,8 +123,8 @@ B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb
 | 构建目标 | 开发环境 | 运行时另需准备 |
 |---|---|---|
 | Android | JDK 17、SDK Platform 35、Build Tools 35.0.0、仓库 Gradle Wrapper；Windows/Linux/macOS 均可开发构建 | Android 手机；首次 USB 路径需 ADB；录音与安装权限 |
-| Windows 接收端及控制台 | Windows x64、global.json 指定的 .NET SDK 8.0.425 | 虚拟音频驱动、用户选择的输入法、LAN 防火墙与配对 |
-| macOS `.app` | macOS、.NET SDK、zsh 与系统 codesign；架构显式指定 | BlackHole、输入法、辅助功能/音频权限 |
+| Windows 接收端及托盘 | Windows x64、global.json 指定的 .NET SDK 10.0.400；Mac/Linux 可交叉编译，Windows 特有测试仍须 Windows | 虚拟音频驱动、用户选择的输入法、LAN 防火墙与配对 |
+| macOS `.app` | macOS、.NET SDK 10.0.400、zsh/codesign；lite 另需 Xcode 命令行工具；显式架构 | BlackHole、输入法、辅助功能/音频权限 |
 | 更新 ZIP | PowerShell 7、已构建的两个 EXE 和同渠道 APK、更新发布私钥 | 接收端内置匹配的发布公钥 |
 
 环境路径通过 `JAVA_HOME`、`ANDROID_HOME` 或本机 `local.properties` 配置。
@@ -117,8 +132,8 @@ B01/B02及B03开发候选流程已通过本地与三平台CI；事务基础在eb
 检查环境可用 `java -version`、`dotnet --info` 和 `./gradlew --version`。
 Windows 验证发现 Gradle 缓存目录包含中文时可能无法加载 GradleWorkerMain；保留源码中文路径，
 将 `GRADLE_USER_HOME` 配为标准用户缓存等 ASCII 路径后已通过完整 Android 构建。无需把本机盘符写入脚本。
-B02 新增 global.json 精确固定 SDK 8.0.425、六个 .NET 项目的 packages.lock.json，以及 Gradle 8.9 官方分发 SHA-256。统一入口强制锁定还原，依赖变化应由维护者显式重新生成锁并审查；CI 从 global.json 安装 SDK。Mac 锁包含双架构依赖图，不代表双架构真机已验证。
-后续 B02 固定可复现工具链，同时按总计划的运行时生命周期要求制定迁移验证，不能把当前 .NET 8 配置无限沿用。
+global.json 精确固定 SDK 10.0.400，.NET 项目使用 packages.lock.json，Gradle 8.9 固定官方分发 SHA-256。
+统一入口强制锁定还原，依赖变化须显式重新生成锁并审查；CI 从 global.json 安装 SDK。Mac 锁包含双架构依赖图，不代表双架构真机已验证。
 
 ## 4. 当前可执行的构建命令
 
@@ -276,9 +291,9 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 | Windows 控制台 | build/publish + 单文件原生库内嵌校验 | 已在 B01 完成，归档 EXE 产物 |
 | Android | assembleDebug、assembleRelease、lintDebug、testDebugUnitTest | 已在 B01 完成，归档 APK 与测试/Lint 报告 |
 | Mac | test + 当前运行器架构的 `.app` | B04 明确 arm64/x64 矩阵及正式签名边界；已归档 app 与 trx 报告 |
-| 包/版本/签名 | 未校验发行组合，也未生成统一更新包 | B02/B03 增加校验和失败用例 |
+| 包/版本/签名 | 版本描述/源码一致性、Windows 包静态版本与 B03 staging/事务测试 | 正式签名与真机发行门另验；工件配额不足时 B03 会明确降级，不能据绿色状态推断全部工件路径已执行 |
 | 产物与报告归档 | upload-artifact 归档各端二进制与测试/Lint 报告 | 已在 B01 完成 |
-| 重复 CI 与并发 | 任意 base 的 PR；同仓分支存在 open PR 时跳过 push 构建，API 查询失败保留构建；同事件过期运行取消 | 8项纯数据检查通过；PR #7 前置作业通过，创建PR前的首次push和PR各跑一次属于正常情况 |
+| 重复 CI 与并发 | 任意 base 的 PR；同仓分支存在 open PR 时跳过 push 构建，API 查询失败保留构建；同事件过期运行取消 | 查看 PR 的实际构建 job，不能把去重的 skipped push 当成未验证 |
 | 正式发布 | 没有专用 Release workflow | B03 设计受保护签名/发布，不给 PR 私钥 |
 | iOS | 无 | M0 原型后在 B04 接入真实工程与 Mac 构建机 |
 
@@ -286,18 +301,18 @@ CI release APK 构建成功不代表有发行签名；Mac runner 编译成功也
 
 ## 8. 实施顺序与验收门槛
 
-以下是总计划 0.21 的执行细化。B01 本地和三平台 CI 已通过，证据见 HANDOFF；B02 当前分工见 B02_IMPLEMENTATION.md。
+以下是总计划 0.21 的执行细化。B01/B02 与 B03 staging/事务基础已有本地及 CI 证据；历史分工见 B02_IMPLEMENTATION.md，当前范围以本表及 HANDOFF 最新条目为准。
 
 | 任务 | 依赖/负责人角色 | 具体交付 | 完成证据 | 状态 |
 |---|---|---|---|---|
-| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；补控制台/Android 测试/报告归档；评估重复 CI | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | **本地与三平台 CI 通过，PR #7 待合并** |
-| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖约束、Gradle 分发校验、产物版本检查 | 任一版本/code/sequence 不匹配都在安装前失败；重建能追溯来源 | 实施中，未验收 |
-| B03 候选包与发布 | B02；发布维护 | 首次安装/旧版接入/统一更新各自打包；签名渠道分离；产物报告；受保护发布流程 | 缺密钥、混渠道、漏控制台、错误版本、错误哈希均不产生可发布候选 | 待实施 |
-| B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 原型产生工程后再接入 CI；各平台独立签名任务 | 可重复构建各已实现目标，未支持组合明确排除 | 待实施 |
+| B01 统一开发构建 | 当前源码；构建维护 | 一个入口调用现有工具、失败即停、路径可移植；测试/报告归档及重复 CI 去重 | 干净 Windows 与 CI 执行同一检查集合，故意编译失败时无成功产物；不接触运行进程 | 已实现并合入，三平台 CI 通过 |
+| B02 版本与依赖约束 | B01；构建维护 | 单一版本描述、SDK/依赖锁、Gradle 分发校验、产物版本检查 | 版本/code/sequence 不匹配在安装前失败；重建可追溯 | 已实现并合入；版本变化须重新检查 |
+| B03 候选包与发布 | B02；发布维护 | staging/候选/事务与安装渠道分离，来源和哈希记录 | 缺密钥、混渠道、漏控制台、错误版本/哈希均拒绝正式候选 | staging/事务基础通过；已有手动 beta 分发，正式签名发行未完成 |
+| B04 跨平台构建矩阵 | B01；Mac/iOS 工程角色 | Mac 双架构；iOS 工程与独立签名任务 | 已实现目标可重复构建，排除未支持组合 | Mac 主机架构 CI 与 arm64 lite 已有；Intel/iOS/正式签名仍待验证或开发 |
 | B05 多设备候选验收 | B03 + M0/T01/T02；测试角色 | 第二台旧电脑接入、两机升级、离线补更、取消/低磁盘/文件占用/断电恢复；音频与身份回归 | 逐设备版本/设置/身份及测试结果可追溯；未确认的安装不显示成功 | 待实施 |
 | B06 开源发行准备 | B03–B05 + M1–M4；维护角色 | 全新用户安装/卸载、许可证/资产清单、支持矩阵、SBOM、发行渠道、维护流程 | 支持矩阵内完成干净安装和升级，才能按 M5 声明稳定支持 | 待实施 |
 
-当前 B01 构建验收通过，正在推进 B02，随后 B03；另一台电脑接入与 T02 会话契约可按现有条件推进。
-Mac/iOS 原型继续尽早开展；多输入法、五机能力、主题保持 M1–M4 的依赖顺序，不以构建计划替代产品验收。
+当前重点为外部干净安装、完整更新/撤销/异常恢复、多电脑同时共享与输入法矩阵。已有三电脑切换、八套主题、附近授权和共享协议自动化，不能由此宣称五机或全输入法认证。
+iOS 与正式签名继续按独立授权推进，不以构建计划替代产品验收。
 
 每个实现任务完成后，先记录源码与测试证据，再形成候选包；安装当前使用中的电脑和手机是独立动作，不应成为普通 build 的隐含副作用。

@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
   "windows": {
-    "version": "1.6.0-dev.16",
-    "sequence": 28
+    "version": "1.6.0-dev.17",
+    "sequence": 29
   },
   "android": {
-    "versionName": "1.6.0-dev.21",
-    "versionCode": 27
+    "versionName": "1.6.0-dev.22",
+    "versionCode": 28
   },
   "macos": {
-    "version": "2.0.0-dev.3",
+    "version": "2.0.0-dev.4",
     "bundleShortVersion": "2.0.0",
-    "bundleVersion": "2",
+    "bundleVersion": "3",
     "historicBundleMapping": {
-      "healthVersion": "2.0.0-dev.3",
+      "healthVersion": "2.0.0-dev.4",
       "bundleShortVersion": "2.0.0",
-      "bundleVersion": "2",
-      "note": "Mac CFBundleVersion=2 historically diverged from marketing/health 2.0.0-dev.3. Preserve this mapping; do not silently renumber in this batch."
+      "bundleVersion": "3",
+      "note": "Released beta.2 keeps health 2.0.0-dev.3 / CFBundleVersion 2 at its original tag. Beta.3 explicitly increments to health 2.0.0-dev.4 / CFBundleVersion 3; the short version remains 2.0.0."
     }
   },
   "console": {
     "follows": "windows.version",
-    "informationalVersion": "1.6.0-dev.16"
+    "informationalVersion": "1.6.0-dev.17"
   }
 }

@@ -1,0 +1,73 @@
+[
+  {
+    "component": "Makaretu.Dns",
+    "license": "MIT",
+    "licenseBlob": "61d5419047d083bc1b1233241dfc4d097b76176b",
+    "source": "https://github.com/richardschneider/net-dns/blob/master/LICENSE",
+    "sha256": "37920e72b0c28aa74ad0eb9b37814a69d44614eb1991c0f1cd7e6caad735d7ad",
+    "upstreamSha256": "37920e72b0c28aa74ad0eb9b37814a69d44614eb1991c0f1cd7e6caad735d7ad",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "Makaretu.Dns.Multicast",
+    "license": "MIT",
+    "licenseBlob": "61d5419047d083bc1b1233241dfc4d097b76176b",
+    "source": "https://github.com/richardschneider/net-mdns/blob/master/LICENSE",
+    "sha256": "37920e72b0c28aa74ad0eb9b37814a69d44614eb1991c0f1cd7e6caad735d7ad",
+    "upstreamSha256": "37920e72b0c28aa74ad0eb9b37814a69d44614eb1991c0f1cd7e6caad735d7ad",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "Common.Logging",
+    "license": "Apache-2.0",
+    "licenseBlob": "29f81d812f3e768fa89638d1f72920dbfd1413a8",
+    "source": "https://github.com/net-commons/common-logging/blob/master/license.txt",
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "upstreamSha256": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "IPNetwork2",
+    "license": "BSD-2-Clause",
+    "licenseBlob": "45d7392ac4eec4f42894d1c212525529415631b0",
+    "source": "https://github.com/lduchosal/ipnetwork/blob/master/LICENSE",
+    "sha256": "bd2942522aff6e9d8f2aa68fa6179bd86197c1d34f832bc316c606835922cf9c",
+    "upstreamSha256": "3008cd3226731b919830bb984856ff5f19f3beb1bff2ab062a07b4fb21965feb",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "SimpleBase",
+    "license": "Apache-2.0",
+    "licenseBlob": "dc24dac82b0aed33ce9f6b3400da5feb34d97e18",
+    "source": "https://github.com/ssg/SimpleBase/blob/main/LICENSE.txt",
+    "sha256": "55d0d0aadcd58e132439c98cc3c9c84136cb51fd61f8abbf50edb77bde276db0",
+    "upstreamSha256": "00d7839fe77ff1e115765e6a473ff45a49e7c1607bc5fd9e2dda045ada997bc0",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "Tmds.LibC",
+    "license": "MIT",
+    "licenseBlob": "da6125439e48ee47a49b63cce5259a6075a20edc",
+    "source": "https://github.com/tmds/Tmds.LibC/blob/master/LICENSE",
+    "sha256": "fc2ee8bf3b29ee7818f8c5f1ee9d8a7403ed83cbcdc50515019a986a5307bb4a",
+    "upstreamSha256": "fc2ee8bf3b29ee7818f8c5f1ee9d8a7403ed83cbcdc50515019a986a5307bb4a",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "QRCoder",
+    "license": "MIT",
+    "source": "https://github.com/Shane32/QRCoder/blob/v1.6.0/LICENSE.txt",
+    "licenseBlob": "bddcd4b980eba019304de339e18129fc6254e4ca",
+    "sha256": "044bd5eeee412a603a6e2b6201c7256da386788aaa4392be9870a5e899adea05",
+    "upstreamSha256": "044bd5eeee412a603a6e2b6201c7256da386788aaa4392be9870a5e899adea05",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  },
+  {
+    "component": "NAudio",
+    "license": "MIT",
+    "source": "NAudio 2.2.1 NuGet license.txt",
+    "sha256": "b3b45984823d8604640d080a0254627e95d238f674dbaaf1a6d06196a420da7c",
+    "upstreamSha256": "303e01786b271eb464b3f43d18a375f2f17d37bc708a37c2fdf45b289fb5bfaa",
+    "normalization": "UTF-8 without BOM, LF, single trailing newline; license wording unchanged"
+  }
+]
