@@ -1,5 +1,17 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-07 v1.6.0-beta.2 发布与真机走查（最新状态）
+
+- **发布**：[v1.6.0-beta.2](https://github.com/leolemon777/PhoneDeck/releases/tag/v1.6.0-beta.2)（Pre-release，标签指向 b03a828）：
+  调试签名 APK（`com.codex.phonedeck`，签名 SHA-256 `ba44…061f`）、Windows x64 zip（Server + ControlCenter 自包含单文件、
+  防火墙脚本、`INSTALL.txt`）、macOS arm64 zip（原生精简版 ad-hoc 签名、`INSTALL.txt`）、`SHA256SUMS.txt`。匿名下载与校验已确认。
+  构建产物在 ignored 的 `outputs/release-v1.6.0-beta.2/`。
+- **走查**：深色待机/录音/共享正常（录音长条珊瑚红配深字）；关掉 Mac 接收端后滑到 Mac 卡片显示「这台电脑离线」、长条改浅底浅字、
+  点按重试切回；横屏左栏卡片 + 右栏说话区正常。
+- **修复**：横屏时三星把内容延伸到状态栏下，标题与状态栏重叠——根布局按系统栏/挖孔 inset 留白（竖屏为 0，已确认不变）；横屏长条上方加间距。
+- **记录**：切到共享模式时电脑卡片多出「加入共享组」按钮，卡片变高、下方内容下移一点，未改。
+- **待办**：翻译/问答逐项实测；其他品牌手机；正式签名与 Mac 公证；Windows 原生精简编译。
+
 ## 2026-10-07 真机状态：单一 App、三台电脑（最新状态）
 
 - **“又不能说话”的原因**：手机同时装了正式包 `com.codex.phonedeck`（15:40 由 Windows 侧测试安装）与预览包
