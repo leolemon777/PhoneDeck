@@ -3864,16 +3864,18 @@ public final class MainActivity extends Activity {
         if (WORK_SHARED.equals(voiceWorkMode)) {
             PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
             boolean stopState = state.running;
-            int stopFill = theme.live;
-            int stopInk = theme.onLive;
+            // 底部长条：共享中用成功色浅底，和录音的红色区分开。
+            boolean bar = voiceStatusCaption != null;
+            int stopFill = bar ? theme.successContainer : theme.live;
+            int stopInk = bar ? theme.success : theme.onLive;
             typelessButton.setBackground(stopState
                     ? voiceButtonBackground(stopFill,
-                            theme.mix(theme.live, theme.onLive, 0.2f))
+                            theme.mix(stopFill, stopInk, 0.2f))
                     : voiceButtonBackground(theme.primary, theme.primaryPressed));
             typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
             if (voiceIcon != null) {
                 voiceIcon.setColor(stopState ? stopInk : theme.onPrimary);
-                voiceIcon.setStopGlyph(stopState);
+                voiceIcon.setStopGlyph(stopState && !bar);
             }
             typelessButton.setContentDescription(stopState
                     ? "关闭共享麦克风" : "开启共享麦克风");
@@ -3900,11 +3902,14 @@ public final class MainActivity extends Activity {
                     ? VoiceLevelView.CONNECTING
                     : VoiceLevelView.IDLE);
         }
-        int stopFill = theme.live;
-        int stopInk = theme.onLive;
+        // 底部长条录音中用红色（设计稿），一眼区分“正在说”；圆形话筒保持原配色。
+        boolean bar = voiceStatusCaption != null;
+        int stopFill = bar ? theme.danger : theme.live;
+        // 深色配色的红偏浅，白字不够清楚，改用底色当字色。
+        int stopInk = !bar ? theme.onLive : Color.luminance(stopFill) > 0.3f ? theme.background : Color.WHITE;
         typelessButton.setBackground(stopState
                 ? voiceButtonBackground(stopFill,
-                        theme.mix(theme.live, theme.onLive, 0.2f))
+                        theme.mix(stopFill, stopInk, 0.2f))
                 : voiceButtonBackground(theme.primary, theme.primaryPressed));
         typelessButton.setTextColor(stopState ? stopInk : theme.onPrimary);
         if (voiceIcon != null) {
@@ -4345,8 +4350,10 @@ public final class MainActivity extends Activity {
                                     : "✓  听写已停止 · 请在电脑确认文字 · " + transport,
                             theme.success);
                     performResultHaptic(typelessButton, true);
-                    flashResult(typelessButton, theme.success);
+                    // 先解除忙碌再闪：闪烁动画按开始时的可用状态决定终点透明度，
+                    // 反过来会在按钮恢复后又把它拉回 45%，看起来一直是灰的。
                     finishGuardedAction(typelessButton, true);
+                    flashResult(typelessButton, theme.success);
                     if (starting && holdReleasePending && !holdGestureActive) {
                         holdReleasePending = false;
                         mainHandler.postDelayed(this::stopPhoneDictation, 80);

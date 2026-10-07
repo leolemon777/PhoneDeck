@@ -8,9 +8,9 @@ Speak into the phone and the text appears on your computer. One phone can drive 
 
 > **Status: technical preview.** The core path works on the author's devices, but it has not yet been through clean installs by outside users. See [Verification](#verification) for what has been tested on real hardware. Issues are welcome.
 
-| Idle | Translating | Shared mic (dark) |
+| Idle | Dictating | Shared mic |
 |---|---|---|
-| ![Idle](docs/images/android-home-light.png) | ![Translating](docs/images/android-recording.png) | ![Shared microphone](docs/images/android-home-dark.png) |
+| ![Idle](docs/images/android-home-light.png) | ![Dictating](docs/images/android-recording.png) | ![Shared microphone](docs/images/android-shared.png) |
 
 ## How it works
 
@@ -59,7 +59,7 @@ You install the dictation app and the virtual audio device yourself; this projec
 
 1. Install the APK and open Yandu.
 2. On the same Wi-Fi, a "Nearby · tap to connect" card appears for each computer. Tap it, check that the phone and the computer show the same four-digit code, then click Allow on the computer.
-3. Press the big microphone and speak.
+3. Hold the 按住 说话 (hold to talk) bar near the bottom and speak; release to finish. In tap mode, tap once to start and again to stop.
 
 If the phone and computer are on different subnets (for example behind a second router), use "Add computer → Enter address" and type the computer's LAN IP. USB also works: turn on USB debugging on the phone and install [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`) on the computer. The receiver sets up and keeps an `adb reverse` tunnel.
 

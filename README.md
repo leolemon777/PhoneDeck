@@ -8,9 +8,9 @@
 
 > **当前状态：技术预览。** 核心链路已在作者的设备上跑通，但还没有经过外部用户的干净安装测试。各平台验证程度见下方[验证情况](#验证情况)，遇到问题欢迎开 Issue。
 
-| 待命 | 正在翻译 | 共享麦克风（深色） |
+| 待命 | 正在听写 | 共享麦克风 |
 |---|---|---|
-| ![待命](docs/images/android-home-light.png) | ![正在翻译](docs/images/android-recording.png) | ![共享麦克风](docs/images/android-home-dark.png) |
+| ![待命](docs/images/android-home-light.png) | ![正在听写](docs/images/android-recording.png) | ![共享麦克风](docs/images/android-shared.png) |
 
 ## 它是怎么工作的
 
@@ -59,7 +59,7 @@
 
 1. 安装 APK，打开「言渡」。
 2. 同一 Wi-Fi 下，首页会出现「附近 · 点按连接」的电脑卡片。点它，确认手机和电脑显示的四位校验码一致，在电脑上点「允许」。
-3. 连上后按大话筒说话。
+3. 连上后按下方的「按住 说话」说话，松开结束；也可以切到「点击」模式，点一下开始、再点一下结束。
 
 手机和电脑不在同一网段（比如隔了一层路由器）时，在「添加电脑 → 输入地址」里填电脑的局域网 IP。也可以用 USB 线连接：手机打开 USB 调试，电脑上需要有 [Android platform-tools](https://developer.android.com/tools/releases/platform-tools)（`adb`），接收端会自动建立并维持 `adb reverse` 通道。
 
