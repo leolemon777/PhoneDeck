@@ -216,7 +216,7 @@ JsonObject BuildHealth(HttpContext context)
         audioBridge.NotePhoneActivity();
     }
     var audio = audioBridge.Probe();
-    var capturing = CachedCapturing();
+    var capturing = CachedCapturing(out var capturingAgeMs);
     var engineProfile = MacVoiceEngines.Active;
     var readerConfig = MacTypelessConfiguration.Load(settings);
     bool? virtualCableSelected = engineProfile.VerifiesMicrophone
@@ -265,6 +265,8 @@ JsonObject BuildHealth(HttpContext context)
         ["typeless"] = new JsonObject
         {
             ["capturing"] = capturing,
+            // 样本年龄：手机只用开始确认之后采到的样本判断“电脑已停止”。
+            ["ageMs"] = capturingAgeMs,
             ["virtualCableSelected"] = virtualCableSelected,
             ["microphone"] = MacVoiceEngines.MicrophoneDescription,
             ["settingsPath"] = readerConfig.SettingsPath,
@@ -331,17 +333,21 @@ static JsonArray? JsonStrings(IEnumerable<string>? values)
 
 // 输入法采集状态要查询 Core Audio 进程对象：健康快照（含 /api/events 每 50 ms 的比对）150 ms 内复用。
 // 听写开始/停止的确认仍直接查询（MacDictationSessionManager），不受此缓存影响。
-bool? CachedCapturing()
+// 会话一变化就重新采样：否则开始确认后的第一个快照会带着开始前的“未采集”，手机会误以为电脑已停止。
+bool? CachedCapturing(out long ageMs)
 {
     lock (capturingCache)
     {
         var now = Environment.TickCount64;
-        if (!capturingCache.Valid || now - capturingCache.At >= 150)
+        var session = dictationSessions.IsActive ? dictationSessions.ActiveSessionId ?? "" : null;
+        if (!capturingCache.Valid || now - capturingCache.At >= 150 || capturingCache.Session != session)
         {
             capturingCache.Value = engineController.IsCapturing();
             capturingCache.At = now;
+            capturingCache.Session = session;
             capturingCache.Valid = true;
         }
+        ageMs = now - capturingCache.At;
         return capturingCache.Value;
     }
 }
@@ -622,4 +628,5 @@ internal sealed class CapturingCacheBox
     public bool Valid;
     public long At;
     public bool? Value;
+    public string? Session;
 }

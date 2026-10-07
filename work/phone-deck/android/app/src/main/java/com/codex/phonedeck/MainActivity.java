@@ -862,10 +862,16 @@ public final class MainActivity extends Activity {
         refreshShortcutGrid();
 
         if (dialogue) {
-            // 对话白（方案二）：电脑大卡左右滑动、卡内切换输入法模式，话筒居中，
-            // 底部是说话方式与指令栏。录音、会话和手势仍由原有控件负责。
+            // 对话白（方案二）：电脑大卡左右滑动、卡内切换输入法模式；说话按钮是拇指区的
+            // 长条（像微信「按住 说话」），下面是指令栏和说话方式。录音、会话和手势仍由原有控件负责。
             voiceBody.removeView(voiceCopy);
             voiceBody.removeView(voiceRing);
+            voiceRing.removeView(typelessButton);
+            voiceHalo = null;
+            RoundVoiceButton voiceBar = (RoundVoiceButton) typelessButton;
+            voiceBar.setTextSize(17);
+            voiceBar.setLetterSpacing(0.06f);
+            int barHeight = dp(landscape || compact ? 56 : 64);
             for (View control : new View[] {voiceModeSwitch, voiceEditRow, actionFeedback}) {
                 voiceDock.removeView(control);
             }
@@ -877,15 +883,15 @@ public final class MainActivity extends Activity {
             recentList.setOrientation(LinearLayout.VERTICAL);
             quickRow = buildQuickRow();
             View commandBar = buildCommandBar();
-            int ringSize = micSize + (landscape ? 28 : 40);
+            ((android.view.ViewGroup) voiceMeter.getParent()).removeView(voiceMeter);
+            voiceCopy.addView(voiceMeter, margins(0, dp(14), 0, 0, dp(220), dp(24)));
             if (!landscape) {
                 LinearLayout middle = new LinearLayout(this);
                 middle.setOrientation(LinearLayout.VERTICAL);
                 middle.setGravity(Gravity.CENTER);
                 middle.setPadding(dp(24), dp(8), dp(24), dp(12));
                 middle.addView(voiceStatusCaption, new LinearLayout.LayoutParams(-2, -2));
-                middle.addView(voiceRing, margins(0, dp(compact ? 6 : 10), 0, dp(compact ? 4 : 8), dp(ringSize), dp(ringSize)));
-                middle.addView(voiceCopy);
+                middle.addView(voiceCopy, margins(0, dp(10), 0, 0, -1, -2));
                 middle.addView(actionFeedback, margins(0, dp(10), 0, 0, -1, -2));
                 middle.addView(quickRow, margins(0, dp(compact ? 14 : 24), 0, 0, -1, -2));
                 middle.addView(recentList, margins(0, dp(compact ? 10 : 16), 0, 0, -1, -2));
@@ -895,9 +901,11 @@ public final class MainActivity extends Activity {
                 middleScroll.addView(middle);
                 LinearLayout footer = new LinearLayout(this);
                 footer.setOrientation(LinearLayout.VERTICAL);
-                footer.setPadding(dp(16), 0, dp(16), dp(compact ? 12 : 20));
-                footer.addView(voiceModeSwitch, new LinearLayout.LayoutParams(-1, -2));
-                footer.addView(commandBar, margins(0, dp(10), 0, 0, -1, dp(56)));
+                // 说话按钮不贴底：下面还有指令栏和说话方式，长条落在屏幕约四分之三高度的拇指区。
+                footer.setPadding(dp(16), dp(8), dp(16), dp(compact ? 16 : 28));
+                footer.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
+                footer.addView(commandBar, margins(0, dp(16), 0, 0, -1, dp(56)));
+                footer.addView(voiceModeSwitch, margins(0, dp(12), 0, 0, -1, -2));
                 LinearLayout page = new LinearLayout(this);
                 page.setOrientation(LinearLayout.VERTICAL);
                 page.addView(header);
@@ -925,16 +933,15 @@ public final class MainActivity extends Activity {
                 copyColumn.addView(voiceCopy, margins(0, dp(6), 0, 0, -1, -2));
                 copyColumn.addView(actionFeedback, margins(0, dp(8), 0, 0, -1, -2));
                 LinearLayout stage = new LinearLayout(this);
-                stage.setGravity(Gravity.CENTER);
-                stage.addView(voiceRing, new LinearLayout.LayoutParams(dp(ringSize), dp(ringSize)));
-                stage.addView(copyColumn, margins(dp(20), 0, 0, 0, 0, -2));
-                ((LinearLayout.LayoutParams) copyColumn.getLayoutParams()).weight = 1f;
+                stage.setGravity(Gravity.CENTER_VERTICAL);
+                stage.addView(copyColumn, new LinearLayout.LayoutParams(0, -2, 1f));
                 LinearLayout right = new LinearLayout(this);
                 right.setOrientation(LinearLayout.VERTICAL);
                 right.setPadding(dp(16), dp(12), dp(16), dp(12));
                 right.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
-                right.addView(voiceModeSwitch, new LinearLayout.LayoutParams(-1, -2));
-                right.addView(commandBar, margins(0, dp(8), 0, 0, -1, dp(56)));
+                right.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
+                right.addView(commandBar, margins(0, dp(10), 0, 0, -1, dp(56)));
+                right.addView(voiceModeSwitch, margins(0, dp(8), 0, 0, -1, -2));
                 View divider = new View(this);
                 divider.setBackgroundColor(theme.outline);
                 LinearLayout console = new LinearLayout(this);
@@ -3716,7 +3723,8 @@ public final class MainActivity extends Activity {
                 if (!view.isEnabled()) {
                     return true;
                 }
-                TouchFeedback.press(view, 0.93f, true);
+                // 长条整体缩放 0.93 太晃，只轻微下压。
+                TouchFeedback.press(view, voiceStatusCaption != null ? 0.98f : 0.93f, true);
                 if (WORK_MANAGED.equals(voiceWorkMode) && MODE_TAP.equals(voiceMode)
                         && !dictationActive && !audioStartPending && !typelessInFlight) {
                     prewarmVoicePath();
@@ -3731,6 +3739,7 @@ public final class MainActivity extends Activity {
                     if (!dictationActive && !audioStartPending && !typelessInFlight) {
                         beginPhoneDictation();
                     }
+                    updateVoiceControls();
                     return true;
                 }
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -3749,6 +3758,7 @@ public final class MainActivity extends Activity {
                             showActionFeedback("●  已松开，连接完成后会自动结束", theme.warning);
                         }
                     }
+                    updateVoiceControls();
                     if (action == MotionEvent.ACTION_UP) view.performClick();
                     return true;
                 }
@@ -3939,21 +3949,28 @@ public final class MainActivity extends Activity {
         voiceStatusCaption.setTextColor(chipInk);
         if (homeStyle == HomeStyle.CENTER) voiceStatusCaption.setBackground(roundRect(chipFill, 14));
         boolean holdMode = MODE_HOLD.equals(voiceMode);
-        String idleTitle = "ask".equals(modeId) && !holdMode ? "问任何问题"
-                : (holdMode ? "按住" : "开始") + action;
+        String idleTitle = "ask".equals(modeId) ? "问任何问题" : action;
         voiceButtonCaption.setText(shared ? recording ? "正在共享声音" : "共享麦克风"
                 : stopping ? "正在结束" : starting ? "正在连接"
-                : recording ? "停止" + action : !connected ? "先连接一台电脑" : idleTitle);
+                : recording ? "正在" + action : !connected ? "先连接一台电脑" : idleTitle);
         String modeHint = "translation".equals(modeId) ? "说中文，按 " + engine + " 设置的目标语言输入"
                 : "ask".equals(modeId) ? "回答会显示在电脑上的 " + engine + " 窗口" : null;
         voiceHint.setText(stopping ? "等待电脑完成这一段"
                 : starting ? "正在准备麦克风与电脑输入法"
                 : shared ? "各台电脑用自己的快捷键开始和停止"
-                : recording ? holdMode ? "松开即可结束" : "电脑端停止也会同步结束"
+                : recording ? holdMode ? "松开手指结束；电脑端停止也会同步结束"
+                        : "说完点一下「结束」；电脑端停止也会同步结束"
                 : !connected ? (targetDeviceManager != null && targetDeviceManager.list().isEmpty()
                         ? "手机和电脑连同一个 Wi-Fi，电脑会出现在上方" : "左右滑动电脑卡片，选一台在线的电脑")
                 : modeHint != null ? modeHint
-                : holdMode ? "按下开始，松开结束" : "轻点开始，再点结束");
+                : holdMode ? "按住下面的按钮说话，松开就结束" : "点一下开始，说完再点一下结束");
+        ((RoundVoiceButton) typelessButton).setBarLabel(shared
+                ? state.running ? "共享中 · 点一下关闭" : sharedStartPending ? "正在开启…" : "开启共享麦克风"
+                : stopping || holdReleasePending && (starting || recording) ? "正在结束…"
+                : voiceBusyLabel != null ? voiceBusyLabel
+                : typelessInFlight && !holdGestureActive && !recording && !starting ? "请稍候…"
+                : holdMode ? holdGestureActive || recording || starting ? "松开 结束" : "按住 说话"
+                : starting ? "点一下 取消" : recording ? "点一下 结束" : "点一下 开始说话");
         if (voiceMeter != null) voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.INVISIBLE);
         if (voiceHalo != null) voiceHalo.setBackground(theme.shape(this, recording
                 ? shared ? theme.successContainer : theme.dangerContainer : Color.TRANSPARENT, 120));

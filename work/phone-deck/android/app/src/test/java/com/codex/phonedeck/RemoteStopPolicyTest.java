@@ -17,10 +17,20 @@ public final class RemoteStopPolicyTest {
     }
 
     @Test public void quickLegacyStopDoesNotRequireAnEarlierCapturingPoll() {
-        assertTrue(RemoteStopPolicy.shouldStop("new", null, 1000, 1200, 50,
+        assertTrue(RemoteStopPolicy.shouldStop("new", null, 1000, 1400, 50,
                 false, true, "new", false));
-        assertTrue(RemoteStopPolicy.shouldStop("new", null, 1000, 1200, 0,
+        assertTrue(RemoteStopPolicy.shouldStop("new", null, 1000, 1400, 0,
                 false, false, null, false));
+    }
+
+    @Test public void receiverCacheRightAfterStartCannotStopNewRecording() {
+        // Mac 接收端 150 ms 缓存、不报年龄：开始确认后 121 ms 的快照仍是开始前的“未采集”（2026-10-06 实机）。
+        assertFalse(RemoteStopPolicy.shouldStop("new", null, 1000, 1121, 0,
+                false, true, "new", false));
+        assertFalse(RemoteStopPolicy.shouldStop("new", null, 1000, 1299, 0,
+                false, true, "new", false));
+        assertTrue(RemoteStopPolicy.shouldStop("new", null, 1000, 1300, 0,
+                false, true, "new", false));
     }
 
     @Test public void PreStartAndCachedSamplesCannotStopNewRecording() {
@@ -28,7 +38,7 @@ public final class RemoteStopPolicyTest {
                 false, false, null, false));
         assertFalse(RemoteStopPolicy.shouldStop("new", null, 1000, 999, 0,
                 false, false, null, false));
-        assertFalse(RemoteStopPolicy.shouldStop("new", null, 1000, 1200, 300,
+        assertFalse(RemoteStopPolicy.shouldStop("new", null, 1000, 1600, 700,
                 false, true, "new", false));
     }
 
