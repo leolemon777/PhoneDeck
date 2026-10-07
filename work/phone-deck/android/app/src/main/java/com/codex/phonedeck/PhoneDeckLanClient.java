@@ -171,6 +171,10 @@ final class PhoneDeckLanClient {
         } catch (Exception exception) {
             if (isPairingRejection(exception)) {
                 rejected.set(true);
+                // 只记地址与状态码，不含令牌：用于排查“配对已失效”误报来自哪个地址。
+                android.util.Log.w("PhoneDeckNet", "Wi-Fi 探测被拒：" + address + " · "
+                        + (device.clientId != null ? "逐手机凭据" : "共享令牌") + " · "
+                        + exception.getMessage());
             }
             // 并行探测下其余地址可能仍可达。
             return null;
