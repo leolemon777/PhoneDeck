@@ -84,8 +84,10 @@ final class TouchFeedback {
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         if (success) {
             view.setAlpha(0.7f);
+            // 结束时按当时的可用状态复位，避免动画期间按钮已恢复却被拉回半透明。
             view.animate().alpha(restingAlpha).setDuration(180)
-                    .setInterpolator(new DecelerateInterpolator()).start();
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> view.setAlpha(view.isEnabled() ? 1f : 0.45f)).start();
         } else {
             float distance = PhoneDeckTheme.dp(view.getContext(), 4);
             view.setTranslationX(-distance);
