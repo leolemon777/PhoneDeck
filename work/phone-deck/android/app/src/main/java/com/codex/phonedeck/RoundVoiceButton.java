@@ -32,7 +32,14 @@ final class RoundVoiceButton extends Button {
     void setBarLabel(String label) {
         if (label == null ? barLabel == null : label.equals(barLabel)) return;
         barLabel = label;
+        if (label != null) super.setAlpha(1f);
         invalidate();
+    }
+
+    /// 长条不做半透明“灰掉”：忙碌状态由条上的文字表达（如「正在结束…」），颜色始终是主色或录音色。
+    @Override
+    public void setAlpha(float alpha) {
+        super.setAlpha(barLabel != null ? 1f : alpha);
     }
 
     @Override

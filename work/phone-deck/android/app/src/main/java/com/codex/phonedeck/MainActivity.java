@@ -3967,6 +3967,8 @@ public final class MainActivity extends Activity {
         ((RoundVoiceButton) typelessButton).setBarLabel(shared
                 ? state.running ? "共享中 · 点一下关闭" : sharedStartPending ? "正在开启…" : "开启共享麦克风"
                 : stopping || holdReleasePending && (starting || recording) ? "正在结束…"
+                : voiceBusyLabel != null ? voiceBusyLabel
+                : typelessInFlight && !holdGestureActive && !recording && !starting ? "请稍候…"
                 : holdMode ? holdGestureActive || recording || starting ? "松开 结束" : "按住 说话"
                 : starting ? "点一下 取消" : recording ? "点一下 结束" : "点一下 开始说话");
         if (voiceMeter != null) voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.INVISIBLE);
