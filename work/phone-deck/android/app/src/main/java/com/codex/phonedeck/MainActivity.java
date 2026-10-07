@@ -591,6 +591,28 @@ public final class MainActivity extends Activity {
         boolean compact = getResources().getConfiguration().screenHeightDp < 740;
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.background);
+        // 横屏时部分机型让内容延伸到状态栏和挖孔下面：按实际系统栏/挖孔留白，竖屏未延伸时为 0。
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int left;
+            int top;
+            int right;
+            int bottom;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars()
+                        | android.view.WindowInsets.Type.displayCutout());
+                left = bars.left;
+                top = bars.top;
+                right = bars.right;
+                bottom = bars.bottom;
+            } else {
+                left = insets.getSystemWindowInsetLeft();
+                top = insets.getSystemWindowInsetTop();
+                right = insets.getSystemWindowInsetRight();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(left, top, right, bottom);
+            return insets;
+        });
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
@@ -942,7 +964,7 @@ public final class MainActivity extends Activity {
                 right.setOrientation(LinearLayout.VERTICAL);
                 right.setPadding(dp(16), dp(12), dp(16), dp(12));
                 right.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
-                right.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
+                right.addView(voiceBar, margins(0, dp(10), 0, 0, -1, barHeight));
                 right.addView(commandBar, margins(0, dp(10), 0, 0, -1, dp(56)));
                 right.addView(voiceModeSwitch, margins(0, dp(8), 0, 0, -1, -2));
                 View divider = new View(this);
