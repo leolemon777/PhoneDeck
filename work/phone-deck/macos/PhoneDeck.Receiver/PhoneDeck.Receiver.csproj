@@ -34,6 +34,10 @@
       <_Parameter1>PhoneDeck.Receiver.Tests</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+  <ItemGroup>
+    <!-- Web SDK 默认把项目里的 .json 当内容复制到输出；锁文件只给还原用。 -->
+    <Content Remove="packages.aot.lock.json" />
+  </ItemGroup>
   <Import Project="../../shared/Receiver/Receiver.Core.props" />
   <Import Project="../../shared/PhoneWeb/PhoneWeb.props" Condition="'$(PublishAot)' != 'true'" />
 </Project>
