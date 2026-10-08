@@ -36,7 +36,7 @@ jobs:
           npx --no-install playwright install --with-deps chromium --only-shell
       - name: Exercise phone controls through real receiver and generated browser audio
         run: node work/phone-deck/desktop/tests-web/browser.integration.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: PhoneDeck-Web-Verification
@@ -99,7 +99,7 @@ jobs:
           INCLUDE_MODEL: ${{ inputs.include_model || false }}
         run: |
           ./scripts/build-desktop.ps1 -Rid '${{ matrix.rid }}' -IncludeModel:($env:INCLUDE_MODEL -eq 'true') -VerifySpeech
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: PhoneDeck-Desktop-${{ matrix.rid }}
           retention-days: 7
@@ -123,7 +123,7 @@ jobs:
       - name: Build isolated Android preview
         working-directory: work/phone-deck/android
         run: bash gradlew :app:assembleUiPreview :app:lintUiPreview :app:testDebugUnitTest --console=plain
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: PhoneDeck-Android-Preview
           path: work/phone-deck/android/app/build/outputs/apk/uiPreview/*.apk
