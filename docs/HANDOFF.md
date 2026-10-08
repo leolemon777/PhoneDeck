@@ -1,5 +1,23 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-08 Windows Typeless 鼠标快捷键兼容（最新状态）
+
+- **问题与范围**：用户的第三台 Windows 在线，但手机真实日志在 `/api/dictation/start` 得到 400
+  「Typeless 听写快捷键无法识别：MouseButton2」。用户确认 Mouse 2 为中键（按下滚轮），要求改代码兼容。
+  分支 `codex/typeless-mouse-shortcuts` 为主线 Windows 1.6 兼容修复，沿用 beta.3 版本基线，不改公开包、签名或发布序号。
+- **实现**：`KeyboardInput` 动态解析 `MouseButton2/3/4` 为中键/XBUTTON1/XBUTTON2，实际注入为 `INPUT_MOUSE`
+  按下和释放；支持修饰键组合、toggle、hold 与旧 `typeless` 动作，继续 requestId 去重。绑定最多 4 键/100 字符，
+  重复键或其他编号拒绝，普通 keyChord/宏仍使用原键盘白名单。hold 按实际开始绑定释放，外部配置失效也可停止；
+  释放失败继续清理其他键，并保留绑定供退出重试。内部发送委托仅供隔离回归，不增加网络接口。
+- **验证**：SDK 10.0.400 锁定还原的 Windows Server Release 交叉构建通过（0 警告/0 错误）；Mac 宿主跑 Windows
+  全量测试 197/201，新增 20 项全部通过，涵盖 native INPUT 布局/标志、按键顺序、重复请求、失败清理、配置失效/退出重试、
+  配置校验和普通动作隔离。4 项失败仍为已有的平台文件锁差异：`RevokeWriteFailureKeepsInMemoryStateConsistent`、
+  `AtomicWriteFailureLeavesPreviousFileIntact`、`AtomicPersistencePreservesOldFileWhenReplacementFails`、
+  `RotateRateLimitEnforcesMinimumInterval`；完整 Windows 宿主结果以本 PR 的 Windows CI job 为准。
+  测试使用隔离 data 和 obj 下的临时 NuGet 锁，不更改个人配置或仓库依赖锁；`git diff --check` 通过。
+- **待办 / 实机边界**：尚未在该 Windows 安装补丁，也未验证 Typeless 接受注入鼠标事件、点击/按住听写、组合键与断流清理。
+  需先更新接收端，再完成真实中键链路及侧键回归；Android 与 macOS 源码未改，Mac 鼠标触发仍待独立适配。
+
 ## 2026-10-07 GitHub Release 中英双语（最新状态）
 
 - **范围**：用户要求仅补齐 GitHub 中英文。`README.md` 与 `README.en.md` 已提供两种语言；本次为

@@ -106,17 +106,17 @@ internal interface IVoiceEngineController : IDisposable
 }
 
 /// <summary>把引擎触发键映射到 Windows SendInput 的真实发送通道。</summary>
-internal sealed class KeyboardEngineKeyDispatcher : IEngineKeyDispatcher
+internal sealed class KeyboardEngineKeyDispatcher(Action<KeyboardInput.Input>? sendInput = null) : IEngineKeyDispatcher
 {
     public bool ToggleOnce(string? requestId, ushort[] keys) =>
-        KeyboardInput.EngineToggleOnce(requestId, keys);
+        KeyboardInput.EngineToggleOnce(requestId, keys, sendInput);
 
-    public void Toggle(ushort[] keys) => KeyboardInput.EngineToggle(keys);
+    public void Toggle(ushort[] keys) => KeyboardInput.EngineToggle(keys, sendInput);
 
     public bool HoldDownOnce(string? requestId, ushort[] keys) =>
-        KeyboardInput.EngineHoldDownOnce(requestId, keys);
+        KeyboardInput.EngineHoldDownOnce(requestId, keys, sendInput);
 
-    public void HoldUp(ushort[] keys) => KeyboardInput.EngineHoldUp(keys);
+    public void HoldUp(ushort[] keys) => KeyboardInput.EngineHoldUp(keys, sendInput);
 }
 
 internal sealed class WindowsVoiceEngineController : IVoiceEngineController
@@ -185,18 +185,25 @@ internal sealed class WindowsVoiceEngineController : IVoiceEngineController
 
     public bool End(string mode, string? requestId)
     {
-        var resolved = bindings.ResolveKeysOrThrow(mode);
-        var isHold = string.Equals(bindings.TriggerFor(mode), EngineTriggers.Hold,
-            StringComparison.Ordinal);
         lock (sync)
         {
+            // 先释放实际按住的绑定；外部输入法配置变成无效值也不能阻止清理。
+            // 释放失败时保留它，让后续停止/退出能够再次尝试。
+            if (heldKeys is not null)
+            {
+                keys.HoldUp(heldKeys);
+                heldKeys = null;
+                lastTriggerMilliseconds = Environment.TickCount64;
+                return false;
+            }
+            var resolved = bindings.ResolveKeysOrThrow(mode);
+            var isHold = string.Equals(bindings.TriggerFor(mode), EngineTriggers.Hold,
+                StringComparison.Ordinal);
             // hold 引擎：释放按住的键（以实际按下的键为准）。释放未按下的键
             // 是安全空操作，因此重复 End 幂等；未按住时退化为释放解析出的键。
-            if (isHold || heldKeys is not null)
+            if (isHold)
             {
-                var held = heldKeys ?? resolved;
-                heldKeys = null;
-                keys.HoldUp(held);
+                keys.HoldUp(resolved);
                 lastTriggerMilliseconds = Environment.TickCount64;
                 return false;
             }

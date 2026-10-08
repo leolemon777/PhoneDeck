@@ -113,6 +113,24 @@ macOS 端数据目录默认是 `~/Library/Application Support/PhoneDeck/`。
 这类"按住说话"软件，接收器会在会话开始时按下快捷键并保持、结束时释放，并保证
 任何异常路径（断流、进程退出）都释放按键，不悬挂修饰键。
 
+### Windows 鼠标触发键（beta.3 之后的源码兼容修复）
+
+Windows 接收端可读取 Typeless 的鼠标绑定，也可在引擎档案或手机「电脑设置」中填写：
+
+| 绑定 | Windows 事件 |
+|---|---|
+| `MouseButton2` | 中键（按下滚轮） |
+| `MouseButton3` | 后退侧键（XBUTTON1） |
+| `MouseButton4` | 前进侧键（XBUTTON2） |
+| `Ctrl+MouseButton2` | Ctrl + 中键 |
+
+这沿用 Typeless 的编号，发送 `INPUT_MOUSE` 按下和释放；不移动指针。toggle/hold 都使用该路径，
+异常时继续反向释放修饰键与鼠标按钮。绑定最多 4 个键、100 字符，重复键和其他鼠标编号会被拒绝。
+Typeless 的配置读取优先级保持不变，无需把用户的中键绑定改成键盘快捷键。
+
+已发布的 beta.3 安装包尚无这项修复；源码的单元测试不能证明 Typeless 实际接受注入事件。
+更新接收端后，应在该 Windows 电脑验证开始/停止、连续点击、按住与断流清理。macOS 鼠标触发仍待独立适配。
+
 ## 示例档案（可直接复制）
 
 ### 千问输入法（Windows，按住右 Alt 说话）

@@ -774,10 +774,14 @@ internal static class KeyboardInput
     private static readonly Dictionary<string, long> RecentRequestIds =
         new(StringComparer.Ordinal);
     private const long RequestIdLifetimeMilliseconds = 30_000;
+    private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint KeyEventUnicode = 0x0004;
 
+    private const ushort VkMiddleMouse = 0x04;
+    private const ushort VkXButton1 = 0x05;
+    private const ushort VkXButton2 = 0x06;
     private const ushort VkBack = 0x08;
     private const ushort VkTab = 0x09;
     private const ushort VkReturn = 0x0D;
@@ -835,11 +839,14 @@ internal static class KeyboardInput
                 "alt" or "menu" or "leftalt" => "ALT",
                 "win" or "windows" => "WIN",
                 "rightalt" => "RightAlt",
+                "mousebutton2" => "MouseButton2",
+                "mousebutton3" => "MouseButton3",
+                "mousebutton4" => "MouseButton4",
                 _ => null
             };
             if (canonical is not null)
             {
-                if (canonical == "RightAlt")
+                if (canonical == "RightAlt" || canonical.StartsWith("MouseButton", StringComparison.Ordinal))
                 {
                     baseKeys.Add(canonical);
                 }
@@ -1248,12 +1255,12 @@ internal static class KeyboardInput
         }
     }
 
-    /// <summary>解析引擎快捷键绑定串（如 "CTRL+SHIFT+S"）为虚拟键码序列；
+    /// <summary>解析引擎快捷键绑定串（如 "CTRL+SHIFT+S"、"MouseButton2"）为受控键码序列；
     /// 含无法识别的键时返回 null。Typeless 配置读取逻辑已移至
     /// TypelessSettingsReader，引擎绑定解析见 VoiceEngines。</summary>
     internal static ushort[]? ParseBindingKeys(string? binding)
     {
-        if (string.IsNullOrWhiteSpace(binding))
+        if (string.IsNullOrWhiteSpace(binding) || binding.Length > 100)
         {
             return null;
         }
@@ -1262,7 +1269,7 @@ internal static class KeyboardInput
                      StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             var key = ParseBindingKey(token);
-            if (key is null)
+            if (key is null || keys.Contains(key.Value) || keys.Count == 4)
             {
                 return null;
             }
@@ -1314,6 +1321,10 @@ internal static class KeyboardInput
             "comma" or "," => 0xBC,
             "period" or "." => 0xBE,
             "slash" or "/" => 0xBF,
+            // Typeless 使用从 0 开始的鼠标编号，允许中键和两个侧键绑定。
+            "mousebutton2" => VkMiddleMouse,
+            "mousebutton3" => VkXButton1,
+            "mousebutton4" => VkXButton2,
             _ => null
         };
     }
@@ -1333,15 +1344,17 @@ internal static class KeyboardInput
         SendChordSafely(holdMilliseconds, keys);
     }
 
-    private static void SendChordSafely(int holdMilliseconds, IReadOnlyList<ushort> keys)
+    internal static void SendChordSafely(int holdMilliseconds, IReadOnlyList<ushort> keys,
+        Action<Input>? sendInput = null)
     {
+        var send = sendInput ?? SendSingleInput;
         var pressedKeys = new List<ushort>(keys.Count);
         try
         {
             foreach (var key in keys)
             {
                 pressedKeys.Add(key);
-                Send([VirtualKey(key, keyUp: false)]);
+                send(ShortcutInput(key, keyUp: false));
             }
             if (holdMilliseconds > 0)
             {
@@ -1355,7 +1368,7 @@ internal static class KeyboardInput
             {
                 try
                 {
-                    Send([VirtualKey(pressedKeys[index], keyUp: true)]);
+                    send(ShortcutInput(pressedKeys[index], keyUp: true));
                 }
                 catch (Exception exception)
                 {
@@ -1377,15 +1390,18 @@ internal static class KeyboardInput
     }
 
     /// <summary>引擎切换式触发键（按住 55ms），带 requestId 去重；true 表示重复请求。</summary>
-    internal static bool EngineToggleOnce(string? requestId, ushort[] keys) =>
-        ExecuteOnceCore(requestId, () => SendChordSafely(55, keys));
+    internal static bool EngineToggleOnce(string? requestId, ushort[] keys,
+        Action<Input>? sendInput = null) =>
+        ExecuteOnceCore(requestId, () => SendChordSafely(55, keys, sendInput));
 
     /// <summary>引擎切换式触发键，不去重（服务端内部复位/重试用）。</summary>
-    internal static void EngineToggle(ushort[] keys) => SendChordSafely(55, keys);
+    internal static void EngineToggle(ushort[] keys, Action<Input>? sendInput = null) =>
+        SendChordSafely(55, keys, sendInput);
 
     /// <summary>引擎按住式触发：按下并保持，带 requestId 去重；
     /// true 表示重复请求（不重复按下）。后续必须用 EngineHoldUp 释放。</summary>
-    internal static bool EngineHoldDownOnce(string? requestId, ushort[] keys)
+    internal static bool EngineHoldDownOnce(string? requestId, ushort[] keys,
+        Action<Input>? sendInput = null)
     {
         lock (SyncRoot)
         {
@@ -1405,7 +1421,7 @@ internal static class KeyboardInput
                     return true;
                 }
             }
-            SendChordDown(keys);
+            SendChordDown(keys, sendInput);
             if (normalizedRequestId is not null)
             {
                 RecentRequestIds[normalizedRequestId] = now;
@@ -1415,7 +1431,8 @@ internal static class KeyboardInput
     }
 
     /// <summary>释放按住式触发键（倒序、逐键释放）；未按下的键释放为安全空操作。</summary>
-    internal static void EngineHoldUp(ushort[] keys) => SendChordUp(keys);
+    internal static void EngineHoldUp(ushort[] keys, Action<Input>? sendInput = null) =>
+        SendChordUp(keys, sendInput);
 
     /// <summary>完整轻触一次按住式触发键：按下、保持、释放（遗留协议兜底）。</summary>
     internal static void EngineHoldTap(ushort[] keys)
@@ -1432,29 +1449,30 @@ internal static class KeyboardInput
     }
 
     /// <summary>按给定顺序按下全部键；中途失败时把已按下的键全部释放再抛出。</summary>
-    private static void SendChordDown(IReadOnlyList<ushort> keys)
+    internal static void SendChordDown(IReadOnlyList<ushort> keys, Action<Input>? sendInput = null)
     {
+        var send = sendInput ?? SendSingleInput;
         var pressedKeys = new List<ushort>(keys.Count);
         try
         {
             foreach (var key in keys)
             {
                 pressedKeys.Add(key);
-                Send([VirtualKey(key, keyUp: false)]);
+                send(ShortcutInput(key, keyUp: false));
             }
         }
         catch (Exception)
         {
-            ReleaseChord(pressedKeys, rethrow: false);
+            ReleaseChord(pressedKeys, rethrow: false, send);
             throw;
         }
     }
 
     /// <summary>倒序释放全部键；任一键释放失败时抛出（按键悬挂必须显式暴露）。</summary>
-    private static void SendChordUp(IReadOnlyList<ushort> keys) =>
-        ReleaseChord(keys, rethrow: true);
+    internal static void SendChordUp(IReadOnlyList<ushort> keys, Action<Input>? sendInput = null) =>
+        ReleaseChord(keys, rethrow: true, sendInput ?? SendSingleInput);
 
-    private static void ReleaseChord(IReadOnlyList<ushort> keys, bool rethrow)
+    private static void ReleaseChord(IReadOnlyList<ushort> keys, bool rethrow, Action<Input> send)
     {
         if (keys.Count == 0)
         {
@@ -1465,7 +1483,7 @@ internal static class KeyboardInput
         {
             try
             {
-                Send([VirtualKey(keys[index], keyUp: true)]);
+                send(ShortcutInput(keys[index], keyUp: true));
             }
             catch (Exception exception)
             {
@@ -1514,6 +1532,25 @@ internal static class KeyboardInput
         Send(inputs);
     }
 
+    /// <summary>鼠标触发键必须使用 INPUT_MOUSE，不能作为键盘虚拟键注入。
+    /// 只发按下/释放，不移动指针或滚动。</summary>
+    internal static Input ShortcutInput(ushort key, bool keyUp) => key switch
+    {
+        VkMiddleMouse => MouseButton(keyUp ? 0x0040u : 0x0020u, 0),
+        VkXButton1 => MouseButton(keyUp ? 0x0100u : 0x0080u, 1),
+        VkXButton2 => MouseButton(keyUp ? 0x0100u : 0x0080u, 2),
+        _ => VirtualKey(key, keyUp)
+    };
+
+    private static Input MouseButton(uint flags, uint mouseData) => new()
+    {
+        Type = InputMouse,
+        Union = new InputUnion
+        {
+            Mouse = new MouseInputData { Flags = flags, MouseData = mouseData }
+        }
+    };
+
     private static Input VirtualKey(ushort key, bool keyUp) => new()
     {
         Type = InputKeyboard,
@@ -1554,6 +1591,8 @@ internal static class KeyboardInput
         }
     }
 
+    private static void SendSingleInput(Input input) => Send([input]);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint numberOfInputs, Input[] inputs, int sizeOfInput);
 
@@ -1564,14 +1603,14 @@ internal static class KeyboardInput
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Input
+    internal struct Input
     {
         public uint Type;
         public InputUnion Union;
     }
 
     [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
+    internal struct InputUnion
     {
         [FieldOffset(0)] public MouseInputData Mouse;
         [FieldOffset(0)] public KeyboardInputData Keyboard;
@@ -1579,7 +1618,7 @@ internal static class KeyboardInput
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct KeyboardInputData
+    internal struct KeyboardInputData
     {
         public ushort VirtualKey;
         public ushort ScanCode;
@@ -1589,7 +1628,7 @@ internal static class KeyboardInput
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MouseInputData
+    internal struct MouseInputData
     {
         public int X;
         public int Y;
@@ -1600,7 +1639,7 @@ internal static class KeyboardInput
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct HardwareInputData
+    internal struct HardwareInputData
     {
         public uint Message;
         public ushort ParameterLow;
