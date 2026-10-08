@@ -13,8 +13,16 @@
   全量测试 197/201，新增 20 项全部通过，涵盖 native INPUT 布局/标志、按键顺序、重复请求、失败清理、配置失效/退出重试、
   配置校验和普通动作隔离。4 项失败仍为已有的平台文件锁差异：`RevokeWriteFailureKeepsInMemoryStateConsistent`、
   `AtomicWriteFailureLeavesPreviousFileIntact`、`AtomicPersistencePreservesOldFileWhenReplacementFails`、
-  `RotateRateLimitEnforcesMinimumInterval`；完整 Windows 宿主结果以本 PR 的 Windows CI job 为准。
+  `RotateRateLimitEnforcesMinimumInterval`。随后 [PR #52 的 CI](https://github.com/leolemon777/PhoneDeck/actions/runs/37755363735)
+  在源码 `2985dd1` 上通过：Windows 全量 201/201、Server/ControlCenter 构建与自包含发布、Android、Mac 与 B03 全部成功；
+  4 项文件锁用例在目标 Windows 上均通过。
   测试使用隔离 data 和 obj 下的临时 NuGet 锁，不更改个人配置或仓库依赖锁；`git diff --check` 通过。
+- **候选**：源码 `2985dd1` 交叉发布为本机 `outputs/mouse-shortcuts-20261008/PhoneDeck-Windows-mouse-shortcuts-2985dd1.zip`，
+  附手动替换/回退说明、许可、来源与逐文件哈希；ZIP 解压与哈希校验通过。ZIP SHA-256
+  `1eecd508a9e68bdb9374638d66da2b933c4bba45d878e1f02fbd8f5804b3a94f`；EXE SHA-256
+  `7c08369e5547a9c29ee0ca6bd2e4de4cee49cb6683ff51223fb494062e67f3fb`。
+  [Windows CI 候选](https://github.com/leolemon777/PhoneDeck/actions/runs/37755363735/artifacts/11539598185) 独立保存 Server/ControlCenter。
+  它们为开发候选，保留原内部版本，不能导入签名统一更新；未上传为 Release 或替换 beta.3 下载字节。
 - **待办 / 实机边界**：尚未在该 Windows 安装补丁，也未验证 Typeless 接受注入鼠标事件、点击/按住听写、组合键与断流清理。
   需先更新接收端，再完成真实中键链路及侧键回归；Android 与 macOS 源码未改，Mac 鼠标触发仍待独立适配。
 
