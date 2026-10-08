@@ -58,6 +58,31 @@ public sealed class DesktopConfigurationTests
     }
 
     [TestMethod]
+    public void VoiceValidationAcceptsMouseBindingsWithoutWritingSettings()
+    {
+        WithDirectory(directory =>
+        {
+            var catalog = VoiceEngineCatalog.Load();
+            var settingsPath = VoiceEngineSettings.SettingsPath;
+            var original = File.ReadAllText(settingsPath);
+            var request = new DesktopVoiceRequest("pc", "revision", "typeless",
+                new() { ["typeless"] = new()
+                {
+                    ["dictation"] = "MouseButton2", ["translation"] = "Ctrl+MouseButton3",
+                    ["ask"] = "Shift+MouseButton4"
+                } });
+            var validated = DesktopConfiguration.ValidateVoice(catalog, request);
+            Assert.AreEqual("MouseButton2", validated.ShortcutOverrideFor("typeless", "dictation"));
+            Assert.AreEqual("Ctrl+MouseButton3", validated.ShortcutOverrideFor("typeless", "translation"));
+            Assert.AreEqual("Shift+MouseButton4", validated.ShortcutOverrideFor("typeless", "ask"));
+            Assert.AreEqual(original, File.ReadAllText(settingsPath),
+                "校验快捷键不应写入本机配置");
+            request.ShortcutOverrides!["typeless"]["dictation"] = "MouseButton5";
+            Assert.ThrowsExactly<ArgumentException>(() => DesktopConfiguration.ValidateVoice(catalog, request));
+        });
+    }
+
+    [TestMethod]
     public void AtomicPersistencePreservesOldFileWhenReplacementFails()
     {
         WithDirectory(directory =>
