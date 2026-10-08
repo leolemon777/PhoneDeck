@@ -197,14 +197,14 @@ jobs:
       - name: Download Windows binaries (this run)
         id: download_windows
         continue-on-error: true # 上传/下载失败（如配额）时容错放行；B03 步骤会显式报告 DEGRADED/SKIPPED，不静默通过
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-artifacts-dev
           path: artifacts/windows
       - name: Download Android APKs (this run)
         id: download_android
         continue-on-error: true # 同上：工件缺失由 B03 步骤写入步骤摘要
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: android-apk-dev
           path: artifacts/android
