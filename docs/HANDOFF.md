@@ -1,5 +1,22 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-09 半开音频长流占用接收端导致听写全部失败（最新状态）
+
+- **现象**：作者 Samsung + Apple Silicon Mac，连接与状态全部正常，但每次点语音都无字；手机日志为
+  `/api/dictation/start rejected via Wi-Fi +3.4s: HTTP 409 音频会话不存在或已断开`。
+- **根因**：共享麦克风长流在手机休眠/断网/进程重启后成为半开连接（FIN 未到达电脑），Mac `/api/diagnostics` 仍显示
+  `streaming: true, mode: shared`，但该 TCP 连接已无新增字节，手机侧也已无此套接字。接收端只有一个音频槽且读取无超时，
+  新的受管流被立即以冲突拒绝，`dictation/start` 等待 3 s 后 409。Kestrel 默认请求体速率限制没有回收该连接。
+- **修复**：Mac 与 Windows 音频桥每次读取重新计时，连续 5 s（`DefaultStallTimeoutMs`）无任何字节即判定断流：
+  排空已收到的 PCM、释放会话，端点抛 `AudioStreamStalledException` 后中止连接。手机端供音期间至少每 100 ms 写入一次
+  （暂停时写静音保活），正常会话不会触发。协议与手机端未改。
+- **验证**：Mac Release 构建与测试 50/50（含新增停滞释放、持续供音不误判两项）；Windows Server 在 Mac 上交叉构建 0 错误，
+  Windows 测试因 `win-x64` 运行时标识无法在 Mac 加载，以 PR CI 为准。真机：重启旧接收端清除幽灵会话后听写恢复并出字；
+  作者 Mac 已安装本分支构建的 2.0.0-dev.4 lite（ad-hoc 重签后需删掉并重新添加辅助功能项），听写出字已确认。
+  旧安装备份在 `~/Library/Application Support/PhoneDeck/backups/`。
+- **未验证**：真机上“共享麦克风中途锁屏/断网后 5 s 内自动恢复”尚未复现验证；Windows 修复未在 Windows 实机运行。
+- **待办**：真机复现休眠/断网场景确认自动恢复；Windows 实机验证。
+
 ## 2026-10-07 GitHub Release 中英双语（最新状态）
 
 - **范围**：用户要求仅补齐 GitHub 中英文。`README.md` 与 `README.en.md` 已提供两种语言；本次为
