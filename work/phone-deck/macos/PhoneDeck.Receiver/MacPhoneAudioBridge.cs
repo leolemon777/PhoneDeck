@@ -21,6 +21,11 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     internal const int DrainMaxMs = 3_000;
     internal static readonly int OutputTailMs = PcmLatency.OutputTailMs;
     internal static readonly int StopWaitMs = DrainMaxMs + OutputTailMs + 1_500;
+    /// <summary>手机供音期间至少每 100 ms 写一次（暂停时写静音保活）。超过此时长无数据，
+    /// 视为半开连接（手机休眠、断网或进程被杀而 FIN 未到达），释放接收端，避免幽灵会话
+    /// 永久占用并让后续听写全部 409。</summary>
+    internal const int DefaultStallTimeoutMs = 5_000;
+    private readonly int stallTimeoutMs;
     private readonly object syncRoot = new();
     private readonly IMacAudioOutputFactory outputFactory;
     private readonly bool keepOutputWarm;
@@ -40,10 +45,12 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private string? completedSessionId;
     private bool completedDrainSucceeded;
 
-    internal MacPhoneAudioBridge(IMacAudioOutputFactory outputFactory, bool keepOutputWarm = false)
+    internal MacPhoneAudioBridge(IMacAudioOutputFactory outputFactory, bool keepOutputWarm = false,
+        int stallTimeoutMs = DefaultStallTimeoutMs)
     {
         this.outputFactory = outputFactory;
         this.keepOutputWarm = keepOutputWarm;
+        this.stallTimeoutMs = stallTimeoutMs;
         if (keepOutputWarm)
         {
             idleReaper = new Timer(_ => ReleaseIdleOutput(), null, 30_000, 30_000);
@@ -240,12 +247,15 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
 
         var buffer = new byte[16 * 1024];
         var drained = true;
+        var stalled = false;
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(session.Cancellation.Token);
         try
         {
             while (true)
             {
-                var count = await source.ReadAsync(
-                    buffer.AsMemory(), session.Cancellation.Token);
+                // 每次读取重新计时：只有持续 stallTimeoutMs 收不到任何字节才判定断流。
+                stall.CancelAfter(stallTimeoutMs);
+                var count = await source.ReadAsync(buffer.AsMemory(), stall.Token);
                 if (count == 0)
                 {
                     break;
@@ -275,6 +285,12 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         }
         catch (OperationCanceledException) when (session.Cancellation.IsCancellationRequested)
         {
+        }
+        catch (OperationCanceledException) when (stall.IsCancellationRequested)
+        {
+            stalled = true;
+            Console.Error.WriteLine(
+                $"[audio:{sessionId}] {stallTimeoutMs}ms 未收到手机音频，判定连接已断开，释放接收端");
         }
         finally
         {
@@ -317,6 +333,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                 }
             }
         }
+        if (stalled) throw new AudioStreamStalledException("手机音频流长时间无数据，连接已释放");
         if (!drained) throw new IOException("手机尾音未能在限定时间内播放完成");
     }
 
@@ -489,3 +506,6 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
+
+/// <summary>手机音频长流超过停滞阈值无数据：接收端已释放会话，调用方应中止该连接。</summary>
+internal sealed class AudioStreamStalledException(string message) : IOException(message);
