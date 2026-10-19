@@ -184,6 +184,9 @@ public final class MainActivity extends Activity {
 
     private static final java.util.Set<String> REPEATABLE_KEYS = new java.util.HashSet<>(
             java.util.Arrays.asList("DELETE", "LEFT", "RIGHT", "UP", "DOWN"));
+    /// 长按连发的组合键（按词移动与按词删除），键序与 normalizeChord 一致：修饰键在前。
+    private static final java.util.Set<String> REPEATABLE_CHORDS = new java.util.HashSet<>(
+            java.util.Arrays.asList("CTRL,LEFT", "CTRL,RIGHT", "CTRL,BACKSPACE", "CTRL,DELETE"));
     /// agentGoal 已从默认面板停用；语音区 Goal 按钮在配置缺失时退回这个内置动作。
     private static final ShortcutButtonConfig GOAL_FALLBACK = ShortcutButtonConfig.textAction(
             "agentGoal", "Goal", "blue", true, 0, false, "/goal", true, 0);
@@ -2033,10 +2036,15 @@ public final class MainActivity extends Activity {
     }
 
     private boolean isRepeatableKey(ShortcutButtonConfig config) {
-        if (config.isTextAction() || config.keys == null || config.keys.size() != 1) {
+        if (config.isTextAction() || config.isMacroAction()
+                || config.keys == null || config.keys.isEmpty()) {
             return false;
         }
-        return REPEATABLE_KEYS.contains(config.keys.get(0));
+        if (config.keys.size() == 1) {
+            return REPEATABLE_KEYS.contains(config.keys.get(0));
+        }
+        return config.keys.size() == 2
+                && REPEATABLE_CHORDS.contains(String.join(",", config.keys));
     }
 
     private boolean isBackspaceKey(ShortcutButtonConfig config) {

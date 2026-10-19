@@ -257,6 +257,14 @@ final class ShortcutConfigRepository {
         addDefault(values, "volumeUp", "音量 +", "blue", "VOLUMEUP");
         addDefault(values, "left", "向左", "slate", "LEFT");
         addDefault(values, "right", "向右", "slate", "RIGHT");
+        addDefault(values, "wordLeft", "按词左移", "slate", "CTRL", "LEFT");
+        addDefault(values, "wordRight", "按词右移", "slate", "CTRL", "RIGHT");
+        addDefault(values, "lineStart", "行首", "slate", "HOME");
+        addDefault(values, "lineEnd", "行尾", "slate", "END");
+        addDefault(values, "docStart", "文首", "slate", "CTRL", "HOME");
+        addDefault(values, "docEnd", "文末", "slate", "CTRL", "END");
+        addDefault(values, "deleteWordLeft", "删前词", "orange", "CTRL", "BACKSPACE");
+        addDefault(values, "deleteWordRight", "删后词", "orange", "CTRL", "DELETE");
         return values;
     }
 
@@ -266,7 +274,10 @@ final class ShortcutConfigRepository {
             "agentClear", "agentAcceptAll", "agentRejectAll"));
 
     /// 本次新引入的内置按钮：合并进已保存的配置，让升级设备直接拿到。
-    private static final List<String> INTRODUCED_BUILTIN_IDS = Arrays.asList("delete");
+    private static final List<String> INTRODUCED_BUILTIN_IDS = Arrays.asList(
+            "delete",
+            "wordLeft", "wordRight", "lineStart", "lineEnd", "docStart", "docEnd",
+            "deleteWordLeft", "deleteWordRight");
 
     private static boolean migrateBuiltinButtons(ArrayList<ShortcutButtonConfig> values) {
         boolean changed = values.removeIf(value -> RETIRED_BUILTIN_IDS.contains(value.id));

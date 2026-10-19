@@ -2,16 +2,23 @@
 
 ## 2026-10-18 默认快捷键面板改为通用编辑键（最新状态）
 
-- **需求**：用户要求把默认面板顶部的 Agent 按钮（打断、接受全部等）换成复制、粘贴、delete、backspace 这类通用编辑键。
+- **需求**：用户要求把默认面板顶部的 Agent 按钮（打断、接受全部等）换成复制、粘贴、delete、backspace 这类通用编辑键；
+  随后因「方向键一次挪一位太慢」追加快速导航组。
 - **源码**（仅 Android，分支 `agent/shortcut-panel-common-keys`）：`ShortcutConfigRepository.defaults()` 移除 7 个 agent 默认按钮，
-  新增「删除」（DELETE；DELETE 已在 `REPEATABLE_KEYS`，长按连续发送）；`mergeAgentDefaults` 替换为 `migrateBuiltinButtons`：
-  加载旧配置时移除已停用的 agent 按钮 ID（不再自动补回），并把新引入的内置按钮（delete）合并进已有配置，
-  用户手动删过的其他默认按钮不会被强行加回。`MainActivity.triggerConfiguredGoal` 在配置中找不到 `agentGoal` 时
+  新增「删除」（DELETE）与 8 个快速编辑键：按词左移/右移（CTRL+LEFT/RIGHT）、行首/行尾（HOME/END）、文首/文末（CTRL+HOME/END）、
+  删前词/删后词（CTRL+BACKSPACE/DELETE）；`mergeAgentDefaults` 替换为 `migrateBuiltinButtons`：
+  加载旧配置时移除已停用的 agent 按钮 ID（不再自动补回），并把新引入的内置按钮合并进已有配置，
+  用户手动删过的其他默认按钮不会被强行加回。`isRepeatableKey` 放开按词移动/删词组合键的长按连发（`REPEATABLE_CHORDS`，
+  仅协议 v2 的 keyChord 路径；v1 旧协议连发仍只支持单键）。`MainActivity.triggerConfiguredGoal` 在配置中找不到 `agentGoal` 时
   退回内置 `/goal` 文本动作（`GOAL_FALLBACK`），语音区 Goal 按钮不再依赖面板配置。
 - **验证**：本机（Windows，`E:\Android` 的 JDK17/SDK）`:app:assembleDebug`、`:app:testDebugUnitTest` 46/46、
-  `:app:lintDebug` 全部通过。**未在真机验证**：旧配置迁移的实际效果、删除按钮长按连发、Goal 回退发送路径。
-- **待办**：真机装包走查面板迁移与 Delete 长按；版本号未动（Android 仍 dev.22/code28），正式发布前需按
-  `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程。
+  `:app:lintDebug` 全部通过。**已装到作者 Samsung 真机**：因旧版为 Mac 调试签名，卸载前用 `run-as` 备份应用数据
+  （留档 `工作区/artifacts/phonedeck-backup-2026-10-18.tgz`），重装（本机签名）后恢复，配对保留并完成「升级为独立凭据」；
+  补授附近设备与麦克风权限；旧配置迁移后真机读回验证：19 按钮（无 agent、含删除）。第二版覆盖安装后真机读回验证：
+  27 按钮（8 个快速编辑键已合并）。**未在真机验证**：删除/按词键长按连发的手感、Goal 回退发送路径。
+- **待办**：真机走查长按连发与 Goal 回退；版本号未动（Android 仍 dev.22/code28），正式发布前需按
+  `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程；注意真机现为本机签名，
+  后续安装 Mac 签名的官方包需再次备份恢复或统一签名。
 
 ## 2026-10-09 半开音频长流占用接收端导致听写全部失败（最新状态）
 
