@@ -5,7 +5,8 @@
 - **范围**：整理 `PhoneDeck手机键盘项目` 中既有的 11 个 Android 文件改动，沿用 `agent/shortcut-panel-common-keys` 分支；不包含其他工作区的未提交修改。
 - **行为**：四套浅深外观及旧主题迁移；首页最多八个常用指令、底部斜杠指令栏、统一编辑状态；图标拖动改为插入调序，新增/编辑/隐藏或删除与短时撤销；编辑器增加快捷键和斜杠预设；设置及编辑页支持边缘右滑返回，浮层支持系统背景模糊。
 - **配置**：新增默认斜杠指令 `slashPlan/slashGoal/slashCompact/slashClear` 并迁移已有配置；旧 agent ID 继续停用，配置 schemaVersion 与主线版本号保持不变。README 中英文与规格顶部已同步当前状态。
-- **验证**：本机 JDK 17 / Android SDK：`:app:assembleDebug`、`:app:testDebugUnitTest`（46/46）、`:app:lintDebug` 通过；Lint 仍有警告。本次未安装或操作真实手机，10 月 18 日的旧验证不能代替今天 UI 改动的设备验收。
+- **验证**：本机 JDK 17 / Android SDK：`:app:assembleDebug`、`:app:testDebugUnitTest`（46/46）、`:app:lintDebug` 通过（43 项警告）；Windows 接收端 Release 构建及测试（183/183）、macOS 接收端在 Windows 上跨平台构建及测试（50/50）通过。本次未安装或操作真实手机/Mac，10 月 18 日的旧验证不能代替今天 UI 改动的设备验收。
+- **GitHub**：源码提交 `6e034b4` 已推送，[PR #55](https://github.com/leolemon777/PhoneDeck/pull/55) 面向 main，包含尚未合入的快捷键改动与 #53 音频流回收修复。按用户要求删除 beta.1、beta.2 的 5 个旧 APK/ZIP；回读确认旧包已移除、beta.3 的 5 个资产及独立 Desktop 草稿的 20 个资产 ID/大小/摘要均未变。Release 说明、标签和校验记录保留；操作前后元数据存于 ignored 的 `outputs/github-old-installers-20261019/`。
 - **待办**：真机检查首页/面板/指令栏拖动、编辑退出、隐藏删除与撤销、预设保存、旧主题迁移、边缘返回和浮层；公开 APK 需另行升版、确认签名并完成发布验收。
 
 ## 2026-10-18 默认快捷键面板改为通用编辑键（最新状态）
