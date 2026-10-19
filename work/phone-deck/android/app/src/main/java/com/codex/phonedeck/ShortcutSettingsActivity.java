@@ -20,10 +20,15 @@ import java.util.ArrayList;
 public final class ShortcutSettingsActivity extends Activity {
     private static final int REQUEST_EXPORT_CONFIG = 41;
     private static final int REQUEST_IMPORT_CONFIG = 42;
+    private static final long UNDO_BAR_TIMEOUT_MS = 4500;
 
     private ShortcutConfigRepository repository;
     private PhoneDeckTheme theme;
     private LinearLayout list;
+    private LinearLayout undoBar;
+    private TextView undoMessage;
+    private ArrayList<ShortcutButtonConfig> undoSnapshot;
+    private final Runnable hideUndoBar = () -> hideUndoBar();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -106,8 +111,8 @@ public final class ShortcutSettingsActivity extends Activity {
         header.addView(title, titleParams);
         page.addView(header);
 
-        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；点卡片可编辑按键、名称与指令；"
-                        + "内置按钮可隐藏，自定义按钮可删除；底部可导入导出整套配置。",
+        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；右滑卡片隐藏/删除（底部可撤销）；"
+                        + "点卡片可编辑按键、名称与指令；内置按钮可隐藏，自定义按钮可删除；底部可导入导出整套配置。",
                 13, theme.muted, Typeface.NORMAL);
         hint.setLineSpacing(0, 1.15f);
         page.addView(hint, topMargin(dp(18)));
@@ -156,7 +161,111 @@ public final class ShortcutSettingsActivity extends Activity {
         page.addView(transferRow, topMargin(dp(14)));
 
         refreshList();
-        return theme.wrapContent(this, scroll);
+
+        // 底部悬浮的撤销条：右滑隐藏/删除后出现，可一键还原整份快照。
+        undoBar = new LinearLayout(this);
+        undoBar.setOrientation(LinearLayout.HORIZONTAL);
+        undoBar.setGravity(Gravity.CENTER_VERTICAL);
+        undoBar.setPadding(dp(16), dp(10), dp(8), dp(10));
+        undoBar.setBackground(theme.shape(this, theme.surfaceRaised, 14, 1, theme.outline));
+        undoBar.setElevation(dp(6));
+        undoMessage = text("", 13, theme.text, Typeface.NORMAL);
+        undoBar.addView(undoMessage, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button undo = button("撤销", theme.feedbackSurface(theme.primary), theme.text);
+        undo.setOnClickListener(view -> {
+            if (undoSnapshot != null) {
+                try {
+                    repository.save(undoSnapshot);
+                } catch (Exception exception) {
+                    showError("撤销失败：" + exception.getMessage());
+                }
+                undoSnapshot = null;
+            }
+            hideUndoBar();
+            refreshList();
+        });
+        LinearLayout.LayoutParams undoParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        undoParams.leftMargin = dp(10);
+        undoBar.addView(undo, undoParams);
+        undoBar.setVisibility(View.GONE);
+
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.addView(scroll, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        android.widget.FrameLayout.LayoutParams barParams = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+        barParams.gravity = Gravity.BOTTOM;
+        barParams.setMargins(dp(12), 0, dp(12), dp(16));
+        root.addView(undoBar, barParams);
+        return theme.wrapContent(this, root);
+    }
+
+    private void hideUndoBar() {
+        if (undoBar != null) {
+            undoBar.setVisibility(View.GONE);
+        }
+    }
+
+    private void showUndoBar(String message, ArrayList<ShortcutButtonConfig> snapshot) {
+        undoSnapshot = snapshot;
+        undoMessage.setText(message);
+        undoBar.setVisibility(View.VISIBLE);
+        undoBar.removeCallbacks(hideUndoBar);
+        undoBar.postDelayed(hideUndoBar, UNDO_BAR_TIMEOUT_MS);
+    }
+
+    /// 右滑卡片：内置按钮隐藏（可再显示），自定义按钮删除；底部撤销条可整份还原。
+    private void onRowSwiped(View row, ShortcutButtonConfig config) {
+        ArrayList<ShortcutButtonConfig> before;
+        try {
+            before = repository.load();
+        } catch (Exception exception) {
+            showError("无法读取快捷键配置");
+            return;
+        }
+        ArrayList<ShortcutButtonConfig> snapshot = new ArrayList<>();
+        for (ShortcutButtonConfig value : before) {
+            snapshot.add(value.copy());
+        }
+        if (config.builtIn) {
+            for (ShortcutButtonConfig value : before) {
+                if (value.id.equals(config.id)) {
+                    value.visible = false;
+                    value.updatedAt = System.currentTimeMillis();
+                }
+            }
+            try {
+                repository.save(before);
+            } catch (Exception exception) {
+                showError("隐藏按钮失败");
+                return;
+            }
+            animateRowOut(row, () -> refreshList());
+            showUndoBar("已隐藏「" + config.label + "」", snapshot);
+        } else {
+            before.removeIf(value -> value.id.equals(config.id));
+            try {
+                repository.save(before);
+            } catch (Exception exception) {
+                showError("删除按钮失败");
+                return;
+            }
+            animateRowOut(row, () -> refreshList());
+            showUndoBar("已删除「" + config.label + "」", snapshot);
+        }
+    }
+
+    private void animateRowOut(View row, Runnable endAction) {
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            endAction.run();
+            return;
+        }
+        row.animate().translationX(row.getWidth() * 1.2f).alpha(0f).setDuration(140)
+                .withEndAction(endAction).start();
     }
 
     private void refreshList() {
@@ -210,10 +319,11 @@ public final class ShortcutSettingsActivity extends Activity {
         editParams.leftMargin = dp(8);
         row.addView(edit, editParams);
 
-        // 点卡片主体 = 编辑；长按（自管计时，抗手指微动）= 浮起拖动调位。
+        // 点卡片主体 = 编辑；长按（自管计时，抗手指微动）= 浮起拖动调位；右滑 = 隐藏/删除（可撤销）。
         row.setOnClickListener(view -> openEditor(config.id));
         TouchFeedback.installHoldable(row, null,
-                () -> startRowDrag(row, config), null);
+                () -> startRowDrag(row, config), null,
+                () -> onRowSwiped(row, config));
         row.setOnDragListener((view, event) -> handleDrag(view, event));
         return row;
     }

@@ -3,7 +3,6 @@ package com.codex.phonedeck;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.os.Build;
-import android.os.SystemClock;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
@@ -29,12 +28,22 @@ final class TouchFeedback {
     @SuppressLint("ClickableViewAccessibility") // 手势自管；UP 时显式 performClick。
     static void installHoldable(View control, Runnable onRelease,
             Runnable onHeld, Runnable onHeldThenMoved) {
+        installHoldable(control, onRelease, onHeld, onHeldThenMoved, null);
+    }
+
+    /**
+     * installHoldable 的完整版：额外支持右滑删除。未按住时右滑实时跟手平移，
+     * 超过阈值一次性回调 onSwipeRight（此后本手势不再触发按住/点击）。
+     */
+    @SuppressLint("ClickableViewAccessibility") // 手势自管；UP 时显式 performClick。
+    static void installHoldable(View control, Runnable onRelease,
+            Runnable onHeld, Runnable onHeldThenMoved, Runnable onSwipeRight) {
         control.setSoundEffectsEnabled(true);
         control.setHapticFeedbackEnabled(true);
         float slop = ViewConfiguration.get(control.getContext()).getScaledTouchSlop();
         long holdTimeout = ViewConfiguration.getLongPressTimeout();
+        float swipeCommit = PhoneDeckTheme.dp(control.getContext(), 88);
         float[] down = new float[2];
-        long[] downAt = new long[1];
         boolean[] held = new boolean[1];
         boolean[] movedWhileHeld = new boolean[1];
         boolean[] finished = new boolean[1];
@@ -45,10 +54,10 @@ final class TouchFeedback {
                 press(view, 0.95f, true);
                 down[0] = event.getX();
                 down[1] = event.getY();
-                downAt[0] = SystemClock.uptimeMillis();
                 held[0] = false;
                 movedWhileHeld[0] = false;
                 finished[0] = false;
+                view.setTranslationX(0f);
                 Runnable tick = () -> {
                     if (finished[0] || held[0]) {
                         return;
@@ -70,6 +79,17 @@ final class TouchFeedback {
                         // 行内扫动先占住事件流，等按住计时到点转拖动。
                         disallowIntercept(view);
                     }
+                    if (onSwipeRight != null && dx > slop) {
+                        view.setTranslationX(dx - slop);
+                        if (dx - slop >= swipeCommit && !finished[0]) {
+                            finished[0] = true;
+                            if (timer[0] != null) {
+                                view.removeCallbacks(timer[0]);
+                            }
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                            onSwipeRight.run();
+                        }
+                    }
                     return true;
                 }
                 if (!movedWhileHeld[0]) {
@@ -85,9 +105,11 @@ final class TouchFeedback {
                 float dx = event.getX() - down[0];
                 float dy = event.getY() - down[1];
                 boolean wasHeld = held[0];
+                boolean swipedAway = view.getTranslationX() > 0f && onSwipeRight != null;
                 release(view);
                 if (onRelease != null) onRelease.run();
-                if (action == MotionEvent.ACTION_UP && !wasHeld && view.isEnabled()
+                if (action == MotionEvent.ACTION_UP && !wasHeld && !swipedAway
+                        && view.isEnabled()
                         && Math.abs(dx) <= slop && Math.abs(dy) <= slop) {
                     view.performClick();
                 }
