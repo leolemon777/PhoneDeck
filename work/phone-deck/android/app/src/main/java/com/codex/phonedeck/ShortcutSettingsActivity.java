@@ -91,51 +91,64 @@ public final class ShortcutSettingsActivity extends Activity {
 
     private View createInterface() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(theme.background);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(20), dp(20), dp(32));
+        page.setPadding(dp(24), dp(22), dp(24), dp(36));
         page.setBackgroundColor(theme.contentBackground());
         scroll.addView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button("←", theme.surface, theme.text);
+        Button back = button("‹", theme.surface, theme.primary);
+        back.setTextSize(26);
+        back.setPadding(0, 0, 0, dp(2));
         back.setOnClickListener(view -> finish());
         back.setContentDescription("返回");
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = text("快捷键与布局", 22, theme.text, Typeface.BOLD);
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView title = text("快捷指令与布局", 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleParams.leftMargin = dp(12);
+        titleParams.leftMargin = dp(14);
         header.addView(title, titleParams);
         page.addView(header);
 
-        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；右滑卡片隐藏/删除（底部可撤销）；"
-                        + "点卡片可编辑按键、名称与指令；内置按钮可隐藏，自定义按钮可删除；底部可导入导出整套配置。",
-                13, theme.muted, Typeface.NORMAL);
-        hint.setLineSpacing(0, 1.15f);
-        page.addView(hint, topMargin(dp(18)));
+        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；右滑卡片隐藏或删除（底部可撤销）；"
+                        + "点击卡片可编辑按键、名称与指令。",
+                13, theme.body, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.2f);
+        page.addView(hint, topMargin(dp(16)));
 
         LinearLayout actions = new LinearLayout(this);
-        Button add = button("＋ 新增按钮", theme.feedbackSurface(theme.primary), theme.text);
+        Button add = button("＋ 快捷键", theme.primary, theme.onPrimary);
         add.setOnClickListener(view ->
                 startActivity(new Intent(this, ShortcutEditActivity.class)));
-        actions.addView(add, new LinearLayout.LayoutParams(0, dp(52), 1f));
-        Button restore = button("恢复全部", theme.feedbackSurface(theme.danger), theme.danger);
+        actions.addView(add, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button addSlash = button("＋ /指令", theme.surface, theme.primary);
+        addSlash.setOnClickListener(view -> {
+            Intent intent = new Intent(this, ShortcutEditActivity.class);
+            intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
+            startActivity(intent);
+        });
+        LinearLayout.LayoutParams slashParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        slashParams.leftMargin = dp(8);
+        actions.addView(addSlash, slashParams);
+        Button restore = button("恢复默认", theme.surface, theme.danger);
         restore.setOnClickListener(view -> confirmResetAll());
-        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, dp(48), 0.9f);
         restoreParams.leftMargin = dp(8);
         actions.addView(restore, restoreParams);
-        page.addView(actions, topMargin(dp(16)));
+        page.addView(actions, topMargin(dp(18)));
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        page.addView(list, topMargin(dp(12)));
+        page.addView(list, topMargin(dp(14)));
 
         LinearLayout transferRow = new LinearLayout(this);
         transferRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button exportButton = button("导出配置", theme.surface, theme.text);
+        Button exportButton = button("导出配置", theme.surface, theme.body);
         exportButton.setOnClickListener(view -> {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -145,7 +158,7 @@ public final class ShortcutSettingsActivity extends Activity {
         });
         transferRow.addView(exportButton, new LinearLayout.LayoutParams(
                 0, dp(48), 1f));
-        Button importButton = button("导入配置", theme.surface, theme.text);
+        Button importButton = button("导入配置", theme.surface, theme.body);
         importButton.setOnClickListener(view -> {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -158,7 +171,7 @@ public final class ShortcutSettingsActivity extends Activity {
                 0, dp(48), 1f);
         importParams.leftMargin = dp(10);
         transferRow.addView(importButton, importParams);
-        page.addView(transferRow, topMargin(dp(14)));
+        page.addView(transferRow, topMargin(dp(16)));
 
         refreshList();
 
@@ -167,12 +180,12 @@ public final class ShortcutSettingsActivity extends Activity {
         undoBar.setOrientation(LinearLayout.HORIZONTAL);
         undoBar.setGravity(Gravity.CENTER_VERTICAL);
         undoBar.setPadding(dp(16), dp(10), dp(8), dp(10));
-        undoBar.setBackground(theme.shape(this, theme.surfaceRaised, 14, 1, theme.outline));
+        undoBar.setBackground(theme.shape(this, theme.surface, 14, 1, theme.outline));
         undoBar.setElevation(dp(6));
         undoMessage = text("", 13, theme.text, Typeface.NORMAL);
         undoBar.addView(undoMessage, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        Button undo = button("撤销", theme.feedbackSurface(theme.primary), theme.text);
+        Button undo = button("撤销", theme.primaryContainer, theme.primary);
         undo.setOnClickListener(view -> {
             if (undoSnapshot != null) {
                 try {
@@ -199,9 +212,10 @@ public final class ShortcutSettingsActivity extends Activity {
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
         barParams.gravity = Gravity.BOTTOM;
-        barParams.setMargins(dp(12), 0, dp(12), dp(16));
+        barParams.setMargins(dp(16), 0, dp(16), dp(20));
         root.addView(undoBar, barParams);
-        return theme.wrapContent(this, root);
+        return theme.wrapContent(this,
+                TouchFeedback.wrapEdgeSwipeBack(this, root, this::finish));
     }
 
     private void hideUndoBar() {
@@ -308,16 +322,25 @@ public final class ShortcutSettingsActivity extends Activity {
         row.addView(copy, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button visible = miniButton(config.visible ? "隐藏" : "显示");
-        visible.setContentDescription((config.visible ? "隐藏" : "显示") + config.label);
-        visible.setOnClickListener(view -> toggleVisible(config.id));
-        row.addView(visible, new LinearLayout.LayoutParams(dp(52), dp(48)));
-
         Button edit = miniButton("编辑");
         edit.setOnClickListener(view -> openEditor(config.id));
-        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(54), dp(48));
-        editParams.leftMargin = dp(8);
-        row.addView(edit, editParams);
+        row.addView(edit, new LinearLayout.LayoutParams(dp(50), dp(44)));
+
+        if (!config.builtIn) {
+            Button delete = button("删除", theme.feedbackSurface(theme.danger), theme.danger);
+            delete.setContentDescription("删除" + config.label);
+            delete.setOnClickListener(view -> onRowSwiped(row, config));
+            LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(50), dp(44));
+            deleteParams.leftMargin = dp(6);
+            row.addView(delete, deleteParams);
+        } else {
+            Button visible = miniButton(config.visible ? "隐藏" : "显示");
+            visible.setContentDescription((config.visible ? "隐藏" : "显示") + config.label);
+            visible.setOnClickListener(view -> toggleVisible(config.id));
+            LinearLayout.LayoutParams visibleParams = new LinearLayout.LayoutParams(dp(50), dp(44));
+            visibleParams.leftMargin = dp(6);
+            row.addView(visible, visibleParams);
+        }
 
         // 点卡片主体 = 编辑；长按（自管计时，抗手指微动）= 浮起拖动调位；右滑 = 隐藏/删除（可撤销）。
         row.setOnClickListener(view -> openEditor(config.id));
@@ -432,26 +455,9 @@ public final class ShortcutSettingsActivity extends Activity {
             return;
         }
         try {
-            ArrayList<ShortcutButtonConfig> buttons = repository.load();
-            ShortcutButtonConfig moving = null;
-            for (ShortcutButtonConfig value : buttons) {
-                if (value.id.equals(sourceId)) {
-                    moving = value;
-                    break;
-                }
+            if (repository.moveToSlot(sourceId, targetId)) {
+                refreshList();
             }
-            if (moving == null) {
-                return;
-            }
-            buttons.remove(moving);
-            int targetIndex = 0;
-            while (targetIndex < buttons.size()
-                    && !buttons.get(targetIndex).id.equals(targetId)) {
-                targetIndex++;
-            }
-            buttons.add(Math.min(targetIndex, buttons.size()), moving);
-            repository.save(buttons);
-            refreshList();
         } catch (Exception exception) {
             showError("保存拖动顺序失败");
         }

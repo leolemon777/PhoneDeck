@@ -195,6 +195,12 @@ public final class MainActivity extends Activity {
     private ShortcutKeyView repeatSource;
     private boolean gridEditMode;
     private Button gridEditButton;
+    private GridLayout homeShortcutGrid;
+    private Button homeEditButton;
+    private TextView homeShortcutSubtitle;
+    private LinearLayout commandChipsContainer;
+    private java.util.ArrayList<ShortcutButtonConfig> lastRemovedSnapshot;
+    private final Runnable clearUndoSnapshot = () -> lastRemovedSnapshot = null;
     private TextView shortcutHintText;
     private TextView shortcutNormalHintText;
     private volatile String usbForegroundApp;
@@ -518,8 +524,8 @@ public final class MainActivity extends Activity {
                 renderSharedAudioStatus(PhoneAudioService.getSnapshot());
             }
         }
-        if (shortcutGrid != null && configRepository != null) {
-            refreshShortcutGrid();
+        if (configRepository != null) {
+            refreshAllShortcutViews();
         }
     }
 
@@ -533,7 +539,7 @@ public final class MainActivity extends Activity {
 
     private void applyUiState() {
         updateConnectionDisplay();
-        refreshShortcutGrid();
+        refreshAllShortcutViews();
         refreshTargetSwitcher();
         if (voiceModeSwitch != null && typelessButton != null) {
             updateVoiceModeInterface();
@@ -598,6 +604,10 @@ public final class MainActivity extends Activity {
         boolean dialogue = homeStyle == HomeStyle.CENTER;
         voiceStatusCaption = null;
         voiceHint = null;
+        homeShortcutGrid = null;
+        homeEditButton = null;
+        homeShortcutSubtitle = null;
+        commandChipsContainer = null;
         if (shortcutDialog != null) {
             shortcutDialog.dismiss();
             shortcutDialog = null;
@@ -651,6 +661,13 @@ public final class MainActivity extends Activity {
             shortcuts.setContentDescription("打开完整快捷键面板");
             shortcuts.setOnClickListener(view -> showShortcutPanel());
             brandRow.addView(shortcuts, new LinearLayout.LayoutParams(dp(64), dp(48)));
+        } else {
+            Button manageBtn = smallButton("指令库");
+            manageBtn.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
+            manageBtn.setTextColor(theme.muted);
+            manageBtn.setContentDescription("打开全部快捷指令与布局管理");
+            manageBtn.setOnClickListener(view -> showShortcutPanel());
+            brandRow.addView(manageBtn, new LinearLayout.LayoutParams(dp(58), dp(44)));
         }
         Button settings = smallButton(dialogue ? "⋯" : "设置");
         settings.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
@@ -734,29 +751,49 @@ public final class MainActivity extends Activity {
         shortcutScroll.addView(shortcutPage);
         LinearLayout shortcutHeader = new LinearLayout(this);
         shortcutHeader.setGravity(Gravity.CENTER_VERTICAL);
-        shortcutHeader.addView(text("快捷键", 18, theme.text, Typeface.BOLD),
+        shortcutHeader.addView(text("全部快捷指令", 18, theme.text, Typeface.BOLD),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        gridEditButton = smallButton(gridEditMode ? "完成" : "编辑布局");
-        gridEditButton.setBackgroundColor(Color.TRANSPARENT);
-        gridEditButton.setTextColor(theme.muted);
+        Button panelAddBtn = smallButton("＋ 快捷键");
+        panelAddBtn.setTextColor(theme.primary);
+        panelAddBtn.setSingleLine(true);
+        panelAddBtn.setPadding(dp(10), 0, dp(10), 0);
+        panelAddBtn.setOnClickListener(view -> startActivity(new Intent(this, ShortcutEditActivity.class)));
+        shortcutHeader.addView(panelAddBtn, margins(0, 0, dp(6), 0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)));
+        Button panelAddSlashBtn = smallButton("＋ /指令");
+        panelAddSlashBtn.setTextColor(theme.primary);
+        panelAddSlashBtn.setSingleLine(true);
+        panelAddSlashBtn.setPadding(dp(10), 0, dp(10), 0);
+        panelAddSlashBtn.setOnClickListener(view -> {
+            Intent intent = new Intent(this, ShortcutEditActivity.class);
+            intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
+            startActivity(intent);
+        });
+        shortcutHeader.addView(panelAddSlashBtn, margins(0, 0, dp(6), 0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)));
+        gridEditButton = smallButton(gridEditMode ? "完成" : "编辑/删除");
+        gridEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.text);
+        gridEditButton.setBackground(theme.pressable(this,
+                gridEditMode ? theme.primary : theme.key, theme.primaryPressed, 18));
         gridEditButton.setSingleLine(true);
+        gridEditButton.setPadding(dp(12), 0, dp(12), 0);
         gridEditButton.setOnClickListener(view -> toggleGridEditMode());
         installTouchFeedback(gridEditButton);
         shortcutHeader.addView(gridEditButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(48)));
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)));
         shortcutPage.addView(shortcutHeader);
-        shortcutHintText = text("点击按钮编辑 · 长按拖动调换位置", 12,
-                theme.muted, Typeface.NORMAL);
+        shortcutHintText = text("✎ 编辑模式：点右上角 × 删除/隐藏 · 点击卡片修改 · 长按像手机图标拖动调序", 12,
+                theme.warning, Typeface.NORMAL);
         shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
-        shortcutPage.addView(shortcutHintText, marginTop(dp(3)));
-        shortcutNormalHintText = text("点按发送 · 长按拖动调换位置 · 编辑可改按钮", 12,
+        shortcutPage.addView(shortcutHintText, marginTop(dp(4)));
+        shortcutNormalHintText = text("点按立即发送 · 长按任意图标直接像桌面 App 一样拖动排序并进入编辑", 12,
                 theme.muted, Typeface.NORMAL);
         shortcutNormalHintText.setVisibility(gridEditMode ? View.GONE : View.VISIBLE);
-        shortcutPage.addView(shortcutNormalHintText, marginTop(dp(3)));
+        shortcutPage.addView(shortcutNormalHintText, marginTop(dp(4)));
         shortcutGrid = new GridLayout(this);
         shortcutGrid.setColumnCount(3);
         shortcutGrid.setUseDefaultMargins(false);
-        shortcutPage.addView(shortcutGrid, margins(dp(-4), dp(4), dp(-4), 0,
+        shortcutPage.addView(shortcutGrid, margins(dp(-4), dp(6), dp(-4), 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout voiceDock = new LinearLayout(this);
@@ -844,6 +881,7 @@ public final class MainActivity extends Activity {
         actionFeedback.setPadding(dp(12), dp(8), dp(12), dp(8));
         actionFeedback.setVisibility(View.GONE);
         actionFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        actionFeedback.setOnClickListener(view -> tryUndoRemoveShortcut());
         voiceDock.addView(actionFeedback, margins(0, dp(12), 0, 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -921,25 +959,28 @@ public final class MainActivity extends Activity {
                 voiceDock.removeView(control);
             }
             ((android.view.ViewGroup) voiceStatusCaption.getParent()).removeView(voiceStatusCaption);
-            voiceStatusCaption.setPadding(dp(10), dp(4), dp(10), dp(4));
-            voiceButtonCaption.setTextSize(22);
+            voiceStatusCaption.setPadding(dp(10), dp(3), dp(10), dp(3));
+            voiceButtonCaption.setTextSize(19);
+            if (voiceHint != null) {
+                ((LinearLayout.LayoutParams) voiceHint.getLayoutParams()).topMargin = dp(4);
+            }
             voiceCopy.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
             recentList = new LinearLayout(this);
             recentList.setOrientation(LinearLayout.VERTICAL);
             quickRow = buildQuickRow();
             View commandBar = buildCommandBar();
             ((android.view.ViewGroup) voiceMeter.getParent()).removeView(voiceMeter);
-            voiceCopy.addView(voiceMeter, margins(0, dp(14), 0, 0, dp(220), dp(24)));
+            voiceCopy.addView(voiceMeter, margins(0, dp(6), 0, 0, dp(180), dp(12)));
             if (!landscape) {
                 LinearLayout middle = new LinearLayout(this);
                 middle.setOrientation(LinearLayout.VERTICAL);
-                middle.setGravity(Gravity.CENTER);
-                middle.setPadding(dp(24), dp(8), dp(24), dp(12));
+                middle.setGravity(Gravity.CENTER_HORIZONTAL);
+                middle.setPadding(dp(20), dp(4), dp(20), dp(6));
                 middle.addView(voiceStatusCaption, new LinearLayout.LayoutParams(-2, -2));
-                middle.addView(voiceCopy, margins(0, dp(10), 0, 0, -1, -2));
-                middle.addView(actionFeedback, margins(0, dp(10), 0, 0, -1, -2));
-                middle.addView(quickRow, margins(0, dp(compact ? 14 : 24), 0, 0, -1, -2));
-                middle.addView(recentList, margins(0, dp(compact ? 10 : 16), 0, 0, -1, -2));
+                middle.addView(voiceCopy, margins(0, dp(4), 0, 0, -1, -2));
+                middle.addView(actionFeedback, margins(0, dp(6), 0, 0, -1, -2));
+                middle.addView(quickRow, margins(0, dp(10), 0, 0, -1, -2));
+                middle.addView(recentList, margins(0, dp(8), 0, 0, -1, -2));
                 ScrollView middleScroll = new ScrollView(this);
                 middleScroll.setFillViewport(true);
                 middleScroll.setVerticalScrollBarEnabled(false);
@@ -947,10 +988,10 @@ public final class MainActivity extends Activity {
                 LinearLayout footer = new LinearLayout(this);
                 footer.setOrientation(LinearLayout.VERTICAL);
                 // 说话按钮不贴底：下面还有指令栏和说话方式，长条落在屏幕约四分之三高度的拇指区。
-                footer.setPadding(dp(16), dp(8), dp(16), dp(compact ? 16 : 28));
+                footer.setPadding(dp(16), dp(4), dp(16), dp(compact ? 12 : 18));
                 footer.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
-                footer.addView(commandBar, margins(0, dp(16), 0, 0, -1, dp(56)));
-                footer.addView(voiceModeSwitch, margins(0, dp(12), 0, 0, -1, -2));
+                footer.addView(commandBar, margins(0, dp(10), 0, 0, -1, dp(52)));
+                footer.addView(voiceModeSwitch, margins(0, dp(8), 0, 0, -1, -2));
                 LinearLayout page = new LinearLayout(this);
                 page.setOrientation(LinearLayout.VERTICAL);
                 page.addView(header);
@@ -1299,8 +1340,8 @@ public final class MainActivity extends Activity {
         boolean recording = selected && !shared && (dictationActive || isVoiceStarting());
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        card.setBackground(theme.pressable(this, ink, theme.mix(ink, onInk, 0.18f), 24));
+        card.setPadding(dp(18), dp(15), dp(18), dp(15));
+        card.setBackground(theme.pressable(this, ink, theme.mix(ink, onInk, 0.18f), 16));
 
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
@@ -1312,7 +1353,7 @@ public final class MainActivity extends Activity {
         String badgeText = confirming ? "确认中" : recording ? modeVerb(effectiveSelectedMode()) + "中" : "当前";
         TextView badge = text(badgeText, 11, recording ? Color.WHITE : ink, Typeface.BOLD);
         badge.setPadding(dp(10), dp(3), dp(10), dp(3));
-        badge.setBackground(roundRect(recording ? theme.danger : onInk, 12));
+        badge.setBackground(roundRect(recording ? theme.danger : onInk, 10));
         top.addView(badge);
         card.addView(top);
 
@@ -1342,7 +1383,7 @@ public final class MainActivity extends Activity {
         if (selected && shared && !device.sharedGroup) {
             TextView join = text("加入共享组", 13, ink, Typeface.BOLD);
             join.setGravity(Gravity.CENTER);
-            join.setBackground(theme.pressable(this, onInk, theme.mix(onInk, ink, 0.15f), 20));
+            join.setBackground(theme.pressable(this, onInk, theme.mix(onInk, ink, 0.15f), 14));
             join.setContentDescription("把这台电脑加入共享组");
             join.setOnClickListener(view -> toggleSharedGroupFromCard(device));
             card.addView(join, margins(0, dp(12), 0, 0, -1, dp(40)));
@@ -1355,7 +1396,7 @@ public final class MainActivity extends Activity {
         } else if (selected) {
             EngineMode[] modes = activeTypelessModes();
             if (activeManagedDictationSupported() && modes.length > 1) {
-                card.addView(engineModeTabs(modes), margins(0, dp(12), 0, 0, -1, dp(44)));
+                card.addView(engineModeTabs(modes), margins(0, dp(12), 0, 0, -1, dp(42)));
             }
         }
         card.setContentDescription(device.slot + "号电脑 " + device.displayName + "，" + state
@@ -1378,7 +1419,7 @@ public final class MainActivity extends Activity {
         String selected = effectiveSelectedMode();
         LinearLayout tabs = new LinearLayout(this);
         tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
-        tabs.setBackground(roundRect(theme.mix(ink, onInk, 0.14f), 22));
+        tabs.setBackground(roundRect(theme.mix(ink, onInk, 0.16f), 12));
         for (int i = 0; i < modes.length; i++) {
             EngineMode mode = modes[i];
             boolean on = mode.id.equals(selected);
@@ -1388,8 +1429,8 @@ public final class MainActivity extends Activity {
             tab.setTextSize(13);
             tab.setTypeface(Typeface.DEFAULT, on ? Typeface.BOLD : Typeface.NORMAL);
             tab.setTextColor(on ? ink : onInk);
-            tab.setBackground(on ? roundRect(onInk, 18) : theme.pressable(this, Color.TRANSPARENT,
-                    theme.mix(ink, onInk, 0.25f), 18));
+            tab.setBackground(on ? roundRect(onInk, 10) : theme.pressable(this, Color.TRANSPARENT,
+                    theme.mix(ink, onInk, 0.25f), 10));
             tab.setAlpha(locked && !on ? 0.45f : 1f);
             tab.setContentDescription(mode.label + (on ? "，已选中" : "") + (locked ? "，说话时不能更换" : ""));
             tab.setOnClickListener(view -> {
@@ -1417,8 +1458,8 @@ public final class MainActivity extends Activity {
         boolean busy = isVoiceInteractionBusy();
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        card.setBackground(theme.pressable(this, theme.background, theme.surfaceRaised, 24, 1, theme.outline));
+        card.setPadding(dp(18), dp(15), dp(18), dp(15));
+        card.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 16, 1, theme.outline));
         card.setAlpha(online && !busy ? 1f : 0.6f);
         card.addView(new DeckIconView(this, "macos".equalsIgnoreCase(device.platform) ? "laptop" : "devices", theme.muted),
                 new LinearLayout.LayoutParams(dp(22), dp(22)));
@@ -1521,56 +1562,143 @@ public final class MainActivity extends Activity {
         return card;
     }
 
-    // ---------- 常用：配置里排在前面的 4 个按键（不含指令栏已有的回车、退格） ----------
+    // ---------- 常用快捷指令区（4 列桌面图标风格：点按发送，长按拖动调序，编辑可点 × 删除或新增） ----------
 
     private View buildQuickRow() {
-        LinearLayout row = new LinearLayout(this);
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("常用快捷指令", 14, theme.text, Typeface.BOLD);
+        headerRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        Button addBtn = smallButton("＋ 新增");
+        addBtn.setTextSize(12);
+        addBtn.setTextColor(theme.primary);
+        addBtn.setBackground(theme.pressable(this, theme.surface, theme.outline, 14, 1, theme.outline));
+        addBtn.setPadding(dp(10), 0, dp(10), 0);
+        addBtn.setOnClickListener(view -> startActivity(new Intent(this, ShortcutEditActivity.class)));
+        headerRow.addView(addBtn, margins(0, 0, dp(6), 0, -2, dp(32)));
+
+        homeEditButton = smallButton(gridEditMode ? "完成" : "编辑");
+        homeEditButton.setTextSize(12);
+        homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
+        homeEditButton.setBackground(theme.pressable(this,
+                gridEditMode ? theme.primary : theme.surface, theme.outline, 14, 1, theme.outline));
+        homeEditButton.setPadding(dp(10), 0, dp(10), 0);
+        homeEditButton.setOnClickListener(view -> toggleGridEditMode());
+        headerRow.addView(homeEditButton, margins(0, 0, dp(6), 0, -2, dp(32)));
+
+        Button allBtn = smallButton("全部");
+        allBtn.setTextSize(12);
+        allBtn.setTextColor(theme.muted);
+        allBtn.setBackground(theme.pressable(this, theme.surface, theme.outline, 14, 1, theme.outline));
+        allBtn.setPadding(dp(10), 0, dp(10), 0);
+        allBtn.setOnClickListener(view -> showShortcutPanel());
+        headerRow.addView(allBtn, new LinearLayout.LayoutParams(-2, dp(32)));
+
+        section.addView(headerRow, new LinearLayout.LayoutParams(-1, -2));
+
+        homeShortcutSubtitle = text(
+                gridEditMode ? "✎ 拖动图标调序 · 点右上角 × 删除 · 点击图标改键" : "点按发送 · 长按图标像手机桌面一样拖动排序",
+                11, gridEditMode ? theme.warning : theme.muted, Typeface.NORMAL);
+        homeShortcutSubtitle.setSingleLine(true);
+        homeShortcutSubtitle.setEllipsize(TextUtils.TruncateAt.END);
+        section.addView(homeShortcutSubtitle, margins(0, dp(3), 0, 0, -1, -2));
+
+        homeShortcutGrid = new GridLayout(this);
+        homeShortcutGrid.setColumnCount(4);
+        homeShortcutGrid.setUseDefaultMargins(false);
+        section.addView(homeShortcutGrid, margins(dp(-3), dp(5), dp(-3), 0, -1, -2));
+
+        refreshHomeShortcuts();
+        return section;
+    }
+
+    private void refreshHomeShortcuts() {
+        if (homeShortcutGrid == null || configRepository == null) {
+            return;
+        }
+        homeShortcutGrid.removeAllViews();
         java.util.List<ShortcutButtonConfig> picks = new java.util.ArrayList<>();
         try {
             for (ShortcutButtonConfig config : configRepository.load()) {
-                if (picks.size() == 4) break;
-                if (!config.visible || config.isTextAction()
-                        || "enter".equals(config.id) || "backspace".equals(config.id)) continue;
+                if (picks.size() == 8) break;
+                boolean isSlash = config.isTextAction() && config.text != null
+                        && config.text.trim().startsWith("/");
+                if (!config.visible || isSlash
+                        || "enter".equals(config.id) || "backspace".equals(config.id)) {
+                    continue;
+                }
                 picks.add(config);
             }
         } catch (Exception ignored) {
-            // 配置损坏时不显示常用行。
+            // 配置损坏时保留添加入口。
         }
-        row.setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
-        for (int i = 0; i < picks.size(); i++) {
-            ShortcutButtonConfig config = picks.get(i);
-            LinearLayout tile = new LinearLayout(this);
-            tile.setOrientation(LinearLayout.VERTICAL);
-            tile.setGravity(Gravity.CENTER);
-            tile.setPadding(dp(4), dp(8), dp(4), dp(8));
-            tile.setBackground(theme.pressable(this, theme.surfaceRaised, theme.outline, 16));
-            TextView label = text(config.label, 14, theme.text, Typeface.BOLD);
-            label.setGravity(Gravity.CENTER);
-            label.setSingleLine(true);
-            label.setEllipsize(TextUtils.TruncateAt.END);
-            tile.addView(label, new LinearLayout.LayoutParams(-1, -2));
-            String chord = config.subtitle().replace(" + ", "+").replace("Backspace", "⌫");
-            TextView keys = text(chord, 11, theme.muted, Typeface.NORMAL);
-            keys.setGravity(Gravity.CENTER);
-            keys.setSingleLine(true);
-            keys.setEllipsize(TextUtils.TruncateAt.END);
-            tile.addView(keys, margins(0, dp(2), 0, 0, -1, -2));
-            tile.setContentDescription(config.label + "，" + config.subtitle() + "，长按查看全部快捷键");
-            tile.setFocusable(true);
-            tile.setOnClickListener(view -> triggerShortcut(view, config));
-            tile.setOnLongClickListener(view -> {
-                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                showShortcutPanel();
-                return true;
-            });
-            installTouchFeedback(tile);
-            row.addView(tile, margins(i == 0 ? 0 : dp(8), 0, 0, 0, 0, dp(60)));
-            ((LinearLayout.LayoutParams) tile.getLayoutParams()).weight = 1f;
+        for (ShortcutButtonConfig config : picks) {
+            addHomeKey(homeShortcutGrid, config);
         }
-        return row;
+        if (picks.size() < 8) {
+            addPlusTile(homeShortcutGrid, true);
+        }
     }
 
-    // ---------- 指令栏 ----------
+    private void addHomeKey(GridLayout grid, ShortcutButtonConfig config) {
+        ShortcutKeyView button = new ShortcutKeyView(this, theme, config, true);
+        button.setTag(config.id);
+        button.setContentDescription(config.label + "，" + config.subtitle()
+                + "。点按发送，长按拖动排序或编辑删除");
+        button.setEditMode(gridEditMode, () -> removeShortcutWithUndo(config));
+        button.setOnClickListener(view -> {
+            if (gridEditMode) {
+                openButtonEditor(config.id);
+            } else {
+                triggerShortcut(button, config);
+            }
+        });
+        button.setOnDragListener((view, event) -> handleGridDrag(view, event));
+        TouchFeedback.installHoldable(button, this::stopKeyRepeat,
+                () -> onGridButtonHeld(button, config),
+                () -> startDragFromRepeat(button, config));
+
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = dp(Math.round(56 * Math.max(1f,
+                getResources().getConfiguration().fontScale)));
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(dp(3), dp(3), dp(3), dp(3));
+        grid.addView(button, params);
+    }
+
+    private void addPlusTile(GridLayout grid, boolean compact) {
+        LinearLayout add = new LinearLayout(this);
+        add.setOrientation(LinearLayout.VERTICAL);
+        add.setGravity(Gravity.CENTER);
+        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, compact ? 16 : 18);
+        dashed.setStroke(dp(1), theme.outline, dp(5), dp(4));
+        add.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
+        TextView plus = text("＋", compact ? 18 : 22, theme.primary, Typeface.BOLD);
+        plus.setGravity(Gravity.CENTER);
+        add.addView(plus);
+        TextView label = text("添加指令", compact ? 11 : 12, theme.muted, Typeface.NORMAL);
+        label.setGravity(Gravity.CENTER);
+        add.addView(label, marginTop(dp(1)));
+        add.setContentDescription("添加自定义快捷指令");
+        add.setOnClickListener(view -> startActivity(new Intent(this, ShortcutEditActivity.class)));
+        installTouchFeedback(add);
+
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = dp(Math.round((compact ? 62 : 88) * Math.max(1f,
+                getResources().getConfiguration().fontScale)));
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(dp(compact ? 3 : 4), dp(compact ? 3 : 4), dp(compact ? 3 : 4), dp(compact ? 3 : 4));
+        grid.addView(add, params);
+    }
+
+    // ---------- 指令栏（支持点按发送、长按拖动排序、编辑删除与一键新增 /指令） ----------
 
     private java.util.List<ShortcutButtonConfig> slashCommands() {
         java.util.List<ShortcutButtonConfig> commands = new java.util.ArrayList<>();
@@ -1601,41 +1729,28 @@ public final class MainActivity extends Activity {
         return button;
     }
 
-    /// 底部指令栏：“/”打开全部指令，中间横向滑动常用 /指令，右侧固定退格与回车。
+    /// 底部指令栏：“/”打开全部指令，中间横向滑动常用 /指令（可长按拖动调序、新增），右侧固定退格与回车。
     private View buildCommandBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(4), dp(4), dp(4), dp(4));
-        bar.setBackground(roundRect(theme.surfaceRaised, 28));
+        bar.setBackground(theme.shape(this, theme.surface, 16, 1, theme.outline));
         Button all = smallButton("/");
         all.setTextSize(18);
         all.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         all.setTextColor(theme.onPrimary);
-        all.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 24));
-        all.setContentDescription("全部指令");
+        all.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 12));
+        all.setContentDescription("全部斜杠指令与管理");
         all.setOnClickListener(view -> showCommandSheet());
         installTouchFeedback(all);
-        bar.addView(all, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        bar.addView(all, new LinearLayout.LayoutParams(dp(44), dp(44)));
         HorizontalScrollView chipsScroll = new HorizontalScrollView(this);
         chipsScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout chips = new LinearLayout(this);
-        chips.setGravity(Gravity.CENTER_VERTICAL);
-        chips.setPadding(dp(6), 0, dp(6), 0);
-        for (ShortcutButtonConfig config : slashCommands()) {
-            Button chip = smallButton(config.text.trim());
-            chip.setAllCaps(false);
-            chip.setSingleLine(true);
-            chip.setTextSize(13);
-            chip.setTypeface(Typeface.MONOSPACE);
-            chip.setTextColor(theme.text);
-            chip.setBackground(theme.pressable(this, theme.background, theme.outline, 20));
-            chip.setPadding(dp(12), 0, dp(12), 0);
-            chip.setContentDescription(config.label + "，发送 " + config.text.trim());
-            chip.setOnClickListener(view -> triggerShortcut(chip, config));
-            installTouchFeedback(chip);
-            chips.addView(chip, margins(0, 0, dp(6), 0, -2, dp(40)));
-        }
-        chipsScroll.addView(chips);
+        commandChipsContainer = new LinearLayout(this);
+        commandChipsContainer.setGravity(Gravity.CENTER_VERTICAL);
+        commandChipsContainer.setPadding(dp(6), 0, dp(6), 0);
+        refreshCommandBar();
+        chipsScroll.addView(commandChipsContainer);
         bar.addView(chipsScroll, new LinearLayout.LayoutParams(0, -2, 1f));
         View divider = new View(this);
         divider.setBackgroundColor(theme.outline);
@@ -1647,11 +1762,77 @@ public final class MainActivity extends Activity {
             triggerDeleteAll(backspace);
             return true;
         });
-        bar.addView(backspace, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        bar.addView(backspace, new LinearLayout.LayoutParams(dp(46), dp(44)));
         Button enter = iconKey(R.drawable.ic_enter, "回车");
         enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
-        bar.addView(enter, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        bar.addView(enter, new LinearLayout.LayoutParams(dp(46), dp(44)));
         return bar;
+    }
+
+    private void refreshCommandBar() {
+        if (commandChipsContainer == null || configRepository == null) {
+            return;
+        }
+        commandChipsContainer.removeAllViews();
+        for (ShortcutButtonConfig config : slashCommands()) {
+            FrameLayout chipWrap = new FrameLayout(this);
+            chipWrap.setTag(config.id);
+            chipWrap.setOnDragListener((view, event) -> handleGridDrag(view, event));
+
+            Button chip = smallButton(config.text.trim());
+            chip.setAllCaps(false);
+            chip.setSingleLine(true);
+            chip.setTextSize(13);
+            chip.setTypeface(Typeface.MONOSPACE);
+            chip.setTextColor(theme.body);
+            chip.setBackground(theme.pressable(this, theme.background, theme.outline, 12));
+            chip.setPadding(dp(12), 0, dp(gridEditMode ? 22 : 12), 0);
+            chip.setContentDescription(config.label + "，发送 " + config.text.trim() + "，长按拖动调序");
+            chip.setOnClickListener(view -> {
+                if (gridEditMode) {
+                    openButtonEditor(config.id);
+                } else {
+                    triggerShortcut(chip, config);
+                }
+            });
+            TouchFeedback.installHoldable(chip, null, () -> {
+                chip.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                enableEditModeInPlace();
+                startGridButtonDrag(chipWrap, config);
+            }, null);
+            chipWrap.addView(chip, new FrameLayout.LayoutParams(-2, dp(38)));
+
+            if (gridEditMode) {
+                TextView badge = text("×", 11, Color.WHITE, Typeface.BOLD);
+                badge.setGravity(Gravity.CENTER);
+                badge.setBackground(roundRect(theme.danger, 10));
+                badge.setContentDescription("删除指令 " + config.label);
+                badge.setOnClickListener(view -> removeShortcutWithUndo(config));
+                FrameLayout.LayoutParams badgeParams = new FrameLayout.LayoutParams(dp(18), dp(18));
+                badgeParams.gravity = Gravity.TOP | Gravity.END;
+                badgeParams.topMargin = dp(2);
+                badgeParams.rightMargin = dp(2);
+                chipWrap.addView(badge, badgeParams);
+            }
+
+            commandChipsContainer.addView(chipWrap, margins(0, 0, dp(6), 0, -2, dp(38)));
+        }
+
+        Button addSlash = smallButton("＋ 指令");
+        addSlash.setAllCaps(false);
+        addSlash.setSingleLine(true);
+        addSlash.setTextSize(12);
+        addSlash.setTextColor(theme.primary);
+        addSlash.setBackground(theme.pressable(this, theme.background, theme.outline, 12));
+        addSlash.setPadding(dp(10), 0, dp(10), 0);
+        addSlash.setContentDescription("新增斜杠指令");
+        addSlash.setOnClickListener(view -> {
+            Intent intent = new Intent(this, ShortcutEditActivity.class);
+            intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
+            startActivity(intent);
+        });
+        installTouchFeedback(addSlash);
+        commandChipsContainer.addView(addSlash, new LinearLayout.LayoutParams(-2, dp(38)));
     }
 
     private void showCommandSheet() {
@@ -1662,16 +1843,20 @@ public final class MainActivity extends Activity {
             labels[i] = commands.get(i).text.trim() + "    " + commands.get(i).label
                     + (commands.get(i).submitText ? "" : "（只输入）");
         }
-        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle("指令 · 输入到 " + target);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle("斜杠指令 · 输入到 " + target);
         if (commands.isEmpty()) {
-            builder.setMessage("还没有 /指令。可在“编辑指令”里新建文字按钮，内容以 / 开头即可出现在这里。");
+            builder.setMessage("还没有 /指令。点击「＋ 新增 /指令」即可一键添加常用斜杠指令。");
         } else {
             builder.setItems(labels, (dialog, which) -> triggerShortcut(computerCarousel != null
                     ? computerCarousel : typelessButton, commands.get(which)));
         }
-        builder.setPositiveButton("编辑指令", (dialog, which) ->
+        builder.setPositiveButton("＋ 新增 /指令", (dialog, which) -> {
+                    Intent intent = new Intent(this, ShortcutEditActivity.class);
+                    intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
+                    startActivity(intent);
+                })
+                .setNeutralButton("排序与管理", (dialog, which) ->
                         startActivity(new Intent(this, ShortcutSettingsActivity.class)))
-                .setNeutralButton("全部快捷键", (dialog, which) -> showShortcutPanel())
                 .setNegativeButton("关闭", null).show();
     }
 
@@ -1791,10 +1976,11 @@ public final class MainActivity extends Activity {
             }
             inputModes.setGroupCheckable(2, true, true);
         }
-        menu.getMenu().add(1, 1, 1, "全部快捷键");
-        menu.getMenu().add(1, 3, 2, "管理电脑");
-        menu.getMenu().add(1, 4, 3, "首页样式 · " + homeStyle.title);
-        menu.getMenu().add(1, 2, 4, "设置");
+        menu.getMenu().add(1, 1, 1, "全部快捷指令面板");
+        menu.getMenu().add(1, 5, 2, "快捷键与布局管理");
+        menu.getMenu().add(1, 3, 3, "管理电脑");
+        menu.getMenu().add(1, 4, 4, "首页样式 · " + homeStyle.title);
+        menu.getMenu().add(1, 2, 5, "设置");
         menu.setOnMenuItemClickListener(item -> {
             if (item.getGroupId() == 2) {
                 if (isVoiceInteractionBusy()) return true;
@@ -1804,6 +1990,7 @@ public final class MainActivity extends Activity {
                 updateVoiceControls();
                 TouchFeedback.selection(anchor);
             } else if (item.getItemId() == 1) showShortcutPanel();
+            else if (item.getItemId() == 5) startActivity(new Intent(this, ShortcutSettingsActivity.class));
             else if (item.getItemId() == 3) showManageComputersDialog();
             else if (item.getItemId() == 4) showHomeStylePicker(anchor);
             else if (item.getItemId() == 2) startActivity(new Intent(this, SettingsActivity.class));
@@ -1845,35 +2032,48 @@ public final class MainActivity extends Activity {
         if (shortcutScroll.getParent() instanceof android.view.ViewGroup) {
             ((android.view.ViewGroup) shortcutScroll.getParent()).removeView(shortcutScroll);
         }
+        refreshShortcutGrid();
         shortcutDialog = new android.app.Dialog(this);
         shortcutDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(0, dp(12), 0, dp(8));
-        shortcutPanelFeedback = text("发送到当前电脑", 12, theme.muted, Typeface.NORMAL);
+        shortcutPanelFeedback = text("点按发送 · 长按任意图标可拖动排序或点 × 删除", 12, theme.muted, Typeface.NORMAL);
         shortcutPanelFeedback.setPadding(dp(20), dp(8), dp(20), dp(8));
         shortcutPanelFeedback.setMaxLines(3);
         shortcutPanelFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        shortcutPanelFeedback.setOnClickListener(view -> tryUndoRemoveShortcut());
         panel.addView(shortcutPanelFeedback);
         panel.addView(shortcutScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout bottomRow = new LinearLayout(this);
+        bottomRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button manageAll = smallButton("列表管理 / 恢复默认");
+        manageAll.setTextColor(theme.body);
+        manageAll.setBackground(theme.pressable(this, theme.background, theme.outline, 14, 1, theme.outline));
+        manageAll.setOnClickListener(view -> {
+            shortcutDialog.dismiss();
+            startActivity(new Intent(this, ShortcutSettingsActivity.class));
+        });
+        bottomRow.addView(manageAll, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button close = smallButton("返回语音");
+        close.setTextColor(theme.onPrimary);
+        close.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 14));
         close.setOnClickListener(view -> shortcutDialog.dismiss());
-        panel.addView(close, margins(dp(16), dp(8), dp(16), 0,
+        bottomRow.addView(close, margins(dp(8), 0, 0, 0, 0, dp(48)));
+        ((LinearLayout.LayoutParams) close.getLayoutParams()).weight = 1f;
+        panel.addView(bottomRow, margins(dp(16), dp(8), dp(16), 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
         shortcutDialog.setContentView(panel);
         shortcutDialog.setCanceledOnTouchOutside(true);
-        shortcutDialog.setOnDismissListener(dialog -> {
-            stopKeyRepeat();
-            if (gridEditMode) toggleGridEditMode();
-        });
+        shortcutDialog.setOnDismissListener(dialog -> stopKeyRepeat());
         shortcutDialog.show();
         android.view.Window window = shortcutDialog.getWindow();
         if (window != null) {
             window.setGravity(Gravity.BOTTOM);
-            window.setBackgroundDrawable(theme.shape(this, theme.background, 24));
+            theme.applySheetGlass(this, window, 20);
             window.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                    getResources().getDisplayMetrics().heightPixels * 78 / 100);
+                    getResources().getDisplayMetrics().heightPixels * 82 / 100);
         }
     }
 
@@ -1893,7 +2093,17 @@ public final class MainActivity extends Activity {
         triggerShortcut(source, GOAL_FALLBACK);
     }
 
+    private void refreshAllShortcutViews() {
+        refreshShortcutGrid();
+        refreshHomeShortcuts();
+        refreshCommandBar();
+        syncEditModeChrome();
+    }
+
     private void refreshShortcutGrid() {
+        if (shortcutGrid == null || configRepository == null) {
+            return;
+        }
         shortcutGrid.removeAllViews();
         try {
             for (ShortcutButtonConfig config : configRepository.load()) {
@@ -1901,6 +2111,7 @@ public final class MainActivity extends Activity {
                     addKey(shortcutGrid, config);
                 }
             }
+            addPlusTile(shortcutGrid, false);
             if (actionFeedback != null) {
                 String recoveryNotice = configRepository.consumeRecoveryNotice();
                 if (recoveryNotice != null) {
@@ -1915,7 +2126,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addKey(GridLayout grid, ShortcutButtonConfig config) {
-        ShortcutKeyView button = new ShortcutKeyView(this, theme, config);
+        ShortcutKeyView button = new ShortcutKeyView(this, theme, config, false);
         boolean deleteAllOnLongPress = isBackspaceKey(config);
         boolean repeatable = isRepeatableKey(config);
         button.setTag(config.id);
@@ -1925,6 +2136,7 @@ public final class MainActivity extends Activity {
                 : repeatable
                 ? "。点按发送一次，长按连续发送，按住后滑动可直接拖动调位"
                 : "。点按发送，长按拖动调换位置"));
+        button.setEditMode(gridEditMode, () -> removeShortcutWithUndo(config));
         button.setOnClickListener(view -> {
             if (gridEditMode) {
                 openButtonEditor(config.id);
@@ -1933,9 +2145,6 @@ public final class MainActivity extends Activity {
             }
         });
         button.setOnDragListener((view, event) -> handleGridDrag(view, event));
-        if (gridEditMode) {
-            button.setAlpha(0.78f);
-        }
         // 手势自管：系统长按遇微动即取消并退化为滚动，改为自行计时（见 TouchFeedback.installHoldable）。
         TouchFeedback.installHoldable(button, this::stopKeyRepeat,
                 () -> onGridButtonHeld(button, config),
@@ -1950,7 +2159,7 @@ public final class MainActivity extends Activity {
         grid.addView(button, params);
     }
 
-    /// 面板按钮按住到点：退格全删、连发键连发、其余直接浮起进入拖动调位。
+    /// 按钮按住到点：退格全删、连发键连发、其余直接像手机桌面图标一样进入编辑并浮起拖动调位。
     private void onGridButtonHeld(ShortcutKeyView button, ShortcutButtonConfig config) {
         android.util.Log.d("PhoneDeckDrag", "held " + config.id + " edit=" + gridEditMode);
         button.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
@@ -1962,6 +2171,7 @@ public final class MainActivity extends Activity {
             startKeyRepeat(button, config);
             return;
         }
+        enableEditModeInPlace();
         startGridButtonDrag(button, config);
     }
 
@@ -1981,34 +2191,80 @@ public final class MainActivity extends Activity {
         }
         stopKeyRepeat();
         source.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        enableEditModeInPlace();
         startGridButtonDrag(source, config);
+    }
+
+    /// 长按启动拖动时原地开启编辑态（显示 × 角标），不重建当前正在被拖动的 View。
+    private void enableEditModeInPlace() {
+        if (gridEditMode) {
+            return;
+        }
+        gridEditMode = true;
+        syncEditModeChrome();
+        updateExistingKeysEditMode();
+        refreshCommandBar();
+    }
+
+    private void updateExistingKeysEditMode() {
+        java.util.Map<String, ShortcutButtonConfig> map = new java.util.HashMap<>();
+        try {
+            for (ShortcutButtonConfig config : configRepository.load()) {
+                map.put(config.id, config);
+            }
+        } catch (Exception ignored) {
+        }
+        for (GridLayout grid : new GridLayout[]{homeShortcutGrid, shortcutGrid}) {
+            if (grid == null) continue;
+            for (int i = 0; i < grid.getChildCount(); i++) {
+                View child = grid.getChildAt(i);
+                if (child instanceof ShortcutKeyView && child.getTag() instanceof String) {
+                    ShortcutButtonConfig cfg = map.get((String) child.getTag());
+                    if (cfg != null) {
+                        ((ShortcutKeyView) child).setEditMode(gridEditMode, () -> removeShortcutWithUndo(cfg));
+                    }
+                }
+            }
+        }
+    }
+
+    private void syncEditModeChrome() {
+        if (gridEditButton != null) {
+            gridEditButton.setText(gridEditMode ? "完成" : "编辑/删除");
+            gridEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
+            gridEditButton.setBackground(theme.pressable(this,
+                    gridEditMode ? theme.primary : theme.surface, theme.primaryPressed, 14, 1, theme.outline));
+        }
+        if (homeEditButton != null) {
+            homeEditButton.setText(gridEditMode ? "完成" : "编辑");
+            homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
+            homeEditButton.setBackground(theme.pressable(this,
+                    gridEditMode ? theme.primary : theme.surface, theme.outline, 14, 1, theme.outline));
+        }
+        if (homeShortcutSubtitle != null) {
+            homeShortcutSubtitle.setText(gridEditMode
+                    ? "✎ 拖动调序 · 点 × 删除 · 点图标改键"
+                    : "长按似手机桌面拖动排序 · 点编辑可增删");
+            homeShortcutSubtitle.setTextColor(gridEditMode ? theme.warning : theme.muted);
+        }
+        if (shortcutHintText != null) {
+            shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
+        }
+        if (shortcutNormalHintText != null) {
+            shortcutNormalHintText.setVisibility(gridEditMode ? View.GONE : View.VISIBLE);
+        }
     }
 
     private void toggleGridEditMode() {
         gridEditMode = !gridEditMode;
         stopKeyRepeat();
         if (gridEditButton != null) {
-            gridEditButton.setText(gridEditMode ? "完成" : "编辑布局");
             performResultHaptic(gridEditButton, true);
         }
-        if (shortcutHintText != null) {
-            shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
-            shortcutHintText.setText(gridEditMode
-                    ? "点击按钮编辑 · 长按拖动调换位置"
-                    : "发送到当前电脑 · 编辑可调整按钮与顺序");
-        }
-        if (shortcutNormalHintText != null) {
-            shortcutNormalHintText.setVisibility(gridEditMode ? View.GONE : View.VISIBLE);
-        }
-        if (shortcutGrid != null) {
-            for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
-                View child = shortcutGrid.getChildAt(i);
-                child.setAlpha(gridEditMode ? 0.78f : 1f);
-            }
-        }
+        refreshAllShortcutViews();
         showActionFeedback(gridEditMode
-                ? "✎  编辑模式：点击按钮编辑，长按拖动调位置"
-                : "●  已退出编辑模式", gridEditMode ? theme.warning : theme.muted);
+                ? "✎  编辑模式：点右上角 × 可删除，点击图标可改键，长按可拖动排序"
+                : "●  已完成快捷指令编辑", gridEditMode ? theme.warning : theme.muted);
     }
 
     private boolean handleGridDrag(View target, DragEvent event) {
@@ -2018,15 +2274,21 @@ public final class MainActivity extends Activity {
         }
         if (event.getAction() == DragEvent.ACTION_DRAG_ENTERED) {
             target.setAlpha(0.45f);
+            target.setScaleX(0.95f);
+            target.setScaleY(0.95f);
             return true;
         }
         if (event.getAction() == DragEvent.ACTION_DRAG_EXITED
                 || event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
-            target.setAlpha(gridEditMode ? 0.78f : 1f);
+            target.setAlpha(1f);
+            target.setScaleX(1f);
+            target.setScaleY(1f);
             return true;
         }
         if (event.getAction() == DragEvent.ACTION_DROP) {
-            target.setAlpha(gridEditMode ? 0.78f : 1f);
+            target.setAlpha(1f);
+            target.setScaleX(1f);
+            target.setScaleY(1f);
             if (event.getClipData() == null || event.getClipData().getItemCount() == 0) {
                 return false;
             }
@@ -2039,30 +2301,48 @@ public final class MainActivity extends Activity {
     }
 
     private void swapGridButtons(String sourceId, String targetId) {
-        if (sourceId.equals(targetId)) {
+        if (sourceId == null || targetId == null || sourceId.equals(targetId)) {
             return;
         }
         try {
-            java.util.ArrayList<ShortcutButtonConfig> buttons = configRepository.load();
-            int sourceIndex = -1;
-            int targetIndex = -1;
-            for (int i = 0; i < buttons.size(); i++) {
-                if (buttons.get(i).id.equals(sourceId)) {
-                    sourceIndex = i;
-                }
-                if (buttons.get(i).id.equals(targetId)) {
-                    targetIndex = i;
-                }
+            if (configRepository.moveToSlot(sourceId, targetId)) {
+                refreshAllShortcutViews();
+                showActionFeedback("✓  已调整指令顺序", theme.success);
             }
-            if (sourceIndex < 0 || targetIndex < 0) {
-                return;
-            }
-            java.util.Collections.swap(buttons, sourceIndex, targetIndex);
-            configRepository.save(buttons);
-            refreshShortcutGrid();
-            showActionFeedback("✓  已调换位置", theme.success);
         } catch (Exception exception) {
             showActionFeedback("✕  保存按钮顺序失败", theme.danger);
+        }
+    }
+
+    private void removeShortcutWithUndo(ShortcutButtonConfig config) {
+        try {
+            java.util.ArrayList<ShortcutButtonConfig> snapshot = configRepository.removeOrHide(config.id);
+            if (snapshot == null) {
+                return;
+            }
+            lastRemovedSnapshot = snapshot;
+            mainHandler.removeCallbacks(clearUndoSnapshot);
+            mainHandler.postDelayed(clearUndoSnapshot, 6_000);
+            refreshAllShortcutViews();
+            String actionLabel = config.builtIn ? "已隐藏" : "已删除";
+            showActionFeedback("✓  " + actionLabel + "「" + config.label + "」 · 点此撤销", theme.warning);
+        } catch (Exception exception) {
+            showActionFeedback("✕  删除快捷指令失败", theme.danger);
+        }
+    }
+
+    private void tryUndoRemoveShortcut() {
+        if (lastRemovedSnapshot == null) {
+            return;
+        }
+        try {
+            configRepository.save(lastRemovedSnapshot);
+            lastRemovedSnapshot = null;
+            mainHandler.removeCallbacks(clearUndoSnapshot);
+            refreshAllShortcutViews();
+            showActionFeedback("✓  已恢复刚才移除的指令", theme.success);
+        } catch (Exception exception) {
+            showActionFeedback("✕  撤销失败", theme.danger);
         }
     }
 

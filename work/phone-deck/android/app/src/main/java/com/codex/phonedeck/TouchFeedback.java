@@ -191,7 +191,7 @@ final class TouchFeedback {
         control.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
-                press(view, 0.95f, hapticOnPress);
+                press(view, 0.96f, hapticOnPress);
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 release(view);
                 if (onRelease != null) onRelease.run();
@@ -201,13 +201,85 @@ final class TouchFeedback {
         });
     }
 
+    /**
+     * 苹果风格左侧边缘右滑返回手势：从屏幕左边缘 32dp 内向右滑动时跟手微移，
+     * 超过阈值触发触觉反馈并执行 onBack，未达阈值平滑回弹。
+     */
+    static View wrapEdgeSwipeBack(android.content.Context context, View content, Runnable onBack) {
+        final float edgeZone = PhoneDeckTheme.dp(context, 32);
+        final float commitDistance = PhoneDeckTheme.dp(context, 72);
+        final float slop = ViewConfiguration.get(context).getScaledTouchSlop();
+        return new android.widget.FrameLayout(context) {
+            private float downX;
+            private float downY;
+            private boolean trackingEdge;
+            private boolean swiping;
+
+            {
+                addView(content, new LayoutParams(
+                        LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+            }
+
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent ev) {
+                int action = ev.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    downX = ev.getX();
+                    downY = ev.getY();
+                    trackingEdge = downX <= edgeZone;
+                    swiping = false;
+                } else if (action == MotionEvent.ACTION_MOVE && trackingEdge && !swiping) {
+                    float dx = ev.getX() - downX;
+                    float dy = Math.abs(ev.getY() - downY);
+                    if (dx > slop && dx > dy * 1.25f) {
+                        swiping = true;
+                        return true;
+                    } else if (dy > slop * 1.5f) {
+                        trackingEdge = false;
+                    }
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    trackingEdge = false;
+                    swiping = false;
+                }
+                return super.onInterceptTouchEvent(ev);
+            }
+
+            @Override
+            @SuppressLint("ClickableViewAccessibility")
+            public boolean onTouchEvent(MotionEvent ev) {
+                if (!swiping) {
+                    return super.onTouchEvent(ev);
+                }
+                int action = ev.getActionMasked();
+                if (action == MotionEvent.ACTION_MOVE) {
+                    float dx = Math.max(0f, ev.getX() - downX);
+                    content.setTranslationX(dx * 0.42f);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    float dx = ev.getX() - downX;
+                    trackingEdge = false;
+                    swiping = false;
+                    content.animate().translationX(0f).setDuration(160)
+                            .setInterpolator(new DecelerateInterpolator()).start();
+                    if (action == MotionEvent.ACTION_UP && dx >= commitDistance && onBack != null) {
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                        onBack.run();
+                    }
+                    return true;
+                }
+                return true;
+            }
+        };
+    }
+
     static void press(View view, float scale, boolean haptic) {
         view.animate().cancel();
         view.animate().withEndAction(null);
         view.setTranslationX(0);
         view.setAlpha(view.isEnabled() ? 1f : 0.45f);
         if (ValueAnimator.areAnimatorsEnabled()) {
-            view.animate().scaleX(scale).scaleY(scale).setDuration(85)
+            view.animate().scaleX(scale).scaleY(scale).setDuration(80)
                     .setInterpolator(new DecelerateInterpolator()).start();
         } else {
             view.setScaleX(1f);
@@ -226,8 +298,8 @@ final class TouchFeedback {
             view.setScaleY(1f);
             return;
         }
-        view.animate().scaleX(1f).scaleY(1f).setDuration(210)
-                .setInterpolator(new OvershootInterpolator(1.1f)).start();
+        view.animate().scaleX(1f).scaleY(1f).setDuration(200)
+                .setInterpolator(new OvershootInterpolator(1.08f)).start();
     }
 
     static void selection(View view) {

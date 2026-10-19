@@ -117,8 +117,61 @@ final class ShortcutConfigRepository {
         ArrayList<ShortcutButtonConfig> current = load();
         int sortIndex = current.stream().mapToInt(value -> value.sortIndex).max().orElse(-1) + 1;
         return new ShortcutButtonConfig(
-                "custom-" + UUID.randomUUID(), "新按钮", "", "blue", true,
-                sortIndex, false, Arrays.asList("F1"), 45, System.currentTimeMillis());
+                "custom-" + UUID.randomUUID(), "复制", "", "blue", true,
+                sortIndex, false, Arrays.asList("CTRL", "C"), 45, System.currentTimeMillis());
+    }
+
+    ShortcutButtonConfig newSlashButton() {
+        ArrayList<ShortcutButtonConfig> current = load();
+        int sortIndex = current.stream().mapToInt(value -> value.sortIndex).max().orElse(-1) + 1;
+        return ShortcutButtonConfig.textAction(
+                "custom-" + UUID.randomUUID(), "规划", "blue", true,
+                sortIndex, false, "/plan", true, System.currentTimeMillis());
+    }
+
+    /// 像手机桌面拖动 App 图标一样插入调序：将 sourceId 移到 targetId 所在槽位，中间图标自动顺移。
+    synchronized boolean moveToSlot(String sourceId, String targetId) {
+        if (sourceId == null || targetId == null || sourceId.equals(targetId)) {
+            return false;
+        }
+        ArrayList<ShortcutButtonConfig> buttons = load();
+        int sourceIndex = -1;
+        int targetIndex = -1;
+        for (int i = 0; i < buttons.size(); i++) {
+            String id = buttons.get(i).id;
+            if (id.equals(sourceId)) sourceIndex = i;
+            if (id.equals(targetId)) targetIndex = i;
+        }
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) {
+            return false;
+        }
+        ShortcutButtonConfig moving = buttons.remove(sourceIndex);
+        buttons.add(targetIndex, moving);
+        save(buttons);
+        return true;
+    }
+
+    /// 移除一个快捷指令：自定义按钮直接删除，内置按钮设为隐藏；返回修改前快照以便一键撤销。
+    synchronized ArrayList<ShortcutButtonConfig> removeOrHide(String id) {
+        if (id == null) return null;
+        ArrayList<ShortcutButtonConfig> before = load();
+        ArrayList<ShortcutButtonConfig> snapshot = copyList(before);
+        boolean changed = false;
+        for (int i = 0; i < before.size(); i++) {
+            ShortcutButtonConfig item = before.get(i);
+            if (!item.id.equals(id)) continue;
+            if (item.builtIn) {
+                item.visible = false;
+                item.updatedAt = System.currentTimeMillis();
+            } else {
+                before.remove(i);
+            }
+            changed = true;
+            break;
+        }
+        if (!changed) return null;
+        save(before);
+        return snapshot;
     }
 
     private static JSONObject toRootJson(List<ShortcutButtonConfig> buttons) throws Exception {
@@ -242,14 +295,18 @@ final class ShortcutConfigRepository {
         addDefault(values, "paste", "粘贴", "green", "CTRL", "V");
         addDefault(values, "cut", "剪切", "orange", "CTRL", "X");
         addDefault(values, "undo", "撤销", "slate", "CTRL", "Z");
-        addDefault(values, "redo", "重做", "slate", "CTRL", "Y");
         addDefault(values, "selectAll", "全选", "purple", "CTRL", "A");
         addDefault(values, "save", "保存", "green", "CTRL", "S");
+        addDefault(values, "delete", "删除", "slate", "DELETE");
         addDefault(values, "altTab", "切换窗口", "purple", "ALT", "TAB");
+        addDefault(values, "redo", "重做", "slate", "CTRL", "Y");
         addDefault(values, "screenshot", "截图", "blue", "WIN", "SHIFT", "S");
+        addDefaultText(values, "slashPlan", "规划", "blue", "/plan", true);
+        addDefaultText(values, "slashGoal", "目标", "green", "/goal", true);
+        addDefaultText(values, "slashCompact", "压缩", "purple", "/compact", true);
+        addDefaultText(values, "slashClear", "清空", "orange", "/clear", true);
         addDefault(values, "enter", "回车", "green", "ENTER");
         addDefault(values, "backspace", "退格", "slate", "BACKSPACE");
-        addDefault(values, "delete", "删除", "slate", "DELETE");
         addDefault(values, "escape", "退出", "red", "ESC");
         addDefault(values, "switchInputMethod", "切换输入法", "purple", "WIN", "SPACE");
         addDefault(values, "volumeDown", "音量 −", "slate", "VOLUMEDOWN");
@@ -276,6 +333,7 @@ final class ShortcutConfigRepository {
     /// 本次新引入的内置按钮：合并进已保存的配置，让升级设备直接拿到。
     private static final List<String> INTRODUCED_BUILTIN_IDS = Arrays.asList(
             "delete",
+            "slashPlan", "slashGoal", "slashCompact", "slashClear",
             "wordLeft", "wordRight", "lineStart", "lineEnd", "docStart", "docEnd",
             "deleteWordLeft", "deleteWordRight");
 
@@ -342,5 +400,16 @@ final class ShortcutConfigRepository {
         target.add(new ShortcutButtonConfig(
                 id, label, "", color, true, target.size(), true,
                 Arrays.asList(keys), 45, 0));
+    }
+
+    private static void addDefaultText(
+            ArrayList<ShortcutButtonConfig> target,
+            String id,
+            String label,
+            String color,
+            String text,
+            boolean submitText) {
+        target.add(ShortcutButtonConfig.textAction(
+                id, label, color, true, target.size(), true, text, submitText, 0));
     }
 }
