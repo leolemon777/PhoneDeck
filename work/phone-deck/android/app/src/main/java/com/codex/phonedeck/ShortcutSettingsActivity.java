@@ -18,6 +18,9 @@ import android.widget.Toast;
 import java.util.ArrayList;
 
 public final class ShortcutSettingsActivity extends Activity {
+    private static final int REQUEST_EXPORT_CONFIG = 41;
+    private static final int REQUEST_IMPORT_CONFIG = 42;
+
     private ShortcutConfigRepository repository;
     private PhoneDeckTheme theme;
     private LinearLayout list;
@@ -36,6 +39,48 @@ public final class ShortcutSettingsActivity extends Activity {
         super.onResume();
         if (list != null) {
             refreshList();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        android.net.Uri uri = data.getData();
+        if (requestCode == REQUEST_EXPORT_CONFIG) {
+            String json = repository.exportJson();
+            if (json == null) {
+                showError("导出失败：本地还没有配置文件");
+                return;
+            }
+            try (java.io.OutputStream output = getContentResolver().openOutputStream(uri)) {
+                if (output == null) {
+                    throw new IllegalStateException("无法打开目标文件");
+                }
+                output.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Toast.makeText(this, "配置已导出", Toast.LENGTH_SHORT).show();
+            } catch (Exception exception) {
+                showError("导出失败：" + exception.getMessage());
+            }
+        } else if (requestCode == REQUEST_IMPORT_CONFIG) {
+            try (java.io.InputStream input = getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                byte[] chunk = new byte[8192];
+                int read;
+                while ((read = input.read(chunk)) > 0) {
+                    buffer.write(chunk, 0, read);
+                }
+                if (repository.importJson(buffer.toString("UTF-8"))) {
+                    Toast.makeText(this, "配置已导入并生效", Toast.LENGTH_SHORT).show();
+                    refreshList();
+                } else {
+                    showError("导入失败：文件无效，原配置未改动");
+                }
+            } catch (Exception exception) {
+                showError("导入失败：" + exception.getMessage());
+            }
         }
     }
 
@@ -61,7 +106,8 @@ public final class ShortcutSettingsActivity extends Activity {
         header.addView(title, titleParams);
         page.addView(header);
 
-        TextView hint = text("点击左侧排序图标可上移或下移；长按卡片可拖动。内置按钮可隐藏，自定义按钮可删除。",
+        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；点卡片可编辑按键、名称与指令；"
+                        + "内置按钮可隐藏，自定义按钮可删除；底部可导入导出整套配置。",
                 13, theme.muted, Typeface.NORMAL);
         hint.setLineSpacing(0, 1.15f);
         page.addView(hint, topMargin(dp(18)));
@@ -81,6 +127,34 @@ public final class ShortcutSettingsActivity extends Activity {
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         page.addView(list, topMargin(dp(12)));
+
+        LinearLayout transferRow = new LinearLayout(this);
+        transferRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button exportButton = button("导出配置", theme.surface, theme.text);
+        exportButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "phonedeck-shortcuts.json");
+            startActivityForResult(intent, REQUEST_EXPORT_CONFIG);
+        });
+        transferRow.addView(exportButton, new LinearLayout.LayoutParams(
+                0, dp(48), 1f));
+        Button importButton = button("导入配置", theme.surface, theme.text);
+        importButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                    new String[]{"application/json", "text/*"});
+            startActivityForResult(intent, REQUEST_IMPORT_CONFIG);
+        });
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(
+                0, dp(48), 1f);
+        importParams.leftMargin = dp(10);
+        transferRow.addView(importButton, importParams);
+        page.addView(transferRow, topMargin(dp(14)));
+
         refreshList();
         return theme.wrapContent(this, scroll);
     }
@@ -105,12 +179,14 @@ public final class ShortcutSettingsActivity extends Activity {
         row.setBackground(theme.shape(this, theme.surface, 15, 1, theme.outline));
         row.setTag(config.id);
         row.setContentDescription(config.label + "，" + config.subtitle()
-                + (config.visible ? "，已显示" : "，已隐藏"));
+                + (config.visible ? "，已显示" : "，已隐藏")
+                + "。点按编辑，长按拖动调顺序");
 
         TextView drag = text("☰", 20, theme.muted, Typeface.BOLD);
         drag.setGravity(Gravity.CENTER);
-        drag.setContentDescription("调整" + config.label + "的顺序");
+        drag.setContentDescription("拖动调整" + config.label + "的顺序，点按可上移或下移");
         drag.setOnClickListener(view -> showReorderDialog(config.id, index, total));
+        TouchFeedback.installDragHandle(drag, () -> startRowDrag(row, config));
         row.addView(drag, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout copy = new LinearLayout(this);
@@ -120,7 +196,6 @@ public final class ShortcutSettingsActivity extends Activity {
         copy.addView(title);
         copy.addView(text(config.subtitle() + (config.visible ? "" : "  ·  已隐藏"),
                 12, theme.muted, Typeface.NORMAL));
-        copy.setOnClickListener(view -> openEditor(config.id));
         row.addView(copy, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -135,13 +210,18 @@ public final class ShortcutSettingsActivity extends Activity {
         editParams.leftMargin = dp(8);
         row.addView(edit, editParams);
 
-        row.setOnLongClickListener(view -> {
-            ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
-            view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
-            return true;
-        });
+        // 点卡片主体 = 编辑；长按（自管计时，抗手指微动）= 浮起拖动调位。
+        row.setOnClickListener(view -> openEditor(config.id));
+        TouchFeedback.installHoldable(row, null,
+                () -> startRowDrag(row, config), null);
         row.setOnDragListener((view, event) -> handleDrag(view, event));
         return row;
+    }
+
+    private void startRowDrag(View row, ShortcutButtonConfig config) {
+        ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
+        row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        row.startDragAndDrop(data, new View.DragShadowBuilder(row), null, 0);
     }
 
     private boolean handleDrag(View target, DragEvent event) {

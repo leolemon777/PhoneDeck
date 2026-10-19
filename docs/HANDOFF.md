@@ -17,14 +17,22 @@
   （ScrollView）拦截，竖向移动保持面板正常滚动；未按住即松手仍为点按发送。落点换位沿用既有
   `handleGridDrag`/`swapGridButtons`，编辑模式行为不变；另加 adb 调试入口
   `am start --ez open_shortcut_panel true` 直开面板。
+- **「快捷键与布局」成为集中管理入口**（同分支追加）：用户要求在该界面直接长按拖动并把全部自定义操作集中到一处。
+  `ShortcutSettingsActivity` 卡片行改用 `TouchFeedback.installHoldable`（与面板同款抗微动手势，长按浮起拖动、
+  插入式换位沿用 `moveBefore`）；左侧 ☰ 改为 `installDragHandle` 拖动把手（按下即锁定事件流，滑动或按满即拖，
+  点按仍保留上移/下移对话框作精确/无障碍后备）；点卡片主体直接进编辑器（原文字区点击归并到行）；新增
+  「导出配置 / 导入配置」（与 SettingsActivity 同款 SAF 逻辑，导入成功即刷新）；编辑器文本指令标签由
+  「AI Agent 文本指令」改为「文本指令（以 / 开头会进入首页指令栏）」。MainActivity 调试入口增加
+  `open_shortcut_settings` extra。
 - **验证**：本机（Windows，`E:\Android` 的 JDK17/SDK）`:app:assembleDebug`、`:app:testDebugUnitTest` 46/46、
   `:app:lintDebug` 全部通过。**已装到作者 Samsung 真机**：因旧版为 Mac 调试签名，卸载前用 `run-as` 备份应用数据
   （留档 `工作区/artifacts/phonedeck-backup-2026-10-18.tgz`），重装（本机签名）后恢复，配对保留并完成「升级为独立凭据」；
   补授附近设备与麦克风权限；旧配置迁移后真机读回验证：19 按钮（无 agent、含删除）。第二版覆盖安装后真机读回验证：
-  27 按钮（8 个快速编辑键已合并）。**拖拽已真机自动化验证**（logcat + 配置读回）：按住后拖动换位、一气呵成横扫
-  中途浮起拖动、连发滑出转拖动、竖向滚动不破坏、单击发送不破坏、退格按住全删且滑动不误拖，共 6 项全过
+  27 按钮（8 个快速编辑键已合并）。**拖拽已真机自动化验证**（logcat + 配置读回）：面板按住后拖动换位、一气呵成横扫
+  中途浮起拖动、连发滑出转拖动、竖向滚动不破坏、单击发送不破坏、退格按住全删且滑动不误拖，共 6 项全过；
+  设置页卡片长按拖动插入换位、☰ 一次滑动即拖、点卡片打开编辑器、底部导入导出按钮存在，共 4 项全过
   （测试期间向电脑发送过少量真实按键：Ctrl+S/Ctrl+X/DELETE/一次全删）。**未在真机验证**：Goal 回退发送路径、
-  人手指感（抖动/边缘情形）。
+  人手指感（抖动/边缘情形）、设置页导入导出的实际文件往返。
 - **待办**：真机走查长按连发与 Goal 回退；版本号未动（Android 仍 dev.22/code28），正式发布前需按
   `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程；注意真机现为本机签名，
   后续安装 Mac 签名的官方包需再次备份恢复或统一签名。

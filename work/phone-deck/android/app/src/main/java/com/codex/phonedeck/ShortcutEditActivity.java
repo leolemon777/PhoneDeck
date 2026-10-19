@@ -258,8 +258,8 @@ public final class ShortcutEditActivity extends Activity {
         macroAddStepButton = null;
         actionContainer.removeAllViews();
         if (draft.isTextAction()) {
-            actionContainer.addView(label("AI Agent 文本指令"), topMargin(dp(16)));
-            textInput = input("例如：/plan");
+            actionContainer.addView(label("文本指令（以 / 开头会进入首页指令栏）"), topMargin(dp(16)));
+            textInput = input("例如：/plan（斜杠指令）或任意文本");
             textInput.setText(draft.text == null ? "" : draft.text);
             actionContainer.addView(textInput, fieldParams());
             submitSwitch = new Switch(this);

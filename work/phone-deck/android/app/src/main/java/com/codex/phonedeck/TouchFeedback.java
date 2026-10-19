@@ -104,6 +104,64 @@ final class TouchFeedback {
         }
     }
 
+    /**
+     * 拖动把手（如列表行的 ☰）：按下即锁定事件流（把手区域不参与父容器滚动），
+     * 手指滑出 slop 或按满时长任一先到即回调 onDragStart；未拖动就松手仍走 performClick。
+     */
+    @SuppressLint("ClickableViewAccessibility") // 手势自管；UP 时显式 performClick。
+    static void installDragHandle(View control, Runnable onDragStart) {
+        control.setSoundEffectsEnabled(true);
+        control.setHapticFeedbackEnabled(true);
+        float slop = ViewConfiguration.get(control.getContext()).getScaledTouchSlop();
+        long holdTimeout = ViewConfiguration.getLongPressTimeout();
+        float[] down = new float[2];
+        boolean[] started = new boolean[1];
+        boolean[] finished = new boolean[1];
+        Runnable[] timer = new Runnable[1];
+        control.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
+                press(view, 0.95f, true);
+                down[0] = event.getX();
+                down[1] = event.getY();
+                started[0] = false;
+                finished[0] = false;
+                disallowIntercept(view);
+                Runnable tick = () -> {
+                    if (finished[0] || started[0]) {
+                        return;
+                    }
+                    started[0] = true;
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    if (onDragStart != null) onDragStart.run();
+                };
+                timer[0] = tick;
+                view.postDelayed(tick, holdTimeout);
+            } else if (action == MotionEvent.ACTION_MOVE
+                    && !started[0]
+                    && (Math.abs(event.getX() - down[0]) > slop
+                    || Math.abs(event.getY() - down[1]) > slop)) {
+                started[0] = true;
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                if (onDragStart != null) onDragStart.run();
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                finished[0] = true;
+                if (timer[0] != null) {
+                    view.removeCallbacks(timer[0]);
+                }
+                float dx = event.getX() - down[0];
+                float dy = event.getY() - down[1];
+                boolean dragged = started[0];
+                release(view);
+                if (action == MotionEvent.ACTION_UP && !dragged && view.isEnabled()
+                        && Math.abs(dx) <= slop && Math.abs(dy) <= slop) {
+                    view.performClick();
+                }
+            }
+            return true;
+        });
+    }
+
     @SuppressLint("ClickableViewAccessibility") // Always returns false; native onTouchEvent owns performClick.
     static void install(View control, Runnable onRelease, boolean hapticOnPress) {
         control.setSoundEffectsEnabled(true);

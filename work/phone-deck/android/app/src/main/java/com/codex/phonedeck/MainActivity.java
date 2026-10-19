@@ -463,10 +463,14 @@ public final class MainActivity extends Activity {
         super.onResume();
         PhoneDeckHttp.appInForeground = true;
         mainHandler.post(nearbyScan);
-        // 调试/自动化入口：adb 启动时带 open_shortcut_panel=true 直接打开快捷键面板。
+        // 调试/自动化入口：adb 启动时带 open_shortcut_panel=true 直接打开快捷键面板，
+        // 或 open_shortcut_settings=true 直接打开「快捷键与布局」管理页。
         if (getIntent().getBooleanExtra("open_shortcut_panel", false)) {
             getIntent().removeExtra("open_shortcut_panel");
             mainHandler.postDelayed(this::showShortcutPanel, 600);
+        } else if (getIntent().getBooleanExtra("open_shortcut_settings", false)) {
+            getIntent().removeExtra("open_shortcut_settings");
+            startActivity(new android.content.Intent(this, ShortcutSettingsActivity.class));
         }
         PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
         if (!latestTheme.id.equals(appliedThemeId)) {
