@@ -106,6 +106,52 @@ public sealed class MacAudioTests
     }
 
     [TestMethod]
+    public async Task StalledSharedStreamReleasesReceiverForManagedDictation()
+    {
+        // 回归：手机休眠/断网后共享长流成为半开连接，接收端永久被占，所有听写 409。
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory, stallTimeoutMs: 200);
+        var stalledSource = new ChannelStream();
+        var shared = Guid.NewGuid().ToString();
+        var sharedEnded = false;
+        var stalled = bridge.StreamAsync(stalledSource, shared, AudioStreamMode.Shared,
+            (_, _) => sharedEnded = true, CancellationToken.None);
+        Assert.IsTrue(bridge.WaitForSessionActive(shared, 1_000));
+        stalledSource.Push([0x78, 0x56]);
+
+        await Assert.ThrowsExactlyAsync<AudioStreamStalledException>(() => stalled);
+        Assert.IsTrue(sharedEnded);
+        Assert.IsFalse(bridge.IsStreaming);
+
+        var managedSource = new ChannelStream();
+        var managed = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(managedSource, managed, AudioStreamMode.Managed,
+            (_, _) => { }, CancellationToken.None);
+        Assert.IsTrue(bridge.WaitForSessionActive(managed, 1_000));
+        managedSource.Complete();
+        await streaming;
+    }
+
+    [TestMethod]
+    public async Task SteadyAudioIsNotTreatedAsStall()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory, stallTimeoutMs: 300);
+        var source = new ChannelStream();
+        var session = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(source, session, AudioStreamMode.Shared,
+            (_, _) => { }, CancellationToken.None);
+        for (var i = 0; i < 10; i++)
+        {
+            source.Push([0x00, 0x00]);
+            await Task.Delay(100);
+        }
+        Assert.IsTrue(bridge.IsStreaming, "每 100 ms 有数据时累计超过阈值也不能断流");
+        source.Complete();
+        await streaming;
+    }
+
+    [TestMethod]
     public async Task EndOfStreamKeepsOutputAndOwnershipUntilTailHasDrained()
     {
         var drained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

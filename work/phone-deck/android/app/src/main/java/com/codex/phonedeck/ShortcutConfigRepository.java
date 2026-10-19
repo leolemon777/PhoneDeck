@@ -58,7 +58,7 @@ final class ShortcutConfigRepository {
             }
             values.sort(Comparator.comparingInt(value -> value.sortIndex));
             validateAndNormalize(values);
-            if (mergeAgentDefaults(values)) {
+            if (migrateBuiltinButtons(values)) {
                 save(values);
             }
             return values;
@@ -117,8 +117,61 @@ final class ShortcutConfigRepository {
         ArrayList<ShortcutButtonConfig> current = load();
         int sortIndex = current.stream().mapToInt(value -> value.sortIndex).max().orElse(-1) + 1;
         return new ShortcutButtonConfig(
-                "custom-" + UUID.randomUUID(), "新按钮", "", "blue", true,
-                sortIndex, false, Arrays.asList("F1"), 45, System.currentTimeMillis());
+                "custom-" + UUID.randomUUID(), "复制", "", "blue", true,
+                sortIndex, false, Arrays.asList("CTRL", "C"), 45, System.currentTimeMillis());
+    }
+
+    ShortcutButtonConfig newSlashButton() {
+        ArrayList<ShortcutButtonConfig> current = load();
+        int sortIndex = current.stream().mapToInt(value -> value.sortIndex).max().orElse(-1) + 1;
+        return ShortcutButtonConfig.textAction(
+                "custom-" + UUID.randomUUID(), "规划", "blue", true,
+                sortIndex, false, "/plan", true, System.currentTimeMillis());
+    }
+
+    /// 像手机桌面拖动 App 图标一样插入调序：将 sourceId 移到 targetId 所在槽位，中间图标自动顺移。
+    synchronized boolean moveToSlot(String sourceId, String targetId) {
+        if (sourceId == null || targetId == null || sourceId.equals(targetId)) {
+            return false;
+        }
+        ArrayList<ShortcutButtonConfig> buttons = load();
+        int sourceIndex = -1;
+        int targetIndex = -1;
+        for (int i = 0; i < buttons.size(); i++) {
+            String id = buttons.get(i).id;
+            if (id.equals(sourceId)) sourceIndex = i;
+            if (id.equals(targetId)) targetIndex = i;
+        }
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) {
+            return false;
+        }
+        ShortcutButtonConfig moving = buttons.remove(sourceIndex);
+        buttons.add(targetIndex, moving);
+        save(buttons);
+        return true;
+    }
+
+    /// 移除一个快捷指令：自定义按钮直接删除，内置按钮设为隐藏；返回修改前快照以便一键撤销。
+    synchronized ArrayList<ShortcutButtonConfig> removeOrHide(String id) {
+        if (id == null) return null;
+        ArrayList<ShortcutButtonConfig> before = load();
+        ArrayList<ShortcutButtonConfig> snapshot = copyList(before);
+        boolean changed = false;
+        for (int i = 0; i < before.size(); i++) {
+            ShortcutButtonConfig item = before.get(i);
+            if (!item.id.equals(id)) continue;
+            if (item.builtIn) {
+                item.visible = false;
+                item.updatedAt = System.currentTimeMillis();
+            } else {
+                before.remove(i);
+            }
+            changed = true;
+            break;
+        }
+        if (!changed) return null;
+        save(before);
+        return snapshot;
     }
 
     private static JSONObject toRootJson(List<ShortcutButtonConfig> buttons) throws Exception {
@@ -238,16 +291,20 @@ final class ShortcutConfigRepository {
 
     private static ArrayList<ShortcutButtonConfig> defaults() {
         ArrayList<ShortcutButtonConfig> values = new ArrayList<>();
-        addAgentDefaults(values);
         addDefault(values, "copy", "复制", "blue", "CTRL", "C");
         addDefault(values, "paste", "粘贴", "green", "CTRL", "V");
         addDefault(values, "cut", "剪切", "orange", "CTRL", "X");
         addDefault(values, "undo", "撤销", "slate", "CTRL", "Z");
-        addDefault(values, "redo", "重做", "slate", "CTRL", "Y");
         addDefault(values, "selectAll", "全选", "purple", "CTRL", "A");
         addDefault(values, "save", "保存", "green", "CTRL", "S");
+        addDefault(values, "delete", "删除", "slate", "DELETE");
         addDefault(values, "altTab", "切换窗口", "purple", "ALT", "TAB");
+        addDefault(values, "redo", "重做", "slate", "CTRL", "Y");
         addDefault(values, "screenshot", "截图", "blue", "WIN", "SHIFT", "S");
+        addDefaultText(values, "slashPlan", "规划", "blue", "/plan", true);
+        addDefaultText(values, "slashGoal", "目标", "green", "/goal", true);
+        addDefaultText(values, "slashCompact", "压缩", "purple", "/compact", true);
+        addDefaultText(values, "slashClear", "清空", "orange", "/clear", true);
         addDefault(values, "enter", "回车", "green", "ENTER");
         addDefault(values, "backspace", "退格", "slate", "BACKSPACE");
         addDefault(values, "escape", "退出", "red", "ESC");
@@ -257,21 +314,38 @@ final class ShortcutConfigRepository {
         addDefault(values, "volumeUp", "音量 +", "blue", "VOLUMEUP");
         addDefault(values, "left", "向左", "slate", "LEFT");
         addDefault(values, "right", "向右", "slate", "RIGHT");
+        addDefault(values, "wordLeft", "按词左移", "slate", "CTRL", "LEFT");
+        addDefault(values, "wordRight", "按词右移", "slate", "CTRL", "RIGHT");
+        addDefault(values, "lineStart", "行首", "slate", "HOME");
+        addDefault(values, "lineEnd", "行尾", "slate", "END");
+        addDefault(values, "docStart", "文首", "slate", "CTRL", "HOME");
+        addDefault(values, "docEnd", "文末", "slate", "CTRL", "END");
+        addDefault(values, "deleteWordLeft", "删前词", "orange", "CTRL", "BACKSPACE");
+        addDefault(values, "deleteWordRight", "删后词", "orange", "CTRL", "DELETE");
         return values;
     }
 
-    private static boolean mergeAgentDefaults(ArrayList<ShortcutButtonConfig> values) {
-        ArrayList<ShortcutButtonConfig> agentDefaults = new ArrayList<>();
-        addAgentDefaults(agentDefaults);
+    /// 已停用的内置按钮：从旧配置中移除；用户仍可在编辑器里手动重建同样的动作。
+    private static final Set<String> RETIRED_BUILTIN_IDS = new HashSet<>(Arrays.asList(
+            "agentInterrupt", "agentPlan", "agentGoal", "agentCompact",
+            "agentClear", "agentAcceptAll", "agentRejectAll"));
+
+    /// 本次新引入的内置按钮：合并进已保存的配置，让升级设备直接拿到。
+    private static final List<String> INTRODUCED_BUILTIN_IDS = Arrays.asList(
+            "delete",
+            "slashPlan", "slashGoal", "slashCompact", "slashClear",
+            "wordLeft", "wordRight", "lineStart", "lineEnd", "docStart", "docEnd",
+            "deleteWordLeft", "deleteWordRight");
+
+    private static boolean migrateBuiltinButtons(ArrayList<ShortcutButtonConfig> values) {
+        boolean changed = values.removeIf(value -> RETIRED_BUILTIN_IDS.contains(value.id));
         Set<String> existingIds = new HashSet<>();
         for (ShortcutButtonConfig value : values) {
             existingIds.add(value.id);
         }
-        boolean changed = false;
-        for (int index = agentDefaults.size() - 1; index >= 0; index--) {
-            ShortcutButtonConfig value = agentDefaults.get(index);
-            if (existingIds.add(value.id)) {
-                values.add(0, value);
+        for (ShortcutButtonConfig builtin : defaults()) {
+            if (INTRODUCED_BUILTIN_IDS.contains(builtin.id) && existingIds.add(builtin.id)) {
+                values.add(builtin);
                 changed = true;
             }
         }
@@ -279,16 +353,6 @@ final class ShortcutConfigRepository {
             validateAndNormalize(values);
         }
         return changed;
-    }
-
-    private static void addAgentDefaults(ArrayList<ShortcutButtonConfig> target) {
-        addDefault(target, "agentInterrupt", "打断", "red", "ESC");
-        addTextDefault(target, "agentPlan", "规划", "purple", "/plan");
-        addTextDefault(target, "agentGoal", "目标", "blue", "/goal");
-        addTextDefault(target, "agentCompact", "压缩上下文", "green", "/compact");
-        addTextDefault(target, "agentClear", "新会话", "orange", "/clear");
-        addDefault(target, "agentAcceptAll", "接受全部", "green", "CTRL", "ENTER");
-        addDefault(target, "agentRejectAll", "拒绝全部", "red", "CTRL", "BACKSPACE");
     }
 
     /// 导出当前配置文件的原始 JSON；文件尚不存在时返回 null。
@@ -338,13 +402,14 @@ final class ShortcutConfigRepository {
                 Arrays.asList(keys), 45, 0));
     }
 
-    private static void addTextDefault(
+    private static void addDefaultText(
             ArrayList<ShortcutButtonConfig> target,
             String id,
             String label,
             String color,
-            String text) {
+            String text,
+            boolean submitText) {
         target.add(ShortcutButtonConfig.textAction(
-                id, label, color, true, target.size(), true, text, true, 0));
+                id, label, color, true, target.size(), true, text, submitText, 0));
     }
 }

@@ -113,62 +113,63 @@ public final class SettingsActivity extends Activity {
         pageHost.addView(rootPage, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
-        return theme.wrapContent(this, pageHost);
+        return theme.wrapContent(this,
+                TouchFeedback.wrapEdgeSwipeBack(this, pageHost, this::onBackPressed));
     }
 
     private View buildRootPage() {
         LinearLayout page = pageShell();
         addHeader(page, "设置", view -> finish());
 
-        page.addView(sectionLabel("使用偏好"), topMargin(dp(24)));
+        page.addView(sectionLabel("偏好设置"), topMargin(dp(26)));
 
         themeSummary = summaryText();
-        page.addView(navRow("appearance", "外观主题", themeSummary,
-                () -> pushPage(themePage, true)), fullWidthMargins(dp(8)));
+        page.addView(navRow("appearance", "外观与配色", themeSummary,
+                () -> pushPage(themePage, true)), fullWidthMargins(dp(10)));
 
         voiceSummary = summaryText();
         page.addView(navRow("voice", "语音输入", voiceSummary,
-                () -> pushPage(voicePage, true)), fullWidthMargins(dp(8)));
+                () -> pushPage(voicePage, true)), fullWidthMargins(dp(10)));
 
         shortcutSummary = summaryText();
-        page.addView(navRow("keys", "快捷键与布局", shortcutSummary,
-                () -> pushPage(shortcutsPage, true)), fullWidthMargins(dp(8)));
+        page.addView(navRow("keys", "快捷指令与布局", shortcutSummary,
+                () -> startActivity(new Intent(this, ShortcutSettingsActivity.class))), fullWidthMargins(dp(10)));
 
-        page.addView(sectionLabel("连接与维护"), topMargin(dp(24)));
+        page.addView(sectionLabel("连接与设备"), topMargin(dp(28)));
         computerSummary = summaryText();
         int computers = TargetDeviceManager.get(this).list().size();
         computerSummary.setText(getString(R.string.computer_settings_summary, computers));
         page.addView(navRow("devices", "多电脑配置", computerSummary,
-                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(8)));
-        page.addView(keepAliveRow(), fullWidthMargins(dp(8)));
+                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(10)));
+        page.addView(keepAliveRow(), fullWidthMargins(dp(10)));
         TextView syncSummary = summaryText(); syncSummary.setText("共享组内保持最终文字一致");
-        page.addView(navRow("devices", "同步文字", syncSummary,
-                () -> startActivity(new Intent(this, TranscriptSyncActivity.class))), fullWidthMargins(dp(8)));
+        page.addView(navRow("sync", "同步文字", syncSummary,
+                () -> startActivity(new Intent(this, TranscriptSyncActivity.class))), fullWidthMargins(dp(10)));
         TextView updateSummary = summaryText();
         updateSummary.setText("一次发起，逐台查看结果");
-        page.addView(navRow("↻", "设备更新", updateSummary,
-                () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(8)));
+        page.addView(navRow("update", "设备更新", updateSummary,
+                () -> startActivity(new Intent(this, FleetUpdateActivity.class))), fullWidthMargins(dp(10)));
         TextView privacy = text(getString(R.string.brand_name) + " · Yandu · 本地连接\n手机音频默认不保存；转写由电脑本地语音引擎或已选输入法处理。", 12, theme.muted, Typeface.NORMAL);
         privacy.setLineSpacing(dp(4), 1f);
-        page.addView(privacy, topMargin(dp(24)));
+        page.addView(privacy, topMargin(dp(28)));
         return wrapInScroll(page);
     }
 
     private View buildThemePage() {
         LinearLayout page = pageShell();
-        addHeader(page, "外观主题", view -> popPage());
+        addHeader(page, "外观与配色", view -> popPage());
 
         TextView hint = text(
-                "选一套喜欢的配色，立即应用到整个手机界面。主题跟随手机，每台电脑的配置独立保存。",
-                13, theme.muted, Typeface.NORMAL);
-        hint.setLineSpacing(0, 1.18f);
-        page.addView(hint, topMargin(dp(14)));
+                "遵循极简克制的设计规范：单品牌主色配通透底色，通过字重与留白区分信息层级。",
+                13, theme.body, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.2f);
+        page.addView(hint, topMargin(dp(16)));
 
         for (PhoneDeckTheme candidate : PhoneDeckTheme.all()) {
             if (PhoneDeckTheme.NATIVE_LIGHT.equals(candidate.id)) {
-                page.addView(sectionLabel("浅色"), topMargin(dp(20)));
+                page.addView(sectionLabel("浅色外观"), topMargin(dp(24)));
             } else if (PhoneDeckTheme.NATIVE_DARK.equals(candidate.id)) {
-                page.addView(sectionLabel("深色"), topMargin(dp(20)));
+                page.addView(sectionLabel("深色外观"), topMargin(dp(24)));
             }
             page.addView(themeOption(candidate), fullWidthMargins(dp(10)));
         }
@@ -180,7 +181,7 @@ public final class SettingsActivity extends Activity {
         addHeader(page, "语音输入", view -> popPage());
         TextView computerSummary = summaryText(); computerSummary.setText("逐台设置语音引擎与电脑快捷键");
         page.addView(navRow("devices", "多电脑配置", computerSummary,
-                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(12)));
+                () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(14)));
 
         managedOption = option("手机控制听写",
                 "手机按钮控制当前电脑的语音引擎（在「多电脑配置」调整），保留点击/按住操作", true);
@@ -192,28 +193,28 @@ public final class SettingsActivity extends Activity {
                 "手机持续向所有在线电脑供音；在每台电脑上用自己的快捷键触发语音软件", false);
         sharedCheck = (TextView) sharedOption.getChildAt(1);
         sharedOption.setOnClickListener(view -> selectWorkMode(WORK_SHARED));
-        page.addView(sharedOption, fullWidthMargins(dp(12)));
+        page.addView(sharedOption, fullWidthMargins(dp(10)));
 
         tapHoldSection = new LinearLayout(this);
         tapHoldSection.setOrientation(LinearLayout.VERTICAL);
 
-        TextView controlHeading = text("手机控制听写方式", 14, theme.muted, Typeface.BOLD);
-        tapHoldSection.addView(controlHeading, topMargin(dp(10)));
+        TextView controlHeading = text("手机控制听写方式", 13, theme.muted, Typeface.BOLD);
+        tapHoldSection.addView(controlHeading, topMargin(dp(24)));
 
         tapOption = option("点击说话", "点击主按钮开始，再点同一按钮停止", true);
         tapCheck = (TextView) tapOption.getChildAt(1);
         tapOption.setOnClickListener(view -> selectMode(MODE_TAP));
-        tapHoldSection.addView(tapOption, fullWidthMargins(dp(18)));
+        tapHoldSection.addView(tapOption, fullWidthMargins(dp(10)));
 
         holdOption = option("按住说话", "按下开始，松开后停止采音和听写", false);
         holdCheck = (TextView) holdOption.getChildAt(1);
         holdOption.setOnClickListener(view -> selectMode(MODE_HOLD));
-        tapHoldSection.addView(holdOption, fullWidthMargins(dp(12)));
+        tapHoldSection.addView(holdOption, fullWidthMargins(dp(10)));
 
         TextView tip = text("提示：点击模式适合长内容，使用同一个主按钮开始和停止；长按模式更适合短句。",
                 13, theme.muted, Typeface.NORMAL);
-        tip.setLineSpacing(0, 1.18f);
-        tip.setPadding(dp(14), dp(13), dp(14), dp(13));
+        tip.setLineSpacing(0, 1.2f);
+        tip.setPadding(dp(16), dp(14), dp(16), dp(14));
         tip.setBackground(roundRect(theme.surface, 14, 1, theme.outline));
         tapHoldSection.addView(tip, fullWidthMargins(dp(20)));
 
@@ -223,27 +224,26 @@ public final class SettingsActivity extends Activity {
 
     private View buildShortcutsPage() {
         LinearLayout page = pageShell();
-        addHeader(page, "快捷键与布局", view -> popPage());
+        addHeader(page, "快捷指令与布局", view -> popPage());
 
-        TextView hint = text("编辑手机上的按钮、按键、颜色和顺序；配置可导出为 JSON，在其他设备导入。",
-                13, theme.muted, Typeface.NORMAL);
-        hint.setLineSpacing(0, 1.18f);
-        page.addView(hint, topMargin(dp(14)));
+        TextView hint = text("管理手机上的快捷指令、斜杠指令与桌面顺序；配置可导出为 JSON，在其他设备导入。",
+                13, theme.body, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.2f);
+        page.addView(hint, topMargin(dp(16)));
 
         Button shortcuts = new Button(this);
-        shortcuts.setText("编辑按钮、按键、颜色和顺序  →");
+        shortcuts.setText("管理快捷指令与排序  →");
         shortcuts.setTextSize(15);
-        shortcuts.setTextColor(theme.text);
+        shortcuts.setTextColor(theme.onPrimary);
         shortcuts.setAllCaps(false);
-        shortcuts.setGravity(Gravity.CENTER_VERTICAL);
+        shortcuts.setGravity(Gravity.CENTER);
         shortcuts.setPadding(dp(18), 0, dp(18), 0);
-        shortcuts.setBackground(roundRect(
-                theme.feedbackSurface(theme.primary), 16, 1, theme.primary));
+        shortcuts.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 14));
         shortcuts.setOnClickListener(view ->
                 startActivity(new Intent(this, ShortcutSettingsActivity.class)));
         LinearLayout.LayoutParams shortcutParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(60));
-        shortcutParams.topMargin = dp(16);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
+        shortcutParams.topMargin = dp(18);
         page.addView(shortcuts, shortcutParams);
 
         LinearLayout transferRow = new LinearLayout(this);
@@ -380,19 +380,19 @@ public final class SettingsActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         Button back = new Button(this);
-        back.setText("←");
-        back.setTextSize(22);
-        back.setTextColor(theme.text);
+        back.setText("‹");
+        back.setTextSize(26);
+        back.setTextColor(theme.primary);
         back.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
         back.setContentDescription("返回");
-        back.setPadding(0, 0, 0, 0);
+        back.setPadding(0, 0, 0, dp(2));
         back.setOnClickListener(onBack);
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         TextView titleView = text(title, 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleParams.leftMargin = dp(13);
+        titleParams.leftMargin = dp(14);
         header.addView(titleView, titleParams);
 
         page.addView(header, new LinearLayout.LayoutParams(
@@ -402,23 +402,23 @@ public final class SettingsActivity extends Activity {
     private LinearLayout navRow(String glyph, String title, TextView summary, Runnable open) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(15), dp(14), dp(15));
-        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 20));
-        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        row.setPadding(dp(16), dp(15), dp(14), dp(15));
+        row.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(38), dp(38)));
         row.setFocusable(true);
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        copyParams.leftMargin = dp(13);
+        copyParams.leftMargin = dp(14);
         copy.addView(text(title, 16, theme.text, Typeface.BOLD));
         if (summary != null) {
             copy.addView(summary, topMargin(dp(3)));
         }
         row.addView(copy, copyParams);
 
-        TextView chevron = text("›", 22, theme.muted, Typeface.BOLD);
+        TextView chevron = text("›", 22, theme.muted, Typeface.NORMAL);
         chevron.setGravity(Gravity.CENTER);
         row.addView(chevron, new LinearLayout.LayoutParams(dp(24), dp(28)));
 
@@ -433,9 +433,9 @@ public final class SettingsActivity extends Activity {
     private LinearLayout iconTile(String glyph) {
         LinearLayout tile = new LinearLayout(this);
         tile.setGravity(Gravity.CENTER);
-        tile.setBackground(theme.shape(this, theme.primaryContainer, 13));
+        tile.setBackground(theme.shape(this, theme.primaryContainer, 10));
         tile.addView(new DeckIconView(this, glyph, theme.primary),
-                new LinearLayout.LayoutParams(dp(24), dp(24)));
+                new LinearLayout.LayoutParams(dp(22), dp(22)));
         return tile;
     }
 
@@ -444,23 +444,23 @@ public final class SettingsActivity extends Activity {
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(13), dp(14), dp(13));
-        row.setBackground(roundRect(theme.surface, 16, 1, theme.outline));
-        row.addView(iconTile("connection"), new LinearLayout.LayoutParams(dp(32), dp(32)));
+        row.setPadding(dp(16), dp(14), dp(16), dp(14));
+        row.setBackground(roundRect(theme.surface, 14, 0, 0));
+        row.addView(iconTile("connection"), new LinearLayout.LayoutParams(dp(38), dp(38)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        copyParams.leftMargin = dp(13);
+        copyParams.leftMargin = dp(14);
         row.addView(copy, copyParams);
 
         copy.addView(text("保持无线连接", 16, theme.text, Typeface.BOLD));
         TextView detail = text(
-                "运行期间保持 Wi-Fi 活跃，减少省电造成的断流。可能增加耗电。",
+                "运行期间保持 Wi-Fi 活跃，减少省电造成的断流。",
                 12, theme.muted, Typeface.NORMAL);
-        detail.setLineSpacing(0, 1.12f);
-        copy.addView(detail, topMargin(dp(4)));
+        detail.setLineSpacing(0, 1.15f);
+        copy.addView(detail, topMargin(dp(3)));
 
         Switch switchView = new Switch(this);
         switchView.setChecked(enabled);
@@ -477,7 +477,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private TextView sectionLabel(String label) {
-        return text(label, 12, theme.muted, Typeface.BOLD);
+        return text(label, 13, theme.muted, Typeface.BOLD);
     }
 
     private void refreshRootSummaries() {
@@ -491,7 +491,7 @@ public final class SettingsActivity extends Activity {
                 preferences.getString(PREF_VOICE_MODE, MODE_TAP));
         voiceSummary.setText(sharedSelected ? "共享麦克风"
                 : "手机控制 · " + (holdSelected ? "按住说话" : "点击说话"));
-        shortcutSummary.setText(repository.load().size() + " 个按钮");
+        shortcutSummary.setText(repository.load().size() + " 个快捷指令");
         computerSummary.setText(getString(R.string.computer_settings_summary,
                 TargetDeviceManager.get(this).list().size()));
     }
@@ -506,7 +506,7 @@ public final class SettingsActivity extends Activity {
     private LinearLayout pageShell() {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(20), dp(20), dp(24));
+        page.setPadding(dp(24), dp(22), dp(24), dp(32));
         page.setBackgroundColor(theme.contentBackground());
         return page;
     }
@@ -561,12 +561,10 @@ public final class SettingsActivity extends Activity {
         boolean sharedSelected = WORK_SHARED.equals(
                 preferences.getString(PREF_VOICE_WORK_MODE, WORK_MANAGED));
         managedOption.setBackground(roundRect(
-                sharedSelected ? theme.surface : theme.feedbackSurface(theme.primary),
-                18, sharedSelected ? 1 : 2,
+                theme.surface, 14, sharedSelected ? 0 : 2,
                 sharedSelected ? theme.outline : theme.primary));
         sharedOption.setBackground(roundRect(
-                sharedSelected ? theme.feedbackSurface(theme.primary) : theme.surface,
-                18, sharedSelected ? 2 : 1,
+                theme.surface, 14, sharedSelected ? 2 : 0,
                 sharedSelected ? theme.primary : theme.outline));
         managedCheck.setText(sharedSelected ? "○" : "✓");
         managedCheck.setTextColor(sharedSelected ? theme.muted : theme.primary);
@@ -576,12 +574,10 @@ public final class SettingsActivity extends Activity {
         boolean holdSelected = MODE_HOLD.equals(
                 preferences.getString(PREF_VOICE_MODE, MODE_TAP));
         tapOption.setBackground(roundRect(
-                holdSelected ? theme.surface : theme.feedbackSurface(theme.primary),
-                18, holdSelected ? 1 : 2,
+                theme.surface, 14, holdSelected ? 0 : 2,
                 holdSelected ? theme.outline : theme.primary));
         holdOption.setBackground(roundRect(
-                holdSelected ? theme.feedbackSurface(theme.primary) : theme.surface,
-                18, holdSelected ? 2 : 1,
+                theme.surface, 14, holdSelected ? 2 : 0,
                 holdSelected ? theme.primary : theme.outline));
         tapCheck.setText(holdSelected ? "○" : "✓");
         tapCheck.setTextColor(holdSelected ? theme.muted : theme.primary);
@@ -598,20 +594,19 @@ public final class SettingsActivity extends Activity {
         boolean selected = candidate.id.equals(theme.id);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), dp(12), dp(12), dp(12));
+        row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setBackground(roundRect(
-                selected ? theme.feedbackSurface(theme.primary) : theme.surface,
-                17, selected ? 2 : 1, selected ? theme.primary : theme.outline));
+                theme.surface, 14, selected ? 2 : 0, selected ? theme.primary : theme.outline));
         row.setContentDescription(candidate.name + "，" + candidate.description
                 + (selected ? "，当前主题" : ""));
 
         LinearLayout preview = new LinearLayout(this);
         preview.setOrientation(LinearLayout.VERTICAL);
         preview.setPadding(dp(7), dp(7), dp(7), dp(7));
-        preview.setBackground(candidate.shape(this, candidate.background, 12, 1,
+        preview.setBackground(candidate.shape(this, candidate.background, 10, 1,
                 candidate.outline));
         View primary = new View(this);
-        primary.setBackground(candidate.shape(this, candidate.primary, 6));
+        primary.setBackground(candidate.shape(this, candidate.primary, 5));
         preview.addView(primary, new LinearLayout.LayoutParams(dp(46), dp(13)));
         LinearLayout keys = new LinearLayout(this);
         LinearLayout.LayoutParams keysParams = new LinearLayout.LayoutParams(dp(46), dp(17));
@@ -619,8 +614,7 @@ public final class SettingsActivity extends Activity {
         preview.addView(keys, keysParams);
         for (int index = 0; index < 3; index++) {
             View key = new View(this);
-            key.setBackground(candidate.shape(this,
-                    index == 1 ? candidate.shortcutColor("green") : candidate.key, 5));
+            key.setBackground(candidate.shape(this, candidate.surface, 4, 1, candidate.outline));
             LinearLayout.LayoutParams keyParams = new LinearLayout.LayoutParams(0, dp(17), 1f);
             if (index > 0) {
                 keyParams.leftMargin = dp(3);
@@ -631,13 +625,13 @@ public final class SettingsActivity extends Activity {
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.addView(text(candidate.name, 15, theme.text, Typeface.BOLD));
+        copy.addView(text(candidate.name, 16, theme.text, Typeface.BOLD));
         TextView detail = text(candidate.description, 12, theme.muted, Typeface.NORMAL);
         detail.setMaxLines(2);
         copy.addView(detail, topMargin(dp(3)));
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        copyParams.leftMargin = dp(12);
+        copyParams.leftMargin = dp(14);
         row.addView(copy, copyParams);
 
         TextView check = text(selected ? "✓" : "○", 20,
@@ -672,10 +666,10 @@ public final class SettingsActivity extends Activity {
             if (!android.animation.ValueAnimator.areAnimatorsEnabled()) return false;
             if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN
                     && view.isEnabled()) {
-                view.animate().scaleX(0.985f).scaleY(0.985f).setDuration(55).start();
+                view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(65).start();
             } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
                     || event.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL) {
-                view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
+                view.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
             }
             return false;
         });
@@ -688,28 +682,29 @@ public final class SettingsActivity extends Activity {
         button.setTextColor(theme.text);
         button.setAllCaps(false);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(roundRect(theme.surfaceRaised, 16, 1, theme.outline));
+        button.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
         return button;
     }
 
     private LinearLayout option(String title, String detail, boolean tap) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(18), dp(17), dp(16), dp(17));
+        row.setPadding(dp(18), dp(16), dp(16), dp(16));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         row.addView(copy, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        copy.addView(text(title, 18, theme.text, Typeface.BOLD));
-        TextView detailText = text(detail, 13, theme.muted, Typeface.NORMAL);
-        detailText.setLineSpacing(0, 1.12f);
-        copy.addView(detailText, topMargin(dp(5)));
+        copy.addView(text(title, 16, theme.text, Typeface.BOLD));
+        TextView detailText = text(detail, 13, theme.body, Typeface.NORMAL);
+        detailText.setLineSpacing(0, 1.15f);
+        copy.addView(detailText, topMargin(dp(4)));
 
-        TextView check = text(tap ? "✓" : "○", 22, theme.primary, Typeface.BOLD);
+        TextView check = text(tap ? "✓" : "○", 20, theme.primary, Typeface.BOLD);
         check.setGravity(Gravity.CENTER);
-        row.addView(check, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        row.addView(check, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        installPressFeedback(row);
         return row;
     }
 

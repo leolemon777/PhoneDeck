@@ -42,6 +42,12 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     /// <summary>同一共享会话重连时等待旧连接让出的上限。</summary>
     internal const int TakeoverWaitMs = 2_000;
 
+    /// <summary>手机供音期间至少每 100 ms 写一次（暂停时写静音保活）。超过此时长无数据，
+    /// 视为半开连接（手机休眠、断网或进程被杀而 FIN 未到达），释放接收端，避免幽灵会话
+    /// 永久占用并让后续听写全部 409。</summary>
+    internal const int DefaultStallTimeoutMs = 5_000;
+    private readonly int stallTimeoutMs;
+
     internal PhoneAudioBridge()
         : this(source => new WasapiPhoneAudioPlayback(source),
             keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0")
@@ -50,10 +56,12 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     internal PhoneAudioBridge(
         Func<IWaveProvider, IPhoneAudioPlayback> createPlayback,
-        bool keepOutputWarm = false)
+        bool keepOutputWarm = false,
+        int stallTimeoutMs = DefaultStallTimeoutMs)
     {
         this.createPlayback = createPlayback;
         this.keepOutputWarm = keepOutputWarm;
+        this.stallTimeoutMs = stallTimeoutMs;
         if (keepOutputWarm)
         {
             idleReaper = new Timer(_ => ReleaseIdleOutput(), null, 30_000, 30_000);
@@ -401,13 +409,18 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             var carry = 0;
             long totalBytes = 0;
             var firstBytesLogged = false;
+            var stalled = false;
+            using var stall = CancellationTokenSource.CreateLinkedTokenSource(
+                sessionCancellation.Token);
             try
             {
                 while (true)
                 {
+                    // 每次读取重新计时：只有持续 stallTimeoutMs 收不到任何字节才判定断流。
+                    stall.CancelAfter(stallTimeoutMs);
                     var read = await input.ReadAsync(
                         bytes.AsMemory(carry, bytes.Length - carry),
-                        sessionCancellation.Token);
+                        stall.Token);
                     if (read == 0)
                     {
                         break;
@@ -451,6 +464,13 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                     }
                 }
 
+            }
+            catch (OperationCanceledException)
+                when (stall.IsCancellationRequested && !sessionCancellation.IsCancellationRequested)
+            {
+                stalled = true;
+                Console.Error.WriteLine(
+                    $"[audio:{sessionId}] {stallTimeoutMs}ms 未收到手机音频，判定连接已断开；排空已收到的 PCM 后释放接收端");
             }
             catch (OperationCanceledException)
             {
@@ -510,6 +530,10 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
                 $"bytes={totalBytes} droppedStaleBytes={stream.Provider.DroppedBytes} " +
                 $"skippedSilenceBytes={stream.Provider.SkippedSilenceBytes}");
+            if (stalled)
+            {
+                throw new AudioStreamStalledException("手机音频流长时间无数据，连接已释放");
+            }
             return totalBytes;
         }
         finally

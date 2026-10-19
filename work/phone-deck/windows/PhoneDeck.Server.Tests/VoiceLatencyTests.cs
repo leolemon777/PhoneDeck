@@ -215,6 +215,40 @@ public sealed class VoiceLatencyTests
     }
 
     [TestMethod]
+    public async Task StalledSharedStreamReleasesReceiverForManagedDictation()
+    {
+        // 回归：手机休眠/断网后共享长流成为半开连接，接收端永久被占，所有听写 409。
+        using var bridge = new PhoneAudioBridge(source => new RecordingPlayback(source),
+            keepOutputWarm: true, stallTimeoutMs: 200);
+        var shared = Guid.NewGuid().ToString();
+        var sharedEnded = false;
+        using var stalled = new GatedStream(Voice(20));
+        var first = bridge.StreamAsync(stalled, shared, AudioStreamMode.Shared,
+            (_, _) => sharedEnded = true, CancellationToken.None, ownerId: "phone-a");
+
+        await Assert.ThrowsExactlyAsync<AudioStreamStalledException>(() => first);
+        Assert.IsTrue(sharedEnded);
+        Assert.IsFalse(bridge.IsStreaming);
+
+        using var managed = new MemoryStream(Voice(20));
+        await bridge.StreamAsync(managed, Guid.NewGuid().ToString(), AudioStreamMode.Managed,
+            (_, _) => { }, CancellationToken.None, ownerId: "phone-a");
+    }
+
+    [TestMethod]
+    public async Task SteadyAudioIsNotTreatedAsStall()
+    {
+        using var bridge = new PhoneAudioBridge(source => new RecordingPlayback(source),
+            keepOutputWarm: true, stallTimeoutMs: 300);
+        using var input = new TrickleStream(Voice(20), chunks: 10, intervalMs: 100);
+        var bytes = await bridge.StreamAsync(input, Guid.NewGuid().ToString(),
+            AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None);
+
+        Assert.AreEqual(10L * PcmLatency.MsToBytes(20), bytes,
+            "每 100 ms 有数据时累计超过阈值也不能断流");
+    }
+
+    [TestMethod]
     public async Task StreamOwnershipIsVisibleOnlyToItsPhone()
     {
         using var bridge = new PhoneAudioBridge(source => new RecordingPlayback(source),
@@ -360,6 +394,36 @@ public sealed class VoiceLatencyTests
     }
 
     /// <summary>读完数据后挂起，直到 Finish()，用于在中途放行 pre-roll 或模拟断线未被发现。</summary>
+    /// <summary>按固定间隔逐块供音，模拟手机持续写入。</summary>
+    private sealed class TrickleStream(byte[] chunk, int chunks, int intervalMs) : Stream
+    {
+        private int sent;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (sent == chunks)
+            {
+                return 0;
+            }
+            await Task.Delay(intervalMs, cancellationToken);
+            chunk.CopyTo(buffer);
+            sent++;
+            return chunk.Length;
+        }
+    }
+
     private sealed class GatedStream(byte[] pcm) : MemoryStream(pcm)
     {
         private readonly TaskCompletionSource finished = new(TaskCreationOptions.RunContinuationsAsynchronously);

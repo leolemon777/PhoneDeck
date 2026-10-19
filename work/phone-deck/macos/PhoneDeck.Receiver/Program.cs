@@ -470,6 +470,12 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
             streamClientId);
         return Results.Ok(new AudioStreamResult(true, sessionId, mode.ToWireValue()));
     }
+    catch (AudioStreamStalledException)
+    {
+        // 半开连接收不到响应；直接中止，Kestrel 不再等待剩余请求体。
+        context.Abort();
+        return Results.Empty;
+    }
     catch (AudioStreamConflictException exception)
     {
         return Results.Conflict(ApiResult.Fail(exception.Message));

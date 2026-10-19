@@ -553,6 +553,12 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
             bytes
         });
     }
+    catch (AudioStreamStalledException)
+    {
+        // 半开连接收不到响应；直接中止，Kestrel 不再等待剩余请求体。
+        request.HttpContext.Abort();
+        return Results.Empty;
+    }
     catch (OperationCanceledException)
     {
         return Results.StatusCode(499);

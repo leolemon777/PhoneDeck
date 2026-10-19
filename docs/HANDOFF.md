@@ -1,5 +1,70 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-19 上传当前 Android 界面与快捷指令更新（最新状态）
+
+- **范围**：整理 `PhoneDeck手机键盘项目` 中既有的 11 个 Android 文件改动，沿用 `agent/shortcut-panel-common-keys` 分支；不包含其他工作区的未提交修改。
+- **行为**：四套浅深外观及旧主题迁移；首页最多八个常用指令、底部斜杠指令栏、统一编辑状态；图标拖动改为插入调序，新增/编辑/隐藏或删除与短时撤销；编辑器增加快捷键和斜杠预设；设置及编辑页支持边缘右滑返回，浮层支持系统背景模糊。
+- **配置**：新增默认斜杠指令 `slashPlan/slashGoal/slashCompact/slashClear` 并迁移已有配置；旧 agent ID 继续停用，配置 schemaVersion 与主线版本号保持不变。README 中英文与规格顶部已同步当前状态。
+- **验证**：本机 JDK 17 / Android SDK：`:app:assembleDebug`、`:app:testDebugUnitTest`（46/46）、`:app:lintDebug` 通过（43 项警告）；Windows 接收端 Release 构建及测试（183/183）、macOS 接收端在 Windows 上跨平台构建及测试（50/50）通过。本次未安装或操作真实手机/Mac，10 月 18 日的旧验证不能代替今天 UI 改动的设备验收。
+- **GitHub**：源码提交 `6e034b4` 已推送，[PR #55](https://github.com/leolemon777/PhoneDeck/pull/55) 面向 main，包含尚未合入的快捷键改动与 #53 音频流回收修复。按用户要求删除 beta.1、beta.2 的 5 个旧 APK/ZIP；回读确认旧包已移除、beta.3 的 5 个资产及独立 Desktop 草稿的 20 个资产 ID/大小/摘要均未变。Release 说明、标签和校验记录保留；操作前后元数据存于 ignored 的 `outputs/github-old-installers-20261019/`。
+- **待办**：真机检查首页/面板/指令栏拖动、编辑退出、隐藏删除与撤销、预设保存、旧主题迁移、边缘返回和浮层；公开 APK 需另行升版、确认签名并完成发布验收。
+
+## 2026-10-18 默认快捷键面板改为通用编辑键（最新状态）
+
+- **需求**：用户要求把默认面板顶部的 Agent 按钮（打断、接受全部等）换成复制、粘贴、delete、backspace 这类通用编辑键；
+  随后因「方向键一次挪一位太慢」追加快速导航组。
+- **源码**（仅 Android，分支 `agent/shortcut-panel-common-keys`）：`ShortcutConfigRepository.defaults()` 移除 7 个 agent 默认按钮，
+  新增「删除」（DELETE）与 8 个快速编辑键：按词左移/右移（CTRL+LEFT/RIGHT）、行首/行尾（HOME/END）、文首/文末（CTRL+HOME/END）、
+  删前词/删后词（CTRL+BACKSPACE/DELETE）；`mergeAgentDefaults` 替换为 `migrateBuiltinButtons`：
+  加载旧配置时移除已停用的 agent 按钮 ID（不再自动补回），并把新引入的内置按钮合并进已有配置，
+  用户手动删过的其他默认按钮不会被强行加回。`isRepeatableKey` 放开按词移动/删词组合键的长按连发（`REPEATABLE_CHORDS`，
+  仅协议 v2 的 keyChord 路径；v1 旧协议连发仍只支持单键）。`MainActivity.triggerConfiguredGoal` 在配置中找不到 `agentGoal` 时
+  退回内置 `/goal` 文本动作（`GOAL_FALLBACK`），语音区 Goal 按钮不再依赖面板配置。
+- **拖拽调位免进编辑模式**（同分支追加）：网格按钮不再依赖系统长按（真机微动即取消、手势退化为滚动），
+  改为 `TouchFeedback.installHoldable` 自管按住计时——按满长按时长即浮起拖动（容忍手指微动），
+  连发键按住连发中滑出按钮自动停止连发转为拖动，退格按住仍是全部删除；水平为主的移动预先阻止父容器
+  （ScrollView）拦截，竖向移动保持面板正常滚动；未按住即松手仍为点按发送。落点换位沿用既有
+  `handleGridDrag`/`swapGridButtons`，编辑模式行为不变；另加 adb 调试入口
+  `am start --ez open_shortcut_panel true` 直开面板。
+- **「快捷键与布局」成为集中管理入口**（同分支追加）：用户要求在该界面直接长按拖动、右滑删除并把全部自定义操作集中到一处。
+  `ShortcutSettingsActivity` 卡片行改用 `TouchFeedback.installHoldable`（与面板同款抗微动手势，长按浮起拖动、
+  插入式换位沿用 `moveBefore`）；左侧 ☰ 改为 `installDragHandle` 拖动把手（按下即锁定事件流，滑动或按满即拖，
+  点按仍保留上移/下移对话框作精确/无障碍后备）；点卡片主体直接进编辑器（原文字区点击归并到行）；新增
+  「导出配置 / 导入配置」（与 SettingsActivity 同款 SAF 逻辑，导入成功即刷新）；**右滑卡片**：内置按钮隐藏、
+  自定义按钮删除，卡片跟手平移超过 88dp 提交，底部悬浮撤销条 4.5 秒内可整份还原快照；编辑器文本指令标签由
+  「AI Agent 文本指令」改为「文本指令（以 / 开头会进入首页指令栏）」。MainActivity 调试入口增加
+  `open_shortcut_settings` extra。
+- **验证**：本机（Windows，`E:\Android` 的 JDK17/SDK）`:app:assembleDebug`、`:app:testDebugUnitTest` 46/46、
+  `:app:lintDebug` 全部通过。**已装到作者 Samsung 真机**：因旧版为 Mac 调试签名，卸载前用 `run-as` 备份应用数据
+  （留档 `工作区/artifacts/phonedeck-backup-2026-10-18.tgz`），重装（本机签名）后恢复，配对保留并完成「升级为独立凭据」；
+  补授附近设备与麦克风权限；旧配置迁移后真机读回验证：19 按钮（无 agent、含删除）。第二版覆盖安装后真机读回验证：
+  27 按钮（8 个快速编辑键已合并）。**拖拽已真机自动化验证**（logcat + 配置读回）：面板按住后拖动换位、一气呵成横扫
+  中途浮起拖动、连发滑出转拖动、竖向滚动不破坏、单击发送不破坏、退格按住全删且滑动不误拖，共 6 项全过；
+  设置页卡片长按拖动插入换位、☰ 一次滑动即拖、点卡片打开编辑器、底部导入导出按钮存在、右滑内置按钮隐藏并可撤销、
+  右滑后拖动仍正常，共 7 项全过（测试期间向电脑发送过少量真实按键：Ctrl+S/Ctrl+X/DELETE/一次全删；测试弄乱的
+  按钮顺序与误隐藏的复制已还原）。**未在真机验证**：Goal 回退发送路径、人手指感（抖动/边缘情形）、
+  设置页导入导出的实际文件往返、自定义按钮右滑删除（逻辑与内置隐藏同路径）。
+- **待办**：真机走查长按连发与 Goal 回退；版本号未动（Android 仍 dev.22/code28），正式发布前需按
+  `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程；注意真机现为本机签名，
+  后续安装 Mac 签名的官方包需再次备份恢复或统一签名。
+
+## 2026-10-09 半开音频长流占用接收端导致听写全部失败（最新状态）
+
+- **现象**：作者 Samsung + Apple Silicon Mac，连接与状态全部正常，但每次点语音都无字；手机日志为
+  `/api/dictation/start rejected via Wi-Fi +3.4s: HTTP 409 音频会话不存在或已断开`。
+- **根因**：共享麦克风长流在手机休眠/断网/进程重启后成为半开连接（FIN 未到达电脑），Mac `/api/diagnostics` 仍显示
+  `streaming: true, mode: shared`，但该 TCP 连接已无新增字节，手机侧也已无此套接字。接收端只有一个音频槽且读取无超时，
+  新的受管流被立即以冲突拒绝，`dictation/start` 等待 3 s 后 409。Kestrel 默认请求体速率限制没有回收该连接。
+- **修复**：Mac 与 Windows 音频桥每次读取重新计时，连续 5 s（`DefaultStallTimeoutMs`）无任何字节即判定断流：
+  排空已收到的 PCM、释放会话，端点抛 `AudioStreamStalledException` 后中止连接。手机端供音期间至少每 100 ms 写入一次
+  （暂停时写静音保活），正常会话不会触发。协议与手机端未改。
+- **验证**：Mac Release 构建与测试 50/50（含新增停滞释放、持续供音不误判两项）；Windows Server 在 Mac 上交叉构建 0 错误，
+  Windows 测试因 `win-x64` 运行时标识无法在 Mac 加载，以 PR CI 为准。真机：重启旧接收端清除幽灵会话后听写恢复并出字；
+  作者 Mac 已安装本分支构建的 2.0.0-dev.4 lite（ad-hoc 重签后需删掉并重新添加辅助功能项），听写出字已确认。
+  旧安装备份在 `~/Library/Application Support/PhoneDeck/backups/`。
+- **未验证**：真机上“共享麦克风中途锁屏/断网后 5 s 内自动恢复”尚未复现验证；Windows 修复未在 Windows 实机运行。
+- **待办**：真机复现休眠/断网场景确认自动恢复；Windows 实机验证。
+
 ## 2026-10-07 GitHub Release 中英双语（最新状态）
 
 - **范围**：用户要求仅补齐 GitHub 中英文。`README.md` 与 `README.en.md` 已提供两种语言；本次为
