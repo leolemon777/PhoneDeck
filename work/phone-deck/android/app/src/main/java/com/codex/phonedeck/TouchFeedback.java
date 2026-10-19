@@ -17,6 +17,38 @@ final class TouchFeedback {
         install(control, onRelease, true);
     }
 
+    /** 在按压反馈之上增加“按住期间手指滑出触摸 slop”的一次性回调（连发转拖动等）。 */
+    @SuppressLint("ClickableViewAccessibility") // Always returns false; native onTouchEvent owns performClick.
+    static void install(View control, Runnable onRelease, Runnable onMoveBeyondSlop) {
+        control.setSoundEffectsEnabled(true);
+        control.setHapticFeedbackEnabled(true);
+        float slop = android.view.ViewConfiguration
+                .get(control.getContext()).getScaledTouchSlop();
+        float[] down = new float[2];
+        boolean[] moveFired = new boolean[1];
+        control.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
+                press(view, 0.95f, true);
+                down[0] = event.getX();
+                down[1] = event.getY();
+                moveFired[0] = false;
+            } else if (action == MotionEvent.ACTION_MOVE && !moveFired[0]
+                    && view.isEnabled()
+                    && (Math.abs(event.getX() - down[0]) > slop
+                    || Math.abs(event.getY() - down[1]) > slop)) {
+                moveFired[0] = true;
+                release(view);
+                if (onMoveBeyondSlop != null) onMoveBeyondSlop.run();
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                release(view);
+                if (onRelease != null) onRelease.run();
+            }
+            // Native click/long-click, ripple, and accessibility still own the action.
+            return false;
+        });
+    }
+
     @SuppressLint("ClickableViewAccessibility") // Always returns false; native onTouchEvent owns performClick.
     static void install(View control, Runnable onRelease, boolean hapticOnPress) {
         control.setSoundEffectsEnabled(true);

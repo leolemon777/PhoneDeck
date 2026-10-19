@@ -196,6 +196,7 @@ public final class MainActivity extends Activity {
     private boolean gridEditMode;
     private Button gridEditButton;
     private TextView shortcutHintText;
+    private TextView shortcutNormalHintText;
     private volatile String usbForegroundApp;
     private volatile boolean phoneAudioAvailable;
     /// null = 电脑端引擎无可读配置、无法校验麦克风（不阻断启动）。
@@ -739,6 +740,10 @@ public final class MainActivity extends Activity {
                 theme.muted, Typeface.NORMAL);
         shortcutHintText.setVisibility(gridEditMode ? View.VISIBLE : View.GONE);
         shortcutPage.addView(shortcutHintText, marginTop(dp(3)));
+        shortcutNormalHintText = text("点按发送 · 长按拖动调换位置 · 编辑可改按钮", 12,
+                theme.muted, Typeface.NORMAL);
+        shortcutNormalHintText.setVisibility(gridEditMode ? View.GONE : View.VISIBLE);
+        shortcutPage.addView(shortcutNormalHintText, marginTop(dp(3)));
         shortcutGrid = new GridLayout(this);
         shortcutGrid.setColumnCount(3);
         shortcutGrid.setUseDefaultMargins(false);
@@ -1908,7 +1913,9 @@ public final class MainActivity extends Activity {
         button.setContentDescription(config.label + "，" + config.subtitle()
                 + (deleteAllOnLongPress
                 ? "。点按删除一个字符，长按全部删除"
-                : repeatable ? "。点按发送一次，长按连续发送" : ""));
+                : repeatable
+                ? "。点按发送一次，长按连续发送，按住后滑动可直接拖动调位"
+                : "。点按发送，长按拖动调换位置"));
         button.setOnClickListener(view -> {
             if (gridEditMode) {
                 openButtonEditor(config.id);
@@ -1917,29 +1924,24 @@ public final class MainActivity extends Activity {
             }
         });
         button.setOnLongClickListener(view -> {
-            if (gridEditMode) {
-                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
-                view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
-                return true;
-            }
-            if (deleteAllOnLongPress) {
-                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            if (!gridEditMode && deleteAllOnLongPress) {
                 triggerDeleteAll(button);
                 return true;
             }
-            if (repeatable) {
-                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            if (!gridEditMode && repeatable) {
                 startKeyRepeat(button, config);
                 return true;
             }
-            return false;
+            startGridButtonDrag(button, config);
+            return true;
         });
         button.setOnDragListener((view, event) -> handleGridDrag(view, event));
         if (gridEditMode) {
             button.setAlpha(0.78f);
         }
-        installTouchFeedback(button, this::stopKeyRepeat);
+        installTouchFeedback(button, this::stopKeyRepeat,
+                () -> startDragFromRepeat(button, config));
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
@@ -1948,6 +1950,22 @@ public final class MainActivity extends Activity {
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
         grid.addView(button, params);
+    }
+
+    /// 以手机桌面图标的方式拖动调位：普通与编辑模式共用，落点换位由 handleGridDrag 处理。
+    private void startGridButtonDrag(View source, ShortcutButtonConfig config) {
+        ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
+        source.startDragAndDrop(data, new View.DragShadowBuilder(source), null, 0);
+    }
+
+    /// 连发进行中手指滑出按钮：停止连发，转为拖动调位。
+    private void startDragFromRepeat(ShortcutKeyView source, ShortcutButtonConfig config) {
+        if (repeatSource == null) {
+            return;
+        }
+        stopKeyRepeat();
+        source.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        startGridButtonDrag(source, config);
     }
 
     private void toggleGridEditMode() {
@@ -1962,6 +1980,9 @@ public final class MainActivity extends Activity {
             shortcutHintText.setText(gridEditMode
                     ? "点击按钮编辑 · 长按拖动调换位置"
                     : "发送到当前电脑 · 编辑可调整按钮与顺序");
+        }
+        if (shortcutNormalHintText != null) {
+            shortcutNormalHintText.setVisibility(gridEditMode ? View.GONE : View.VISIBLE);
         }
         if (shortcutGrid != null) {
             for (int i = 0; i < shortcutGrid.getChildCount(); i++) {
@@ -4837,11 +4858,15 @@ public final class MainActivity extends Activity {
     }
 
     private void installTouchFeedback(View control) {
-        installTouchFeedback(control, null);
+        installTouchFeedback(control, null, null);
     }
 
     private void installTouchFeedback(View control, Runnable onRelease) {
-        TouchFeedback.install(control, onRelease);
+        installTouchFeedback(control, onRelease, null);
+    }
+
+    private void installTouchFeedback(View control, Runnable onRelease, Runnable onMoveBeyondSlop) {
+        TouchFeedback.install(control, onRelease, onMoveBeyondSlop);
     }
 
     private void performResultHaptic(View view, boolean success) {
