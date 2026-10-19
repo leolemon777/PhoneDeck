@@ -463,6 +463,11 @@ public final class MainActivity extends Activity {
         super.onResume();
         PhoneDeckHttp.appInForeground = true;
         mainHandler.post(nearbyScan);
+        // 调试/自动化入口：adb 启动时带 open_shortcut_panel=true 直接打开快捷键面板。
+        if (getIntent().getBooleanExtra("open_shortcut_panel", false)) {
+            getIntent().removeExtra("open_shortcut_panel");
+            mainHandler.postDelayed(this::showShortcutPanel, 600);
+        }
         PhoneDeckTheme latestTheme = PhoneDeckTheme.load(this);
         if (!latestTheme.id.equals(appliedThemeId)) {
             // Rebind views only: recreating would destroy active audio/connection owners.
@@ -1923,24 +1928,13 @@ public final class MainActivity extends Activity {
                 triggerShortcut(button, config);
             }
         });
-        button.setOnLongClickListener(view -> {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            if (!gridEditMode && deleteAllOnLongPress) {
-                triggerDeleteAll(button);
-                return true;
-            }
-            if (!gridEditMode && repeatable) {
-                startKeyRepeat(button, config);
-                return true;
-            }
-            startGridButtonDrag(button, config);
-            return true;
-        });
         button.setOnDragListener((view, event) -> handleGridDrag(view, event));
         if (gridEditMode) {
             button.setAlpha(0.78f);
         }
-        installTouchFeedback(button, this::stopKeyRepeat,
+        // 手势自管：系统长按遇微动即取消并退化为滚动，改为自行计时（见 TouchFeedback.installHoldable）。
+        TouchFeedback.installHoldable(button, this::stopKeyRepeat,
+                () -> onGridButtonHeld(button, config),
                 () -> startDragFromRepeat(button, config));
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
@@ -1952,14 +1946,32 @@ public final class MainActivity extends Activity {
         grid.addView(button, params);
     }
 
+    /// 面板按钮按住到点：退格全删、连发键连发、其余直接浮起进入拖动调位。
+    private void onGridButtonHeld(ShortcutKeyView button, ShortcutButtonConfig config) {
+        android.util.Log.d("PhoneDeckDrag", "held " + config.id + " edit=" + gridEditMode);
+        button.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        if (!gridEditMode && isBackspaceKey(config)) {
+            triggerDeleteAll(button);
+            return;
+        }
+        if (!gridEditMode && isRepeatableKey(config)) {
+            startKeyRepeat(button, config);
+            return;
+        }
+        startGridButtonDrag(button, config);
+    }
+
     /// 以手机桌面图标的方式拖动调位：普通与编辑模式共用，落点换位由 handleGridDrag 处理。
     private void startGridButtonDrag(View source, ShortcutButtonConfig config) {
         ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
+        android.util.Log.d("PhoneDeckDrag", "startDragAndDrop " + config.id);
         source.startDragAndDrop(data, new View.DragShadowBuilder(source), null, 0);
     }
 
     /// 连发进行中手指滑出按钮：停止连发，转为拖动调位。
     private void startDragFromRepeat(ShortcutKeyView source, ShortcutButtonConfig config) {
+        android.util.Log.d("PhoneDeckDrag", "drag-from-repeat " + config.id
+                + " repeatActive=" + (repeatSource != null));
         if (repeatSource == null) {
             return;
         }
@@ -4858,15 +4870,11 @@ public final class MainActivity extends Activity {
     }
 
     private void installTouchFeedback(View control) {
-        installTouchFeedback(control, null, null);
+        installTouchFeedback(control, null);
     }
 
     private void installTouchFeedback(View control, Runnable onRelease) {
-        installTouchFeedback(control, onRelease, null);
-    }
-
-    private void installTouchFeedback(View control, Runnable onRelease, Runnable onMoveBeyondSlop) {
-        TouchFeedback.install(control, onRelease, onMoveBeyondSlop);
+        TouchFeedback.install(control, onRelease);
     }
 
     private void performResultHaptic(View view, boolean success) {

@@ -11,17 +11,20 @@
   用户手动删过的其他默认按钮不会被强行加回。`isRepeatableKey` 放开按词移动/删词组合键的长按连发（`REPEATABLE_CHORDS`，
   仅协议 v2 的 keyChord 路径；v1 旧协议连发仍只支持单键）。`MainActivity.triggerConfiguredGoal` 在配置中找不到 `agentGoal` 时
   退回内置 `/goal` 文本动作（`GOAL_FALLBACK`），语音区 Goal 按钮不再依赖面板配置。
-- **拖拽调位免进编辑模式**（同分支追加）：`addKey` 的长按逻辑重写——普通模式下长按普通按钮直接发起拖动（手机桌面式），
-  连发键长按连发中手指滑出按钮自动停止连发转为拖动（`TouchFeedback.install` 新增按住滑动回调），退格长按仍是全部删除
-  （拖退格需编辑布局）；落点换位沿用既有 `handleGridDrag`/`swapGridButtons`，编辑模式行为不变；面板提示与按钮
-  content-desc 同步更新。
+- **拖拽调位免进编辑模式**（同分支追加）：网格按钮不再依赖系统长按（真机微动即取消、手势退化为滚动），
+  改为 `TouchFeedback.installHoldable` 自管按住计时——按满长按时长即浮起拖动（容忍手指微动），
+  连发键按住连发中滑出按钮自动停止连发转为拖动，退格按住仍是全部删除；水平为主的移动预先阻止父容器
+  （ScrollView）拦截，竖向移动保持面板正常滚动；未按住即松手仍为点按发送。落点换位沿用既有
+  `handleGridDrag`/`swapGridButtons`，编辑模式行为不变；另加 adb 调试入口
+  `am start --ez open_shortcut_panel true` 直开面板。
 - **验证**：本机（Windows，`E:\Android` 的 JDK17/SDK）`:app:assembleDebug`、`:app:testDebugUnitTest` 46/46、
   `:app:lintDebug` 全部通过。**已装到作者 Samsung 真机**：因旧版为 Mac 调试签名，卸载前用 `run-as` 备份应用数据
   （留档 `工作区/artifacts/phonedeck-backup-2026-10-18.tgz`），重装（本机签名）后恢复，配对保留并完成「升级为独立凭据」；
   补授附近设备与麦克风权限；旧配置迁移后真机读回验证：19 按钮（无 agent、含删除）。第二版覆盖安装后真机读回验证：
-  27 按钮（8 个快速编辑键已合并）。**未在真机验证**：直接长按拖拽与连发转拖动的手感（adb 注入的长按/拖拽手势在该机
-  上不被识别为连续手势，注入坐标与实际落点有偏差，且测试点击会向电脑发送真实按键，已停止注入验证，待真机手指走查）、
-  Goal 回退发送路径。
+  27 按钮（8 个快速编辑键已合并）。**拖拽已真机自动化验证**（logcat + 配置读回）：按住后拖动换位、一气呵成横扫
+  中途浮起拖动、连发滑出转拖动、竖向滚动不破坏、单击发送不破坏、退格按住全删且滑动不误拖，共 6 项全过
+  （测试期间向电脑发送过少量真实按键：Ctrl+S/Ctrl+X/DELETE/一次全删）。**未在真机验证**：Goal 回退发送路径、
+  人手指感（抖动/边缘情形）。
 - **待办**：真机走查长按连发与 Goal 回退；版本号未动（Android 仍 dev.22/code28），正式发布前需按
   `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程；注意真机现为本机签名，
   后续安装 Mac 签名的官方包需再次备份恢复或统一签名。

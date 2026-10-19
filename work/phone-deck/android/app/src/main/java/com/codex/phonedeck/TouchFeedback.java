@@ -3,9 +3,12 @@ package com.codex.phonedeck;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.os.Build;
+import android.os.SystemClock;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 
@@ -17,36 +20,88 @@ final class TouchFeedback {
         install(control, onRelease, true);
     }
 
-    /** 在按压反馈之上增加“按住期间手指滑出触摸 slop”的一次性回调（连发转拖动等）。 */
-    @SuppressLint("ClickableViewAccessibility") // Always returns false; native onTouchEvent owns performClick.
-    static void install(View control, Runnable onRelease, Runnable onMoveBeyondSlop) {
+    /**
+     * 按住类手势完全自管（供快捷键网格按钮）。系统长按一遇手指微动就取消、手势退化为滚动，
+     * 所以这里自己计时：按满时长即回调 onHeld（浮起拖动/连发/全删），已按住再滑出回调
+     * onHeldThenMoved（连发转拖动）；未按住就松手仍走 performClick。水平为主的移动预先
+     * 阻止父容器拦截，保证“按下即横扫”也能到点转拖动；竖向移动保持父容器正常滚动。
+     */
+    @SuppressLint("ClickableViewAccessibility") // 手势自管；UP 时显式 performClick。
+    static void installHoldable(View control, Runnable onRelease,
+            Runnable onHeld, Runnable onHeldThenMoved) {
         control.setSoundEffectsEnabled(true);
         control.setHapticFeedbackEnabled(true);
-        float slop = android.view.ViewConfiguration
-                .get(control.getContext()).getScaledTouchSlop();
+        float slop = ViewConfiguration.get(control.getContext()).getScaledTouchSlop();
+        long holdTimeout = ViewConfiguration.getLongPressTimeout();
         float[] down = new float[2];
-        boolean[] moveFired = new boolean[1];
+        long[] downAt = new long[1];
+        boolean[] held = new boolean[1];
+        boolean[] movedWhileHeld = new boolean[1];
+        boolean[] finished = new boolean[1];
+        Runnable[] timer = new Runnable[1];
         control.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN && view.isEnabled()) {
                 press(view, 0.95f, true);
                 down[0] = event.getX();
                 down[1] = event.getY();
-                moveFired[0] = false;
-            } else if (action == MotionEvent.ACTION_MOVE && !moveFired[0]
-                    && view.isEnabled()
-                    && (Math.abs(event.getX() - down[0]) > slop
-                    || Math.abs(event.getY() - down[1]) > slop)) {
-                moveFired[0] = true;
-                release(view);
-                if (onMoveBeyondSlop != null) onMoveBeyondSlop.run();
+                downAt[0] = SystemClock.uptimeMillis();
+                held[0] = false;
+                movedWhileHeld[0] = false;
+                finished[0] = false;
+                Runnable tick = () -> {
+                    if (finished[0] || held[0]) {
+                        return;
+                    }
+                    held[0] = true;
+                    disallowIntercept(view);
+                    if (onHeld != null) onHeld.run();
+                };
+                timer[0] = tick;
+                view.postDelayed(tick, holdTimeout);
+            } else if (action == MotionEvent.ACTION_MOVE) {
+                float dx = event.getX() - down[0];
+                float dy = event.getY() - down[1];
+                if (Math.abs(dx) <= slop && Math.abs(dy) <= slop) {
+                    return true;
+                }
+                if (!held[0]) {
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        // 行内扫动先占住事件流，等按住计时到点转拖动。
+                        disallowIntercept(view);
+                    }
+                    return true;
+                }
+                if (!movedWhileHeld[0]) {
+                    movedWhileHeld[0] = true;
+                    disallowIntercept(view);
+                    if (onHeldThenMoved != null) onHeldThenMoved.run();
+                }
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                finished[0] = true;
+                if (timer[0] != null) {
+                    view.removeCallbacks(timer[0]);
+                }
+                float dx = event.getX() - down[0];
+                float dy = event.getY() - down[1];
+                boolean wasHeld = held[0];
                 release(view);
                 if (onRelease != null) onRelease.run();
+                if (action == MotionEvent.ACTION_UP && !wasHeld && view.isEnabled()
+                        && Math.abs(dx) <= slop && Math.abs(dy) <= slop) {
+                    view.performClick();
+                }
             }
-            // Native click/long-click, ripple, and accessibility still own the action.
-            return false;
+            return true;
         });
+    }
+
+    private static void disallowIntercept(View view) {
+        ViewParent parent = view.getParent();
+        while (parent != null) {
+            parent.requestDisallowInterceptTouchEvent(true);
+            parent = parent.getParent();
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility") // Always returns false; native onTouchEvent owns performClick.
