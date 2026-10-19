@@ -58,7 +58,7 @@ final class ShortcutConfigRepository {
             }
             values.sort(Comparator.comparingInt(value -> value.sortIndex));
             validateAndNormalize(values);
-            if (mergeAgentDefaults(values)) {
+            if (migrateBuiltinButtons(values)) {
                 save(values);
             }
             return values;
@@ -238,7 +238,6 @@ final class ShortcutConfigRepository {
 
     private static ArrayList<ShortcutButtonConfig> defaults() {
         ArrayList<ShortcutButtonConfig> values = new ArrayList<>();
-        addAgentDefaults(values);
         addDefault(values, "copy", "复制", "blue", "CTRL", "C");
         addDefault(values, "paste", "粘贴", "green", "CTRL", "V");
         addDefault(values, "cut", "剪切", "orange", "CTRL", "X");
@@ -250,6 +249,7 @@ final class ShortcutConfigRepository {
         addDefault(values, "screenshot", "截图", "blue", "WIN", "SHIFT", "S");
         addDefault(values, "enter", "回车", "green", "ENTER");
         addDefault(values, "backspace", "退格", "slate", "BACKSPACE");
+        addDefault(values, "delete", "删除", "slate", "DELETE");
         addDefault(values, "escape", "退出", "red", "ESC");
         addDefault(values, "switchInputMethod", "切换输入法", "purple", "WIN", "SPACE");
         addDefault(values, "volumeDown", "音量 −", "slate", "VOLUMEDOWN");
@@ -260,18 +260,23 @@ final class ShortcutConfigRepository {
         return values;
     }
 
-    private static boolean mergeAgentDefaults(ArrayList<ShortcutButtonConfig> values) {
-        ArrayList<ShortcutButtonConfig> agentDefaults = new ArrayList<>();
-        addAgentDefaults(agentDefaults);
+    /// 已停用的内置按钮：从旧配置中移除；用户仍可在编辑器里手动重建同样的动作。
+    private static final Set<String> RETIRED_BUILTIN_IDS = new HashSet<>(Arrays.asList(
+            "agentInterrupt", "agentPlan", "agentGoal", "agentCompact",
+            "agentClear", "agentAcceptAll", "agentRejectAll"));
+
+    /// 本次新引入的内置按钮：合并进已保存的配置，让升级设备直接拿到。
+    private static final List<String> INTRODUCED_BUILTIN_IDS = Arrays.asList("delete");
+
+    private static boolean migrateBuiltinButtons(ArrayList<ShortcutButtonConfig> values) {
+        boolean changed = values.removeIf(value -> RETIRED_BUILTIN_IDS.contains(value.id));
         Set<String> existingIds = new HashSet<>();
         for (ShortcutButtonConfig value : values) {
             existingIds.add(value.id);
         }
-        boolean changed = false;
-        for (int index = agentDefaults.size() - 1; index >= 0; index--) {
-            ShortcutButtonConfig value = agentDefaults.get(index);
-            if (existingIds.add(value.id)) {
-                values.add(0, value);
+        for (ShortcutButtonConfig builtin : defaults()) {
+            if (INTRODUCED_BUILTIN_IDS.contains(builtin.id) && existingIds.add(builtin.id)) {
+                values.add(builtin);
                 changed = true;
             }
         }
@@ -279,16 +284,6 @@ final class ShortcutConfigRepository {
             validateAndNormalize(values);
         }
         return changed;
-    }
-
-    private static void addAgentDefaults(ArrayList<ShortcutButtonConfig> target) {
-        addDefault(target, "agentInterrupt", "打断", "red", "ESC");
-        addTextDefault(target, "agentPlan", "规划", "purple", "/plan");
-        addTextDefault(target, "agentGoal", "目标", "blue", "/goal");
-        addTextDefault(target, "agentCompact", "压缩上下文", "green", "/compact");
-        addTextDefault(target, "agentClear", "新会话", "orange", "/clear");
-        addDefault(target, "agentAcceptAll", "接受全部", "green", "CTRL", "ENTER");
-        addDefault(target, "agentRejectAll", "拒绝全部", "red", "CTRL", "BACKSPACE");
     }
 
     /// 导出当前配置文件的原始 JSON；文件尚不存在时返回 null。
@@ -336,15 +331,5 @@ final class ShortcutConfigRepository {
         target.add(new ShortcutButtonConfig(
                 id, label, "", color, true, target.size(), true,
                 Arrays.asList(keys), 45, 0));
-    }
-
-    private static void addTextDefault(
-            ArrayList<ShortcutButtonConfig> target,
-            String id,
-            String label,
-            String color,
-            String text) {
-        target.add(ShortcutButtonConfig.textAction(
-                id, label, color, true, target.size(), true, text, true, 0));
     }
 }

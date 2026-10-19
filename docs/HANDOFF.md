@@ -1,5 +1,18 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-18 默认快捷键面板改为通用编辑键（最新状态）
+
+- **需求**：用户要求把默认面板顶部的 Agent 按钮（打断、接受全部等）换成复制、粘贴、delete、backspace 这类通用编辑键。
+- **源码**（仅 Android，分支 `agent/shortcut-panel-common-keys`）：`ShortcutConfigRepository.defaults()` 移除 7 个 agent 默认按钮，
+  新增「删除」（DELETE；DELETE 已在 `REPEATABLE_KEYS`，长按连续发送）；`mergeAgentDefaults` 替换为 `migrateBuiltinButtons`：
+  加载旧配置时移除已停用的 agent 按钮 ID（不再自动补回），并把新引入的内置按钮（delete）合并进已有配置，
+  用户手动删过的其他默认按钮不会被强行加回。`MainActivity.triggerConfiguredGoal` 在配置中找不到 `agentGoal` 时
+  退回内置 `/goal` 文本动作（`GOAL_FALLBACK`），语音区 Goal 按钮不再依赖面板配置。
+- **验证**：本机（Windows，`E:\Android` 的 JDK17/SDK）`:app:assembleDebug`、`:app:testDebugUnitTest` 46/46、
+  `:app:lintDebug` 全部通过。**未在真机验证**：旧配置迁移的实际效果、删除按钮长按连发、Goal 回退发送路径。
+- **待办**：真机装包走查面板迁移与 Delete 长按；版本号未动（Android 仍 dev.22/code28），正式发布前需按
+  `release-versions.json` + `Assert-ReleaseVersions.ps1 -Sync` 升版并走发布流程。
+
 ## 2026-10-09 半开音频长流占用接收端导致听写全部失败（最新状态）
 
 - **现象**：作者 Samsung + Apple Silicon Mac，连接与状态全部正常，但每次点语音都无字；手机日志为

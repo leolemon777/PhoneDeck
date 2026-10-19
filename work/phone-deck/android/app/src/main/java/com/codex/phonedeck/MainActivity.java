@@ -184,6 +184,9 @@ public final class MainActivity extends Activity {
 
     private static final java.util.Set<String> REPEATABLE_KEYS = new java.util.HashSet<>(
             java.util.Arrays.asList("DELETE", "LEFT", "RIGHT", "UP", "DOWN"));
+    /// agentGoal 已从默认面板停用；语音区 Goal 按钮在配置缺失时退回这个内置动作。
+    private static final ShortcutButtonConfig GOAL_FALLBACK = ShortcutButtonConfig.textAction(
+            "agentGoal", "Goal", "blue", true, 0, false, "/goal", true, 0);
     private Runnable repeatRunnable;
     private ShortcutButtonConfig repeatConfig;
     private ShortcutKeyView repeatSource;
@@ -1870,9 +1873,7 @@ public final class MainActivity extends Activity {
                 return;
             }
         }
-        showActionFeedback("找不到 Goal 配置，请在快捷键中检查", theme.warning);
-        performResultHaptic(source, false);
-        showShortcutFailure(source);
+        triggerShortcut(source, GOAL_FALLBACK);
     }
 
     private void refreshShortcutGrid() {
