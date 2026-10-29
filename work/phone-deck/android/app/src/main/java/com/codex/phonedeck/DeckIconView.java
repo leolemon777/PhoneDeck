@@ -17,7 +17,7 @@ final class DeckIconView extends View {
         this.kind = kind;
         paint.setColor(color);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1.6f);
+        paint.setStrokeWidth(1.75f);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeJoin(Paint.Join.ROUND);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -31,15 +31,13 @@ final class DeckIconView extends View {
         canvas.scale(scale, scale);
         switch (kind) {
             case "devices":
-                canvas.drawRoundRect(3, 4, 21, 16, 2, 2, paint);
-                canvas.drawLine(12, 16, 12, 20, paint);
-                canvas.drawLine(8, 20, 16, 20, paint);
+                canvas.drawRoundRect(3, 4.5f, 21, 16, 2.2f, 2.2f, paint);
+                canvas.drawLine(12, 16, 12, 19.5f, paint);
+                canvas.drawLine(8, 19.5f, 16, 19.5f, paint);
                 break;
             case "laptop":
-                canvas.drawRoundRect(5, 5, 19, 15, 1.5f, 1.5f, paint);
+                canvas.drawRoundRect(4.5f, 5, 19.5f, 15.5f, 2f, 2f, paint);
                 canvas.drawLine(2.5f, 18.5f, 21.5f, 18.5f, paint);
-                canvas.drawLine(5, 15, 3.5f, 18.5f, paint);
-                canvas.drawLine(19, 15, 20.5f, 18.5f, paint);
                 break;
             case "translate":
                 canvas.drawLine(4, 5, 12, 5, paint);
@@ -66,34 +64,43 @@ final class DeckIconView extends View {
                 canvas.drawLine(5, 12, 19, 12, paint);
                 break;
             case "appearance":
-                canvas.drawCircle(12, 12, 8, paint);
-                canvas.drawLine(12, 4, 12, 20, paint);
-                canvas.drawArc(6, 6, 18, 18, -90, 180, false, paint);
+                canvas.drawCircle(12, 12, 7.5f, paint);
+                canvas.drawArc(7.5f, 7.5f, 16.5f, 16.5f, -90, 180, false, paint);
                 break;
             case "voice":
-                canvas.drawRoundRect(9, 3, 15, 14, 3, 3, paint);
-                canvas.drawArc(6, 8, 18, 19, 0, 180, false, paint);
-                canvas.drawLine(12, 19, 12, 22, paint);
-                canvas.drawLine(9, 22, 15, 22, paint);
+                canvas.drawRoundRect(9, 3.5f, 15, 13.5f, 3, 3, paint);
+                canvas.drawArc(6, 8, 18, 18.5f, 0, 180, false, paint);
+                canvas.drawLine(12, 18.5f, 12, 21.5f, paint);
+                canvas.drawLine(9, 21.5f, 15, 21.5f, paint);
                 break;
             case "keys":
-                canvas.drawRoundRect(3, 5, 21, 19, 3, 3, paint);
+                canvas.drawRoundRect(3, 5.5f, 21, 18.5f, 3, 3, paint);
                 for (int x = 7; x <= 17; x += 5) {
-                    canvas.drawPoint(x, 9, paint); canvas.drawPoint(x, 12, paint);
+                    canvas.drawLine(x - 0.8f, 9.5f, x + 0.8f, 9.5f, paint);
+                    canvas.drawLine(x - 0.8f, 12.5f, x + 0.8f, 12.5f, paint);
                 }
-                canvas.drawLine(8, 16, 16, 16, paint);
+                canvas.drawLine(8, 15.5f, 16, 15.5f, paint);
                 break;
             case "connection":
-                canvas.drawArc(2, 3, 22, 23, 225, 90, false, paint);
-                canvas.drawArc(6, 8, 18, 20, 225, 90, false, paint);
-                canvas.drawCircle(12, 17, 1, paint);
+                canvas.drawArc(2.5f, 4, 21.5f, 23, 225, 90, false, paint);
+                canvas.drawArc(6.5f, 8.5f, 17.5f, 19.5f, 225, 90, false, paint);
+                canvas.drawCircle(12, 17, 0.9f, paint);
                 break;
+            case "sync":
+                canvas.drawArc(4.5f, 4.5f, 19.5f, 19.5f, 200, 130, false, paint);
+                canvas.drawLine(17.5f, 5.5f, 19.5f, 8.5f, paint);
+                canvas.drawLine(19.5f, 8.5f, 16f, 9f, paint);
+                canvas.drawArc(4.5f, 4.5f, 19.5f, 19.5f, 20, 130, false, paint);
+                canvas.drawLine(6.5f, 18.5f, 4.5f, 15.5f, paint);
+                canvas.drawLine(4.5f, 15.5f, 8f, 15f, paint);
+                break;
+            case "update":
+            case "↻":
             default:
-                canvas.drawArc(4, 4, 20, 20, -60, 280, false, paint);
-                canvas.drawLine(4, 5, 4, 10, paint);
-                canvas.drawLine(4, 10, 9, 10, paint);
-                canvas.drawLine(12, 8, 12, 13, paint);
-                canvas.drawLine(12, 13, 15, 15, paint);
+                canvas.drawArc(4.5f, 4.5f, 19.5f, 19.5f, -55, 285, false, paint);
+                canvas.drawLine(16, 4.5f, 19.5f, 5.5f, paint);
+                canvas.drawLine(19.5f, 5.5f, 18.2f, 9, paint);
+                break;
         }
         canvas.restore();
     }

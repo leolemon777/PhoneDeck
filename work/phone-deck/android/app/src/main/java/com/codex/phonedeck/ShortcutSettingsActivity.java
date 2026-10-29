@@ -18,9 +18,17 @@ import android.widget.Toast;
 import java.util.ArrayList;
 
 public final class ShortcutSettingsActivity extends Activity {
+    private static final int REQUEST_EXPORT_CONFIG = 41;
+    private static final int REQUEST_IMPORT_CONFIG = 42;
+    private static final long UNDO_BAR_TIMEOUT_MS = 4500;
+
     private ShortcutConfigRepository repository;
     private PhoneDeckTheme theme;
     private LinearLayout list;
+    private LinearLayout undoBar;
+    private TextView undoMessage;
+    private ArrayList<ShortcutButtonConfig> undoSnapshot;
+    private final Runnable hideUndoBar = () -> hideUndoBar();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,50 +47,239 @@ public final class ShortcutSettingsActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        android.net.Uri uri = data.getData();
+        if (requestCode == REQUEST_EXPORT_CONFIG) {
+            String json = repository.exportJson();
+            if (json == null) {
+                showError("导出失败：本地还没有配置文件");
+                return;
+            }
+            try (java.io.OutputStream output = getContentResolver().openOutputStream(uri)) {
+                if (output == null) {
+                    throw new IllegalStateException("无法打开目标文件");
+                }
+                output.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                Toast.makeText(this, "配置已导出", Toast.LENGTH_SHORT).show();
+            } catch (Exception exception) {
+                showError("导出失败：" + exception.getMessage());
+            }
+        } else if (requestCode == REQUEST_IMPORT_CONFIG) {
+            try (java.io.InputStream input = getContentResolver().openInputStream(uri);
+                 java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                byte[] chunk = new byte[8192];
+                int read;
+                while ((read = input.read(chunk)) > 0) {
+                    buffer.write(chunk, 0, read);
+                }
+                if (repository.importJson(buffer.toString("UTF-8"))) {
+                    Toast.makeText(this, "配置已导入并生效", Toast.LENGTH_SHORT).show();
+                    refreshList();
+                } else {
+                    showError("导入失败：文件无效，原配置未改动");
+                }
+            } catch (Exception exception) {
+                showError("导入失败：" + exception.getMessage());
+            }
+        }
+    }
+
     private View createInterface() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(theme.background);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(20), dp(20), dp(32));
+        page.setPadding(dp(24), dp(22), dp(24), dp(36));
         page.setBackgroundColor(theme.contentBackground());
         scroll.addView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button("←", theme.surface, theme.text);
+        Button back = button("‹", theme.surface, theme.primary);
+        back.setTextSize(26);
+        back.setPadding(0, 0, 0, dp(2));
         back.setOnClickListener(view -> finish());
         back.setContentDescription("返回");
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = text("快捷键与布局", 22, theme.text, Typeface.BOLD);
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView title = text("快捷指令与布局", 22, theme.text, Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleParams.leftMargin = dp(12);
+        titleParams.leftMargin = dp(14);
         header.addView(title, titleParams);
         page.addView(header);
 
-        TextView hint = text("点击左侧排序图标可上移或下移；长按卡片可拖动。内置按钮可隐藏，自定义按钮可删除。",
-                13, theme.muted, Typeface.NORMAL);
-        hint.setLineSpacing(0, 1.15f);
-        page.addView(hint, topMargin(dp(18)));
+        TextView hint = text("长按卡片（或按住左侧 ☰）直接拖动调顺序；右滑卡片隐藏或删除（底部可撤销）；"
+                        + "点击卡片可编辑按键、名称与指令。",
+                13, theme.body, Typeface.NORMAL);
+        hint.setLineSpacing(0, 1.2f);
+        page.addView(hint, topMargin(dp(16)));
 
         LinearLayout actions = new LinearLayout(this);
-        Button add = button("＋ 新增按钮", theme.feedbackSurface(theme.primary), theme.text);
+        Button add = button("＋ 快捷键", theme.primary, theme.onPrimary);
         add.setOnClickListener(view ->
                 startActivity(new Intent(this, ShortcutEditActivity.class)));
-        actions.addView(add, new LinearLayout.LayoutParams(0, dp(52), 1f));
-        Button restore = button("恢复全部", theme.feedbackSurface(theme.danger), theme.danger);
+        actions.addView(add, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button addSlash = button("＋ /指令", theme.surface, theme.primary);
+        addSlash.setOnClickListener(view -> {
+            Intent intent = new Intent(this, ShortcutEditActivity.class);
+            intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
+            startActivity(intent);
+        });
+        LinearLayout.LayoutParams slashParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        slashParams.leftMargin = dp(8);
+        actions.addView(addSlash, slashParams);
+        Button restore = button("恢复默认", theme.surface, theme.danger);
         restore.setOnClickListener(view -> confirmResetAll());
-        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, dp(48), 0.9f);
         restoreParams.leftMargin = dp(8);
         actions.addView(restore, restoreParams);
-        page.addView(actions, topMargin(dp(16)));
+        page.addView(actions, topMargin(dp(18)));
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        page.addView(list, topMargin(dp(12)));
+        page.addView(list, topMargin(dp(14)));
+
+        LinearLayout transferRow = new LinearLayout(this);
+        transferRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button exportButton = button("导出配置", theme.surface, theme.body);
+        exportButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "phonedeck-shortcuts.json");
+            startActivityForResult(intent, REQUEST_EXPORT_CONFIG);
+        });
+        transferRow.addView(exportButton, new LinearLayout.LayoutParams(
+                0, dp(48), 1f));
+        Button importButton = button("导入配置", theme.surface, theme.body);
+        importButton.setOnClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                    new String[]{"application/json", "text/*"});
+            startActivityForResult(intent, REQUEST_IMPORT_CONFIG);
+        });
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(
+                0, dp(48), 1f);
+        importParams.leftMargin = dp(10);
+        transferRow.addView(importButton, importParams);
+        page.addView(transferRow, topMargin(dp(16)));
+
         refreshList();
-        return theme.wrapContent(this, scroll);
+
+        // 底部悬浮的撤销条：右滑隐藏/删除后出现，可一键还原整份快照。
+        undoBar = new LinearLayout(this);
+        undoBar.setOrientation(LinearLayout.HORIZONTAL);
+        undoBar.setGravity(Gravity.CENTER_VERTICAL);
+        undoBar.setPadding(dp(16), dp(10), dp(8), dp(10));
+        undoBar.setBackground(theme.shape(this, theme.surface, 14, 1, theme.outline));
+        undoBar.setElevation(dp(6));
+        undoMessage = text("", 13, theme.text, Typeface.NORMAL);
+        undoBar.addView(undoMessage, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button undo = button("撤销", theme.primaryContainer, theme.primary);
+        undo.setOnClickListener(view -> {
+            if (undoSnapshot != null) {
+                try {
+                    repository.save(undoSnapshot);
+                } catch (Exception exception) {
+                    showError("撤销失败：" + exception.getMessage());
+                }
+                undoSnapshot = null;
+            }
+            hideUndoBar();
+            refreshList();
+        });
+        LinearLayout.LayoutParams undoParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        undoParams.leftMargin = dp(10);
+        undoBar.addView(undo, undoParams);
+        undoBar.setVisibility(View.GONE);
+
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.addView(scroll, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        android.widget.FrameLayout.LayoutParams barParams = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+        barParams.gravity = Gravity.BOTTOM;
+        barParams.setMargins(dp(16), 0, dp(16), dp(20));
+        root.addView(undoBar, barParams);
+        return theme.wrapContent(this,
+                TouchFeedback.wrapEdgeSwipeBack(this, root, this::finish));
+    }
+
+    private void hideUndoBar() {
+        if (undoBar != null) {
+            undoBar.setVisibility(View.GONE);
+        }
+    }
+
+    private void showUndoBar(String message, ArrayList<ShortcutButtonConfig> snapshot) {
+        undoSnapshot = snapshot;
+        undoMessage.setText(message);
+        undoBar.setVisibility(View.VISIBLE);
+        undoBar.removeCallbacks(hideUndoBar);
+        undoBar.postDelayed(hideUndoBar, UNDO_BAR_TIMEOUT_MS);
+    }
+
+    /// 右滑卡片：内置按钮隐藏（可再显示），自定义按钮删除；底部撤销条可整份还原。
+    private void onRowSwiped(View row, ShortcutButtonConfig config) {
+        ArrayList<ShortcutButtonConfig> before;
+        try {
+            before = repository.load();
+        } catch (Exception exception) {
+            showError("无法读取快捷键配置");
+            return;
+        }
+        ArrayList<ShortcutButtonConfig> snapshot = new ArrayList<>();
+        for (ShortcutButtonConfig value : before) {
+            snapshot.add(value.copy());
+        }
+        if (config.builtIn) {
+            for (ShortcutButtonConfig value : before) {
+                if (value.id.equals(config.id)) {
+                    value.visible = false;
+                    value.updatedAt = System.currentTimeMillis();
+                }
+            }
+            try {
+                repository.save(before);
+            } catch (Exception exception) {
+                showError("隐藏按钮失败");
+                return;
+            }
+            animateRowOut(row, () -> refreshList());
+            showUndoBar("已隐藏「" + config.label + "」", snapshot);
+        } else {
+            before.removeIf(value -> value.id.equals(config.id));
+            try {
+                repository.save(before);
+            } catch (Exception exception) {
+                showError("删除按钮失败");
+                return;
+            }
+            animateRowOut(row, () -> refreshList());
+            showUndoBar("已删除「" + config.label + "」", snapshot);
+        }
+    }
+
+    private void animateRowOut(View row, Runnable endAction) {
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            endAction.run();
+            return;
+        }
+        row.animate().translationX(row.getWidth() * 1.2f).alpha(0f).setDuration(140)
+                .withEndAction(endAction).start();
     }
 
     private void refreshList() {
@@ -105,12 +302,14 @@ public final class ShortcutSettingsActivity extends Activity {
         row.setBackground(theme.shape(this, theme.surface, 15, 1, theme.outline));
         row.setTag(config.id);
         row.setContentDescription(config.label + "，" + config.subtitle()
-                + (config.visible ? "，已显示" : "，已隐藏"));
+                + (config.visible ? "，已显示" : "，已隐藏")
+                + "。点按编辑，长按拖动调顺序");
 
         TextView drag = text("☰", 20, theme.muted, Typeface.BOLD);
         drag.setGravity(Gravity.CENTER);
-        drag.setContentDescription("调整" + config.label + "的顺序");
+        drag.setContentDescription("拖动调整" + config.label + "的顺序，点按可上移或下移");
         drag.setOnClickListener(view -> showReorderDialog(config.id, index, total));
+        TouchFeedback.installDragHandle(drag, () -> startRowDrag(row, config));
         row.addView(drag, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout copy = new LinearLayout(this);
@@ -120,28 +319,42 @@ public final class ShortcutSettingsActivity extends Activity {
         copy.addView(title);
         copy.addView(text(config.subtitle() + (config.visible ? "" : "  ·  已隐藏"),
                 12, theme.muted, Typeface.NORMAL));
-        copy.setOnClickListener(view -> openEditor(config.id));
         row.addView(copy, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button visible = miniButton(config.visible ? "隐藏" : "显示");
-        visible.setContentDescription((config.visible ? "隐藏" : "显示") + config.label);
-        visible.setOnClickListener(view -> toggleVisible(config.id));
-        row.addView(visible, new LinearLayout.LayoutParams(dp(52), dp(48)));
-
         Button edit = miniButton("编辑");
         edit.setOnClickListener(view -> openEditor(config.id));
-        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(dp(54), dp(48));
-        editParams.leftMargin = dp(8);
-        row.addView(edit, editParams);
+        row.addView(edit, new LinearLayout.LayoutParams(dp(50), dp(44)));
 
-        row.setOnLongClickListener(view -> {
-            ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
-            view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
-            return true;
-        });
+        if (!config.builtIn) {
+            Button delete = button("删除", theme.feedbackSurface(theme.danger), theme.danger);
+            delete.setContentDescription("删除" + config.label);
+            delete.setOnClickListener(view -> onRowSwiped(row, config));
+            LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(50), dp(44));
+            deleteParams.leftMargin = dp(6);
+            row.addView(delete, deleteParams);
+        } else {
+            Button visible = miniButton(config.visible ? "隐藏" : "显示");
+            visible.setContentDescription((config.visible ? "隐藏" : "显示") + config.label);
+            visible.setOnClickListener(view -> toggleVisible(config.id));
+            LinearLayout.LayoutParams visibleParams = new LinearLayout.LayoutParams(dp(50), dp(44));
+            visibleParams.leftMargin = dp(6);
+            row.addView(visible, visibleParams);
+        }
+
+        // 点卡片主体 = 编辑；长按（自管计时，抗手指微动）= 浮起拖动调位；右滑 = 隐藏/删除（可撤销）。
+        row.setOnClickListener(view -> openEditor(config.id));
+        TouchFeedback.installHoldable(row, null,
+                () -> startRowDrag(row, config), null,
+                () -> onRowSwiped(row, config));
         row.setOnDragListener((view, event) -> handleDrag(view, event));
         return row;
+    }
+
+    private void startRowDrag(View row, ShortcutButtonConfig config) {
+        ClipData data = ClipData.newPlainText("PhoneDeckButtonId", config.id);
+        row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        row.startDragAndDrop(data, new View.DragShadowBuilder(row), null, 0);
     }
 
     private boolean handleDrag(View target, DragEvent event) {
@@ -242,26 +455,9 @@ public final class ShortcutSettingsActivity extends Activity {
             return;
         }
         try {
-            ArrayList<ShortcutButtonConfig> buttons = repository.load();
-            ShortcutButtonConfig moving = null;
-            for (ShortcutButtonConfig value : buttons) {
-                if (value.id.equals(sourceId)) {
-                    moving = value;
-                    break;
-                }
+            if (repository.moveToSlot(sourceId, targetId)) {
+                refreshList();
             }
-            if (moving == null) {
-                return;
-            }
-            buttons.remove(moving);
-            int targetIndex = 0;
-            while (targetIndex < buttons.size()
-                    && !buttons.get(targetIndex).id.equals(targetId)) {
-                targetIndex++;
-            }
-            buttons.add(Math.min(targetIndex, buttons.size()), moving);
-            repository.save(buttons);
-            refreshList();
         } catch (Exception exception) {
             showError("保存拖动顺序失败");
         }

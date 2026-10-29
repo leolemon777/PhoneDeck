@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 
 public final class ShortcutEditActivity extends Activity {
     static final String EXTRA_BUTTON_ID = "buttonId";
+    static final String EXTRA_PRESET_SLASH = "presetSlash";
     private static final int REQUEST_KEYS = 2001;
     private static final int REQUEST_MACRO_STEP_KEYS = 2002;
 
@@ -53,7 +54,9 @@ public final class ShortcutEditActivity extends Activity {
         theme.applyWindow(this);
         repository = new ShortcutConfigRepository(this);
         String id = getIntent().getStringExtra(EXTRA_BUTTON_ID);
-        draft = id == null ? repository.newCustomButton() : findButton(id);
+        boolean presetSlash = getIntent().getBooleanExtra(EXTRA_PRESET_SLASH, false);
+        draft = id != null ? findButton(id)
+                : presetSlash ? repository.newSlashButton() : repository.newCustomButton();
         if (draft == null) {
             finish();
             return;
@@ -107,48 +110,48 @@ public final class ShortcutEditActivity extends Activity {
 
     private View createInterface() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(theme.background);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(20), dp(20), dp(20), dp(34));
+        page.setPadding(dp(24), dp(22), dp(24), dp(36));
         page.setBackgroundColor(theme.contentBackground());
         scroll.addView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button("←", theme.surfaceRaised, theme.text);
+        Button back = button("‹", theme.surface, theme.primary);
+        back.setTextSize(26);
+        back.setPadding(0, 0, 0, dp(2));
         back.setOnClickListener(view -> requestClose());
         back.setContentDescription("返回；未保存的修改会询问处理方式");
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView title = text(draft.builtIn ? "编辑按钮" : "新增按钮", 22, theme.text,
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView title = text(draft.builtIn ? "编辑快捷指令" : "新增快捷指令", 22, theme.text,
                 Typeface.BOLD);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        titleParams.leftMargin = dp(12);
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        titleParams.leftMargin = dp(14);
         header.addView(title, titleParams);
+        Button topSave = button("保存", theme.primary, theme.onPrimary);
+        topSave.setOnClickListener(view -> saveAndFinish());
+        header.addView(topSave, new LinearLayout.LayoutParams(dp(72), dp(40)));
         page.addView(header);
 
-        page.addView(label("按钮名称"), topMargin(dp(22)));
-        labelInput = input("例如：帮助");
+        page.addView(buildPresetSection(), topMargin(dp(20)));
+
+        page.addView(label("指令名称"), topMargin(dp(22)));
+        labelInput = input("例如：复制 / 规划");
         page.addView(labelInput, fieldParams());
 
-        page.addView(label("按钮颜色"), topMargin(dp(18)));
-        colorContainer = new LinearLayout(this);
-        colorContainer.setOrientation(LinearLayout.HORIZONTAL);
-        HorizontalScrollView colorScroll = new HorizontalScrollView(this);
-        colorScroll.addView(colorContainer, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        colorScroll.setHorizontalScrollBarEnabled(false);
-        page.addView(colorScroll, topMargin(dp(8)));
-
         visibleSwitch = new Switch(this);
-        visibleSwitch.setText("在主界面显示这个按钮");
+        visibleSwitch.setText("在主界面显示此指令");
         visibleSwitch.setTextColor(theme.text);
         visibleSwitch.setTextSize(15);
-        visibleSwitch.setPadding(dp(12), dp(8), dp(12), dp(8));
-        page.addView(visibleSwitch, topMargin(dp(18)));
+        visibleSwitch.setPadding(dp(16), dp(12), dp(16), dp(12));
+        visibleSwitch.setBackground(theme.shape(this, theme.surface, 14, 0, 0));
+        page.addView(visibleSwitch, topMargin(dp(16)));
 
-        page.addView(label("动作类型"), topMargin(dp(20)));
+        page.addView(label("动作类型"), topMargin(dp(22)));
         page.addView(buildTypeSelector(), topMargin(dp(8)));
 
         actionContainer = new LinearLayout(this);
@@ -156,26 +159,152 @@ public final class ShortcutEditActivity extends Activity {
         page.addView(actionContainer, topMargin(dp(4)));
         populateActionSection();
 
-        testButton = button("发送测试（不会保存）", theme.surfaceRaised, theme.text);
+        testButton = button("发送测试（不会保存）", theme.surface, theme.body);
         testButton.setOnClickListener(view -> testAction());
-        page.addView(testButton, topMargin(dp(18)));
+        page.addView(testButton, topMargin(dp(20)));
 
         feedback = text("先测试，再保存。文本指令会输入到当前光标位置。", 13, theme.muted,
                 Typeface.NORMAL);
-        feedback.setPadding(dp(12), dp(10), dp(12), dp(10));
-        feedback.setBackground(theme.shape(this, theme.surface, 12, 1, theme.outline));
-        page.addView(feedback, topMargin(dp(7)));
+        feedback.setPadding(dp(14), dp(12), dp(14), dp(12));
+        feedback.setBackground(theme.shape(this, theme.surface, 14, 1, theme.outline));
+        page.addView(feedback, topMargin(dp(8)));
 
         Button save = button("保存更改", theme.primary, theme.onPrimary);
         save.setOnClickListener(view -> saveAndFinish());
-        page.addView(save, topMargin(dp(18)));
+        page.addView(save, topMargin(dp(20)));
 
         Button restoreOrDelete = button(
-                draft.builtIn ? "恢复这个内置按钮" : "删除这个自定义按钮",
-                theme.feedbackSurface(theme.danger), theme.danger);
+                draft.builtIn ? "恢复默认内置指令" : "删除此自定义指令",
+                theme.surface, theme.danger);
         restoreOrDelete.setOnClickListener(view -> confirmRestoreOrDelete());
         page.addView(restoreOrDelete, topMargin(dp(12)));
-        return theme.wrapContent(this, scroll);
+        return theme.wrapContent(this,
+                TouchFeedback.wrapEdgeSwipeBack(this, scroll, this::requestClose));
+    }
+
+    private View buildPresetSection() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setBackground(theme.shape(this, theme.surface, 14, 0, 0));
+
+        card.addView(text("一键填入常用指令（点按自动填入，再点右上角保存）",
+                13, theme.text, Typeface.BOLD));
+
+        card.addView(text("常用快捷键", 12, theme.muted, Typeface.NORMAL), topMargin(dp(10)));
+        HorizontalScrollView keyScroll = new HorizontalScrollView(this);
+        keyScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout keyRow = new LinearLayout(this);
+        keyRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[][][] keyPresets = {
+                {{"复制", "blue"}, {"CTRL", "C"}},
+                {{"粘贴", "green"}, {"CTRL", "V"}},
+                {{"剪切", "orange"}, {"CTRL", "X"}},
+                {{"撤销", "slate"}, {"CTRL", "Z"}},
+                {{"重做", "slate"}, {"CTRL", "Y"}},
+                {{"全选", "purple"}, {"CTRL", "A"}},
+                {{"保存", "green"}, {"CTRL", "S"}},
+                {{"查找", "blue"}, {"CTRL", "F"}},
+                {{"切换窗口", "purple"}, {"ALT", "TAB"}},
+                {{"截图", "blue"}, {"WIN", "SHIFT", "S"}},
+                {{"终端", "slate"}, {"CTRL", "BACKTICK"}},
+                {{"删除", "slate"}, {"DELETE"}},
+                {{"回车", "green"}, {"ENTER"}},
+                {{"ESC", "red"}, {"ESC"}}
+        };
+        for (int i = 0; i < keyPresets.length; i++) {
+            final String presetLabel = keyPresets[i][0][0];
+            final String presetColor = keyPresets[i][0][1];
+            final String[] presetKeys = keyPresets[i][1];
+            String chordDisplay = KeyCatalog.displayChord(java.util.Arrays.asList(presetKeys))
+                    .replace(" + ", "+");
+            Button chip = presetChip(presetLabel + " · " + chordDisplay);
+            chip.setOnClickListener(v -> applyKeyPreset(presetLabel, presetColor, presetKeys));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(36));
+            if (i > 0) lp.leftMargin = dp(8);
+            keyRow.addView(chip, lp);
+        }
+        keyScroll.addView(keyRow);
+        card.addView(keyScroll, topMargin(dp(6)));
+
+        card.addView(text("常用斜杠指令（自动进入首页底部 / 指令栏）",
+                12, theme.muted, Typeface.NORMAL), topMargin(dp(12)));
+        HorizontalScrollView slashScroll = new HorizontalScrollView(this);
+        slashScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout slashRow = new LinearLayout(this);
+        slashRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[][] slashPresets = {
+                {"规划", "/plan", "blue"},
+                {"目标", "/goal", "green"},
+                {"压缩", "/compact", "purple"},
+                {"清空", "/clear", "orange"},
+                {"审查", "/review", "blue"},
+                {"深度思考", "/boost", "purple"},
+                {"总结经验", "/learn", "green"},
+                {"定时任务", "/schedule", "slate"}
+        };
+        for (int i = 0; i < slashPresets.length; i++) {
+            final String presetLabel = slashPresets[i][0];
+            final String presetCmd = slashPresets[i][1];
+            final String presetColor = slashPresets[i][2];
+            Button chip = presetChip(presetCmd + " " + presetLabel);
+            chip.setOnClickListener(v -> applySlashPreset(presetLabel, presetCmd, presetColor));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(36));
+            if (i > 0) lp.leftMargin = dp(8);
+            slashRow.addView(chip, lp);
+        }
+        slashScroll.addView(slashRow);
+        card.addView(slashScroll, topMargin(dp(6)));
+        return card;
+    }
+
+    private Button presetChip(String textValue) {
+        Button chip = new Button(this);
+        chip.setText(textValue);
+        chip.setAllCaps(false);
+        chip.setSingleLine(true);
+        chip.setTextSize(12);
+        chip.setTextColor(theme.body);
+        chip.setPadding(dp(12), 0, dp(12), 0);
+        chip.setStateListAnimator(null);
+        chip.setBackground(theme.pressable(this, theme.background,
+                theme.primaryContainer, 12, 0, 0));
+        return chip;
+    }
+
+    private void applyKeyPreset(String presetLabel, String presetColor, String[] keys) {
+        draft.label = presetLabel;
+        draft.color = presetColor;
+        draft.actionType = ShortcutButtonConfig.ACTION_KEY_CHORD;
+        draft.keys = KeyCatalog.normalizeChord(java.util.Arrays.asList(keys));
+        draft.visible = true;
+        populateActionSection();
+        if (typeSelectorRow != null) {
+            refreshTypeSelector(typeSelectorRow);
+        }
+        bindDraft();
+        installDirtyTracking();
+        dirty = true;
+        showFeedback("✓ 已填入预设「" + presetLabel + "」，点右上角或底部保存即可", theme.success);
+    }
+
+    private void applySlashPreset(String presetLabel, String command, String presetColor) {
+        draft.label = presetLabel;
+        draft.color = presetColor;
+        draft.actionType = ShortcutButtonConfig.ACTION_TEXT;
+        draft.text = command;
+        draft.submitText = true;
+        draft.visible = true;
+        populateActionSection();
+        if (typeSelectorRow != null) {
+            refreshTypeSelector(typeSelectorRow);
+        }
+        bindDraft();
+        installDirtyTracking();
+        dirty = true;
+        showFeedback("✓ 已填入斜杠指令「" + command + "」，点右上角或底部保存即可", theme.success);
     }
 
     private LinearLayout buildTypeSelector() {
@@ -258,8 +387,8 @@ public final class ShortcutEditActivity extends Activity {
         macroAddStepButton = null;
         actionContainer.removeAllViews();
         if (draft.isTextAction()) {
-            actionContainer.addView(label("AI Agent 文本指令"), topMargin(dp(16)));
-            textInput = input("例如：/plan");
+            actionContainer.addView(label("文本指令（以 / 开头会进入首页指令栏）"), topMargin(dp(16)));
+            textInput = input("例如：/plan（斜杠指令）或任意文本");
             textInput.setText(draft.text == null ? "" : draft.text);
             actionContainer.addView(textInput, fieldParams());
             submitSwitch = new Switch(this);
@@ -483,23 +612,11 @@ public final class ShortcutEditActivity extends Activity {
     }
 
     private void selectColor(String color) {
-        selectedColor = color;
-        colorContainer.removeAllViews();
-        for (String c : KeyCatalog.COLORS) {
-            View swatch = new View(this);
-            int size = dp(48);
-            boolean isSelected = c.equals(color);
-            swatch.setBackground(theme.shape(this, theme.shortcutColor(c), size / 2, isSelected ? 3 : 0, theme.text));
-            swatch.setContentDescription("选择" + colorName(c) + "按钮颜色"
-                    + (isSelected ? "，当前已选择" : ""));
-            swatch.setOnClickListener(v -> {
-                selectColor(c);
-                dirty = true;
-            });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
-            params.rightMargin = dp(12);
-            colorContainer.addView(swatch, params);
+        selectedColor = color == null ? "blue" : color;
+        if (colorContainer == null) {
+            return;
         }
+        colorContainer.removeAllViews();
     }
 
     private String colorName(String color) {

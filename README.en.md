@@ -27,7 +27,7 @@ Yandu **does not do speech recognition**. It carries the phone's audio into the 
 - **Three computer modes:** dictate, translate and ask, depending on what the chosen dictation app supports.
 - **Several computers:** computers on the same Wi-Fi appear on the phone's home screen. Tap one, check that the four-digit code matches, and click Allow on the computer. No QR codes.
 - **Shortcut pad:** copy, paste, screenshot, F1 and so on, plus text commands for AI coding tools such as `/plan`, `/goal` and `/compact`. All of it is editable on the phone.
-- **Eight color themes.**
+- **Four color themes:** light gray, white, black, and space gray. Retired color themes migrate to light gray.
 
 ## What you need
 
