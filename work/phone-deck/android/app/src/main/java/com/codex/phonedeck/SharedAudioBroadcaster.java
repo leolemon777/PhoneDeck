@@ -146,7 +146,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         for (Target target : desired.values()) {
             addSink(target);
         }
-        notifyConnections();
+        notifyConnections(sessionId);
         return stopped;
     }
 
@@ -168,7 +168,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     }
 
     private void addSink(Target target) {
-        TargetSink sink = new TargetSink(target);
+        TargetSink sink = new TargetSink(target, sessionId);
         TargetSink previous = sinks.putIfAbsent(target.computerId, sink);
         if (previous == null) {
             sink.start();
@@ -286,14 +286,15 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         // captureLoop seals queues after offering its last successful read.
     }
 
-    private void notifyConnections() {
+    private void notifyConnections(String eventSessionId) {
         // Consumers read the current connection snapshot when handling this
         // notification, so a queued callback cannot replay obsolete flags.
-        listener.onConnectionsChanged(sessionId);
+        listener.onConnectionsChanged(eventSessionId);
     }
 
     private final class TargetSink {
         final Target target;
+        final String ownerSessionId;
         final SharedAudioPolicies.FrameQueue queue =
                 new SharedAudioPolicies.FrameQueue(QUEUE_FRAMES);
         volatile boolean shouldRun = true;
@@ -302,8 +303,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         volatile HttpURLConnection connection;
         Thread worker;
 
-        TargetSink(Target target) {
+        TargetSink(Target target, String ownerSessionId) {
             this.target = target;
+            this.ownerSessionId = ownerSessionId;
         }
 
         void start() {
@@ -339,14 +341,14 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     local.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
                     local.setRequestProperty("X-PhoneDeck-Audio-Mode", "shared");
                     local.setRequestProperty("X-PhoneDeck-Protocol", "2");
-                    local.setRequestProperty("X-PhoneDeck-Session", sessionId);
+                        local.setRequestProperty("X-PhoneDeck-Session", ownerSessionId);
                     local.setRequestProperty("X-PhoneDeck-Computer-Id", target.computerId);
                     local.setChunkedStreamingMode(CHUNK_BYTES);
                     local.setDoOutput(true);
                     backoff.connectionOpened(SystemClock.elapsedRealtime());
                     try (OutputStream output = local.getOutputStream()) {
                         connected = true;
-                        notifyConnections();
+                        notifyConnections(ownerSessionId);
                         while (shouldRun) {
                             byte[] frame = queue.take();
                             if (frame == null) {
@@ -376,7 +378,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     if (local != null) {
                         local.disconnect();
                     }
-                    notifyConnections();
+                    notifyConnections(ownerSessionId);
                 }
                 if (finishing) {
                     break;
@@ -392,7 +394,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             }
             connected = false;
             shouldRun = false;
-            notifyConnections();
+            notifyConnections(ownerSessionId);
         }
 
         void stop() {
