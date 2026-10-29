@@ -36,7 +36,9 @@ internal sealed class DiagnosticsMonitor : IDisposable
     private readonly ManualResetEventSlim wake = new(false);
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly CancellationTokenSource cancellation = new();
+    private readonly CancellationToken cancellationToken;
     private readonly Thread worker;
+    private int disposed;
     private DiagnosticsSnapshot current = DiagnosticsSnapshot.Unavailable("诊断尚未运行");
 
     internal DiagnosticsSnapshot Current => current;
@@ -51,6 +53,7 @@ internal sealed class DiagnosticsMonitor : IDisposable
         this.refreshIntervalMs = refreshIntervalMs;
         this.sessionActive = sessionActive;
         this.refreshed = refreshed;
+        cancellationToken = cancellation.Token;
         worker = new Thread(Run)
         {
             IsBackground = true,
@@ -80,10 +83,24 @@ internal sealed class DiagnosticsMonitor : IDisposable
     /// 只是停止等待并返回当前快照；读取仍由信号量保证单线程执行。</summary>
     internal async Task<DiagnosticsSnapshot> RefreshAsync(int timeoutMs)
     {
-        if (!await refreshGate.WaitAsync(0))
+        if (Volatile.Read(ref disposed) != 0)
         {
             return current;
         }
+
+        try
+        {
+            if (!await refreshGate.WaitAsync(0))
+            {
+                return current;
+            }
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
+        {
+            return current;
+        }
+
+        var releaseWhenReadCompletes = false;
         try
         {
             var read = Task.Run(() =>
@@ -99,21 +116,60 @@ internal sealed class DiagnosticsMonitor : IDisposable
                 return current;
             });
             var winner = await Task.WhenAny(read, Task.Delay(timeoutMs));
-            return winner == read
-                ? await read
-                : current with { LastError = "诊断刷新超时" };
+            if (winner == read)
+            {
+                return await read;
+            }
+
+            // A timed-out COM/Core Audio read cannot be cancelled safely. Keep
+            // refreshGate owned until that reader really exits; otherwise the
+            // next refresh can enter the same non-reentrant API concurrently.
+            _ = read.ContinueWith(
+                static (_, state) => ((DiagnosticsMonitor)state!).ReleaseRefreshGate(),
+                this,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            releaseWhenReadCompletes = true;
+            return current with { LastError = "诊断刷新超时" };
         }
         finally
         {
+            if (!releaseWhenReadCompletes)
+            {
+                ReleaseRefreshGate();
+            }
+        }
+    }
+
+    private void ReleaseRefreshGate()
+    {
+        try
+        {
             refreshGate.Release();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
+        {
+            // A timed-out reader may finish after Dispose. Its continuation
+            // must not surface an unobserved exception during shutdown.
         }
     }
 
     private void Run()
     {
-        while (!cancellation.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            if (refreshGate.Wait(0))
+            bool entered;
+            try
+            {
+                entered = refreshGate.Wait(0);
+            }
+            catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
+            {
+                break;
+            }
+
+            if (entered)
             {
                 try
                 {
@@ -128,7 +184,7 @@ internal sealed class DiagnosticsMonitor : IDisposable
                 }
                 finally
                 {
-                    refreshGate.Release();
+                    ReleaseRefreshGate();
                 }
                 try
                 {
@@ -141,7 +197,7 @@ internal sealed class DiagnosticsMonitor : IDisposable
             }
             try
             {
-                wake.Wait(CurrentIntervalMs, cancellation.Token);
+                wake.Wait(CurrentIntervalMs, cancellationToken);
                 wake.Reset();
             }
             catch (OperationCanceledException)
@@ -153,6 +209,10 @@ internal sealed class DiagnosticsMonitor : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
         // wake 不在此释放：后台线程可能仍在等待它，取消令牌已足以让线程退出。
         cancellation.Cancel();
         refreshGate.Dispose();
