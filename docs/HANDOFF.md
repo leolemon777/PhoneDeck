@@ -1,5 +1,33 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-29 连接与共享麦克风稳定性审计及基础修复（最新状态）
+
+- **范围**：用户反馈发现、配对后断线、假在线无声、多电脑切换、锁屏/切网均有问题，要求整体优化评估。
+  完整分析、后续分期和验收矩阵保存于 [连接与共享麦克风稳定性改造方案](design/CONNECTION_AUDIO_RELIABILITY.md)。
+  本轮只落地已定位且可自动化验证的基础修复；版本组、协议、音频格式、配对身份和运行安装保持原样。
+- **实际运行检查**：Windows 正在运行 `control-center-publish/PhoneDeck.Server.exe`，版本 `1.6.0-dev.17+a5e1c61`，
+  已有 10 月 9 日的半开流修复。外层根目录另有旧 EXE。只读健康采样中 6 次诊断全部 stale（年龄约 6.6–12.9 秒），
+  HTTP 请求本身 3–136 ms；当时已有 shared 流，不能把过期的 capturing=false 当成实际录音结论。
+  已检测 VB-CABLE 和 CABLE Output 配置；当前网络为 Public，当前 EXE 的 Private 阻止规则属于切换网络类型后的隐患。
+- **Android 连接**：`ConnectionMonitor` 为网络 reset 与每个独立探测分配代次；超时/中断时释放 waiter，最后等待者离开才取消旧 Future。
+  同 Future 的成功结果可同时被首页/服务使用，超时的旧等待者不能覆盖新成功；慢发现也不能倒写新一轮结果。输入 computerId 去重。
+  失效批次显式标记 invalidated，首页与共享服务直接丢弃，避免把切网期间的无效空结果当作全部离线并拆掉现有音频流。
+- **Android 共享**：重连退避从首个实际写入开始计算，连续写入满 5 秒才复位；间隔超过 1 秒重新计时。
+  只取得 OutputStream 不再复位退避。通知和状态分母只统计显式共享组内的现存电脑。
+- **Windows 诊断**：`DiagnosticsMonitor.RefreshAsync` 超时不再提前释放互斥 gate；真实 reader 退出后再释放，并处理 Dispose 竞态。
+  `VoiceEngineStateProbe` 超过 250 ms 协作预算、扫描不完整或异常时返回 unknown，避免错误生成手机停止凭据。
+  同步 COM 仍不能硬取消；保留采样开始时刻，未用改时间戳掩盖慢诊断。
+- **验证**：Windows 使用工作区 `.tools/dotnet` SDK 10.0.400，Release build 0 warning/0 error，Server Tests **188/188**。
+  Android 使用 JDK 17 和现有 SDK，`assembleDebug`、`testDebugUnitTest`、`lintDebug` 通过，**55/55** 测试，lint **0 error/43 warning**。
+  回归覆盖超时释放、共享探测两个成功消费者、单等待者退出、reset、慢发现迟到、重复设备、稳定写入退避、诊断串行与 unknown。
+  Windows TRX 保存于 ignored 的 `outputs/connection-audio-stability/windows/`；Android 报告在标准 build 目录。
+- **未完成及下一步**：普通健康探测失败仍可能删除 shared sink；取得 OutputStream 仍不等于接收端确认；手机侧写入看门狗、
+  输出设备故障上报、15 秒退避/零目标停采协调、统一网络生命周期、分段自检和单一部署入口进入后续实施。
+  本轮无 ADB 设备，未覆盖安装 APK/EXE，未修改防火墙；没有新增真实麦克风、锁屏、多电脑共享或网络切换验收。
+  先完成上述状态与恢复改造，再执行 20 轮开始/停止、1/2/3 电脑共享、2 小时锁屏及 8 小时运行矩阵。
+- **分支**：`agent/connection-mic-stability-audit` 基于 `agent/mac-audio-stall-timeout`（a5e1c61，现有 PR #53 尚未合入 main），
+  保留既有半开流修复；后续草稿 PR 以该分支为 base，避免把旧补丁重复列为本轮修改。
+
 ## 2026-10-09 半开音频长流占用接收端导致听写全部失败（最新状态）
 
 - **现象**：作者 Samsung + Apple Silicon Mac，连接与状态全部正常，但每次点语音都无字；手机日志为
