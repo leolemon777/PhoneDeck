@@ -13,10 +13,6 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.graphics.Color;
-import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.net.wifi.WifiManager;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -218,9 +214,25 @@ public final class MainActivity extends Activity {
     private int lanCheckFailStreak;
     /// 立即探测的最小间隔，避免网络回调风暴。
     private long lastLanCheckAt;
+    /// 网络事件在当前探测/防抖窗口内合并，窗口结束后一定补发一轮，不能丢掉切网。
+    private final WifiLinkPolicy.PendingRefresh pendingLanRefresh =
+            new WifiLinkPolicy.PendingRefresh();
+    private final Runnable pendingLanCheck = () -> {
+        if (isFinishing() || isDestroyed() || lanCheckInFlight) {
+            return;
+        }
+        WifiLinkPolicy.PendingRefresh.Request request = pendingLanRefresh
+                .takeIfDue(SystemClock.elapsedRealtime());
+        if (request == null) {
+            schedulePendingLanCheck();
+            return;
+        }
+        runImmediateLanCheck(request.reason == null
+                ? "Wi-Fi 链路变化" : request.reason, request.probeUsb);
+    };
     /// 单台设备探测失败后到判离线的宽限期。
     private static final long OFFLINE_GRACE_MS = 6_000;
-    private ConnectivityManager.NetworkCallback networkCallback;
+    private WifiLinkObserver.Registration wifiLinkRegistration;
 
     // Microphone activation is owned by explicit actions on the phone.
     private final BroadcastReceiver sharedStatusReceiver = new BroadcastReceiver() {
@@ -398,50 +410,75 @@ public final class MainActivity extends Activity {
 
     /// Wi-Fi 切换、DHCP 变化、网络恢复时立即重新探测与发现，不需要 USB。
     private void registerNetworkCallbacks() {
-        ConnectivityManager manager = (ConnectivityManager) getApplicationContext()
-                .getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (manager == null || networkCallback != null) {
+        if (wifiLinkRegistration != null) {
             return;
         }
-        networkCallback = new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(Network network) {
-                requestImmediateLanCheck("网络可用");
-            }
-
-            @Override
-            public void onLost(Network network) {
-                requestImmediateLanCheck("网络变化");
-            }
-        };
         try {
-            manager.registerNetworkCallback(
-                    new NetworkRequest.Builder()
-                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                            .build(),
-                    networkCallback);
+            wifiLinkRegistration = WifiLinkObserver.register(this, state ->
+                    requestImmediateLanCheck(state.connected
+                            ? "Wi-Fi 链路可用或地址变化" : "Wi-Fi 链路断开", false));
         } catch (Exception exception) {
             Log.w("PhoneDeckNet", "注册网络回调失败：" + exception.getMessage());
-            networkCallback = null;
+            wifiLinkRegistration = null;
         }
     }
 
     private void requestImmediateLanCheck(String reason) {
+        requestImmediateLanCheck(reason, true);
+    }
+
+    private void requestImmediateLanCheck(String reason, boolean invalidate) {
+        if (invalidate) {
+            // Non-network callers (foreground resume, pairing/credential
+            // changes) still need the old explicit reset behavior.  Wi-Fi
+            // observer callbacks pass false because the observer already
+            // invalidated this generation exactly once.
+            ConnectionMonitor.get(this).reset();
+        }
         mainHandler.post(() -> {
             if (isFinishing() || isDestroyed()) {
                 return;
             }
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastLanCheckAt < 1_000) {
-                return;
-            }
-            Log.i("PhoneDeckNet", "立即重新探测：" + reason);
-            lanCheckFailStreak = 0;
-            ConnectionMonitor.get(this).reset();
-            testConnection();
-            testLanConnections();
-            mainHandler.post(nearbyScan);
+            pendingLanRefresh.request(reason, invalidate,
+                    SystemClock.elapsedRealtime(), lastLanCheckAt);
+            schedulePendingLanCheck();
         });
+    }
+
+    private void schedulePendingLanCheck() {
+        if (isFinishing() || isDestroyed() || lanCheckInFlight
+                || !pendingLanRefresh.isPending()) {
+            return;
+        }
+        long delay = Math.max(1L,
+                pendingLanRefresh.dueAt() - SystemClock.elapsedRealtime());
+        mainHandler.removeCallbacks(pendingLanCheck);
+        mainHandler.postDelayed(pendingLanCheck, delay);
+    }
+
+    private void runImmediateLanCheck(String reason, boolean probeUsb) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        long waitForDebounce = Math.max(0L,
+                1_000L - (SystemClock.elapsedRealtime() - lastLanCheckAt));
+        if (lanCheckInFlight || waitForDebounce > 0L) {
+            pendingLanRefresh.request(reason, probeUsb,
+                    SystemClock.elapsedRealtime(), lastLanCheckAt);
+            schedulePendingLanCheck();
+            return;
+        }
+        Log.i("PhoneDeckNet", "立即重新探测：" + reason);
+        lanCheckFailStreak = 0;
+        // WifiLinkObserver has already invalidated ConnectionMonitor once for
+        // Wi-Fi generations.  Only the old non-network callers request a USB
+        // health probe; a Wi-Fi callback must not tear down a healthy fallback.
+        lastLanCheckAt = SystemClock.elapsedRealtime();
+        if (probeUsb) {
+            testConnection();
+        }
+        testLanConnections();
+        mainHandler.post(nearbyScan);
     }
 
     @Override
@@ -3490,10 +3527,13 @@ public final class MainActivity extends Activity {
         }
         lanCheckInFlight = true;
         lastLanCheckAt = SystemClock.elapsedRealtime();
+        final long probeGeneration = WifiLinkObserver.currentGeneration();
         connectionExecutor.execute(() -> {
             try {
                 ConcurrentHashMap<String, LanTargetStatus> next =
                         new ConcurrentHashMap<>();
+                java.util.Map<String, String> goodAddresses = new java.util.HashMap<>();
+                java.util.List<Runnable> remoteUpdates = new java.util.ArrayList<>();
                 // 防抖：上一轮在线、本轮失败但仍在宽限期内的设备保持在线，
                 // 不再出现“Wi-Fi 在线/离线”来回跳动、按钮变灰。
                 for (java.util.Map.Entry<String, LanTargetStatus> entry
@@ -3534,32 +3574,53 @@ public final class MainActivity extends Activity {
                     anySuccess = true;
                     // 复用的缓存结果按其真实采样时刻判断远端停止，不能当作本轮新样本。
                     final long probeStartedAt = outcome.startedAt;
-                    if (targetDeviceManager.recordLastGoodAddress(
-                            device.computerId, result.hostAddress)) {
-                        Log.i("PhoneDeckNet", "last-good 地址更新："
-                                + device.displayName + " → " + result.hostAddress);
-                    }
+                    goodAddresses.put(device.computerId, result.hostAddress);
                     JSONObject health = result.health;
                     RemoteVoiceState remoteVoiceState =
                             RemoteVoiceState.fromHealth(health, probeStartedAt);
                     next.put(device.computerId, lanStatusFrom(result));
                     PhoneDeckEndpoint healthEndpoint = result.endpoint;
                     String healthComputerId = device.computerId;
-                    mainHandler.post(() -> {
+                    remoteUpdates.add(() -> {
                         reconcileRemoteVoiceState(
                                 healthEndpoint, healthComputerId, remoteVoiceState);
                         maybeFollowUpdateRequest(healthComputerId, health);
                     });
                 }
-                lanCheckFailStreak = anyPaired && !anySuccess
+                if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                        WifiLinkObserver.currentGeneration(), !isDestroyed()
+                                && !Thread.currentThread().isInterrupted())) {
+                    return;
+                }
+                final int nextFailStreak = anyPaired && !anySuccess
                         ? lanCheckFailStreak + 1 : 0;
-                lanTargets.clear();
-                lanTargets.putAll(next);
-                lanPairingRejected.clear();
-                lanPairingRejected.putAll(rejectedNext);
-                mainHandler.post(this::applyStoredTarget);
+                mainHandler.post(() -> {
+                    if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                            WifiLinkObserver.currentGeneration(), !isDestroyed())) {
+                        return;
+                    }
+                    for (java.util.Map.Entry<String, String> entry : goodAddresses.entrySet()) {
+                        if (targetDeviceManager.recordLastGoodAddress(
+                                entry.getKey(), entry.getValue())) {
+                            Log.i("PhoneDeckNet", "last-good 地址更新："
+                                    + entry.getKey() + " → " + entry.getValue());
+                        }
+                    }
+                    lanCheckFailStreak = nextFailStreak;
+                    lanTargets.clear();
+                    lanTargets.putAll(next);
+                    lanPairingRejected.clear();
+                    lanPairingRejected.putAll(rejectedNext);
+                    for (Runnable remoteUpdate : remoteUpdates) {
+                        remoteUpdate.run();
+                    }
+                    applyStoredTarget();
+                });
             } finally {
                 lanCheckInFlight = false;
+                mainHandler.post(() -> {
+                    schedulePendingLanCheck();
+                });
             }
         });
     }
@@ -4885,6 +4946,8 @@ public final class MainActivity extends Activity {
         TranscriptRelay.release();
         mainHandler.removeCallbacks(periodicHealthCheck);
         mainHandler.removeCallbacks(managedVoiceCheck);
+        mainHandler.removeCallbacks(pendingLanCheck);
+        pendingLanRefresh.clear();
         voiceStatusExecutor.shutdownNow();
         if (sharedStatusReceiverRegistered) {
             unregisterReceiver(sharedStatusReceiver);
@@ -4912,19 +4975,10 @@ public final class MainActivity extends Activity {
     }
 
     private void unregisterNetworkCallbacks() {
-        if (networkCallback == null) {
-            return;
+        if (wifiLinkRegistration != null) {
+            wifiLinkRegistration.close();
+            wifiLinkRegistration = null;
         }
-        try {
-            ConnectivityManager manager = (ConnectivityManager) getApplicationContext()
-                    .getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (manager != null) {
-                manager.unregisterNetworkCallback(networkCallback);
-            }
-        } catch (Exception ignored) {
-            // 系统可能已随网络服务注销。
-        }
-        networkCallback = null;
     }
 
     private Button smallButton(String label) {

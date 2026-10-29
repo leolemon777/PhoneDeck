@@ -89,6 +89,9 @@ public final class PhoneAudioService extends Service {
     private PowerManager.WakeLock wakeLock;
     private volatile boolean desiredRunning;
     private boolean stopping;
+    private boolean serviceDestroyed;
+    /// 独立于 Wi-Fi 代次的服务会话代次；stop→start 不能接纳上一会话的迟到批次。
+    private volatile long serviceSessionRevision;
     /// 本次共享是由电脑 shared.requested 联动开启（而不是用户在手机上手动开启）；
     /// 只有联动开启的会话才会在电脑全部取消请求后自动停止。
     private volatile boolean startedByLinkage;
@@ -101,6 +104,7 @@ public final class PhoneAudioService extends Service {
     private volatile String statusDetail = "正在准备";
     private final ConcurrentHashMap<String, String> receiverStates =
             new ConcurrentHashMap<>();
+    private WifiLinkObserver.Registration wifiLinkRegistration;
 
     private final Runnable probeTick = new Runnable() {
         @Override
@@ -121,37 +125,37 @@ public final class PhoneAudioService extends Service {
         createNotificationChannel();
         broadcaster = new SharedAudioBroadcaster(this, new SharedAudioBroadcaster.Listener() {
             @Override
-            public void onLevel(int percent) {
-                lastLevel = percent;
-                publishStatus(false);
-            }
-
-            @Override
-            public void onConnectionsChanged(Map<String, Boolean> connections) {
-                if (!desiredRunning) {
-                    return;
-                }
-                int connected = 0;
-                for (Map.Entry<String, Boolean> entry : connections.entrySet()) {
-                    if (Boolean.TRUE.equals(entry.getValue())) {
-                        connected++;
-                        receiverStates.put(entry.getKey(), "正在供音");
-                    } else if (!"配置错误".equals(receiverStates.get(entry.getKey()))
-                            && !"需要更新电脑端".equals(receiverStates.get(entry.getKey()))) {
-                        receiverStates.put(entry.getKey(), "连接中");
-                    }
-                }
-                connectedCount = connected;
-                statusDetail = connected > 0
-                        ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
-                        : "正在等待音频接收端";
-                publishStatus();
-                updateNotification();
-            }
-
-            @Override
-            public void onStopped(String reason) {
+            public void onLevel(String sessionId, int percent) {
                 handler.post(() -> {
+                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping) {
+                        return;
+                    }
+                    lastLevel = percent;
+                    publishStatus(false);
+                });
+            }
+
+            @Override
+            public void onConnectionsChanged(String sessionId) {
+                handler.post(() -> {
+                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping) {
+                        return;
+                    }
+                    mergeCurrentConnections();
+                    statusDetail = connectedCount > 0
+                            ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
+                            : "正在等待音频接收端";
+                    publishStatus();
+                    updateNotification();
+                });
+            }
+
+            @Override
+            public void onStopped(String sessionId, String reason) {
+                handler.post(() -> {
+                    if (!isCurrentAudioSession(sessionId)) {
+                        return;
+                    }
                     desiredRunning = false;
                     statusDetail = reason == null ? "共享麦克风已关闭"
                             : "共享麦克风已停止：" + reason;
@@ -159,6 +163,26 @@ public final class PhoneAudioService extends Service {
                 });
             }
         });
+    }
+
+    private boolean isCurrentAudioSession(String sessionId) {
+        return WifiLinkPolicy.isCurrentSessionEvent(sessionId,
+                broadcaster == null ? null : broadcaster.getSessionId(), !serviceDestroyed);
+    }
+
+    /** Main-thread state merge; reads only the broadcaster's in-memory flags. */
+    private void mergeCurrentConnections() {
+        int connected = 0;
+        for (Map.Entry<String, Boolean> entry : broadcaster.connectionSnapshot().entrySet()) {
+            if (Boolean.TRUE.equals(entry.getValue())) {
+                connected++;
+                receiverStates.put(entry.getKey(), "正在供音");
+            } else if (!"配置错误".equals(receiverStates.get(entry.getKey()))
+                    && !"需要更新电脑端".equals(receiverStates.get(entry.getKey()))) {
+                receiverStates.put(entry.getKey(), "连接中");
+            }
+        }
+        connectedCount = connected;
     }
 
     @Override
@@ -193,7 +217,9 @@ public final class PhoneAudioService extends Service {
             return;
         }
         desiredRunning = true;
+        ++serviceSessionRevision;
         knownTotal = countSharedGroupDevices(deviceManager.list());
+        registerWifiLinkObserver();
         try {
             acquireLocks();
             Notification notification = buildNotification();
@@ -220,7 +246,9 @@ public final class PhoneAudioService extends Service {
             return;
         }
         stopping = true;
+        serviceSessionRevision++;
         desiredRunning = false;
+        unregisterWifiLinkObserver();
         startedByLinkage = false;
         emptyTargetsSinceElapsed = 0L;
         handler.removeCallbacks(probeTick);
@@ -239,7 +267,9 @@ public final class PhoneAudioService extends Service {
     }
 
     private void finishSharedStop() {
+        serviceSessionRevision++;
         desiredRunning = false;
+        unregisterWifiLinkObserver();
         startedByLinkage = false;
         stopping = false;
         handler.removeCallbacks(probeTick);
@@ -255,15 +285,44 @@ public final class PhoneAudioService extends Service {
         stopSelf();
     }
 
+    private void registerWifiLinkObserver() {
+        if (wifiLinkRegistration != null) {
+            return;
+        }
+        try {
+            wifiLinkRegistration = WifiLinkObserver.register(this, state -> {
+                if (desiredRunning && !stopping) {
+                    // The observer has already reset the shared monitor once
+                    // for this Wi-Fi generation.  Re-probe immediately while
+                    // preserving the explicit microphone opt-in state.
+                    probeReceivers();
+                }
+            });
+        } catch (Exception exception) {
+            statusDetail = "Wi-Fi 状态监听不可用：" + exception.getMessage();
+        }
+    }
+
+    private void unregisterWifiLinkObserver() {
+        if (wifiLinkRegistration != null) {
+            wifiLinkRegistration.close();
+            wifiLinkRegistration = null;
+        }
+    }
+
     private void probeReceivers() {
-        if (probeInFlight) {
+        if (!desiredRunning || stopping || probeInFlight) {
             return;
         }
         probeInFlight = true;
+        final long probeGeneration = WifiLinkObserver.currentGeneration();
+        final long probeSessionRevision = serviceSessionRevision;
+        final String probeSessionId = broadcaster == null ? null : broadcaster.getSessionId();
         probeExecutor.execute(() -> {
             try {
                 Map<String, SharedAudioBroadcaster.Target> targets = new HashMap<>();
                 Map<String, String> states = new HashMap<>();
+                Map<String, String> goodAddresses = new HashMap<>();
                 java.util.List<TargetDeviceManager.Device> devices = deviceManager.list();
                 int incompatible = 0;
                 int reachable = 0;
@@ -286,8 +345,11 @@ public final class PhoneAudioService extends Service {
                     // 不把无效空批次当成共享组全部离线。
                     return;
                 }
-                knownTotal = group.size();
-                slotByComputer = slots;
+                if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                        WifiLinkObserver.currentGeneration(), probeSessionRevision,
+                        serviceSessionRevision, desiredRunning && !stopping)) {
+                    return;
+                }
                 for (TargetDeviceManager.Device device : group) {
                     // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
                     states.put(device.computerId, "离线");
@@ -308,7 +370,7 @@ public final class PhoneAudioService extends Service {
                     if (isSharedRequested(result.health)) {
                         anyRequested = true;
                     }
-                    deviceManager.recordLastGoodAddress(device.computerId, result.hostAddress);
+                    goodAddresses.put(device.computerId, result.hostAddress);
                     if (isSharedAudioReady(result.health)) {
                         targets.put(device.computerId, new SharedAudioBroadcaster.Target(
                                 device.computerId, device.displayName, result.endpoint));
@@ -351,49 +413,99 @@ public final class PhoneAudioService extends Service {
                     }
                 } catch (Exception ignored) {
                 }
-
-                receiverStates.clear();
-                receiverStates.putAll(states);
-                broadcaster.updateTargets(targets);
-                if (startedByLinkage && reachable > 0 && !anyRequested) {
-                    // 联动开启的共享：所有在线电脑都已取消请求，自动停止。
-                    // 全部电脑离线时保持等待，网络恢复后再判定。
-                    statusDetail = "电脑已关闭共享，自动停止";
-                    publishStatus();
-                    handler.post(this::stopShared);
+                if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                        WifiLinkObserver.currentGeneration(), probeSessionRevision,
+                        serviceSessionRevision, desiredRunning && !stopping)) {
                     return;
                 }
-                if (targets.isEmpty()) {
-                    long now = android.os.SystemClock.elapsedRealtime();
-                    if (emptyTargetsSinceElapsed == 0L) {
-                        emptyTargetsSinceElapsed = now;
-                    } else if (SharedAudioPolicies.shouldStopForZeroTargets(
-                            emptyTargetsSinceElapsed, now)) {
-                        // MIC-10：组内最后目标离线超过 15s 恢复窗口，停止采集；
-                        // 用户主动停止不受此路径影响（stopShared 即时生效）。
-                        statusDetail = "共享组电脑全部离线，已停止供音";
-                        publishStatus();
-                        handler.post(this::stopShared);
-                        return;
-                    }
-                    statusDetail = incompatible > 0
-                            ? "在线电脑需要更新接收端或配置虚拟麦克风"
-                            : "正在等待在线电脑";
-                } else {
-                    emptyTargetsSinceElapsed = 0L;
+                final int finalIncompatible = incompatible;
+                final int finalReachable = reachable;
+                final boolean finalAnyRequested = anyRequested;
+                boolean targetsApplied = broadcaster != null && probeSessionId != null
+                        && broadcaster.updateTargetsIfCurrent(targets, probeSessionId,
+                        () -> WifiLinkPolicy.shouldApply(probeGeneration,
+                                WifiLinkObserver.currentGeneration(), probeSessionRevision,
+                                serviceSessionRevision, desiredRunning && !stopping));
+                if (!targetsApplied) {
+                    return;
                 }
-                if (targets.size() > 0 && connectedCount > 0) {
-                    // 例：“正在向 2/3 台电脑供音 · 3号离线”，逐台说明未接收原因。
-                    statusDetail = MultiComputerStatus.summarize(receiverStates, slotByComputer);
-                } else if (!targets.isEmpty()) {
-                    statusDetail = "已发现 " + targets.size() + " 台音频接收端，正在连接";
-                }
-                publishStatus();
-                updateNotification();
+                handler.post(() -> applyProbeResult(
+                        probeGeneration, probeSessionRevision, group.size(), slots, targets, states,
+                        goodAddresses, finalIncompatible, finalReachable,
+                        finalAnyRequested));
             } finally {
                 probeInFlight = false;
+                handler.post(() -> {
+                    if (desiredRunning && !stopping
+                            && serviceSessionRevision == probeSessionRevision
+                            && WifiLinkObserver.currentGeneration() != probeGeneration) {
+                        probeReceivers();
+                    }
+                });
             }
         });
+    }
+
+    /** Applies one probe atomically on the service's main lifecycle thread. */
+    private void applyProbeResult(long probeGeneration, long probeSessionRevision,
+                                  int groupSize,
+                                  Map<String, Integer> slots,
+                                  Map<String, SharedAudioBroadcaster.Target> targets,
+                                  Map<String, String> states,
+                                  Map<String, String> goodAddresses,
+                                  int incompatible, int reachable, boolean anyRequested) {
+        if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                WifiLinkObserver.currentGeneration(), probeSessionRevision,
+                serviceSessionRevision, desiredRunning && !stopping)) {
+            return;
+        }
+        knownTotal = groupSize;
+        slotByComputer = slots;
+        for (Map.Entry<String, String> entry : goodAddresses.entrySet()) {
+            deviceManager.recordLastGoodAddress(entry.getKey(), entry.getValue());
+        }
+        receiverStates.clear();
+        receiverStates.putAll(states);
+        // updateTargets notifies the listener from the probe executor.  That
+        // callback may already have observed a sink reaching getOutputStream;
+        // merge the latest in-memory connection bits after the probe batch so
+        // “正在供音” is not overwritten back to “连接中”.
+        mergeCurrentConnections();
+        if (startedByLinkage && reachable > 0 && !anyRequested) {
+            // 联动开启的共享：所有在线电脑都已取消请求，自动停止。
+            // 全部电脑离线时保持等待，网络恢复后再判定。
+            statusDetail = "电脑已关闭共享，自动停止";
+            publishStatus();
+            stopShared();
+            return;
+        }
+        if (targets.isEmpty()) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (emptyTargetsSinceElapsed == 0L) {
+                emptyTargetsSinceElapsed = now;
+            } else if (SharedAudioPolicies.shouldStopForZeroTargets(
+                    emptyTargetsSinceElapsed, now)) {
+                // MIC-10：组内最后目标离线超过 15s 恢复窗口，停止采集；
+                // 用户主动停止不受此路径影响（stopShared 即时生效）。
+                statusDetail = "共享组电脑全部离线，已停止供音";
+                publishStatus();
+                stopShared();
+                return;
+            }
+            statusDetail = incompatible > 0
+                    ? "在线电脑需要更新接收端或配置虚拟麦克风"
+                    : "正在等待在线电脑";
+        } else {
+            emptyTargetsSinceElapsed = 0L;
+        }
+        if (targets.size() > 0 && connectedCount > 0) {
+            // 例：“正在向 2/3 台电脑供音 · 3号离线”，逐台说明未接收原因。
+            statusDetail = MultiComputerStatus.summarize(receiverStates, slotByComputer);
+        } else if (!targets.isEmpty()) {
+            statusDetail = "已发现 " + targets.size() + " 台音频接收端，正在连接";
+        }
+        publishStatus();
+        updateNotification();
     }
 
     private static boolean isSharedAudioReady(JSONObject health) {
@@ -531,8 +643,11 @@ public final class PhoneAudioService extends Service {
 
     @Override
     public void onDestroy() {
+        serviceDestroyed = true;
         TranscriptRelay.release();
+        serviceSessionRevision++;
         desiredRunning = false;
+        unregisterWifiLinkObserver();
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
             broadcaster.close();

@@ -18,9 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /** One AudioRecord source fanned out to independent, bounded receiver queues. */
 final class SharedAudioBroadcaster implements AutoCloseable {
     interface Listener {
-        void onLevel(int percent);
-        void onConnectionsChanged(Map<String, Boolean> connections);
-        void onStopped(String reason);
+        void onLevel(String sessionId, int percent);
+        void onConnectionsChanged(String sessionId);
+        void onStopped(String sessionId, String reason);
     }
 
     static final class Target {
@@ -87,34 +87,83 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             }
             sessionId = newSessionId;
             running = true;
-            captureThread = new Thread(this::captureLoop, "PhoneDeck-SharedCapture");
+            captureThread = new Thread(() -> captureLoop(newSessionId), "PhoneDeck-SharedCapture");
             captureThread.start();
             return true;
         }
     }
 
     void updateTargets(Map<String, Target> requested) {
+        java.util.List<TargetSink> stopped;
         synchronized (stateLock) {
-            if (!running) {
-                return;
+            stopped = updateTargetsLocked(requested);
+        }
+        stopSinks(stopped);
+    }
+
+    /**
+     * Applies a probe result only while the expected audio session is still
+     * current.  The operation intentionally runs on the probe executor: an
+     * old sink may need {@link HttpURLConnection#disconnect()} and must never
+     * block the service main thread during stop or network handover.
+     */
+    boolean updateTargetsIfCurrent(Map<String, Target> requested,
+                                   String expectedSessionId,
+                                   java.util.function.BooleanSupplier guard) {
+        java.util.List<TargetSink> stopped;
+        synchronized (stateLock) {
+            if (!running || expectedSessionId == null
+                    || !expectedSessionId.equals(sessionId)
+                    || guard != null && !guard.getAsBoolean()) {
+                return false;
             }
-            Map<String, Target> desired = new HashMap<>(requested);
-            for (Map.Entry<String, TargetSink> entry : sinks.entrySet()) {
-                Target next = desired.remove(entry.getKey());
-                TargetSink existing = entry.getValue();
-                if (next == null || !existing.target.sameEndpoint(next) || !existing.isAlive()) {
-                    if (sinks.remove(entry.getKey(), existing)) {
-                        existing.stop();
-                    }
-                    if (next != null) {
-                        addSink(next);
-                    }
+            stopped = updateTargetsLocked(requested);
+        }
+        // Disconnecting a stale sink can touch a blocked socket.  Keep it
+        // outside stateLock; this method is called on the probe executor.
+        stopSinks(stopped);
+        return true;
+    }
+
+    private java.util.List<TargetSink> updateTargetsLocked(Map<String, Target> requested) {
+        java.util.List<TargetSink> stopped = new java.util.ArrayList<>();
+        if (!running) {
+            return stopped;
+        }
+        Map<String, Target> desired = new HashMap<>(requested);
+        for (Map.Entry<String, TargetSink> entry : sinks.entrySet()) {
+            Target next = desired.remove(entry.getKey());
+            TargetSink existing = entry.getValue();
+            if (next == null || !existing.target.sameEndpoint(next) || !existing.isAlive()) {
+                if (sinks.remove(entry.getKey(), existing)) {
+                    stopped.add(existing);
+                }
+                if (next != null) {
+                    addSink(next);
                 }
             }
-            for (Target target : desired.values()) {
-                addSink(target);
+        }
+        for (Target target : desired.values()) {
+            addSink(target);
+        }
+        notifyConnections();
+        return stopped;
+    }
+
+    private static void stopSinks(java.util.List<TargetSink> stopped) {
+        for (TargetSink sink : stopped) {
+            sink.stop();
+        }
+    }
+
+    /** Returns only the in-memory sink connection state; never performs I/O. */
+    Map<String, Boolean> connectionSnapshot() {
+        synchronized (stateLock) {
+            Map<String, Boolean> snapshot = new HashMap<>();
+            for (Map.Entry<String, TargetSink> entry : sinks.entrySet()) {
+                snapshot.put(entry.getKey(), entry.getValue().connected);
             }
-            notifyConnections();
+            return snapshot;
         }
     }
 
@@ -127,7 +176,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     }
 
     @android.annotation.SuppressLint("MissingPermission")
-    private void captureLoop() {
+    private void captureLoop(String captureSessionId) {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord localRecorder = null;
         String failure = null;
@@ -174,7 +223,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 }
                 long now = SystemClock.elapsedRealtime();
                 if (now - lastLevelAt >= 100) {
-                    listener.onLevel(calculateLevel(chunk, count));
+                    listener.onLevel(captureSessionId, calculateLevel(chunk, count));
                     lastLevelAt = now;
                 }
             }
@@ -218,8 +267,8 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             synchronized (stateLock) {
                 captureThread = null;
             }
-            listener.onConnectionsChanged(java.util.Collections.emptyMap());
-            listener.onStopped(failure);
+            listener.onConnectionsChanged(captureSessionId);
+            listener.onStopped(captureSessionId, failure);
         }
     }
 
@@ -238,11 +287,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     }
 
     private void notifyConnections() {
-        Map<String, Boolean> connections = new HashMap<>();
-        for (TargetSink sink : sinks.values()) {
-            connections.put(sink.target.computerId, sink.connected);
-        }
-        listener.onConnectionsChanged(connections);
+        // Consumers read the current connection snapshot when handling this
+        // notification, so a queued callback cannot replay obsolete flags.
+        listener.onConnectionsChanged(sessionId);
     }
 
     private final class TargetSink {
