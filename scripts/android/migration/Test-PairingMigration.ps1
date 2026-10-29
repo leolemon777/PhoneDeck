@@ -52,7 +52,13 @@ function Import-RequiredFunctionsFromSource {
 }
 
 function Invoke-PhysicalImportGuardTest {
-    param([Parameter(Mandatory = $true)][string]$MainScript)
+    param(
+        [Parameter(Mandatory = $true)][string]$MainScript,
+        [Parameter(Mandatory = $true)][string]$Serial,
+        [AllowNull()][string]$ApprovedSerial,
+        [AllowNull()][string]$ExpectedHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedError
+    )
 
     $pwsh = Join-Path $PSHOME 'pwsh.exe'
     Assert-Test (Test-Path -LiteralPath $pwsh -PathType Leaf) 'pwsh executable is missing.'
@@ -62,16 +68,24 @@ function Invoke-PhysicalImportGuardTest {
         '-File', $MainScript,
         '-Mode', 'Import',
         '-Adb', 'C:\this-adb-must-never-be-resolved.exe',
-        '-Serial', 'R5CN404KQZR',
+        '-Serial', $Serial,
         '-JavaHome', 'C:\this-java-must-never-be-resolved',
         '-AndroidSdk', 'C:\this-sdk-must-never-be-resolved',
         '-BackupFile', 'C:\this-backup-must-never-be-read.dpapi'
     )
+    if ($null -ne $ApprovedSerial) {
+        $arguments += @('-ApprovedPhysicalSerial', $ApprovedSerial)
+    }
+    if ($null -ne $ExpectedHash) {
+        $arguments += @('-ExpectedApkSha256', $ExpectedHash)
+    }
     $output = @(& $pwsh @arguments 2>&1)
     $exitCode = $LASTEXITCODE
     $text = ($output | Out-String)
     Assert-Test ($exitCode -ne 0) 'physical Import guard unexpectedly succeeded.'
-    Assert-Test ($text -match '(?i)TestEmulator') 'physical Import guard did not run before ADB/tool resolution.'
+    Assert-Test ($text -match [regex]::Escape($ExpectedError)) `
+        "physical Import guard did not reject the expected case: $ExpectedError"
+    return $true
 }
 
 $mainScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Invoke-PairingMigration.ps1'))
@@ -146,7 +160,17 @@ try {
     }
     Assert-Test $corruptRejected 'corrupted DPAPI backup was accepted.'
 
-    Invoke-PhysicalImportGuardTest -MainScript $mainScript
+    $syntheticHash = '0' * 64
+    $guardResults = @(
+        (Invoke-PhysicalImportGuardTest -MainScript $mainScript -Serial 'R5CN404KQZR' `
+            -ApprovedSerial $null -ExpectedHash $syntheticHash -ExpectedError 'ApprovedPhysicalSerial'),
+        (Invoke-PhysicalImportGuardTest -MainScript $mainScript -Serial 'R5CN404KQZR' `
+            -ApprovedSerial 'different-serial' -ExpectedHash $syntheticHash -ExpectedError 'exactly match'),
+        (Invoke-PhysicalImportGuardTest -MainScript $mainScript -Serial 'R5CN404KQZR' `
+            -ApprovedSerial 'R5CN404KQZR' -ExpectedHash $null -ExpectedError 'ExpectedApkSha256')
+    )
+    Assert-Test (@($guardResults | Where-Object { $_ -eq $true }).Count -eq 3) `
+        'one or more physical Import guard cases failed.'
 
     $result = [pscustomobject]@{
         PowerShellSyntax = $true
@@ -156,7 +180,7 @@ try {
         ExistingBackupRejected = $overwriteRejected
         ExistingBackupHashUnchanged = ($beforeHash -ceq $afterHash)
         CorruptBackupRejected = $corruptRejected
-        PhysicalImportGuard = $true
+        PhysicalImportGuard = (@($guardResults | Where-Object { $_ -eq $true }).Count -eq 3)
         AdbInvocations = 0
     }
 } finally {

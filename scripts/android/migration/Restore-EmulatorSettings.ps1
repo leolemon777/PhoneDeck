@@ -1,11 +1,25 @@
-# Requires PowerShell 7. This rehearsal helper never writes to physical phones.
+# Requires PowerShell 7. Physical restoration requires explicit serial approval
+# and the exact already-installed candidate APK hash; rehearsal remains default.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Adb,
-    [Parameter(Mandatory)][ValidatePattern('^emulator-[0-9]+$')][string]$Serial,
-    [Parameter(Mandatory)][string]$SourceDirectory
+    [Parameter(Mandatory)][string]$Serial,
+    [Parameter(Mandatory)][string]$SourceDirectory,
+    [string]$ApprovedPhysicalSerial,
+    [string]$ExpectedApkSha256
 )
 $ErrorActionPreference = 'Stop'
+$physicalRestore = -not [string]::IsNullOrEmpty($ApprovedPhysicalSerial)
+if ($physicalRestore) {
+    if ($ApprovedPhysicalSerial -cne $Serial -or $Serial -match '^emulator-') {
+        throw 'Physical restore approval does not match the selected serial'
+    }
+    if ($ExpectedApkSha256 -notmatch '^[a-fA-F0-9]{64}$') {
+        throw 'Physical restore requires the expected installed APK SHA-256'
+    }
+} elseif ($Serial -notmatch '^emulator-[0-9]+$') {
+    throw 'Physical settings restore requires explicit serial approval'
+}
 function Invoke-Adb([string[]]$Arguments, [AllowNull()][object]$InputLine = $null) {
     $info = [System.Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $Adb
@@ -30,8 +44,18 @@ function Invoke-Adb([string[]]$Arguments, [AllowNull()][object]$InputLine = $nul
     if ($process.ExitCode -ne 0) { throw 'ADB settings rehearsal failed; raw output suppressed' }
     return $output.Trim()
 }
-if ((Invoke-Adb @('shell','getprop','ro.kernel.qemu')) -ne '1') { throw 'Not an Android emulator' }
 $package = 'com.codex.phonedeck'
+if ($physicalRestore) {
+    $apkLine = Invoke-Adb @('shell','pm','path',$package)
+    if ($apkLine -notmatch '^package:(/data/app/[A-Za-z0-9_./=+~-]+/base\.apk)$') {
+        throw 'Expected exactly one installed candidate APK'
+    }
+    $installedApk = $Matches[1]
+    $actualApkHash = (Invoke-Adb @('shell','sha256sum',$installedApk)).Split(' ')[0]
+    if ($actualApkHash -ine $ExpectedApkSha256) { throw 'Installed APK does not match approved candidate' }
+} elseif ((Invoke-Adb @('shell','getprop','ro.kernel.qemu')) -ne '1') {
+    throw 'Not an Android emulator'
+}
 $null = Invoke-Adb @('shell','am','force-stop',$package)
 $null = Invoke-Adb @('shell','run-as',$package,'mkdir','-p','files','shared_prefs')
 $reports = @()

@@ -20,7 +20,13 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$BackupFile,
 
-    [switch]$TestEmulator
+    [switch]$TestEmulator,
+
+    # Required only for the physical Import path.  The emulator path keeps
+    # the original explicit -TestEmulator gate and does not need this value.
+    [string]$ApprovedPhysicalSerial,
+
+    [string]$ExpectedApkSha256
 )
 
 Set-StrictMode -Version Latest
@@ -38,14 +44,27 @@ $FrameEnd = 'PHONEDECK_PAIRING_MIGRATION_END'
 $MaximumPayloadBytes = 4 * 1024 * 1024
 
 # Import is the only operation that can create a real app preference file.  A
-# physical serial must never reach that path, even if a caller accidentally
-# supplies -TestEmulator.
+# physical serial must never reach the emulator path, and the physical path
+# requires an explicit serial approval plus an APK digest.
 if ($Mode -eq 'Import') {
-    if (-not $TestEmulator) {
-        throw 'Import requires explicit -TestEmulator; no physical device may be modified.'
-    }
-    if ($Serial -notmatch '^emulator-[0-9]+$') {
-        throw 'Import requires an emulator serial matching emulator-<number>.'
+    if ($TestEmulator) {
+        if ($Serial -notmatch '^emulator-[0-9]+$') {
+            throw 'Import requires an emulator serial matching emulator-<number>.'
+        }
+    } else {
+        if ([string]::IsNullOrWhiteSpace($ApprovedPhysicalSerial)) {
+            throw 'Physical Import requires explicit -ApprovedPhysicalSerial.'
+        }
+        if ($Serial -match '^emulator-[0-9]+$') {
+            throw 'Physical Import cannot target an emulator serial.'
+        }
+        if ($ApprovedPhysicalSerial -cne $Serial) {
+            throw '-ApprovedPhysicalSerial must exactly match -Serial.'
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedApkSha256) -or
+            $ExpectedApkSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'Physical Import requires a 64-character -ExpectedApkSha256.'
+        }
     }
 }
 
@@ -54,6 +73,7 @@ $script:RemoteTempPath = $null
 $script:DeviceTouched = $false
 $script:BuildRoot = $null
 $script:BuildRootCreated = $false
+$script:PulledApkRoot = $null
 
 function Throw-Safe {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -781,6 +801,78 @@ function Assert-TestEmulator {
     Assert-AppStopped
 }
 
+function Assert-ApprovedPhysicalApk {
+    Assert-AppStopped
+
+    $pm = Invoke-Adb -Arguments @('-s', $Serial, 'shell', 'pm', 'path', $PackageName)
+    if ($pm.ExitCode -ne 0) {
+        Throw-Safe 'Could not read the installed PhoneDeck APK path.'
+    }
+    $apkPaths = @()
+    foreach ($line in @([string]$pm.Stdout -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -eq 0) {
+            continue
+        }
+        if ($trimmed -notmatch '^package:(/data/app(?:-private)?/[^\r\n]+\.apk)$') {
+            Throw-Safe 'The installed PhoneDeck APK path was not an allowed package path.'
+        }
+        $apkPaths += $Matches[1]
+    }
+    if ($apkPaths.Count -ne 1) {
+        Throw-Safe 'The installed PhoneDeck package did not resolve to exactly one APK.'
+    }
+
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ('phonedeck-pairing-apk-' + [guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $root) {
+        Throw-Safe 'The generated APK verification directory already exists.'
+    }
+    [void][System.IO.Directory]::CreateDirectory($root)
+    $script:PulledApkRoot = $root
+    $localApk = Join-Path $root 'installed.apk'
+    $pull = Invoke-Adb -Arguments @('-s', $Serial, 'pull', $apkPaths[0], $localApk)
+    if ($pull.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $localApk -PathType Leaf)) {
+        Throw-Safe 'Could not pull the installed PhoneDeck APK for digest verification.'
+    }
+    $actual = (Get-FileHash -LiteralPath $localApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -cne $ExpectedApkSha256.ToLowerInvariant()) {
+        Throw-Safe 'The installed PhoneDeck APK digest does not match the approved candidate.'
+    }
+    return [pscustomobject]@{
+        Verified = $true
+        Path = $localApk
+    }
+}
+
+function Remove-PulledApk {
+    if (-not $script:PulledApkRoot) {
+        return
+    }
+    try {
+        $candidate = [System.IO.Path]::GetFullPath($script:PulledApkRoot)
+        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        $tempRootPrefix = $tempRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        $leaf = [System.IO.Path]::GetFileName($candidate)
+        $ownedName = $leaf -match '^phonedeck-pairing-apk-[0-9a-f]{32}$'
+        if (-not $ownedName -or
+            -not $candidate.StartsWith($tempRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Throw-Safe 'Refusing to remove an unvalidated APK verification path.'
+        }
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            Remove-Item -LiteralPath $candidate -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            Throw-Safe 'APK verification cleanup left a residual temporary directory.'
+        }
+    } catch {
+        if ($_.Exception -is [System.InvalidOperationException]) {
+            throw
+        }
+        Throw-Safe 'APK verification cleanup could not be verified.'
+    }
+}
+
 function Remove-OwnedBuildRoot {
     if (-not $script:BuildRoot) {
         return
@@ -908,7 +1000,12 @@ try {
         }
     } else {
         $backup = Read-ProtectedBackup -Path $BackupFile
-        Assert-TestEmulator
+        $apk = if ($TestEmulator) {
+            Assert-TestEmulator
+            [pscustomobject]@{ Verified = $false }
+        } else {
+            Assert-ApprovedPhysicalApk
+        }
         $helperBuild = New-HelperBuild -JavaRoot $javaRoot -SdkRoot $sdkRoot
         $stage = Stage-Helper $helperBuild
         $frameInput = New-DeviceInputFrame -PayloadJson $backup.Json
@@ -926,12 +1023,21 @@ try {
             StagingVerified = $stage.Verified
             RoundtripVerified = $backup.RoundtripVerified
             DeviceImported = $true
-            TestEmulator = $true
+            TestEmulator = [bool]$TestEmulator
+            ApprovedPhysicalSerial = if ($TestEmulator) { $null } else { $ApprovedPhysicalSerial }
+            ApkSha256Verified = $apk.Verified
         }
     }
 } finally {
-    [void](Remove-DeviceHelper)
-    Remove-OwnedBuildRoot
+    try {
+        [void](Remove-DeviceHelper)
+    } finally {
+        try {
+            Remove-PulledApk
+        } finally {
+            Remove-OwnedBuildRoot
+        }
+    }
 }
 
 $finalResult | ConvertTo-Json -Compress
