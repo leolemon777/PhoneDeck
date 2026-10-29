@@ -193,7 +193,7 @@ public final class PhoneAudioService extends Service {
             return;
         }
         desiredRunning = true;
-        knownTotal = deviceManager.list().size();
+        knownTotal = countSharedGroupDevices(deviceManager.list());
         try {
             acquireLocks();
             Notification notification = buildNotification();
@@ -265,7 +265,6 @@ public final class PhoneAudioService extends Service {
                 Map<String, SharedAudioBroadcaster.Target> targets = new HashMap<>();
                 Map<String, String> states = new HashMap<>();
                 java.util.List<TargetDeviceManager.Device> devices = deviceManager.list();
-                knownTotal = devices.size();
                 int incompatible = 0;
                 int reachable = 0;
                 boolean anyRequested = false;
@@ -278,9 +277,17 @@ public final class PhoneAudioService extends Service {
                         group.add(device);
                     }
                 }
-                slotByComputer = slots;
+                // 总数只表示显式共享组中的已配对电脑；未加入共享组的设备不应出现在
+                // “正在向 x/y 台电脑供音”的分母里。
                 Map<String, ConnectionMonitor.Outcome> outcomes =
                         ConnectionMonitor.get(this).probeAll(group, false);
+                if (ConnectionMonitor.isInvalidated(outcomes)) {
+                    // 网络切换已使本轮结果失效；保留当前 targets、状态和分母，
+                    // 不把无效空批次当成共享组全部离线。
+                    return;
+                }
+                knownTotal = group.size();
+                slotByComputer = slots;
                 for (TargetDeviceManager.Device device : group) {
                     // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
                     states.put(device.computerId, "离线");
@@ -332,18 +339,12 @@ public final class PhoneAudioService extends Service {
                     }
                     if (!computerId.isEmpty() && !targets.containsKey(computerId)
                             && isSharedAudioReady(health)) {
-                        if (!states.containsKey(computerId)) {
-                            knownTotal++;
-                        }
                         targets.put(computerId, new SharedAudioBroadcaster.Target(
                                 computerId,
                                 health.optString("displayName", "USB 电脑"),
                                 PhoneDeckEndpoint.USB));
                         states.put(computerId, "连接中");
                     } else if (!computerId.isEmpty() && !targets.containsKey(computerId)) {
-                        if (!states.containsKey(computerId)) {
-                            knownTotal++;
-                        }
                         incompatible++;
                         states.put(computerId, hasSharedCapability(health)
                                 ? "配置错误" : "需要更新电脑端");
@@ -408,6 +409,17 @@ public final class PhoneAudioService extends Service {
         }
         JSONObject audio = health.optJSONObject("audio");
         return supported && audio != null && audio.optBoolean("available", false);
+    }
+
+    private static int countSharedGroupDevices(
+            java.util.List<TargetDeviceManager.Device> devices) {
+        int count = 0;
+        for (TargetDeviceManager.Device device : devices) {
+            if (device.sharedGroup) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static boolean isSharedRequested(JSONObject health) {

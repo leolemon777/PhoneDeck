@@ -3510,6 +3510,11 @@ public final class MainActivity extends Activity {
                 // 全部电脑并行探测，离线电脑按各自退避降频；与共享麦克风服务共用结果。
                 java.util.Map<String, ConnectionMonitor.Outcome> outcomes =
                         ConnectionMonitor.get(this).probeAll(devices, false);
+                if (ConnectionMonitor.isInvalidated(outcomes)) {
+                    // 网络切换已使本轮结果失效；保留上一轮 UI/目标状态，
+                    // 不把“无结果”误当成“所有电脑离线”。
+                    return;
+                }
                 if (isDestroyed() || Thread.currentThread().isInterrupted()) {
                     return; // Activity was destroyed during a font/orientation change.
                 }

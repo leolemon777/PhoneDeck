@@ -296,9 +296,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     local.setRequestProperty("X-PhoneDeck-Computer-Id", target.computerId);
                     local.setChunkedStreamingMode(CHUNK_BYTES);
                     local.setDoOutput(true);
+                    backoff.connectionOpened(SystemClock.elapsedRealtime());
                     try (OutputStream output = local.getOutputStream()) {
                         connected = true;
-                        backoff.reset();
                         notifyConnections();
                         while (shouldRun) {
                             byte[] frame = queue.take();
@@ -311,6 +311,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                                 output.write(next);
                             }
                             output.flush();
+                            backoff.frameWritten(SystemClock.elapsedRealtime());
                         }
                         if (shouldRun && finishing) {
                             AudioUpload.finish(local, output);
@@ -322,6 +323,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 } catch (Exception ignored) {
                     // Retry only this computer; capture and other sinks continue.
                 } finally {
+                    backoff.connectionClosed();
                     connected = false;
                     connection = null;
                     if (local != null) {
