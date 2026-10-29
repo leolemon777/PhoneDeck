@@ -37,6 +37,8 @@
 | 问题 | 代码证据与影响 | 本轮处理 |
 |---|---|---|
 | 旧探测拖住新网络 | `ConnectionMonitor` 原先超时后保留 in-flight Future，reset 只重置退避；切网后可能继续等待旧请求 | 取消不再使用的超时探测，增加网络代次，隔离旧结果 |
+| 自动切网后漏刷新 | 首页只监听可用/丢失，1 秒内事件被丢弃；共享服务没有独立 Wi-Fi 监听 | 新增共用链路观察组件，覆盖 IP/路由变化，首页合并后补发、服务后台重探测 |
+| 旧会话回调污染新状态 | 只检查正在运行不能区分停止后重开的会话，音频 worker 可直接发布状态 | 探测与通知校验实际会话身份；状态在主线程应用，连接清理保留后台 |
 | 短暂建连使退避归零 | `SharedAudioBroadcaster.TargetSink` 原先取得 OutputStream 就 reset；接收端反复拒绝时持续从 500 ms 重试 | 实际持续写入满 5 秒才复位；写入中断重新计时 |
 | 共享数量误导 | `PhoneAudioService.knownTotal` 原先统计全部已配对电脑 | 改为显式共享组中的现存电脑数 |
 | 诊断超时后发生并发读取 | `DiagnosticsMonitor.RefreshAsync` 原先等待超时就释放 gate，真正的 COM reader 尚未退出 | gate 持有到实际读取结束，补充退出竞态保护 |
@@ -103,6 +105,9 @@
 
 网络变化由统一组件处理，覆盖 Wi-Fi 可用性、链路地址变化和恢复事件。发现与已配对流使用正确的本地网络，不让 VPN、蜂窝默认路由或错误的固定 /24 广播地址决定 LAN 目标。USB 保持独立通道；网络变化不清除配对身份。
 
+当前源码已补充共用 Wi-Fi 链路监听、IP/路由变化去重、旧事件隔离和前后台探测补发；没有改变系统选网，也尚未将发现/HTTPS socket 绑定到指定 Wi-Fi Network。
+用户确认这次并非主动切网，系统日志支持“断开后自动选中另一已保存网络”。自动切网应作为常规恢复场景，不能依赖用户始终保持同一个接入点。
+
 Android 的网络回调适合触发重新验证，但每种 callback 的意义不同，不能把任意网络 onLost 当作整机无网络。参见 [Android 网络状态文档](https://developer.android.com/develop/connectivity/network-ops/reading-network-state)。
 
 锁屏共享采用用户在可见界面发起的 microphone 前台服务，通知始终显示共享对象并可立即停止。系统回收或权限失效后停止会话，返回界面解释原因；不能依靠后台偷偷重启录音恢复。参见 [Android 前台麦克风服务限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)。
@@ -140,6 +145,6 @@ Windows 安装检查应同时检查端口放行、当前网络类型、针对当
 
 ## 代码入口
 
-- Android：[ConnectionMonitor](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/ConnectionMonitor.java)、[PhoneAudioService](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/PhoneAudioService.java)、[SharedAudioBroadcaster](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/SharedAudioBroadcaster.java)、[SharedAudioPolicies](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/SharedAudioPolicies.java)。
+- Android：[WifiLinkObserver](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/WifiLinkObserver.java)、[WifiLinkPolicy](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/WifiLinkPolicy.java)、[ConnectionMonitor](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/ConnectionMonitor.java)、[PhoneAudioService](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/PhoneAudioService.java)、[SharedAudioBroadcaster](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/SharedAudioBroadcaster.java)、[SharedAudioPolicies](../../work/phone-deck/android/app/src/main/java/com/codex/phonedeck/SharedAudioPolicies.java)。
 - Windows：[DiagnosticsMonitor](../../work/phone-deck/windows/PhoneDeck.Server/DiagnosticsMonitor.cs)、[VoiceEngineStateProbe](../../work/phone-deck/windows/PhoneDeck.Server/VoiceEngineStateProbe.cs)、[PhoneAudioBridge](../../work/phone-deck/windows/PhoneDeck.Server/PhoneAudioBridge.cs)、[Program](../../work/phone-deck/windows/PhoneDeck.Server/Program.cs)。
 - 现行产品边界：[长期规格](../../spec%20plan.markdown)、[交接与验证记录](../HANDOFF.md)、[支持矩阵](../release/SUPPORT_MATRIX.md)。
