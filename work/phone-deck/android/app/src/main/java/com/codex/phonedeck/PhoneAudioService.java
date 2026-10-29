@@ -42,6 +42,38 @@ public final class PhoneAudioService extends Service {
     private static final int NOTIFICATION_ID = 1701;
     private static final String CHANNEL_ID = "phonedeck_shared_microphone";
     private static final long PROBE_INTERVAL_MS = 2_000;
+    /**
+     * A health probe is advisory while the audio sink is already running. Keep
+     * the last accepted target for a short, bounded window so one Wi-Fi roam or
+     * a slow HTTPS request does not tear down a working stream. A sink that has
+     * demonstrably made progress may refresh this window; the broadcaster's
+     * write watchdog bounds that exception when progress stops. The sink itself
+     * owns its reconnect backoff; this window only prevents the probe loop from
+     * replacing/removing it on every transient failure.
+     */
+    private static final int MAX_TRANSIENT_TARGET_FAILURES = 4;
+    private static final long MAX_TRANSIENT_TARGET_RETENTION_MS = 15_000;
+
+    private static final class RetainedTarget {
+        final SharedAudioBroadcaster.Target target;
+        /** Last successful health response or observed live sink progress. */
+        final long lastGoodAt;
+        final int transientFailures;
+
+        RetainedTarget(SharedAudioBroadcaster.Target target, long lastGoodAt,
+                       int transientFailures) {
+            this.target = target;
+            this.lastGoodAt = lastGoodAt;
+            this.transientFailures = transientFailures;
+        }
+    }
+
+    private enum SharedAudioReadiness {
+        READY,
+        EXPLICITLY_UNAVAILABLE,
+        CAPABILITY_MISSING,
+        UNKNOWN
+    }
 
     static final class Snapshot {
         final boolean running;
@@ -104,6 +136,13 @@ public final class PhoneAudioService extends Service {
     private volatile String statusDetail = "正在准备";
     private final ConcurrentHashMap<String, String> receiverStates =
             new ConcurrentHashMap<>();
+    /** Last target map accepted by the current broadcaster session. */
+    private final ConcurrentHashMap<String, SharedAudioBroadcaster.Target> appliedTargets =
+            new ConcurrentHashMap<>();
+    /** Per-target health window used to bound transient-failure retention. */
+    private final ConcurrentHashMap<String, RetainedTarget> retainedTargets =
+            new ConcurrentHashMap<>();
+    private final Object targetStateLock = new Object();
     private WifiLinkObserver.Registration wifiLinkRegistration;
 
     private final Runnable probeTick = new Runnable() {
@@ -142,6 +181,12 @@ public final class PhoneAudioService extends Service {
                         return;
                     }
                     mergeCurrentConnections();
+                    if (connectedCount > 0) {
+                        // A sink that actually completed a write is a confirmed
+                        // target; do not let the no-audio recovery timer stop a
+                        // session merely because another target is still offline.
+                        emptyTargetsSinceElapsed = 0L;
+                    }
                     statusDetail = connectedCount > 0
                             ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
                             : "正在等待音频接收端";
@@ -218,6 +263,7 @@ public final class PhoneAudioService extends Service {
         }
         desiredRunning = true;
         ++serviceSessionRevision;
+        clearTargetState();
         knownTotal = countSharedGroupDevices(deviceManager.list());
         registerWifiLinkObserver();
         try {
@@ -251,6 +297,7 @@ public final class PhoneAudioService extends Service {
         unregisterWifiLinkObserver();
         startedByLinkage = false;
         emptyTargetsSinceElapsed = 0L;
+        clearTargetState();
         handler.removeCallbacks(probeTick);
         if (broadcaster != null) {
             broadcaster.stop();
@@ -273,6 +320,7 @@ public final class PhoneAudioService extends Service {
         startedByLinkage = false;
         stopping = false;
         handler.removeCallbacks(probeTick);
+        clearTargetState();
         connectedCount = 0;
         receiverStates.clear();
         lastLevel = 0;
@@ -320,20 +368,36 @@ public final class PhoneAudioService extends Service {
         final String probeSessionId = broadcaster == null ? null : broadcaster.getSessionId();
         probeExecutor.execute(() -> {
             try {
+                Map<String, SharedAudioBroadcaster.Target> previousTargets;
+                Map<String, RetainedTarget> previousRetained;
+                synchronized (targetStateLock) {
+                    previousTargets = new HashMap<>(appliedTargets);
+                    previousRetained = new HashMap<>(retainedTargets);
+                }
                 Map<String, SharedAudioBroadcaster.Target> targets = new HashMap<>();
+                Map<String, RetainedTarget> nextRetained = new HashMap<>();
                 Map<String, String> states = new HashMap<>();
                 Map<String, String> goodAddresses = new HashMap<>();
                 java.util.List<TargetDeviceManager.Device> devices = deviceManager.list();
                 int incompatible = 0;
                 int reachable = 0;
                 boolean anyRequested = false;
+                java.util.Set<String> groupIds = new java.util.HashSet<>();
+                java.util.Set<String> freshLanTargets = new java.util.HashSet<>();
+                java.util.Set<String> explicitRemovals = new java.util.HashSet<>();
+                Map<String, TargetDeviceManager.Device> groupDevices = new HashMap<>();
                 // 只探测共享组：全部并行，与主界面共用结果与各台电脑的离线退避。
                 java.util.List<TargetDeviceManager.Device> group = new java.util.ArrayList<>();
                 Map<String, Integer> slots = new HashMap<>();
                 for (TargetDeviceManager.Device device : devices) {
+                    if (device == null || device.computerId == null) {
+                        continue;
+                    }
                     slots.put(device.computerId, device.slot);
                     if (device.sharedGroup) {
                         group.add(device);
+                        groupIds.add(targetKey(device.computerId));
+                        groupDevices.put(targetKey(device.computerId), device);
                     }
                 }
                 // 总数只表示显式共享组中的已配对电脑；未加入共享组的设备不应出现在
@@ -350,19 +414,30 @@ public final class PhoneAudioService extends Service {
                         serviceSessionRevision, desiredRunning && !stopping)) {
                     return;
                 }
+                Map<String, Boolean> connectionSnapshot = broadcaster == null
+                        ? java.util.Collections.emptyMap() : broadcaster.connectionSnapshot();
+                final long observedAt = android.os.SystemClock.elapsedRealtime();
                 for (TargetDeviceManager.Device device : group) {
                     // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
                     states.put(device.computerId, "离线");
                     ConnectionMonitor.Outcome outcome = outcomes.get(device.computerId);
-                    if (outcome == null) {
-                        continue;
-                    }
-                    PhoneDeckLanClient.ProbeResult result = outcome.result;
-                    boolean pairingRejected = outcome.pairingRejected;
+                    PhoneDeckLanClient.ProbeResult result = outcome == null
+                            ? null : outcome.result;
                     if (result == null) {
-                        if (pairingRejected) {
-                            // 地址可达但令牌/证书被拒：插一次 USB 自动重新配对即可恢复。
+                        if (outcome != null && outcome.pairingRejected) {
+                            // 地址可达但令牌被明确拒绝：这是显式失效，不保留旧 sink。
+                            explicitRemovals.add(targetKey(device.computerId));
                             states.put(device.computerId, "需要重新配对");
+                        } else {
+                            RetainedTarget retained = retainTransientTarget(
+                                    device, previousTargets, previousRetained,
+                                    isConnected(connectionSnapshot, device.computerId), false,
+                                    observedAt);
+                            if (retained != null) {
+                                targets.put(device.computerId, retained.target);
+                                nextRetained.put(device.computerId, retained);
+                                states.put(device.computerId, "连接检查暂不可用");
+                            }
                         }
                         continue;
                     }
@@ -371,12 +446,28 @@ public final class PhoneAudioService extends Service {
                         anyRequested = true;
                     }
                     goodAddresses.put(device.computerId, result.hostAddress);
-                    if (isSharedAudioReady(result.health)) {
-                        targets.put(device.computerId, new SharedAudioBroadcaster.Target(
-                                device.computerId, device.displayName, result.endpoint));
+                    SharedAudioReadiness readiness = sharedAudioReadiness(result.health);
+                    if (readiness == SharedAudioReadiness.READY) {
+                        SharedAudioBroadcaster.Target target = new SharedAudioBroadcaster.Target(
+                                device.computerId, device.displayName, result.endpoint);
+                        targets.put(device.computerId, target);
+                        nextRetained.put(device.computerId,
+                                new RetainedTarget(target, observedAt, 0));
+                        freshLanTargets.add(targetKey(device.computerId));
                         states.put(device.computerId, "连接中");
+                    } else if (readiness == SharedAudioReadiness.UNKNOWN) {
+                        RetainedTarget retained = retainTransientTarget(
+                                device, previousTargets, previousRetained,
+                                isConnected(connectionSnapshot, device.computerId), false,
+                                observedAt);
+                        if (retained != null) {
+                            targets.put(device.computerId, retained.target);
+                            nextRetained.put(device.computerId, retained);
+                        }
+                        states.put(device.computerId, "连接检查暂不可用");
                     } else {
                         incompatible++;
+                        explicitRemovals.add(targetKey(device.computerId));
                         states.put(device.computerId,
                                 hasSharedCapability(result.health)
                                         ? "配置错误" : "需要更新电脑端");
@@ -390,8 +481,12 @@ public final class PhoneAudioService extends Service {
                     String computerId = health.optString("computerId", "").trim();
                     // USB is a transport fallback, never permission to expand the explicit group.
                     TargetDeviceManager.Device usbDevice = deviceManager.find(computerId);
-                    if (usbDevice == null || !usbDevice.sharedGroup) {
+                    if (usbDevice == null || !usbDevice.sharedGroup
+                            || !groupIds.contains(targetKey(computerId))) {
+                        removeUsbTargets(targets, nextRetained);
                         computerId = "";
+                    } else {
+                        computerId = usbDevice.computerId;
                     }
                     if (!computerId.isEmpty()) {
                         reachable++;
@@ -399,19 +494,47 @@ public final class PhoneAudioService extends Service {
                             anyRequested = true;
                         }
                     }
-                    if (!computerId.isEmpty() && !targets.containsKey(computerId)
-                            && isSharedAudioReady(health)) {
-                        targets.put(computerId, new SharedAudioBroadcaster.Target(
-                                computerId,
-                                health.optString("displayName", "USB 电脑"),
-                                PhoneDeckEndpoint.USB));
-                        states.put(computerId, "连接中");
-                    } else if (!computerId.isEmpty() && !targets.containsKey(computerId)) {
-                        incompatible++;
-                        states.put(computerId, hasSharedCapability(health)
-                                ? "配置错误" : "需要更新电脑端");
+                    if (!computerId.isEmpty()) {
+                        removeUsbTargets(targets, nextRetained);
+                        SharedAudioReadiness readiness = sharedAudioReadiness(health);
+                        if (readiness == SharedAudioReadiness.READY) {
+                            // LAN is preferred when its probe succeeded this round;
+                            // otherwise a verified USB health response may replace a
+                            // retained/stale LAN endpoint immediately.
+                            if (!freshLanTargets.contains(targetKey(computerId))) {
+                                SharedAudioBroadcaster.Target target =
+                                        new SharedAudioBroadcaster.Target(
+                                                computerId,
+                                                health.optString("displayName", "USB 电脑"),
+                                                PhoneDeckEndpoint.USB);
+                                targets.put(computerId, target);
+                                nextRetained.put(computerId,
+                                        new RetainedTarget(target, observedAt, 0));
+                                states.put(computerId, "连接中");
+                            }
+                        } else if (readiness == SharedAudioReadiness.UNKNOWN) {
+                            if (!freshLanTargets.contains(targetKey(computerId))) {
+                                retainUsbTargets(previousTargets, previousRetained, groupIds,
+                                        explicitRemovals, groupDevices, connectionSnapshot,
+                                        targets, nextRetained, states, observedAt);
+                            }
+                            states.putIfAbsent(computerId, "USB 连接检查暂不可用");
+                        } else if (!freshLanTargets.contains(targetKey(computerId))) {
+                            incompatible++;
+                            explicitRemovals.add(targetKey(computerId));
+                            removeTarget(targets, nextRetained, computerId);
+                            states.put(computerId, hasSharedCapability(health)
+                                    ? "配置错误" : "需要更新电脑端");
+                        }
                     }
-                } catch (Exception ignored) {
+                } catch (Exception exception) {
+                    if (isExplicitPairingRejection(exception)) {
+                        removeUsbTargets(targets, nextRetained);
+                    } else {
+                        retainUsbTargets(previousTargets, previousRetained, groupIds,
+                                explicitRemovals, groupDevices, connectionSnapshot,
+                                targets, nextRetained, states, observedAt);
+                    }
                 }
                 if (!WifiLinkPolicy.shouldApply(probeGeneration,
                         WifiLinkObserver.currentGeneration(), probeSessionRevision,
@@ -429,6 +552,17 @@ public final class PhoneAudioService extends Service {
                 if (!targetsApplied) {
                     return;
                 }
+                synchronized (targetStateLock) {
+                    if (!WifiLinkPolicy.shouldApply(probeGeneration,
+                            WifiLinkObserver.currentGeneration(), probeSessionRevision,
+                            serviceSessionRevision, desiredRunning && !stopping)) {
+                        return;
+                    }
+                    appliedTargets.clear();
+                    appliedTargets.putAll(targets);
+                    retainedTargets.clear();
+                    retainedTargets.putAll(nextRetained);
+                }
                 handler.post(() -> applyProbeResult(
                         probeGeneration, probeSessionRevision, group.size(), slots, targets, states,
                         goodAddresses, finalIncompatible, finalReachable,
@@ -444,6 +578,207 @@ public final class PhoneAudioService extends Service {
                 });
             }
         });
+    }
+
+    private static String targetKey(String computerId) {
+        return computerId == null ? "" : computerId.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static SharedAudioBroadcaster.Target findTarget(
+            Map<String, SharedAudioBroadcaster.Target> targets, String computerId) {
+        SharedAudioBroadcaster.Target direct = targets.get(computerId);
+        if (direct != null) {
+            return direct;
+        }
+        for (Map.Entry<String, SharedAudioBroadcaster.Target> entry : targets.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(computerId)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static RetainedTarget findRetained(
+            Map<String, RetainedTarget> retained, String computerId) {
+        RetainedTarget direct = retained.get(computerId);
+        if (direct != null) {
+            return direct;
+        }
+        for (Map.Entry<String, RetainedTarget> entry : retained.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(computerId)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Keep an already accepted endpoint through a transient monitor failure.
+     * The bounded window is deliberately independent of ConnectionMonitor's
+     * offline backoff: one timeout is harmless, but a target that never
+     * recovers eventually leaves the desired map and starts the normal
+     * zero-target stop timer.
+     */
+    private static RetainedTarget retainTransientTarget(
+            TargetDeviceManager.Device device,
+            Map<String, SharedAudioBroadcaster.Target> previousTargets,
+            Map<String, RetainedTarget> previousRetained,
+            boolean connected,
+            boolean allowUsb,
+            long now) {
+        if (device == null || device.computerId == null) {
+            return null;
+        }
+        String computerId = device.computerId;
+        SharedAudioBroadcaster.Target previous = findTarget(previousTargets, computerId);
+        if (previous == null || !targetIdentityMatches(device, previous, allowUsb)) {
+            return null;
+        }
+        // A sink that has completed a write is the strongest evidence we have
+        // while /health is unavailable. The broadcaster watchdog clears this
+        // bit when there is no forward progress, so this does not become an
+        // unbounded keep-alive for a dead stream.
+        if (connected) {
+            return new RetainedTarget(previous, now, 0);
+        }
+        RetainedTarget prior = findRetained(previousRetained, computerId);
+        long lastGoodAt = now;
+        int failures = 1;
+        if (prior != null && prior.target != null && prior.target.sameEndpoint(previous)
+                && now >= prior.lastGoodAt) {
+            lastGoodAt = prior.lastGoodAt;
+            failures = prior.transientFailures + 1;
+        }
+        if (failures > MAX_TRANSIENT_TARGET_FAILURES
+                || now - lastGoodAt >= MAX_TRANSIENT_TARGET_RETENTION_MS) {
+            return null;
+        }
+        return new RetainedTarget(previous, lastGoodAt, failures);
+    }
+
+    private static boolean targetIdentityMatches(TargetDeviceManager.Device device,
+                                                 SharedAudioBroadcaster.Target target,
+                                                 boolean allowUsb) {
+        if (device == null || target == null || target.endpoint == null
+                || device.computerId == null
+                || !device.computerId.equalsIgnoreCase(target.computerId)) {
+            return false;
+        }
+        if (isUsbTarget(target)) {
+            return allowUsb;
+        }
+        PhoneDeckEndpoint endpoint = target.endpoint;
+        return sameCredential(endpoint.accessToken, device.lanToken)
+                && sameFingerprint(endpoint.certificateSha256, device.certificateSha256)
+                && sameCredential(endpoint.clientId, device.clientId);
+    }
+
+    private static boolean sameCredential(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
+    private static boolean sameFingerprint(String left, String right) {
+        return left == null ? right == null : left.equalsIgnoreCase(right);
+    }
+
+    private static boolean isConnected(Map<String, Boolean> snapshot, String computerId) {
+        if (Boolean.TRUE.equals(snapshot.get(computerId))) {
+            return true;
+        }
+        for (Map.Entry<String, Boolean> entry : snapshot.entrySet()) {
+            if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(computerId)
+                    && Boolean.TRUE.equals(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isUsbTarget(SharedAudioBroadcaster.Target target) {
+        return target != null && target.endpoint != null
+                && PhoneDeckEndpoint.USB.baseUrl.equals(target.endpoint.baseUrl);
+    }
+
+    private static void removeTarget(Map<String, SharedAudioBroadcaster.Target> targets,
+                                     Map<String, RetainedTarget> retained,
+                                     String computerId) {
+        targets.remove(computerId);
+        retained.remove(computerId);
+        java.util.Iterator<String> targetIterator = targets.keySet().iterator();
+        while (targetIterator.hasNext()) {
+            String key = targetIterator.next();
+            if (key != null && key.equalsIgnoreCase(computerId)) {
+                targetIterator.remove();
+            }
+        }
+        java.util.Iterator<String> retainedIterator = retained.keySet().iterator();
+        while (retainedIterator.hasNext()) {
+            String key = retainedIterator.next();
+            if (key != null && key.equalsIgnoreCase(computerId)) {
+                retainedIterator.remove();
+            }
+        }
+    }
+
+    private static void removeUsbTargets(
+            Map<String, SharedAudioBroadcaster.Target> targets,
+            Map<String, RetainedTarget> retained) {
+        java.util.Iterator<Map.Entry<String, SharedAudioBroadcaster.Target>> iterator =
+                targets.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, SharedAudioBroadcaster.Target> entry = iterator.next();
+            if (isUsbTarget(entry.getValue())) {
+                retained.remove(entry.getKey());
+                iterator.remove();
+            }
+        }
+    }
+
+    private static void retainUsbTargets(
+            Map<String, SharedAudioBroadcaster.Target> previousTargets,
+            Map<String, RetainedTarget> previousRetained,
+            java.util.Set<String> groupIds,
+            java.util.Set<String> explicitRemovals,
+            Map<String, TargetDeviceManager.Device> groupDevices,
+            Map<String, Boolean> connectionSnapshot,
+            Map<String, SharedAudioBroadcaster.Target> targets,
+            Map<String, RetainedTarget> retained,
+            Map<String, String> states,
+            long now) {
+        for (Map.Entry<String, SharedAudioBroadcaster.Target> entry
+                : previousTargets.entrySet()) {
+            String computerId = entry.getKey();
+            if (!isUsbTarget(entry.getValue())
+                    || !groupIds.contains(targetKey(computerId))
+                    || explicitRemovals.contains(targetKey(computerId))
+                    || findTarget(targets, computerId) != null) {
+                continue;
+            }
+            TargetDeviceManager.Device device = groupDevices.get(targetKey(computerId));
+            RetainedTarget candidate = retainTransientTarget(
+                    device, previousTargets, previousRetained,
+                    isConnected(connectionSnapshot, computerId), true, now);
+            if (candidate != null) {
+                targets.put(computerId, candidate.target);
+                retained.put(computerId, candidate);
+                states.put(computerId, "USB 连接检查暂不可用");
+            }
+        }
+    }
+
+    private static boolean isExplicitPairingRejection(Exception exception) {
+        // PhoneDeckLanClient intentionally exposes only explicit 401/403
+        // rejections.  SSL/certificate failures are not inferred here because
+        // an old address may now belong to another computer; those remain
+        // bounded transient failures until the monitor can identify a result.
+        return PhoneDeckLanClient.isPairingRejection(exception);
+    }
+
+    private void clearTargetState() {
+        synchronized (targetStateLock) {
+            appliedTargets.clear();
+            retainedTargets.clear();
+        }
     }
 
     /** Applies one probe atomically on the service's main lifecycle thread. */
@@ -479,7 +814,11 @@ public final class PhoneAudioService extends Service {
             stopShared();
             return;
         }
-        if (targets.isEmpty()) {
+        // A healthy / discovered endpoint is only a candidate until a sink has
+        // actually connected. This keeps the original bounded zero-audio stop
+        // effective when a PC reports healthy forever but its audio stream is
+        // stuck reconnecting.
+        if (targets.isEmpty() || connectedCount == 0) {
             long now = android.os.SystemClock.elapsedRealtime();
             if (emptyTargetsSinceElapsed == 0L) {
                 emptyTargetsSinceElapsed = now;
@@ -492,9 +831,11 @@ public final class PhoneAudioService extends Service {
                 stopShared();
                 return;
             }
-            statusDetail = incompatible > 0
-                    ? "在线电脑需要更新接收端或配置虚拟麦克风"
-                    : "正在等待在线电脑";
+            if (targets.isEmpty()) {
+                statusDetail = incompatible > 0
+                        ? "在线电脑需要更新接收端或配置虚拟麦克风"
+                        : "正在等待在线电脑";
+            }
         } else {
             emptyTargetsSinceElapsed = 0L;
         }
@@ -508,19 +849,45 @@ public final class PhoneAudioService extends Service {
         updateNotification();
     }
 
-    private static boolean isSharedAudioReady(JSONObject health) {
+    /**
+     * Distinguishes a fresh, explicit capability failure from a health sample
+     * that is stale or incomplete. Unknown health must never create a new sink;
+     * it may only keep an identity-matched sink that was already accepted.
+     * available=true remains usable even when the older receiver marks it stale.
+     */
+    private static SharedAudioReadiness sharedAudioReadiness(JSONObject health) {
         JSONArray capabilities = health.optJSONArray("capabilities");
+        if (capabilities == null) {
+            return SharedAudioReadiness.UNKNOWN;
+        }
         boolean supported = false;
-        if (capabilities != null) {
-            for (int index = 0; index < capabilities.length(); index++) {
-                if ("sharedMicrophone".equals(capabilities.optString(index))) {
-                    supported = true;
-                    break;
-                }
+        for (int index = 0; index < capabilities.length(); index++) {
+            if ("sharedMicrophone".equals(capabilities.optString(index))) {
+                supported = true;
+                break;
             }
         }
+        if (!supported) {
+            return SharedAudioReadiness.CAPABILITY_MISSING;
+        }
         JSONObject audio = health.optJSONObject("audio");
-        return supported && audio != null && audio.optBoolean("available", false);
+        if (audio == null) {
+            return SharedAudioReadiness.UNKNOWN;
+        }
+        Object available = audio.opt("available");
+        if (Boolean.TRUE.equals(available)) {
+            return SharedAudioReadiness.READY;
+        }
+        if (!Boolean.FALSE.equals(available)) {
+            return SharedAudioReadiness.UNKNOWN;
+        }
+        // Treat available=false as an explicit configuration state only when
+        // the receiver also explicitly says the sample is fresh. Missing or
+        // malformed stale metadata is not safe evidence for tearing down audio.
+        Object stale = audio.opt("stale");
+        return Boolean.FALSE.equals(stale)
+                ? SharedAudioReadiness.EXPLICITLY_UNAVAILABLE
+                : SharedAudioReadiness.UNKNOWN;
     }
 
     private static int countSharedGroupDevices(
@@ -649,6 +1016,7 @@ public final class PhoneAudioService extends Service {
         desiredRunning = false;
         unregisterWifiLinkObserver();
         handler.removeCallbacks(probeTick);
+        clearTargetState();
         if (broadcaster != null) {
             broadcaster.close();
         }

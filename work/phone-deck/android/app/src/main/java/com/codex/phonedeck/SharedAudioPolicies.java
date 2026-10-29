@@ -9,6 +9,35 @@ final class SharedAudioPolicies {
     /// M1-B/MIC-10（V21 断言项）：共享组零可达目标的停采窗口（15s 提案，单调时钟）。
     static final long ZERO_TARGET_STOP_WINDOW_MS = 15_000;
 
+    /// 每条共享目标连接都由自己的看门狗监督。HttpURLConnection 的
+    /// getOutputStream()/write()/flush() 不保证受 readTimeout 约束，因此不能只
+    /// 依赖连接对象上的超时；这些预算也必须足够大，避免普通 Wi-Fi/TLS 抖动把
+    /// 一台电脑误判成坏连接。
+    static final long OUTPUT_OPEN_TIMEOUT_MS = 5_000;
+    static final long FIRST_WRITE_TIMEOUT_MS = 5_000;
+    static final long WRITE_PROGRESS_TIMEOUT_MS = 5_000;
+    static final long WATCHDOG_POLL_MS = 100;
+    static final long WATCHDOG_JOIN_TIMEOUT_MS = 250;
+    /// A blocked platform disconnect must not accumulate one task per retry.
+    /// Each sink has at most one daemon cleaner and a small bounded pending set.
+    static final int DISCONNECT_QUEUE_CAPACITY = 4;
+
+    /// 共享模式停止时只给每一台接收端一个有限的尾部收尾预算；慢端不能
+    /// 把手机停止共享拖成 8 秒或更久。其余目标仍独立完成各自的收尾。
+    static final long SHARED_FINISH_TIMEOUT_MS = 2_000;
+
+    static boolean watchdogExpired(long nowElapsed, long deadlineElapsed) {
+        return deadlineElapsed != Long.MIN_VALUE && nowElapsed >= deadlineElapsed;
+    }
+
+    static long watchdogSleepMs(long nowElapsed, long deadlineElapsed) {
+        long remaining = deadlineElapsed - nowElapsed;
+        if (remaining <= 0) {
+            return 0;
+        }
+        return Math.min(WATCHDOG_POLL_MS, remaining);
+    }
+
     static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
         return emptySinceElapsed > 0L
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;

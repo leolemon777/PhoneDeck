@@ -176,6 +176,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         /// <summary>同一共享会话的新连接已接管：旧连接不再排空或补尾音。</summary>
         public volatile bool Superseded;
         public bool PlaybackReleased;
+        /// <summary>所属 WASAPI 输出在上传期间意外停止；该流必须立即让出。</summary>
+        public volatile bool OutputFaulted;
         public long ReleasedAtMs = -1;
         public bool DrainSucceeded;
     }
@@ -371,19 +373,29 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             Provider = new PhonePcmBuffer(mode)
         };
         SwitchingWaveProvider? warm;
+        IPhoneAudioPlayback? monitoredPlayback = null;
         Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
         lock (warmSync)
         {
             warm = EnsureWarmLocked();
             warm?.Attach(stream.Provider);
+            // Capture the playback paired with this exact source while the
+            // same lock still protects the warm source/playback pair.
+            if (warm is not null)
+            {
+                monitoredPlayback = warmPlayback;
+            }
         }
         IPhoneAudioPlayback? output = null;
+        CancellationTokenSource? outputFaultMonitorCancellation = null;
+        Task? outputFaultMonitor = null;
         try
         {
             if (warm is null)
             {
                 output = createPlayback(stream.Provider);
                 output.Play();
+                monitoredPlayback = output;
             }
             Console.WriteLine(
                 $"[audio:{sessionId}] wasapiStarted=+{ElapsedMs(stream.StartedAt)}ms " +
@@ -397,6 +409,18 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 activeCancellation = sessionCancellation;
                 activeStream = stream;
                 activeMode = mode;
+            }
+            if (monitoredPlayback is not null)
+            {
+                // Keep watching through client-cancelled drain/tail handling;
+                // only stream finally owns cancellation of this monitor.
+                outputFaultMonitorCancellation = new CancellationTokenSource();
+                outputFaultMonitor = MonitorPlaybackFaultAsync(
+                    stream,
+                    sessionId,
+                    monitoredPlayback,
+                    outputFaultMonitorCancellation.Token,
+                    sessionCancellation);
             }
             if (mode == AudioStreamMode.Shared)
             {
@@ -472,6 +496,11 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 Console.Error.WriteLine(
                     $"[audio:{sessionId}] {stallTimeoutMs}ms 未收到手机音频，判定连接已断开；排空已收到的 PCM 后释放接收端");
             }
+            catch (OperationCanceledException) when (stream.OutputFaulted)
+            {
+                Console.Error.WriteLine(
+                    $"[audio:{sessionId}] 虚拟声卡输出意外停止，立即终止手机音频上传");
+            }
             catch (OperationCanceledException)
             {
                 // 旧手机客户端 disconnect/显式取消仍须播放已收到的尾音。
@@ -481,6 +510,21 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 Console.WriteLine(
                     $"[audio:{sessionId}] uploadDisconnected={exception.GetType().Name}; draining received PCM");
+            }
+
+            if (stream.OutputFaulted)
+            {
+                lock (stream.PlaybackGate)
+                {
+                    var discarded = stream.Preroll.TakeAll().Length;
+                    stream.PlaybackReleased = true;
+                    if (discarded > 0)
+                    {
+                        Console.WriteLine(
+                            $"[audio:{sessionId}] outputFaultPreRollDiscardedBytes={discarded}");
+                    }
+                }
+                throw new InvalidOperationException("虚拟声卡输出故障，音频上传已终止");
             }
 
             lock (stream.PlaybackGate)
@@ -503,10 +547,14 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             // 否则 pre-roll 突发灌入的尾部会被提前截断。被同会话新连接接管时
             // 由新连接继续供音，旧连接直接让出。
             var drainDeadline = Environment.TickCount64 + DrainMaxMs;
-            while (!stream.Superseded && stream.Provider.BufferedBytes > 0
+            while (!stream.Superseded && !stream.OutputFaulted && stream.Provider.BufferedBytes > 0
                 && Environment.TickCount64 < drainDeadline)
             {
                 await Task.Delay(40, CancellationToken.None);
+            }
+            if (stream.OutputFaulted)
+            {
+                throw new InvalidOperationException("虚拟声卡输出故障，音频上传已终止");
             }
             if (!stream.Superseded && stream.Provider.BufferedBytes > 0)
             {
@@ -523,8 +571,16 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 // ReadFully 在输入排空后继续生成静音，不额外打开手机麦克风。
                 await Task.Delay(OutputTailMs, CancellationToken.None);
+                if (stream.OutputFaulted)
+                {
+                    throw new InvalidOperationException("虚拟声卡输出故障，音频上传已终止");
+                }
             }
             output?.Stop();
+            if (stream.OutputFaulted)
+            {
+                throw new InvalidOperationException("虚拟声卡输出故障，音频上传已终止");
+            }
             stream.DrainSucceeded = true;
             Console.WriteLine(
                 $"[audio:{sessionId}] sessionStopped=+{ElapsedMs(stream.StartedAt)}ms " +
@@ -538,26 +594,176 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         }
         finally
         {
-            output?.Dispose();
-            warm?.Detach(stream.Provider);
-            lock (sessionSync)
+            var outputFaulted = false;
+            try
             {
-                if (ReferenceEquals(activeCancellation, sessionCancellation))
+                TryAudioCleanup(sessionId, "monitorCancel", () =>
+                    outputFaultMonitorCancellation?.Cancel());
+
+                if (outputFaultMonitor is not null)
                 {
-                    completedSessionId = sessionId;
-                    completedDrainSucceeded = stream.DrainSucceeded;
-                    activeCancellation = null;
-                    activeSessionId = null;
-                    activeStream = null;
-                    activeMode = null;
+                    await TryAwaitAudioCleanup(
+                        sessionId, "monitorWait", outputFaultMonitor).ConfigureAwait(false);
                 }
+
+                TryAudioCleanup(sessionId, "monitorDispose", () =>
+                    outputFaultMonitorCancellation?.Dispose());
+
+                outputFaulted = stream.OutputFaulted;
+                if (outputFaulted)
+                {
+                    stream.DrainSucceeded = false;
+                }
+
+                TryAudioCleanup(sessionId, "playbackDispose", () => output?.Dispose());
+                TryAudioCleanup(sessionId, "warmDetach", () => warm?.Detach(stream.Provider));
             }
-            // Ended 事件不 Dispose：WaitForSessionEnd 的等待方可能仍持有引用。
-            stream.Ended.Set();
-            // 先释放闸门，再回调可能等待听写管理器锁的收尾。
-            streamGate.Release();
-            sessionEnded(sessionId, mode);
+            finally
+            {
+                TryAudioCleanup(sessionId, "sessionState", () =>
+                {
+                    lock (sessionSync)
+                    {
+                        if (ReferenceEquals(activeCancellation, sessionCancellation))
+                        {
+                            completedSessionId = sessionId;
+                            completedDrainSucceeded = stream.DrainSucceeded;
+                            activeCancellation = null;
+                            activeSessionId = null;
+                            activeStream = null;
+                            activeMode = null;
+                        }
+                    }
+                });
+                // Ended 事件不 Dispose：WaitForSessionEnd 的等待方可能仍持有引用。
+                TryAudioCleanup(sessionId, "endedSignal", () => stream.Ended.Set());
+                // 先释放闸门，再回调可能等待听写管理器锁的收尾。
+                TryAudioCleanup(sessionId, "streamGate", () => streamGate.Release());
+                TryAudioCleanup(sessionId, "sessionEnded", () => sessionEnded(sessionId, mode));
+            }
+
+            if (outputFaulted)
+            {
+                throw new InvalidOperationException("虚拟声卡输出故障，音频上传已终止");
+            }
         }
+    }
+
+    private static void LogAudioCleanupFailure(
+        string sessionId,
+        string stage,
+        Exception exception) =>
+        Console.Error.WriteLine(
+            $"[audio:{sessionId}] cleanupFailed={stage}:{exception.GetType().Name}");
+
+    private static void TryAudioCleanup(string sessionId, string stage, Action cleanup)
+    {
+        try
+        {
+            cleanup();
+        }
+        catch (Exception exception)
+        {
+            LogAudioCleanupFailure(sessionId, stage, exception);
+        }
+    }
+
+    private static async Task TryAwaitAudioCleanup(
+        string sessionId,
+        string stage,
+        Task cleanup)
+    {
+        try
+        {
+            await cleanup.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            LogAudioCleanupFailure(sessionId, stage, exception);
+        }
+    }
+
+    private async Task MonitorPlaybackFaultAsync(
+        ActiveStream stream,
+        string sessionId,
+        IPhoneAudioPlayback playback,
+        CancellationToken monitorCancellation,
+        CancellationTokenSource sessionCancellation)
+    {
+        try
+        {
+            while (true)
+            {
+                if (monitorCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+                if (playback.IsFaulted)
+                {
+                    if (TryMarkPlaybackFault(stream, sessionId, monitorCancellation))
+                    {
+                        sessionCancellation.Cancel();
+                    }
+                    return;
+                }
+
+                // Keep the monitor inexpensive while still detecting a fault
+                // that appears after the initial synchronous check.
+                await Task.Delay(100, monitorCancellation).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (monitorCancellation.IsCancellationRequested)
+        {
+            // Stream cleanup or client cancellation stopped this monitor.
+        }
+        catch (ObjectDisposedException) when (monitorCancellation.IsCancellationRequested)
+        {
+            // Cleanup raced disposal after the monitor was cancelled.
+        }
+        catch (ObjectDisposedException) when (!monitorCancellation.IsCancellationRequested)
+        {
+            // A warm output can be rebuilt while this stream is unwinding.  If
+            // it was still the active stream, its source no longer has a
+            // playback owner and must be cancelled rather than left ghosting.
+            if (TryMarkPlaybackFault(stream, sessionId, monitorCancellation))
+            {
+                sessionCancellation.Cancel();
+            }
+        }
+        catch (Exception exception) when (!monitorCancellation.IsCancellationRequested)
+        {
+            if (TryMarkPlaybackFault(stream, sessionId, monitorCancellation))
+            {
+                Console.Error.WriteLine(
+                    $"[audio:{sessionId}] playbackFaultMonitorFailed={exception.GetType().Name}");
+                sessionCancellation.Cancel();
+            }
+        }
+        catch (Exception) when (monitorCancellation.IsCancellationRequested)
+        {
+            // Never let a cancelled old monitor mask stream cleanup.
+        }
+    }
+
+    private bool TryMarkPlaybackFault(
+        ActiveStream stream,
+        string sessionId,
+        CancellationToken monitorCancellation)
+    {
+        lock (sessionSync)
+        {
+            // A warm playback can be rebuilt while an old stream is
+            // unwinding.  Only the still-current stream may be cancelled.
+            if (monitorCancellation.IsCancellationRequested
+                || !ReferenceEquals(activeStream, stream))
+            {
+                return false;
+            }
+            stream.OutputFaulted = true;
+        }
+        Console.Error.WriteLine(
+            $"[audio:{sessionId}] playbackFaultObserved; cancelling upload");
+        return true;
     }
 
     private bool TrySupersede(string sessionId, AudioStreamMode mode, string? ownerId)

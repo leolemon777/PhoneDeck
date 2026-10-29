@@ -5,9 +5,9 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 final class PhoneDeckLanClient {
@@ -25,13 +25,20 @@ final class PhoneDeckLanClient {
 
     static final class ProbeOutcome {
         final ProbeResult result;
-        /// 至少一个候选地址回了 401/403 或证书校验失败：网络是通的，
-        /// 但本地保存的配对令牌/证书指纹已失效，插一次 USB 可自动修复。
+        /// 候选地址明确返回 401/403；证书或电脑身份不匹配可能只是旧 IP
+        /// 被重新分配，不把它们推断成用户配对被撤销。
         final boolean pairingRejected;
+        /// Local executor contention is unknown, not a receiver failure.
+        final boolean skipped;
 
         ProbeOutcome(ProbeResult result, boolean pairingRejected) {
+            this(result, pairingRejected, false);
+        }
+
+        ProbeOutcome(ProbeResult result, boolean pairingRejected, boolean skipped) {
             this.result = result;
             this.pairingRejected = pairingRejected;
+            this.skipped = skipped;
         }
     }
 
@@ -49,7 +56,7 @@ final class PhoneDeckLanClient {
                 Thread thread = new Thread(runnable, "PhoneDeck-LanProbe");
                 thread.setDaemon(true);
                 return thread;
-            }, new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     private PhoneDeckLanClient() {
     }
@@ -107,27 +114,59 @@ final class PhoneDeckLanClient {
         if (candidates.isEmpty()) {
             return new ProbeOutcome(null, false);
         }
-        BlockingQueue<ProbeResult> results = new ArrayBlockingQueue<>(candidates.size());
+        ExecutorCompletionService<ProbeResult> completed = new ExecutorCompletionService<>(pool);
+        List<Future<ProbeResult>> attempts = new ArrayList<>(candidates.size());
         java.util.concurrent.atomic.AtomicBoolean rejected =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
-        for (String address : candidates) {
-            pool.execute(() -> {
-                ProbeResult result = probeAddress(device, address, rejected);
-                if (result != null) {
-                    results.offer(result);
-                }
-            });
-        }
         long deadline = android.os.SystemClock.elapsedRealtime()
                 + PROBE_CONNECT_TIMEOUT_MS + PROBE_READ_TIMEOUT_MS + 400;
+        boolean admissionSkipped = false;
         try {
-            ProbeResult first = results.poll(
-                    Math.max(1, deadline - android.os.SystemClock.elapsedRealtime()),
-                    TimeUnit.MILLISECONDS);
-            return new ProbeOutcome(first, rejected.get());
+            for (String address : candidates) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return new ProbeOutcome(null, rejected.get());
+                }
+                try {
+                    attempts.add(completed.submit(() -> probeAddress(device, address, rejected)));
+                } catch (java.util.concurrent.RejectedExecutionException busy) {
+                    // A saturated pool must not move socket I/O onto the
+                    // monitor caller and exceed the whole probe's deadline.
+                    admissionSkipped = true;
+                }
+            }
+            for (int remainingAttempts = attempts.size(); remainingAttempts > 0; remainingAttempts--) {
+                long remainingMs = deadline - android.os.SystemClock.elapsedRealtime();
+                if (remainingMs <= 0) {
+                    break;
+                }
+                Future<ProbeResult> finished = completed.poll(remainingMs, TimeUnit.MILLISECONDS);
+                if (finished == null) {
+                    break;
+                }
+                try {
+                    ProbeResult result = finished.get();
+                    if (result != null) {
+                        return new ProbeOutcome(result, rejected.get());
+                    }
+                } catch (java.util.concurrent.ExecutionException
+                         | java.util.concurrent.CancellationException ignored) {
+                    // Failure of one address cannot hide another valid path.
+                }
+            }
+            // Refused/auth-failed addresses no longer consume the entire
+            // timeout when all candidates have already completed.
+            // If a valid address never got an execution slot, a stale address
+            // rejecting its token cannot prove the whole pairing is invalid.
+            return new ProbeOutcome(null, !admissionSkipped && rejected.get(), admissionSkipped);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return new ProbeOutcome(null, rejected.get());
+        } finally {
+            for (Future<ProbeResult> attempt : attempts) {
+                if (!attempt.isDone()) {
+                    attempt.cancel(true);
+                }
+            }
         }
     }
 

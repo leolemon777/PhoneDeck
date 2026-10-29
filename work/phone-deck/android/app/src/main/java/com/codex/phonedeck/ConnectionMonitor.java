@@ -169,7 +169,7 @@ final class ConnectionMonitor {
                     Thread thread = new Thread(runnable, "PhoneDeck-Monitor");
                     thread.setDaemon(true);
                     return thread;
-                }, new ThreadPoolExecutor.CallerRunsPolicy());
+                }, new ThreadPoolExecutor.AbortPolicy());
     }
 
     /// 网络变化：立即重新探测全部电脑并允许马上发现。
@@ -404,13 +404,22 @@ final class ConnectionMonitor {
     }
 
     private Future<Outcome> submit(TargetDeviceManager.Device device, long sequence) {
-        return pool.submit(() -> {
-            long startedAt = clock.getAsLong();
-            PhoneDeckLanClient.ProbeOutcome outcome = prober.probe(device);
-            return outcome == null ? new Outcome(null, false, false, startedAt, sequence)
-                    : new Outcome(outcome.result, outcome.pairingRejected, false, startedAt,
-                            sequence);
-        });
+        try {
+            return pool.submit(() -> {
+                long startedAt = clock.getAsLong();
+                PhoneDeckLanClient.ProbeOutcome outcome = prober.probe(device);
+                return outcome == null ? new Outcome(null, false, false, startedAt, sequence)
+                        : new Outcome(outcome.result, outcome.pairingRejected, outcome.skipped, startedAt,
+                                sequence);
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            // submit runs under the monitor lock. Never execute network I/O
+            // on its caller when old sockets have exhausted the bounded pool:
+            // that would also block main-thread network reset/stop callbacks.
+            // Local contention is not an offline observation or an auth error.
+            return java.util.concurrent.CompletableFuture.completedFuture(
+                    new Outcome(null, false, true, clock.getAsLong(), sequence));
+        }
     }
 
     private boolean collect(Map<String, PendingProbe> futures, Map<String, Outcome> into) {
