@@ -45,6 +45,10 @@
     Mac 新包只在 dist 临时运行实测，已恢复原安装 App（辅助功能 trusted、shared 已重连），未替换 `~/Applications`。
   - 未验证：Android 新 APK 未装机（无固定签名），麦克风恢复与占用提示需在实机用来电/微信语音复测；
     managed 听写的抖动缓冲尾音与 Typeless `capturing=true` 新探测路径需一次真实听写确认；Windows 未做同类改动。
+  - **已安装到作者 Mac**（2026-10-30）：`~/Applications/PhoneDeck Receiver.app` 替换为本分支 AOT lite 包，
+    主程序 SHA-256 `c7e99467eadb6208389d2283d243061261a0ac507fa1c3f1aa148eeb38388e95`；旧 dev.4 包（`7cfef843…b890b`）备份在
+    `~/Library/Application Support/PhoneDeck/backups/receiver-app-2.0.0-dev.4-20261030/`。首次 kickstart 被
+    `OS_REASON_CODESIGNING` 拒绝一次，重试即启动；shared 供音自动重连、日志正常。新 ad-hoc 签名使辅助功能失效，需用户在列表中删除后重新添加。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
 
