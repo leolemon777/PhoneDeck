@@ -1,5 +1,32 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-30 Mac 接收端与手机共享供音的 CPU 优化（最新源码候选）
+
+- 分支 `agent/mac-receiver-perf`，基于 PR 57（`agent/connection-mic-stability-audit`）。
+- **Mac 热点证据**：作者 Apple Silicon Mac 上已装 `2.0.0-dev.4` 在 shared 供音中，`top` 1 秒采样约 1.6–6.9%（均值约 3.5%），
+  物理内存占用 29.5 MB，23 线程。`sample` 5 秒显示可计 CPU 基本都在 `/api/health → BuildHealth → CachedCapturing →
+  MacVoiceEngineStateProbe.IsCapturing`：每次用 `Process.GetProcesses()` 枚举全部约 760 个进程并逐个读进程名。
+- **采集探测**：改为读取 Core Audio 音频进程列表（`prs#`，约 30 个对象），按对象 ID 缓存“是否属于当前引擎”，
+  只对匹配对象读 `piri`。读不到名称的 root/系统服务按不匹配缓存；PID 不可读的不缓存；列表不可读时退回原全量枚举。
+  本机实测与旧路径结果一致，单次 8.5 ms → 0.2–0.3 ms；Typeless 主进程与 `Typeless Helper` 均被正确匹配。
+- **长轮询**：Mac `/api/events` 改用共享 `HealthEvents` 的 typed 重载，等待期间每 50 ms 只比较 8 个标量，
+  完整 health JSON 只在应答时构造；字段取值、owner 过滤与 hash 不变，前台活动只在进入时记录一次。
+- **手机通知**：logcat 显示共享中前台通知 1701 约每秒重发一次（SystemUI/Launcher/ApplicationPolicy 每分钟约 120 行）。
+  `updateNotification` 现在只在“x/y 台电脑正在接收”文字变化时 `notify`。
+- **手机界面**：共享中 MainActivity 在前台静止时实测约 21 帧/秒持续重绘（19% 卡顿帧），进程约 20% 单核，
+  其中 RenderThread 6%、主线程 4.6%。原因是 100 ms 一次的电平回调每次都调用 `updateVoiceControls()`，
+  重建电脑卡片、模式按钮、最近列表和按钮背景。现在电平只更新音量条和说明文字（文字不变不重设），
+  running/connected/total、详情或接收端状态变化才刷新控件；`VoiceLevelView` 仅在点亮格数或状态变化时重绘。
+- 验证：Mac Receiver Release build 0 error（1 个既有 SYSLIB0057），Mac 测试 50/50；Native AOT lite 包构建成功，
+  位于 ignored `work/phone-deck/dist/macos/osx-arm64/`。Android assembleDebug 成功，单元测试 66/66，lint 0 error / 42 warning；
+  本 Mac 调试签名 APK 仅用于编译验证，不能安装到固定签名手机。
+- **Mac 实机对比**（同一 shared 供音会话，30 秒 CPU 时间）：旧已装版 1.07 s（约 3.6%）→ 新 AOT 包 0.37 s（约 1.2%），
+  采样中 `__proc_info` 消失，物理内存 24.9 MB（新进程刚启动，不作内存结论）。测试时暂停 launchd 服务从 dist 临时运行，
+  测完已 kickstart 恢复原 App（辅助功能仍为 trusted、共享流已重连）；未替换 `~/Applications` 中的 App。
+- 观察：接收端收到 SIGTERM 后约 10 秒才退出（新旧一致），疑似在等长连接收尾，未改动。
+- 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
+  手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
+
 ## 2026-10-29 Windows CPU / 内存优化（最新源码候选）
 
 - 用户希望进一步降低资源占用。按此前要求未运行单元/功能/音频测试，没有替换正在运行的接收端或改动手机配置。
