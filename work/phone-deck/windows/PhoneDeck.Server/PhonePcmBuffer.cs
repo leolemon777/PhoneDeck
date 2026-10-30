@@ -16,27 +16,32 @@ internal sealed class PhonePcmBuffer : IWaveProvider
     private readonly BufferedWaveProvider buffer;
     private readonly PcmSilenceCatchUp catchUp;
     private readonly int? liveLimit;
-    private byte[] discard;
+    private byte[] discard = Array.Empty<byte>();
     private byte[] filtered = new byte[16 * 1024];
 
     internal PhonePcmBuffer(AudioStreamMode mode)
     {
+        var shared = mode == AudioStreamMode.Shared;
         buffer = new BufferedWaveProvider(new WaveFormat(48_000, 16, 1))
         {
-            BufferDuration = TimeSpan.FromMilliseconds(PhoneAudioBridge.PreRollHoldMs + 1_200),
+            // Shared mode releases pre-roll immediately and enforces its own
+            // 240ms live queue below; do not allocate the managed 2.7s buffer
+            // for every shared microphone session.
+            BufferDuration = TimeSpan.FromMilliseconds(
+                shared ? SharedQueueMs : PhoneAudioBridge.PreRollHoldMs + 1_200),
             DiscardOnBufferOverflow = true,
             ReadFully = true
         };
-        var shared = mode == AudioStreamMode.Shared;
         catchUp = new PcmSilenceCatchUp(shared ? SharedTargetMs : ManagedTargetMs);
         liveLimit = shared ? PcmLatency.MsToBytes(SharedQueueMs) : null;
-        discard = new byte[liveLimit ?? 0];
     }
 
     public WaveFormat WaveFormat => buffer.WaveFormat;
     internal long DroppedBytes { get; private set; }
     internal long SkippedSilenceBytes { get { lock (sync) { return catchUp.SkippedBytes; } } }
-    internal int BufferedBytes { get { lock (sync) { return buffer.BufferedBytes; } } }
+    // BufferedWaveProvider's CircularBuffer.Count is independently locked;
+    // this read-only query need not contend with the producer gate.
+    internal int BufferedBytes => buffer.BufferedBytes;
 
     internal void AddSamples(byte[] samples, int offset, int count)
     {
@@ -46,7 +51,8 @@ internal sealed class PhonePcmBuffer : IWaveProvider
             {
                 filtered = new byte[count];
             }
-            count = catchUp.Filter(samples.AsSpan(offset, count), filtered, buffer.BufferedBytes);
+            var bufferedBytes = buffer.BufferedBytes;
+            count = catchUp.Filter(samples.AsSpan(offset, count), filtered, bufferedBytes);
             samples = filtered;
             offset = 0;
             if (liveLimit is int limit)
@@ -54,7 +60,7 @@ internal sealed class PhonePcmBuffer : IWaveProvider
                 // Drop stale backlog rather than keeping old audio and discarding
                 // new words. A native engine stop cannot wait for PhoneDeck queues.
                 var skip = Math.Max(0, count - limit);
-                var remove = Math.Max(0, buffer.BufferedBytes + count - skip - limit);
+                var remove = Math.Max(0, bufferedBytes + count - skip - limit);
                 if (remove > 0)
                 {
                     if (discard.Length < remove)

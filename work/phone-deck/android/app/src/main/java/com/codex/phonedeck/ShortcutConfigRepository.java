@@ -337,16 +337,26 @@ final class ShortcutConfigRepository {
             "wordLeft", "wordRight", "lineStart", "lineEnd", "docStart", "docEnd",
             "deleteWordLeft", "deleteWordRight");
 
-    private static boolean migrateBuiltinButtons(ArrayList<ShortcutButtonConfig> values) {
-        boolean changed = values.removeIf(value -> RETIRED_BUILTIN_IDS.contains(value.id));
+    static boolean migrateBuiltinButtons(ArrayList<ShortcutButtonConfig> values) {
+        // Only remove entries that are still marked as built-in.  A user may have
+        // imported or created a custom button with a formerly reserved id; that
+        // button is not the retired default and must not be discarded during an
+        // otherwise compatible schema-1 migration.
+        boolean changed = values.removeIf(value -> value.builtIn
+                && RETIRED_BUILTIN_IDS.contains(value.id));
         Set<String> existingIds = new HashSet<>();
         for (ShortcutButtonConfig value : values) {
             existingIds.add(value.id);
         }
+        int remainingCapacity = Math.max(0, MAX_BUTTONS - values.size());
         for (ShortcutButtonConfig builtin : defaults()) {
+            if (remainingCapacity == 0) {
+                break;
+            }
             if (INTRODUCED_BUILTIN_IDS.contains(builtin.id) && existingIds.add(builtin.id)) {
                 values.add(builtin);
                 changed = true;
+                remainingCapacity--;
             }
         }
         if (changed) {

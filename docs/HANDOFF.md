@@ -1,5 +1,246 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-29 Windows CPU / 内存优化（最新源码候选）
+
+- 用户希望进一步降低资源占用。按此前要求未运行单元/功能/音频测试，没有替换正在运行的接收端或改动手机配置。
+  仅对旧进程做了 CPU/内存只读采样和一次托管栈读取；没有录音或完整进程内存转储。
+- **热点证据**：旧 `1.6.0-dev.17+a5e1c61` 的 shared 会话中，接收端整机 CPU 为 4.54–4.63%（20 逻辑处理器），
+  私有提交约 47.7–48.2 MiB、工作集约 108.9–109.4 MiB；托盘 CPU 约 0%、私有提交 28.3 MiB、工作集 86 MiB。
+  热线程 `38896/0x97F0` 的栈为 `PropertyStore.get_Item → MMDevice.FriendlyName → SelectDevice → FindVirtualCable → DiagnosticsMonitor.Run`；
+  WASAPI 播放线程位于正常 WaitMultiple。样本在 ignored `outputs/windows-resource-optimization-20261029/old-receiver-managed-stacks.txt`，
+  前一轮资源 JSON 在 `outputs/windows-receiver-optimization-20261029/current-old-receiver-usage-*.json`。
+- **诊断 CPU / 分配**：共享不再触发 250 ms 的引擎扫描，回到 3 秒兜底，managed 及状态事件的快速反馈保持；
+  每个 Typeless 快照最多一次配置文件读取；同一次捕获探针每个 PID 最多一次进程名查询。
+- **声卡属性热点**：新增 `AudioDeviceNames`，属性 Count 一次读取，最多缓存 64 个设备的索引提示；每次仍验证属性 key、
+  读取实时值并在 finally 释放 PROPVARIANT。设备选择单次读取名称并可在首个优先候选处结束，避免 Contains、排序和返回值的重复 COM 遍历。
+  只有索引被缓存，设备可用性与名称不会被长期缓存；异常仍进入诊断 stale/unknown 路径。
+  原生资源释放遵循 [PropVariantClear](https://learn.microsoft.com/en-us/windows/win32/api/propidl/nf-propidl-propvariantclear)；
+  API 与结构布局已与本地 NAudio 2.2.1 实际 IL 对照。
+- **长轮询**：Windows `/api/events` 每 50 ms 只比较 8 个 scalar，完整 health JSON 仅在实际应答时创建。
+  默认 8 秒无变化请求不再重复构造约 160 份完整快照；owner 过滤、hash 算法、取消/超时返回保持，Mac 旧重载保持原行为。
+- **音频缓冲**：shared 队列容量 259,200 → 23,040 字节，原本就执行的 240 ms 丢旧规则不变；
+  未写入 pre-roll 时不分配 144,000 字节，未丢弃 backlog 时不分配 23,040 字节 scratch，通常少预分配约 394 KiB/共享会话。
+  该数字不代表整个程序内存下降 90%；输入格式、managed 容量与音质保持不变。
+- **长期内存**：过期或断开的 Core Audio 监听对象按需异步回收，活动+待清理+清理中的对象总限额 256；
+  不在 COM 回调里注销，不新增常驻清理线程。播放源指针使用原子切换，旧 detach 不能清掉新 source。
+- Windows 统一 `build.ps1 -Platform Windows -Configuration Release -SkipTests` 已完成 Server/ControlCenter 构建与自包含发布，
+  均为 0 warning / 0 error；run 为 `outputs/windows-resource-optimization-20261029/builds/20261030T020421Z-f4ed5365/`。
+  Server SHA-256 `594970baaf13f756f07f3fe1f8cf4c1bfa421babc51cb84e49c66a56b808491a`；
+  ControlCenter SHA-256 `1a03517e28982c15fd97240936253cc1d2bf8f05b8eda9a7c605812efb0c4548`。
+  共享 HealthEvents 的 Mac Release 跨平台编译也通过（0 error，1 个既有 LanIdentity.cs:108 SYSLIB0057 证书构造弃用警告）；
+  首次 --no-restore 因本地缺少 assets 失败，锁定还原后成功，依赖锁文件未修改。未运行测试，manifest 保持 `unverified`。
+  当前运行程序仍是旧版，未声称新候选 CPU 百分比、内存峰值或长期行为已实测。
+
+## 2026-10-29 Windows 接收、诊断与 USB 恢复优化（最新源码状态）
+
+- 用户继续关注电脑端；本轮按“只优化，不需要测试”执行源码修改、静态复核与候选编译，不运行单元测试、设备测试或音频实测。
+  运行中的 Windows 接收端未替换，手机保持下方部署记录的优化 APK；没有改动个人配对、快捷键、系统音频输入或 Typeless 设置。
+- **USB 恢复**：看门狗 Start/Dispose 串行，异常 worker 可重建，设置切换立即唤醒。
+  ADB 标准输出/错误并行读取，命令超时后结束子进程，避免管道阻塞拖住恢复；正常路径每轮仍只查一次 reverse。
+  修复端口后先检查手机应用进程，已经运行时不重复 am start 抢前台。
+- **共享音频输出**：健康请求使用快速预热标记，不再等待可能阻塞的 WASAPI/COM 锁；合并后台预热，失败至少间隔 2 秒重试。
+  初始化放入音频闸门的 try/finally 范围，输出释放幂等且设备清理放在 finally；坏设备、重复停止或取消竞争不遗留永久占用。
+- **可信状态**：音频 owner/session/PCM 状态从同一锁内快照返回，听写 owner/session 以不可变对象一次发布，避免会话切换时字段串线。
+  health/diagnostics 增加可选 PCM 字节数、首次接收标记、最后收包年龄、通用运行错误和运行态采样时间；仅 owner 获得流的私有细节。
+  PCM 包含静音，不能作为播放/识别确认；Android 尚未消费这些字段，healthEvents 指纹不跟随计数和年龄变化。
+- **诊断容错**：错误保留原采样时间并标 stale；过期/失败的引擎观察作为 unknown。
+  超时不会释放仍在读取的 gate，且使用快照引用比对，避免迟到的超时覆盖新结果；关闭后不再发布或回调。
+- 统一入口 `scripts/build.ps1 -Platform Windows -Configuration Release -SkipTests` 已完成；Server 和 ControlCenter
+  Release build 均为 0 warning / 0 error，自包含单文件 publish 成功。按用户要求跳过测试，因此 manifest 为 `unverified`，不是设备验收通过。
+  产物目录为 `outputs/windows-receiver-optimization-20261029/20261030T005941Z-5d07f23e/`，不创建正式 Release。
+  Server SHA-256：`6404c71fc34d49c081189cc77b5be9b9468f95083973519142a99ac73188d7af`；
+  ControlCenter SHA-256：`06b9e2ab5ec62fda739468e9f1661cea6569f1da26ff1c9656703a7ee24ac6ee`。
+- 待办仍包括手机消费接收端 PCM 证据、实际通道诊断界面、Wi-Fi Network 绑定以及未来获准后的设备验收；
+  此次可选字段只是接收证据，不构成远端逐帧确认协议。
+
+## 2026-10-29 优化版已同签名覆盖安装（最新部署状态）
+
+- 用户随后连接手机，已将源码 `cdb153f` 对应的优化 APK 通过 `adb install -r` 覆盖安装到 Samsung `SM-G9880`，未卸载或清数据。
+  安装后的 APK SHA-256 为 `36aaffcd095ca789ef9c3b8625b357344be4fd9caa3ed239e5611ef66ecf5151`，与本地优化包一致；UID 保持 `10852`。
+- 安装前归档当前私有文件；安装后、首次启动前，配对密文、快捷键、`rList`、设置四个文件的 SHA-256 全部不变。
+  冷启动成功后再次核对快捷键与设置三个文件，仍全部不变：37 项快捷键，6 自定义，22 隐藏。
+- 言渡已打开，共享麦克风服务未开启。继续遵守用户“不需要测试”的要求，没有连接/音频功能实测；Windows 运行中的接收端仍未替换。
+- 本机忽略目录 `outputs/connection-audio-optimization-20261029/phone-install/` 保存安装前备份、安装报告及启动后核对结果，
+  `build-manifest.json` 已更新实体安装状态。下方“源码优化阶段未部署”的记录描述该阶段结束时的状态，以本节部署结果为准。
+
+## 2026-10-29 继续优化连接与供音恢复（最新源码状态）
+
+- 用户明确要求“只优化，不需要测试”。本轮不操作手机、不切网络、不运行测试；只做源码复核与编译。
+  下方实体迁移、35 秒 Wi-Fi 电平等证据属于上一批已安装 APK，不能作为本轮新源码的实测结果。
+- **共享目标保留**：健康请求超时、短时不可达不再直接拆除已接受的音频目标；凭据仍一致且音频持续写入时保留连接，
+  无写入进度后按最多 4 次失败/15 秒窗口等待恢复。移出共享组、明确鉴权拒绝、凭据变更或明确配置失效仍移除。
+  所有音频目标无有效连接时仍受 15 秒停采窗口约束，不因候选端点存在而无限开麦。
+- **发送阻塞恢复**：每个共享目标的连接尝试有独立身份与进度期限，建立/首批发送/后续无进度预算为 5 秒；
+  仅中断问题目标并按原退避重试。完成首批 PCM 写入及 flush 后才计入连接数，仍不等同于远端确认播放。
+  共享收尾预算为 2 秒，平台 disconnect 清理与手机控制线程分开；迟到清理只能处理原连接。
+  同一电脑在整个进程中只允许一个发送 worker；旧 worker 及其清理线程均退出后才释放占用，全局也有限额，避免反复启停累积残留线程。
+- **Windows 输出故障**：监视与当前音频源配套的 WASAPI 输出，故障时取消所属上传、跳过无效排空并返回已有错误路径；
+  下次请求重建故障输出。旧会话的故障不会取消新会话，正常主动停止不会误判为设备故障。
+  释放输出或取消回调抛异常也继续清理会话、唤醒结束等待者及释放音频闸门，避免后续连接永久冲突。
+- **探测资源保护**：线程池饱和不再在调用线程、尤其 monitor 锁内执行网络 I/O；未取得执行资源不写入离线缓存。
+  多地址探测在全部完成失败时立即结束，首个成功或结束后取消剩余任务，避免无效等待与重复工作。
+- 现有 UI、配对与快捷键数据格式、协议版本、48 kHz / PCM16 / mono 保持不变。新源码未部署到手机或正在运行的电脑接收端。
+  构建结果与候选字节记录在本机忽略目录 `outputs/connection-audio-optimization-20261029/`。
+- 最终 Android `assembleDebug --offline` 成功；Windows Server Release build 成功，0 warning / 0 error。
+  未运行本轮测试或 lint。APK `Yandu-connection-audio-optimized.apk` 的 SHA-256 为
+  `36aaffcd095ca789ef9c3b8625b357344be4fd9caa3ed239e5611ef66ecf5151`，安装证书仍为
+  `df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f`，与上批已迁移手机相同。
+- 仍待后续实施：远端 PCM 接收/播放确认、按 Android Wi-Fi Network 绑定局域网请求及实际通道诊断界面。
+  平台 socket 若同时不响应 interrupt/disconnect，不能保证该底层调用在期限内退出；新逻辑限制其对其他目标和停止流程的影响。
+
+## 2026-10-29 固定签名实体机迁移与 Wi-Fi/共享验收（最新状态）
+
+- **实体迁移已完成**：用户已明确批准卸载旧签名包、安装固定签名候选并按已验证备份恢复。Samsung
+  `SM-G9880` 当前 `com.codex.phonedeck` UID 为 `10852`；安装候选为
+  `outputs/ui-stability-device-20261029/candidate/Yandu-ui-stability-fixed-signature-candidate.apk`，
+  SHA-256 为 `6053c39aaa64be734052c7e3def7e51e875aabfcc4f2c12a8a817e5b0097b763`。
+- **恢复核对通过**：导入后完整 Verify 通过，候选冷启动后稳定字段无变化；仅一条记录的 `lastSeenAt`
+  发生正常时间更新。原 3 台配对、共享组中的 3 台电脑、默认电脑和 37 个快捷键（6 个自定义、22 个隐藏）均保留。
+  最新只读证据在 `outputs/ui-stability-device-20261029/phone-install-20261029/`；该目录及备份不提交 Git。
+- **无 USB 的 Wi-Fi 证据**：手机与电脑恢复到同一网络（PC `192.168.0.193`、手机 `192.168.0.195`）后物理拔除 USB，
+  ADB 已无设备；手机到电脑 TCP 8766 已建立。`wifi-unplugged-levels.txt` 共 35 条逐秒记录、0 条零信号，
+  最终时长 35.1 秒且每条均有非零 `CABLE Output` 电平，证明当前候选在无 USB 时有持续音频输出路径。
+- **后台共享边界**：30 秒供音测量窗口中途执行 `KEYCODE_HOME` 回到手机桌面后仍持续有信号；该轮仍同时保留 USB 与 Wi-Fi，
+  不能单独作为 Wi-Fi-only 锁屏/Doze 长时验收。没有把电平证据等同于 Typeless 已实际听写。
+- **仍未闭环**：Windows 仍运行旧 dev.17 接收端，连接稳定性分支修复尚未部署到该实机；Typeless 仍为
+  AutoDetect，当前选中物理麦克风而非 `CABLE Output`，因此不宣称听写端到端通过。多电脑同时共享、锁屏/Doze、
+  长时间运行、切网后完整恢复和新 Windows 候选部署后的回归仍待执行。
+- **安全门禁保留**：物理 Import 必须提供与 `-Serial` 完全匹配的 `-ApprovedPhysicalSerial` 及 64 位
+  `-ExpectedApkSha256`；缺失、错配、目标为模拟器、应用未停止、已安装 APK 拉取后的摘要不匹配或状态不确定都会拒绝，
+  不会自动选择或触碰其他 ADB 设备。流程与回退限制见 [固定签名迁移准备](guides/SIGNING_MIGRATION.md)。
+
+## 2026-10-29 固定签名迁移准备与隔离恢复验证（历史准备记录）
+
+- **历史授权边界（已结束）**：用户当时选择“先准备迁移，验证后再确认安装”，所以准备阶段没有卸载、清数据或替换
+  Samsung 上的应用；随后已在上方记录中完成用户批准的实体迁移。新候选最初仅安装在电脑上独立、断网的 Android 12/API 31 模拟器中。
+- **原签名仍未找回，但配对可导出**：原 helper 加载失败的原因之一是传输字节变化；改为推送非敏感 DEX helper 后校验 SHA-256，
+  再以应用 UID 注册本进程 AndroidKeyStore provider。成功从真实手机 UID 10851 只读解密 3 台电脑、3 个共享成员及有效默认目标，
+  不导出系统密钥。手机配对及设置未改写，临时 helper 用后删除并检查不存在；没有改系统安全策略、签名验证或网络配置。
+- **可恢复材料**：新完整文件快照及有效 DPAPI 备份保存在 ignored 的 `outputs/ui-stability-device-20261029/migration-source/`，
+  有效配对备份文件为 `pairings-final.current-user.dpapi`；备份只允许当前 Windows SID 访问，并从磁盘回读解密核对完整字节。
+  原快捷键仍为 37 项、6 自定义、22 隐藏；旧加密 XML 仅作原始归档，不能直接还原到新密钥环境。
+- **隔离恢复通过**：固定签名候选安装到全新 emulator 应用 UID 10105；用该环境自己的 KeyStore 重新加密，导入后独立 Verify 通过。
+  候选冷启动进入实际首页（59 个应用 UI 节点，指令库与共享控件可见），模拟器恢复了原应用已有的录音/蓝牙运行权限，
+  未自动启动麦克风服务。再次停止后 Verify 仍逐字段匹配全部 3 台记录、顺序、默认目标及共享组；只接受加密记录，无明文回退。
+  快捷键、`rList`、设置三个文件在启动后 SHA-256 仍与手机快照完全一致。模拟器测试不等于 Samsung 安装或网络/音频实测。
+- **安全写入与回归**：工具使用 DEX、明确序列号、停止状态检查、Base64 stdin、完整帧及字段校验；DPAPI 默认拒绝覆盖。
+  新配对 XML 用 `CREATE_NEW` 独占创建，写入/刷新后再次解密核对，不能覆盖已有配对；本 API 31 环境拒绝 hard-link，
+  因此不宣称文件发布具有完整原子性。中途失败保留新 key/可能的部分目标并报告 recovery_required，停止后续启动，依靠验证过的备份恢复。
+  本机合成回归覆盖 DPAPI/ACL、已有备份拒绝且摘要不变、损坏备份拒绝、物理手机 Import 门禁及脚本语法，全部通过。
+  模拟器重复 Import 被拒绝，已有配对密文 SHA-256 不变；用户文件目录只剩原有文件及预期的新配对 XML，无临时 helper 残留。
+- **工具范围（准备阶段）**：`scripts/android/migration/` 为仓库维护工具，不进入生产 APK；当时 Import 只允许显式的真正模拟器，
+  不安装或卸载应用。现在的物理 Import 另有明确 serial/APK hash 门禁，当前结果见上方及指南。生产源码/候选 APK 未再改动，沿用 66 项应用测试。
+- **手机保留核验（准备阶段）**：结束只读检查后、重新打开原应用前，四份用户文件与本轮快照一致，原机 Verify 与模拟器 Verify 均通过。
+  原应用随后被重新打开；该准备阶段已结束，实体安装及后续 Wi-Fi 证据见上方最新记录。
+
+## 2026-10-29 现有界面集成与保留配置的安装准备（历史准备记录）
+
+- **用户要求**：合入现有手机界面，解决签名后安装实测，保留现有配对及快捷键。已把 UI 分支
+  `agent/shortcut-panel-common-keys`（cd1deba，PR #55）合入本稳定性分支（合并提交 3012420）；
+  四套外观、指令库、快捷键编辑/拖动/隐藏/撤销与网络生命周期、共享会话隔离修复同时保留。
+- **配置迁移修复**：ee14b87 只删除标记为内置的退役按钮，保留同 ID 的自定义按钮；追加默认项受 100 项容量限制，
+  防止接近上限的配置因追加溢出而回退默认布局。四个回归用例覆盖满容量、有限余量、退役内置项释放容量和同 ID 自定义项。
+- **最终源码验证**：JDK 17 / Android SDK 35，`assembleDebug`、`testDebugUnitTest`、`lintDebug` 全部通过，
+  **66/66 tests，0 failure/error；lint 0 error / 43 warning**。Windows 源码未随本次 UI 集成改变，沿用前述 188/188 结果。
+  这是源码及构建验证，新候选尚未装入手机，不能记作新版本实机验收。
+- **备份与完整性**：停用应用后归档私有 `files/` 和 `shared_prefs/` 及现装 APK，保存在 ignored 的
+  `outputs/ui-stability-device-20261029/before-081120/`。快捷键有 1 个配置、37 项（6 自定义、22 隐藏）；
+  配对仅有 AndroidKeyStore 加密记录、无明文回退。检查结束后、重新打开现装应用前，四份原始文件 SHA-256
+  与备份一致；临时只读导出 helper 已移除。原应用已重新打开，没有开启麦克风服务。
+- **签名阻点仍在**：手机现装证书 SHA-256 `653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef`，
+  项目固定签名为 `df32795309ee01996ccfb21804a37f558a8a095c901d850f991d0d52ea6b1d9f`，Windows 默认 debug 为 `625fd2…`。
+  已检查项目及签名备份、Android/Gradle 缓存和用户 `.android` 等已知位置，未找到匹配的私钥；Mac 只读 SSH 连接未成功，
+  因此没有得到 Mac 上签名存在或缺失的结论。需要原构建机对应签名才能同包覆盖，APK 中的公开证书不能替代私钥。
+- **迁移不能视为可恢复（当时阻点，现已解除）**：准备阶段额外尝试在现装应用 UID 下只读解密配对，
+  但当时导出未返回有效载荷；随后独立 helper、DPAPI 备份与模拟器恢复验证闭环，并在上方完成了用户批准的实体迁移。
+  AndroidKeyStore 密钥仍不能随文件归档导出，实体恢复依赖新 UID 内重新加密，不能直接还原旧密文。
+- **历史安装限制**：当时未卸载、未清数据、未覆盖安装，也未更换系统签名或绕过校验；这些限制已由用户明确授权的
+  固定签名迁移流程替代。当前实体安装、Verify 和无 USB Wi-Fi 证据以本文件最上方记录为准。
+- **候选产物（准备阶段记录）**：`outputs/ui-stability-device-20261029/candidate/Yandu-ui-stability-fixed-signature-candidate.apk`，
+  源码 ee14b87，dev.22/code28，使用项目固定签名；SHA-256
+  `6053c39aaa64be734052c7e3def7e51e875aabfcc4f2c12a8a817e5b0097b763`。当时不能覆盖旧签名包；该候选已按上方流程卸载重装，
+  目前仍不是公开发布包。
+
+## 2026-10-29 自动切换 Wi-Fi 后的生命周期恢复（最新状态）
+
+- **触发证据**：用户确认没有主动切网；手机系统日志显示断开后由自动选网器选中另一已保存网络。
+  本轮修复应用对该事件的响应，不修改手机系统自动连接偏好，也不能让本来不可达的两个子网互通。
+- **网络监听**：新增进程内共用 `WifiLinkObserver`，首页和正在运行的共享服务各自持有注册；最后一个 owner 离开后注销。
+  仅监听 Wi-Fi，处理 Network 可用/丢失及 LinkProperties 中 IP、前缀、接口和路由变化；不要求该 Wi-Fi 具备互联网能力。
+  相同链路属性去重，旧 Wi-Fi 的 capabilities/link-properties/lost 回调不夺回新网络；回调注册代次和全局单调递增代次隔离旧事件。
+- **调度**：首页把在途探测或 1 秒最小间隔内的刷新请求合并保留，结束后补发，不再直接丢弃；延后执行不重复 reset。
+  纯 Wi-Fi 回调不额外发起首页 USB 健康检查；回前台/凭据更新仍保留原 USB 检查。共享服务在后台自行响应 Wi-Fi 事件，
+  旧探测失效后补发新一轮；网络回调不主动开麦、扩大共享组或清除配对。
+- **会话隔离**：共享探测同时携带网络代次、service session revision 与实际音频 sessionId；start/stop/finish/destroy 会使旧会话失效。
+  target 更新仍在后台执行并在 broadcaster 内再次校验会话；连接、音量和停止通知在主线程应用，并校验事件所属的真实音频会话。
+  每个发送 worker 的请求头及连接通知固定使用创建时的 sessionId，旧 worker 不会被重新标记为新会话。
+  迟到的上一轮 stop 不能结束新会话，已销毁 Service 的回调不能重新发布状态。探测批次提交后合并当前连接快照，避免把正在供音覆盖成连接中。
+- **范围**：本轮不改变协议、版本组、签名、现装程序或系统网络设置。普通健康检查失败仍可能删除已有 sink，
+  socket 写入看门狗、按 Wi-Fi Network 绑定连接、远端音频接收确认和实际通道 UI 仍是后续项；不把本轮称为全部断线问题已解决。
+  新代码尚未真机部署，保留下方安装签名及现装 UI 来源的限制；先前短时 USB 电平结果仅属于现装版本。
+- **验证**：最终源码执行 Android `assembleDebug`、`testDebugUnitTest`、`lintDebug` 全部通过；**62/62** 测试，
+  lint **0 error / 43 warning**。新增覆盖旧网络迟到事件、重复链路通知、刷新合并与清除、会话代次以及排队的旧 stop 通知。
+  未改 Windows/macOS 源码，本轮未重复运行其硬件或构建测试；云端检查按新提交另计。
+
+## 2026-10-29 手机接入后的现装版本基线实测（最新状态）
+
+- **设备与范围**：Samsung SM-G9880 / Android 12（API 31），现装 `com.codex.phonedeck` 为 dev.22/code28；
+  Windows 仍运行 `control-center-publish` 中的 dev.17+a5e1c61。本轮没有覆盖安装、卸载、清数据、修改防火墙或触发听写。
+  以下结果属于这两个现装版本，不能作为本分支新补丁已部署的证据。
+- **USB 共享基线**：短时开启后约 4 秒观察到 Windows `streaming=true/mode=shared`，关闭后约 1 秒为 false，
+  手机 `PhoneAudioService` 退出。第二轮以只在内存采集的 NAudio 探针读取明确指定的 CABLE Output，关闭时 5 秒静音；
+  开启后约 3 秒出现非零电平，25 秒采样窗口内持续存在（稳定 RMS 约 0.008，peak 约 0.03–0.04），
+  期间切到手机桌面后仍有电平；关闭后的首秒有少量残留样本，随后 4 秒全部静音，服务和接收端会话均退出。
+  仅保存每秒电平/采样计数，不保存音频；没有改变默认音频设备。短时后台测试不等于锁屏/Doze 或长时间验收。
+- **实际传输与切网**：初始手机、PC 同为一个 /24 子网；后续手机 Wi-Fi 地址变为另一 /24 子网，PC 地址未变。
+  手机 `nc` 到 PC HTTPS 8766 的连接建立超时，而 USB `127.0.0.1:8765` 成功；供音时 Windows 只观察到
+  8765 回环连接，未观察到 8766 已建立连接。手机显示 1/3 台供音，其余两台离线；只有当前 Windows 的电平独立验证。
+  不能由不同网段或一次超时认定必然是防火墙，也没有证明另外两台电脑故障。
+  用户随后确认未主动切网；系统 Wi-Fi 日志记录手机本地时间 17:40:45 断开、17:40:46 自动选网器选择另一个已保存网络、
+  17:40:47 重新连上。日志确认自动重连经过，但最初断开的具体原因未定位；没有更改系统自动连接设置。
+- **诊断缺口**：健康接口仍持续返回约 6–13 秒的过期诊断。`audio.streaming` 仅代表接收端持有会话，
+  不是 PCM 持续到达或 VB-CABLE 有声的证据；本轮用独立电平对照补足了 USB 输出段验证。
+  Android 的共享状态回调目前丢失 endpoint 通道信息，应显示 USB/Wi-Fi、控制可达性与音频数据进度，不能仅显示绿色“正在共享”。
+  单独一轮只读 Core Audio 分段计时总计约 173 ms，未复现慢诊断，尚不能定位到枚举本身；gate、配置读取等仍待查。
+  后续最新采样中 Typeless 报告 Auto-detect/系统默认麦克风、`virtualCableSelected=false`，其物理麦克风阵列会话 active、
+  CABLE Output 会话 inactive，与初始读到的配置不同。本轮未修改其设置；实际听写输入源必须另行确认，不能由 VB-CABLE 有声推断听写已使用手机。
+- **安装阻点**：现装 APK SHA-256 为 `1567bf6eb95e7c96835ee43498537dd4015a99ab4f420e043e014a21f1cf6c03`，
+  安装证书为 `653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef`；当前固定签名 `df3279…`
+  及 Windows 默认 debug 签名 `625fd2…` 均不匹配，已知本地签名目录未找到匹配私钥。不得卸载或清数据绕过。
+  手机的指令库/快捷键 UI 与 [PR #55](https://github.com/leolemon777/PhoneDeck/pull/55) 一致，但 APK 无提交标识，
+  不能证明精确构建提交或构建机器。新候选应先保留该 UI 分支改动并集成本轮连接修复，再使用同渠道签名构建、读回核对。
+- **产物与待办**：忽略目录 `outputs/connection-audio-device-20261029/` 保存现装 APK、UI 快照、三组电平统计及临时探针；
+  已构建但未部署 Windows 候选（源码 2816e23）。先恢复同网段后独立验收无 USB 的 Wi-Fi，再做多电脑/锁屏/重连矩阵。
+  [PR #57](https://github.com/leolemon777/PhoneDeck/pull/57) 的代码提交 2816e23 云端检查已通过；后续仅补充本轮基线证据。
+
+## 2026-10-29 连接与共享麦克风稳定性审计及基础修复（最新状态）
+
+- **范围**：用户反馈发现、配对后断线、假在线无声、多电脑切换、锁屏/切网均有问题，要求整体优化评估。
+  完整分析、后续分期和验收矩阵保存于 [连接与共享麦克风稳定性改造方案](design/CONNECTION_AUDIO_RELIABILITY.md)。
+  本轮只落地已定位且可自动化验证的基础修复；版本组、协议、音频格式、配对身份和运行安装保持原样。
+- **实际运行检查**：Windows 正在运行 `control-center-publish/PhoneDeck.Server.exe`，版本 `1.6.0-dev.17+a5e1c61`，
+  已有 10 月 9 日的半开流修复。外层根目录另有旧 EXE。只读健康采样中 6 次诊断全部 stale（年龄约 6.6–12.9 秒），
+  HTTP 请求本身 3–136 ms；当时已有 shared 流，不能把过期的 capturing=false 当成实际录音结论。
+  已检测 VB-CABLE 和 CABLE Output 配置；当前网络为 Public，当前 EXE 的 Private 阻止规则属于切换网络类型后的隐患。
+- **Android 连接**：`ConnectionMonitor` 为网络 reset 与每个独立探测分配代次；超时/中断时释放 waiter，最后等待者离开才取消旧 Future。
+  同 Future 的成功结果可同时被首页/服务使用，超时的旧等待者不能覆盖新成功；慢发现也不能倒写新一轮结果。输入 computerId 去重。
+  失效批次显式标记 invalidated，首页与共享服务直接丢弃，避免把切网期间的无效空结果当作全部离线并拆掉现有音频流。
+- **Android 共享**：重连退避从首个实际写入开始计算，连续写入满 5 秒才复位；间隔超过 1 秒重新计时。
+  只取得 OutputStream 不再复位退避。通知和状态分母只统计显式共享组内的现存电脑。
+- **Windows 诊断**：`DiagnosticsMonitor.RefreshAsync` 超时不再提前释放互斥 gate；真实 reader 退出后再释放，并处理 Dispose 竞态。
+  `VoiceEngineStateProbe` 超过 250 ms 协作预算、扫描不完整或异常时返回 unknown，避免错误生成手机停止凭据。
+  同步 COM 仍不能硬取消；保留采样开始时刻，未用改时间戳掩盖慢诊断。
+- **验证**：Windows 使用工作区 `.tools/dotnet` SDK 10.0.400，Release build 0 warning/0 error，Server Tests **188/188**。
+  Android 使用 JDK 17 和现有 SDK，`assembleDebug`、`testDebugUnitTest`、`lintDebug` 通过，**55/55** 测试，lint **0 error/43 warning**。
+  回归覆盖超时释放、共享探测两个成功消费者、单等待者退出、reset、慢发现迟到、重复设备、稳定写入退避、诊断串行与 unknown。
+  Windows TRX 保存于 ignored 的 `outputs/connection-audio-stability/windows/`；Android 报告在标准 build 目录。
+- **未完成及下一步**：普通健康探测失败仍可能删除 shared sink；取得 OutputStream 仍不等于接收端确认；手机侧写入看门狗、
+  输出设备故障上报、15 秒退避/零目标停采协调、统一网络生命周期、分段自检和单一部署入口进入后续实施。
+  审计开始时无 ADB 设备，未覆盖安装 APK/EXE，未修改防火墙；之后接入手机的现装版本基线见上方记录，新补丁仍未真机部署。
+  先完成上述状态与恢复改造，再执行 20 轮开始/停止、1/2/3 电脑共享、2 小时锁屏及 8 小时运行矩阵。
+- **分支**：`agent/connection-mic-stability-audit` 基于 `agent/mac-audio-stall-timeout`（a5e1c61，现有 PR #53 尚未合入 main），
+  保留既有半开流修复；后续草稿 PR 以该分支为 base，避免把旧补丁重复列为本轮修改。
+
 ## 2026-10-19 上传当前 Android 界面与快捷指令更新（最新状态）
 
 - **范围**：整理 `PhoneDeck手机键盘项目` 中既有的 11 个 Android 文件改动，沿用 `agent/shortcut-panel-common-keys` 分支；不包含其他工作区的未提交修改。

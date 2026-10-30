@@ -35,12 +35,15 @@ internal sealed class DictationSessionManager : IDisposable
     /// <summary>volatile：/api/health 等读端不得被启动/停止的慢路径阻塞。</summary>
     private volatile string? activeDictationSessionId;
     private volatile string? activeOwnerClientId;
+    private PublishedSession? publishedSession;
     private ConfirmedSession? confirmedSession;
     private string? activeMode;
 
     private long firstStoppedObservationMs;
 
     private sealed record ConfirmedSession(string SessionId, string? OwnerClientId, long ConfirmedAtMs);
+    private sealed record PublishedSession(string SessionId, string? OwnerClientId);
+    internal readonly record struct RuntimeSnapshot(bool Active, string? SessionId);
 
     internal DictationSessionManager(PhoneAudioBridge audioBridge)
         : this(audioBridge, new WindowsVoiceEngineController())
@@ -71,6 +74,19 @@ internal sealed class DictationSessionManager : IDisposable
     internal string? ActiveSessionId => activeDictationSessionId;
 
     internal string? ActiveOwnerClientId => activeOwnerClientId;
+
+    /// <summary>Owner and session are published together; health never waits for slow engine calls.</summary>
+    internal RuntimeSnapshot GetRuntimeSnapshot(string? requesterClientId)
+    {
+        var state = Volatile.Read(ref publishedSession);
+        if (state is null)
+        {
+            return new RuntimeSnapshot(false, null);
+        }
+        var owned = string.Equals(PhoneStopReceipts.NormalizeOwner(state.OwnerClientId),
+            PhoneStopReceipts.NormalizeOwner(requesterClientId), StringComparison.Ordinal);
+        return new RuntimeSnapshot(true, owned ? state.SessionId : null);
+    }
 
     /// <summary>phoneStopV1 凭据：电脑端结束会话时写入，/api/health 按所有者返回。</summary>
     internal PhoneStopReceipts Receipts { get; }
@@ -116,6 +132,7 @@ internal sealed class DictationSessionManager : IDisposable
 
     private void ClearActiveSession()
     {
+        Volatile.Write(ref publishedSession, null);
         Interlocked.Exchange(ref firstStoppedObservationMs, 0);
         activeDictationSessionId = null;
         activeOwnerClientId = null;
@@ -222,6 +239,7 @@ internal sealed class DictationSessionManager : IDisposable
                     $"+{PhoneAudioBridge.ElapsedMs(startTimestamp)}ms");
                 activeDictationSessionId = normalizedSessionId;
                 activeOwnerClientId = clientId;
+                Volatile.Write(ref publishedSession, new PublishedSession(normalizedSessionId, clientId));
                 bool? started;
                 try
                 {

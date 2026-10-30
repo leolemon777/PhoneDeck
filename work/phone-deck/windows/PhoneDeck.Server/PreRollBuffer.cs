@@ -4,7 +4,8 @@
 internal sealed class PreRollBuffer
 {
     private readonly object sync = new();
-    private readonly byte[] store;
+    private readonly int capacityBytes;
+    private byte[]? store;
     private int writeIndex;
     private int storedBytes;
 
@@ -14,10 +15,10 @@ internal sealed class PreRollBuffer
         {
             throw new ArgumentOutOfRangeException(nameof(capacityBytes));
         }
-        store = new byte[capacityBytes];
+        this.capacityBytes = capacityBytes;
     }
 
-    internal int CapacityBytes => store.Length;
+    internal int CapacityBytes => capacityBytes;
 
     internal int StoredBytes
     {
@@ -38,6 +39,7 @@ internal sealed class PreRollBuffer
         }
         lock (sync)
         {
+            var store = this.store ??= new byte[capacityBytes];
             if (count >= store.Length)
             {
                 // 只保留最新的整段。
@@ -63,7 +65,13 @@ internal sealed class PreRollBuffer
     {
         lock (sync)
         {
+            if (storedBytes == 0)
+            {
+                writeIndex = 0;
+                return Array.Empty<byte>();
+            }
             var result = new byte[storedBytes];
+            var store = this.store!;
             var start = (writeIndex - storedBytes + store.Length) % store.Length;
             var first = Math.Min(storedBytes, store.Length - start);
             Array.Copy(store, start, result, 0, first);

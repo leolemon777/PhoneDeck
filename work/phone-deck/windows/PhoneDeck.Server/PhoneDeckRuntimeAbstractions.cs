@@ -14,6 +14,20 @@ internal interface IPhoneAudioSessionController
     bool OutputWarm => false;
 }
 
+/// <summary>
+/// 一次一致读取的音频运行时状态。会话标识、PCM 计数和错误只对当前
+/// owner 返回；Streaming/Mode 保持“电脑当前被占用”的全局语义。
+/// </summary>
+internal readonly record struct PhoneAudioRuntimeSnapshot(
+    bool Streaming,
+    string? SessionId,
+    string? Mode,
+    long? ReceivedPcmBytes,
+    bool? HasReceivedPcm,
+    long? LastPcmAgeMs,
+    string? LastError,
+    long CheckedAtMs);
+
 /// <summary>语音引擎触发键的底层发送通道。抽象出来是为了让
 /// WindowsVoiceEngineController 的 toggle/hold 语义可以用假通道做单元测试。</summary>
 internal interface IEngineKeyDispatcher

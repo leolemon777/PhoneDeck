@@ -76,6 +76,60 @@ public final class SharedAudioPoliciesTest {
         assertEquals(500, backoff.nextDelayMs());
     }
 
+    @Test
+    public void rapidConnectionFailuresKeepIncreasingBackoffUntilStableWrites() {
+        SharedAudioPolicies.ReconnectBackoff backoff =
+                new SharedAudioPolicies.ReconnectBackoff();
+
+        long now = 10_000;
+        assertEquals(500, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 100);
+        backoff.connectionClosed();
+
+        now += 500;
+        assertEquals(1_000, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 200);
+        backoff.connectionClosed();
+
+        now += 1_000;
+        assertEquals(2_000, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 300);
+        backoff.connectionClosed();
+
+        // 只有连续实际写入满 5 秒后才恢复初始退避。
+        now += 2_000;
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now);
+        for (int index = 1; index < 125; index++) {
+            backoff.frameWritten(now + index * 40L);
+        }
+        assertEquals(4_000, backoff.nextDelayMs());
+        backoff.frameWritten(now + 5_000);
+        backoff.connectionClosed();
+        assertEquals(500, backoff.nextDelayMs());
+    }
+
+    @Test
+    public void connectionSetupWithoutSustainedWritesCannotResetBackoff() {
+        SharedAudioPolicies.ReconnectBackoff backoff =
+                new SharedAudioPolicies.ReconnectBackoff();
+
+        assertEquals(500, backoff.nextDelayMs());
+        backoff.connectionOpened(1_000);
+        // 模拟 getOutputStream 成功但迟迟没有任何 PCM 写入。
+        assertEquals(1_000, backoff.nextDelayMs());
+        backoff.frameWritten(6_001); // 首次写入才开始稳定计时。
+        assertEquals(2_000, backoff.nextDelayMs());
+
+        backoff.connectionOpened(7_000);
+        backoff.frameWritten(7_000);
+        backoff.frameWritten(8_001); // 超过允许间隔，重新开始稳定计时。
+        assertEquals(4_000, backoff.nextDelayMs());
+    }
+
     private static byte[] voiced(byte marker) {
         byte[] frame = new byte[1_920];
         for (int index = 0; index + 1 < frame.length; index += 2) {
