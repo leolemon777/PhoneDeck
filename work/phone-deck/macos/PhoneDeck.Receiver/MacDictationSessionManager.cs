@@ -273,6 +273,13 @@ internal sealed class MacDictationSessionManager(
     /// 结束后等待确认停止。</summary>
     private void ResetEngine()
     {
+        // 与 Windows TryStopEngine 一致：确认已停止就只释放按住的键。toggle 引擎漏掉首键时
+        // 盲按会把它重新打开，此后每次开始都被“已在采集”拒绝。
+        if (engine.IsCapturing() is false)
+        {
+            engine.ReleaseHeldKeys();
+            return;
+        }
         engine.End(activeMode ?? engine.Modes.First(), null);
         engine.WaitForCapturing(false, 2_000);
     }

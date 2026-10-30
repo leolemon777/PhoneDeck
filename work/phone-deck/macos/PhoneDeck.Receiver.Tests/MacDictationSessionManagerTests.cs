@@ -39,6 +39,25 @@ public sealed class MacDictationSessionManagerTests
     }
 
     [TestMethod]
+    public void MissedStartKeyDoesNotLeaveTypelessRecordingAfterReset()
+    {
+        var audio = new FakeAudio();
+        var typeless = new FakeTypeless { Capturing = false, IgnoreNextToggle = true };
+        using var manager = new MacDictationSessionManager(audio, typeless);
+
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => manager.Start(
+            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation"));
+
+        StringAssert.Contains(exception.Message, "未确认开始采集");
+        Assert.IsFalse(manager.IsActive);
+        // 盲按复位会把漏掉首键的 toggle 引擎重新打开，下次开始被“已在采集”拒绝。
+        Assert.AreEqual(false, typeless.Capturing);
+        Assert.AreEqual(1, typeless.ToggleCount);
+        manager.Start(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "dictation");
+        Assert.IsTrue(manager.IsActive);
+    }
+
+    [TestMethod]
     public void AudioLossResetsOnlyAnActiveManagedSession()
     {
         var audio = new FakeAudio();
@@ -224,6 +243,8 @@ public sealed class MacDictationSessionManagerTests
         internal bool? Capturing { get; set; }
         internal string? LastMode { get; private set; }
         internal int ToggleCount { get; private set; }
+        /// <summary>模拟引擎漏掉一次快捷键（按键送达但状态未变）。</summary>
+        internal bool IgnoreNextToggle { get; set; }
         public string EngineDisplayName => "Typeless";
         public IReadOnlyCollection<string> Modes => new[] { "dictation", "translation", "ask" };
         public bool? CanVerifyVirtualCable => true;
@@ -248,6 +269,11 @@ public sealed class MacDictationSessionManagerTests
         {
             LastMode = mode;
             ToggleCount++;
+            if (IgnoreNextToggle)
+            {
+                IgnoreNextToggle = false;
+                return;
+            }
             Capturing = !(Capturing ?? false);
         }
         public void Dispose()
