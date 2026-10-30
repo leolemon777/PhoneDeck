@@ -24,6 +24,12 @@
   采样中 `__proc_info` 消失，物理内存 24.9 MB（新进程刚启动，不作内存结论）。测试时暂停 launchd 服务从 dist 临时运行，
   测完已 kickstart 恢复原 App（辅助功能仍为 trusted、共享流已重连）；未替换 `~/Applications` 中的 App。
 - 观察：接收端收到 SIGTERM 后约 10 秒才退出（新旧一致），疑似在等长连接收尾，未改动。
+- **语音失效修复**：Mac 启动听写未在 2 秒内确认采集时，`ResetEngine` 原先无条件再按一次切换键；
+  若引擎漏掉了首键，这一键反而让 Typeless 开始无人控制的录音，此后每次开始都因“已在采集”被拒。
+  现与 Windows `TryStopEngine` 一致：先读真实状态，已停止只释放按住的键。新增回归测试，Mac 测试 51/51。
+- **待办（未改）**：手机麦克风读取出错（来电、audioserver 重启、被抢占）后共享麦克风直接停止且不重试；
+  Android 10+ 麦克风被其他应用占用时系统静默送 0，手机与电脑均无检测；Mac LaunchAgent 未设
+  StandardOutPath/StandardErrorPath，接收端日志全部丢弃；Mac 输出无欠载/丢弃/延迟计数，音质问题无法量化。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
 
