@@ -43,7 +43,7 @@ internal sealed class DictationSessionManager : IDisposable
 
     private sealed record ConfirmedSession(string SessionId, string? OwnerClientId, long ConfirmedAtMs);
     private sealed record PublishedSession(string SessionId, string? OwnerClientId);
-    internal sealed record RuntimeSnapshot(bool Active, string? SessionId);
+    internal readonly record struct RuntimeSnapshot(bool Active, string? SessionId);
 
     internal DictationSessionManager(PhoneAudioBridge audioBridge)
         : this(audioBridge, new WindowsVoiceEngineController())

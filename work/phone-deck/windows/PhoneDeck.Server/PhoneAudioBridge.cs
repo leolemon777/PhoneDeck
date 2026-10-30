@@ -388,7 +388,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             .ToList();
         try
         {
-            return SelectDevice(devices)?.FriendlyName;
+            _ = SelectDevice(devices, out var name);
+            return name;
         }
         finally
         {
@@ -973,12 +974,34 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     }
 
     internal static MMDevice? SelectDevice(IEnumerable<MMDevice> devices) =>
-        devices
-            .Where(device => device.FriendlyName.Contains(
-                "VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(device => device.FriendlyName.Contains(
-                "16", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
-            .FirstOrDefault();
+        SelectDevice(devices, out _);
+
+    private static MMDevice? SelectDevice(IEnumerable<MMDevice> devices, out string? name)
+    {
+        MMDevice? fallback = null;
+        name = null;
+        foreach (var device in devices)
+        {
+            var candidateName = AudioDeviceNames.Read(device);
+            if (!candidateName.Contains("VB-Audio Virtual Cable", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // Preserve the existing stable preference: first non-16 cable,
+            // otherwise the first 16-channel cable. No sort or second COM read.
+            if (!candidateName.Contains("16", StringComparison.OrdinalIgnoreCase))
+            {
+                name = candidateName;
+                return device;
+            }
+            if (fallback is null)
+            {
+                fallback = device;
+                name = candidateName;
+            }
+        }
+        return fallback;
+    }
 
     public void Dispose()
     {

@@ -194,6 +194,11 @@ internal static class VoiceEngines
     /// <summary>解析某模式的快捷键绑定串；优先级：手动覆盖 > 引擎配置文件 > 档案默认值。
     /// 返回 null 表示该模式未配置（受管听写会拒绝启动）。</summary>
     internal static string? ResolveBinding(string modeId)
+        => ResolveBinding(modeId, typelessSettings: null);
+
+    private static string? ResolveBinding(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings)
     {
         var mode = Active.FindMode(modeId)
             ?? throw new ArgumentException($"未知的语音引擎模式：{modeId}");
@@ -204,7 +209,8 @@ internal static class VoiceEngines
         }
         if (string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal))
         {
-            var fromSettings = TypelessSettingsReader.Read().BindingFor(modeId);
+            var fromSettings = (typelessSettings ?? TypelessSettingsReader.Read())
+                .BindingFor(modeId);
             if (!string.IsNullOrWhiteSpace(fromSettings))
             {
                 return fromSettings;
@@ -217,6 +223,11 @@ internal static class VoiceEngines
 
     internal static bool IsModeConfigured(string modeId) =>
         ResolveBinding(modeId) is not null;
+
+    private static bool IsModeConfigured(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
+        ResolveBinding(modeId, typelessSettings) is not null;
 
     /// <summary>把某模式的绑定串解析为修饰键在前的虚拟键码序列。</summary>
     internal static ushort[] ResolveKeysOrThrow(string modeId)
@@ -237,36 +248,57 @@ internal static class VoiceEngines
     internal static string[]? ModeKeyNames(string modeId) =>
         KeyboardInput.BindingKeyNames(ResolveBinding(modeId));
 
+    private static string[]? ModeKeyNames(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
+        KeyboardInput.BindingKeyNames(ResolveBinding(modeId, typelessSettings));
+
     /// <summary>引擎所选麦克风描述；无可读配置的引擎返回 null。</summary>
     internal static string? MicrophoneDescription =>
+        GetMicrophoneDescription(typelessSettings: null);
+
+    private static string? GetMicrophoneDescription(
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
         string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal)
-            ? TypelessSettingsReader.Read().Microphone
+            ? (typelessSettings ?? TypelessSettingsReader.Read()).Microphone
             : null;
 
     /// <summary>引擎输入设备是否已选虚拟声卡；null 表示无法校验（不阻断，仅提示）。</summary>
     internal static bool? UsesVirtualCable =>
+        GetUsesVirtualCable(typelessSettings: null);
+
+    private static bool? GetUsesVirtualCable(
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
         string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal)
-            ? TypelessSettingsReader.Read().UsesVirtualCable
+            ? (typelessSettings ?? TypelessSettingsReader.Read()).UsesVirtualCable
             : null;
 
     internal static VoiceEngineSnapshot BuildSnapshot(bool? capturing)
     {
         var engine = Active;
+        // A diagnostic snapshot must be internally consistent and should not
+        // parse Typeless' settings file once per mode/property.  The public
+        // no-argument helpers above intentionally keep their immediate-read
+        // behavior for button actions and configuration UI.
+        var typelessSettings = string.Equals(
+            engine.SettingsReader, "typeless", StringComparison.Ordinal)
+            ? TypelessSettingsReader.Read()
+            : null;
         var modes = engine.Modes
             .Select(mode => new EngineModeSnapshot(
                 mode.Id,
                 mode.Label ?? mode.Id,
                 TriggerFor(mode.Id),
-                IsModeConfigured(mode.Id),
-                ModeKeyNames(mode.Id)))
+                IsModeConfigured(mode.Id, typelessSettings),
+                ModeKeyNames(mode.Id, typelessSettings)))
             .ToArray();
         return new VoiceEngineSnapshot(
             engine.Id,
             engine.DisplayName,
             engine.Experimental,
             capturing,
-            MicrophoneDescription,
-            UsesVirtualCable,
+            GetMicrophoneDescription(typelessSettings),
+            GetUsesVirtualCable(typelessSettings),
             modes);
     }
 }

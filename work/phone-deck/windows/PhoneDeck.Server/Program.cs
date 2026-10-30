@@ -74,7 +74,9 @@ using var diagnostics = new DiagnosticsMonitor(() =>
     };
     }
 },
-    sessionActive: () => dictationSessions.IsActive || audioBridge.IsStreaming,
+    // Only managed dictation needs sub-second engine-stop observations. Shared
+    // audio is independent of the engine and keeps normal diagnostic polling.
+    sessionActive: () => dictationSessions.IsActive,
     refreshed: snapshot => dictationSessions.ObserveEngineCapturing(
         snapshot.LastError is null
             && Environment.TickCount64 - snapshot.CheckedAtMs <= DiagnosticsMonitor.StaleAfterMs
@@ -197,16 +199,32 @@ DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configuratio
 fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
     || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
 
-object BuildHealth(HttpContext context)
+void NoteHealthActivity(HttpContext context)
 {
-    var requesterClientId = context.Items["ClientId"] as string;
     // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
     if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
     {
         audioBridge.NotePhoneActivity();
     }
+}
+
+HealthEvents.State ReadHealthEventState(string? requesterClientId)
+{
+    var snapshot = diagnostics.Current;
+    var audio = audioBridge.GetRuntimeSnapshot(requesterClientId);
+    var dictation = dictationSessions.GetRuntimeSnapshot(requesterClientId);
+    return new HealthEvents.State(
+        snapshot.AudioAvailable, audio.Streaming, audio.SessionId, audio.Mode,
+        dictationSessions.Receipts.For(requesterClientId),
+        dictation.Active, dictation.SessionId, snapshot.Engine?.Capturing);
+}
+
+object BuildHealth(HttpContext context)
+{
+    var requesterClientId = context.Items["ClientId"] as string;
+    NoteHealthActivity(context);
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
-    // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
+    // 不等待声卡或引擎慢锁；音频状态仅使用短时内存锁。
     var snapshot = diagnostics.Current;
     var runtimeAudio = audioBridge.GetRuntimeSnapshot(requesterClientId);
     var runtimeDictation = dictationSessions.GetRuntimeSnapshot(requesterClientId);
@@ -315,11 +333,18 @@ app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(contex
 
 // healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
 // 显式 Task<IResult>：否则表达式体 lambda 会绑定到 RequestDelegate 重载，结果被丢弃、应答为空。
-app.MapGet("/api/events", async Task<IResult> (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
-    () => BuildHealth(context),
-    context.Request.Query["since"].FirstOrDefault(),
-    HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-    context.RequestAborted)));
+app.MapGet("/api/events", async Task<IResult> (HttpContext context) =>
+{
+    // Foreground activity is observed once on entry, not once per 50ms poll.
+    NoteHealthActivity(context);
+    var requesterClientId = context.Items["ClientId"] as string;
+    return Results.Json(await HealthEvents.WaitAsync(
+        () => ReadHealthEventState(requesterClientId),
+        () => BuildHealth(context),
+        context.Request.Query["since"].FirstOrDefault(),
+        HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
+        context.RequestAborted));
+});
 
 // 共享麦克风联动开关：控制台界面或 Ctrl+Alt+M 热键从 loopback 调用；
 // 局域网调用仍需令牌。手机轮询 /api/health 里的 shared.requested 自动跟随，

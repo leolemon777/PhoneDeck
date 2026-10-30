@@ -70,6 +70,10 @@ internal static class VoiceEngineStateProbe
         var devices = enumerator
             .EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
             .ToList();
+        // The same engine PID can own sessions on multiple capture endpoints.
+        // Resolve its process name once per scan instead of allocating a new
+        // Process wrapper for every session.
+        var processNames = new Dictionary<uint, string?>();
         try
         {
             foreach (var device in devices)
@@ -95,37 +99,50 @@ internal static class VoiceEngineStateProbe
                     {
                         continue;
                     }
-                    try
+                    string? processName;
+                    if (!processNames.TryGetValue(processId, out processName))
                     {
-                        using var process = Process.GetProcessById((int)processId);
-                        if (clock() - startTick > MaxProbeDurationMs)
+                        processName = null;
+                        if (processId <= int.MaxValue)
                         {
-                            return null;
+                            try
+                            {
+                                using var process = Process.GetProcessById((int)processId);
+                                if (clock() - startTick > MaxProbeDurationMs)
+                                {
+                                    return null;
+                                }
+                                try
+                                {
+                                    processName = process.ProcessName;
+                                }
+                                catch (InvalidOperationException)
+                                {
+                                    // The process can exit between PID lookup
+                                    // and reading its name; cache this miss for
+                                    // the remainder of this scan.
+                                }
+                            }
+                            catch (ArgumentException)
+                            {
+                                // Audio session enumeration can outlive the
+                                // process; cache this miss for this scan.
+                            }
                         }
-                        string processName;
-                        try
-                        {
-                            processName = process.ProcessName;
-                        }
-                        catch (InvalidOperationException)
-                        {
-                            // The process can exit between PID lookup and
-                            // reading its name; skip this stale session.
-                            continue;
-                        }
-                        var isActive = session.State == AudioSessionState.AudioSessionStateActive;
-                        if (clock() - startTick > MaxProbeDurationMs)
-                        {
-                            return null;
-                        }
-                        if (MatchesProcess(profile, processName) && isActive)
-                        {
-                            return true;
-                        }
+                        processNames[processId] = processName;
                     }
-                    catch (ArgumentException)
+                    if (processName is null)
                     {
-                        // 音频会话枚举后进程可能已退出。
+                        continue;
+                    }
+                    var isActive = session.State == AudioSessionState.AudioSessionStateActive;
+                    if (clock() - startTick > MaxProbeDurationMs)
+                    {
+                        return null;
+                    }
+                    if (MatchesProcess(profile, processName) && isActive)
+                    {
+                        return true;
                     }
                 }
             }

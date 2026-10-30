@@ -1,5 +1,36 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-29 Windows CPU / 内存优化（最新源码候选）
+
+- 用户希望进一步降低资源占用。按此前要求未运行单元/功能/音频测试，没有替换正在运行的接收端或改动手机配置。
+  仅对旧进程做了 CPU/内存只读采样和一次托管栈读取；没有录音或完整进程内存转储。
+- **热点证据**：旧 `1.6.0-dev.17+a5e1c61` 的 shared 会话中，接收端整机 CPU 为 4.54–4.63%（20 逻辑处理器），
+  私有提交约 47.7–48.2 MiB、工作集约 108.9–109.4 MiB；托盘 CPU 约 0%、私有提交 28.3 MiB、工作集 86 MiB。
+  热线程 `38896/0x97F0` 的栈为 `PropertyStore.get_Item → MMDevice.FriendlyName → SelectDevice → FindVirtualCable → DiagnosticsMonitor.Run`；
+  WASAPI 播放线程位于正常 WaitMultiple。样本在 ignored `outputs/windows-resource-optimization-20261029/old-receiver-managed-stacks.txt`，
+  前一轮资源 JSON 在 `outputs/windows-receiver-optimization-20261029/current-old-receiver-usage-*.json`。
+- **诊断 CPU / 分配**：共享不再触发 250 ms 的引擎扫描，回到 3 秒兜底，managed 及状态事件的快速反馈保持；
+  每个 Typeless 快照最多一次配置文件读取；同一次捕获探针每个 PID 最多一次进程名查询。
+- **声卡属性热点**：新增 `AudioDeviceNames`，属性 Count 一次读取，最多缓存 64 个设备的索引提示；每次仍验证属性 key、
+  读取实时值并在 finally 释放 PROPVARIANT。设备选择单次读取名称并可在首个优先候选处结束，避免 Contains、排序和返回值的重复 COM 遍历。
+  只有索引被缓存，设备可用性与名称不会被长期缓存；异常仍进入诊断 stale/unknown 路径。
+  原生资源释放遵循 [PropVariantClear](https://learn.microsoft.com/en-us/windows/win32/api/propidl/nf-propidl-propvariantclear)；
+  API 与结构布局已与本地 NAudio 2.2.1 实际 IL 对照。
+- **长轮询**：Windows `/api/events` 每 50 ms 只比较 8 个 scalar，完整 health JSON 仅在实际应答时创建。
+  默认 8 秒无变化请求不再重复构造约 160 份完整快照；owner 过滤、hash 算法、取消/超时返回保持，Mac 旧重载保持原行为。
+- **音频缓冲**：shared 队列容量 259,200 → 23,040 字节，原本就执行的 240 ms 丢旧规则不变；
+  未写入 pre-roll 时不分配 144,000 字节，未丢弃 backlog 时不分配 23,040 字节 scratch，通常少预分配约 394 KiB/共享会话。
+  该数字不代表整个程序内存下降 90%；输入格式、managed 容量与音质保持不变。
+- **长期内存**：过期或断开的 Core Audio 监听对象按需异步回收，活动+待清理+清理中的对象总限额 256；
+  不在 COM 回调里注销，不新增常驻清理线程。播放源指针使用原子切换，旧 detach 不能清掉新 source。
+- Windows 统一 `build.ps1 -Platform Windows -Configuration Release -SkipTests` 已完成 Server/ControlCenter 构建与自包含发布，
+  均为 0 warning / 0 error；run 为 `outputs/windows-resource-optimization-20261029/builds/20261030T020421Z-f4ed5365/`。
+  Server SHA-256 `594970baaf13f756f07f3fe1f8cf4c1bfa421babc51cb84e49c66a56b808491a`；
+  ControlCenter SHA-256 `1a03517e28982c15fd97240936253cc1d2bf8f05b8eda9a7c605812efb0c4548`。
+  共享 HealthEvents 的 Mac Release 跨平台编译也通过（0 error，1 个既有 LanIdentity.cs:108 SYSLIB0057 证书构造弃用警告）；
+  首次 --no-restore 因本地缺少 assets 失败，锁定还原后成功，依赖锁文件未修改。未运行测试，manifest 保持 `unverified`。
+  当前运行程序仍是旧版，未声称新候选 CPU 百分比、内存峰值或长期行为已实测。
+
 ## 2026-10-29 Windows 接收、诊断与 USB 恢复优化（最新源码状态）
 
 - 用户继续关注电脑端；本轮按“只优化，不需要测试”执行源码修改、静态复核与候选编译，不运行单元测试、设备测试或音频实测。

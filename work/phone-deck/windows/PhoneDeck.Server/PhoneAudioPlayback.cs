@@ -104,38 +104,31 @@ internal sealed class WasapiPhoneAudioPlayback : IPhoneAudioPlayback
 /// </summary>
 internal sealed class SwitchingWaveProvider : IWaveProvider
 {
-    private readonly object sync = new();
     private IWaveProvider? source;
 
     public WaveFormat WaveFormat { get; } = new(48_000, 16, 1);
 
     internal void Attach(IWaveProvider provider)
     {
-        lock (sync)
-        {
-            source = provider;
-        }
+        Volatile.Write(ref source, provider);
     }
 
     internal void Detach(IWaveProvider provider)
     {
-        lock (sync)
+        // Do not clear a source attached by a newer session if an old
+        // session's detach races this operation.
+        if (ReferenceEquals(Volatile.Read(ref source), provider))
         {
-            if (ReferenceEquals(source, provider))
-            {
-                source = null;
-            }
+            Interlocked.CompareExchange(ref source, null, provider);
         }
     }
 
     public int Read(byte[] buffer, int offset, int count)
     {
-        lock (sync)
+        var current = Volatile.Read(ref source);
+        if (current is not null)
         {
-            if (source is not null)
-            {
-                return source.Read(buffer, offset, count);
-            }
+            return current.Read(buffer, offset, count);
         }
         Array.Clear(buffer, offset, count);
         return count;

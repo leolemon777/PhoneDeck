@@ -17,6 +17,21 @@ internal static class HealthEvents
     internal const int PollIntervalMs = 50;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// The small set of scalar values that controls the health event version.
+    /// Keep this separate from the full response: waiting callers can compare
+    /// it without constructing or serializing the complete health object.
+    /// </summary>
+    internal readonly record struct State(
+        bool? AudioAvailable,
+        bool? AudioStreaming,
+        string? AudioSessionId,
+        string? AudioMode,
+        string? StopRequestedSessionId,
+        bool? DictationActive,
+        string? DictationSessionId,
+        bool? EngineCapturing);
+
     /// <summary>健康对象中决定 stateVersion 的字段（其余诊断字段变化不唤醒长轮询）。</summary>
     internal static string StateVersion(JsonNode health)
     {
@@ -31,6 +46,33 @@ internal static class HealthEvents
             engine?["capturing"]?.ToJsonString());
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)))[..16].ToLowerInvariant();
     }
+
+    /// <summary>
+    /// Computes the same opaque version as <see cref="StateVersion(JsonNode)"/>
+    /// without changing its wire format.  This intentionally builds only the
+    /// eight-field shape used by the existing hash; the full health response is
+    /// still produced only when the caller is ready to return it.
+    /// </summary>
+    internal static string StateVersion(State state) => StateVersion(new JsonObject
+    {
+        ["audio"] = new JsonObject
+        {
+            ["available"] = state.AudioAvailable,
+            ["streaming"] = state.AudioStreaming,
+            ["sessionId"] = state.AudioSessionId,
+            ["mode"] = state.AudioMode,
+            ["stopRequestedSessionId"] = state.StopRequestedSessionId,
+        },
+        ["dictation"] = new JsonObject
+        {
+            ["active"] = state.DictationActive,
+            ["sessionId"] = state.DictationSessionId,
+        },
+        ["voiceEngine"] = new JsonObject
+        {
+            ["capturing"] = state.EngineCapturing,
+        },
+    });
 
     internal static JsonNode Snapshot(object health)
     {
@@ -77,5 +119,62 @@ internal static class HealthEvents
             }
         }
         return snapshot;
+    }
+
+    /// <summary>
+    /// Typed low-allocation long-poll path.  The state callback is sampled at
+    /// the same cadence as the legacy path, but only value-compared while the
+    /// request is waiting.  A small hash object is built initially and when a
+    /// scalar changes; the complete health object is built only for the actual
+    /// response (initial, changed, timeout, or cancellation).
+    /// </summary>
+    internal static async Task<JsonNode> WaitAsync(
+        Func<State> state,
+        Func<object> health,
+        string? since,
+        int timeoutMs,
+        CancellationToken cancellation)
+    {
+        if (string.IsNullOrEmpty(since) || timeoutMs <= 0)
+        {
+            return Snapshot(health());
+        }
+
+        var previous = state();
+        var version = StateVersion(previous);
+        if (!string.Equals(version, since, StringComparison.Ordinal))
+        {
+            return Snapshot(health());
+        }
+
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline && !cancellation.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(PollIntervalMs, cancellation);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            var current = state();
+            if (current.Equals(previous))
+            {
+                continue;
+            }
+
+            previous = current;
+            version = StateVersion(current);
+            if (!string.Equals(version, since, StringComparison.Ordinal))
+            {
+                break;
+            }
+        }
+
+        // Preserve the legacy response semantics: timeout/cancellation still
+        // returns a fresh full health snapshot, including dynamic age fields.
+        return Snapshot(health());
     }
 }
