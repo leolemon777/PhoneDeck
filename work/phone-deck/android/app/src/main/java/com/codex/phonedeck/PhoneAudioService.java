@@ -134,6 +134,8 @@ public final class PhoneAudioService extends Service {
     private volatile long emptyTargetsSinceElapsed;
     private volatile int lastLevel;
     private volatile String statusDetail = "正在准备";
+    /** Last text posted to the ongoing notification; repeats are skipped (main thread only). */
+    private String postedNotificationText;
     private final ConcurrentHashMap<String, String> receiverStates =
             new ConcurrentHashMap<>();
     /** Last target map accepted by the current broadcaster session. */
@@ -268,6 +270,7 @@ public final class PhoneAudioService extends Service {
         registerWifiLinkObserver();
         try {
             acquireLocks();
+            postedNotificationText = notificationText();
             Notification notification = buildNotification();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification,
@@ -987,7 +990,7 @@ public final class PhoneAudioService extends Service {
         Intent stopIntent = new Intent(this, PhoneAudioService.class).setAction(ACTION_STOP);
         PendingIntent stop = PendingIntent.getService(this, 1, stopIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String text = connectedCount + "/" + knownTotal + " 台电脑正在接收";
+        String text = notificationText();
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle(getString(R.string.brand_name) + " 共享麦克风已开启")
@@ -1000,10 +1003,21 @@ public final class PhoneAudioService extends Service {
                 .build();
     }
 
+    private String notificationText() {
+        return connectedCount + "/" + knownTotal + " 台电脑正在接收";
+    }
+
     private void updateNotification() {
         if (!desiredRunning) {
             return;
         }
+        // Probes and connection callbacks fire every few seconds; re-posting an
+        // unchanged notification wakes SystemUI, the launcher and policy services.
+        String text = notificationText();
+        if (text.equals(postedNotificationText)) {
+            return;
+        }
+        postedNotificationText = text;
         getSystemService(NotificationManager.class).notify(
                 NOTIFICATION_ID, buildNotification());
     }

@@ -152,6 +152,8 @@ public final class MainActivity extends Activity {
     private boolean sharedStartPending;
     private boolean sharedStatusReceiverRegistered;
     private String lastSharedDetail;
+    /** running/connected/total last rendered into the voice controls; level-only ticks skip them. */
+    private String lastSharedControlsKey;
     private Map<String, String> lastSharedReceiverStates = java.util.Collections.emptyMap();
     private String currentSessionId;
     private boolean currentSessionManaged;
@@ -4203,6 +4205,7 @@ public final class MainActivity extends Activity {
         lastFeedbackMessage = null;
         actionFeedback.setVisibility(View.GONE);
         lastSharedDetail = null;
+        lastSharedControlsKey = null;
         microphoneLevel.setText(WORK_SHARED.equals(mode)
                 ? "手机麦克风 · 共享未开启" : "手机麦克风 · 未启动");
         microphoneLevel.setTextColor(theme.muted);
@@ -4561,6 +4564,12 @@ public final class MainActivity extends Activity {
         if (!WORK_SHARED.equals(voiceWorkMode) || state == null) {
             return;
         }
+        // Level ticks arrive every 100 ms. Rebuilding cards, chips and the recent
+        // list on each tick kept the UI redrawing continuously; only the meter and
+        // its caption follow the level, everything else waits for a real change.
+        String controlsKey = state.running + "|" + state.connected + "|" + state.total;
+        boolean controlsChanged = sharedStartPending || !controlsKey.equals(lastSharedControlsKey);
+        lastSharedControlsKey = controlsKey;
         sharedStartPending = false;
         boolean receiverStatesChanged = !lastSharedReceiverStates.equals(state.receiverStates);
         if (receiverStatesChanged) {
@@ -4572,23 +4581,26 @@ public final class MainActivity extends Activity {
             voiceMeter.setLevel(state.running ? state.level : 0);
         }
         if (microphoneLevel != null) {
-            if (state.running) {
-                microphoneLevel.setText("手机麦克风  ·  " + state.level + "%  ·  "
-                        + state.connected + "/" + state.total + " 正在供音");
-                microphoneLevel.setTextColor(state.connected > 0
-                        ? theme.success : theme.warning);
-            } else {
-                microphoneLevel.setText("手机麦克风  ○ 共享已关闭");
-                microphoneLevel.setTextColor(theme.muted);
+            String levelText = state.running
+                    ? "手机麦克风  ·  " + state.level + "%  ·  "
+                            + state.connected + "/" + state.total + " 正在供音"
+                    : "手机麦克风  ○ 共享已关闭";
+            if (!levelText.contentEquals(microphoneLevel.getText())) {
+                microphoneLevel.setText(levelText);
+                microphoneLevel.setTextColor(!state.running ? theme.muted
+                        : state.connected > 0 ? theme.success : theme.warning);
             }
         }
         String detail = state.detail == null ? "" : state.detail;
         if (!detail.equals(lastSharedDetail)) {
             lastSharedDetail = detail;
+            controlsChanged = true;
             showActionFeedback((state.running ? "●  " : "■  ") + detail,
                     state.running && state.connected == 0 ? theme.warning : theme.muted);
         }
-        updateVoiceControls();
+        if (controlsChanged || receiverStatesChanged) {
+            updateVoiceControls();
+        }
         if (receiverStatesChanged) {
             refreshTargetSwitcher();
         }

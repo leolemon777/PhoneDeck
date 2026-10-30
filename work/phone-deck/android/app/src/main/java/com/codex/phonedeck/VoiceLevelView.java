@@ -27,16 +27,28 @@ final class VoiceLevelView extends View {
     }
 
     void setLevel(int percent) {
-        level = Math.max(0, Math.min(100, percent));
-        invalidate();
+        int next = Math.max(0, Math.min(100, percent));
+        // Level ticks every 100 ms; only redraw when the number of lit bars changes.
+        boolean visible = state == ACTIVE && litBars(next) != litBars(level);
+        level = next;
+        if (visible) {
+            invalidate();
+        }
     }
 
     void setVoiceState(int state) {
+        if (this.state == state && (state == ACTIVE || level == 0)) {
+            return;
+        }
         this.state = state;
         if (state != ACTIVE) {
             level = 0;
         }
         invalidate();
+    }
+
+    private static int litBars(int level) {
+        return Math.max(1, Math.round(level / 100f * BAR_COUNT));
     }
 
     @Override
@@ -47,7 +59,7 @@ final class VoiceLevelView extends View {
         float width = Math.max(dp(3), available / BAR_COUNT);
         float center = getHeight() / 2f;
         int activeBars = state == ACTIVE
-                ? Math.max(1, Math.round(level / 100f * BAR_COUNT))
+                ? litBars(level)
                 : state == CONNECTING ? 4 : 0;
         int activeColor = state == ACTIVE
                 ? theme.live
