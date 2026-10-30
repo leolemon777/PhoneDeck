@@ -137,11 +137,12 @@ public sealed class DiagnosticsMonitorTests
             StringAssert.Contains(timedOut.LastError, "超时");
 
             // The timeout returns, but the blocking reader still owns the gate.
+            // The first timeout was published, so the skipped refresh reports it.
             var second = await monitor.RefreshAsync(50);
             Assert.AreEqual(1, Volatile.Read(ref calls));
             Assert.AreEqual(1, Volatile.Read(ref maximumActive));
             Assert.AreEqual(1, Volatile.Read(ref active));
-            Assert.AreEqual("诊断尚未运行", second.LastError);
+            Assert.AreEqual("诊断刷新超时", second.LastError);
 
             release.TrySetResult(null);
             var deadline = Environment.TickCount64 + 5_000;
