@@ -26,6 +26,17 @@ final class SharedAudioPolicies {
     /// 把手机停止共享拖成 8 秒或更久。其余目标仍独立完成各自的收尾。
     static final long SHARED_FINISH_TIMEOUT_MS = 2_000;
 
+    /// 麦克风读取出错（来电、audioserver 重启、被抢占）时只重建采集，不拆连接。
+    /// 连续失败按下表退避；采集稳定 CAPTURE_STABLE_MS 后清零，超过表长才真正停止共享。
+    static final long[] CAPTURE_RETRY_BACKOFF_MS = {300, 600, 1_200, 2_000, 3_000, 3_000};
+    static final long CAPTURE_STABLE_MS = 5_000;
+
+    /** Backoff before capture retry {@code attempt} (1-based), or -1 to give up. */
+    static long captureRetryDelayMs(int attempt) {
+        return attempt >= 1 && attempt <= CAPTURE_RETRY_BACKOFF_MS.length
+                ? CAPTURE_RETRY_BACKOFF_MS[attempt - 1] : -1L;
+    }
+
     static boolean watchdogExpired(long nowElapsed, long deadlineElapsed) {
         return deadlineElapsed != Long.MIN_VALUE && nowElapsed >= deadlineElapsed;
     }

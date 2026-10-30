@@ -393,6 +393,18 @@ public final class MainActivity extends Activity {
             public void onStopped(String sessionId, String reason) {
                 mainHandler.post(() -> onAudioStopped(sessionId, reason));
             }
+
+            @Override
+            public void onMicrophoneSilenced(String sessionId, boolean silenced) {
+                mainHandler.post(() -> {
+                    if (isDestroyed() || !sessionId.equals(currentSessionId)) {
+                        return;
+                    }
+                    showActionFeedback(silenced
+                            ? "✕  " + MicSilenceMonitor.message() + "；请关闭通话或其他录音应用"
+                            : "●  手机麦克风已恢复", silenced ? theme.danger : theme.muted);
+                });
+            }
         });
         prepareBluetooth();
         registerNetworkCallbacks();

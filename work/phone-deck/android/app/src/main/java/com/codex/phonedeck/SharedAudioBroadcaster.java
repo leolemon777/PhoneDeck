@@ -25,6 +25,12 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         void onLevel(String sessionId, int percent);
         void onConnectionsChanged(String sessionId);
         void onStopped(String sessionId, String reason);
+
+        /// attempt > 0：麦克风读取出错，正在第 attempt 次重建采集；attempt == 0：已恢复。
+        default void onCaptureRecovering(String sessionId, int attempt, String reason) {}
+
+        /// 麦克风被其他应用占用、系统静默送 0 的状态变化（见 MicSilenceMonitor）。
+        default void onMicrophoneSilenced(String sessionId, boolean silenced) {}
     }
 
     static final class Target {
@@ -57,6 +63,8 @@ final class SharedAudioBroadcaster implements AutoCloseable {
 
     private static final int SAMPLE_RATE = 48_000;
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 * 20 / 1_000;
+    /// 采集重建期间送给各接收端的 20 ms 静音，避免接收端 5 秒无数据判定断流。只读，可共享。
+    private static final byte[] SILENCE_FRAME = new byte[CHUNK_BYTES];
     // 240 ms：吸收常见 Wi-Fi 抖动；满了优先丢静音（见 FrameQueue），接收端再跳过积压静音。
     private static final int QUEUE_FRAMES = 12;
     /// A platform socket can ignore both interrupt and disconnect for a while.
@@ -237,56 +245,78 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord localRecorder = null;
         String failure = null;
+        MicSilenceMonitor silence = new MicSilenceMonitor();
+        int failedAttempts = 0;
+        boolean recovering = false;
         try {
-            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED) {
-                throw new SecurityException("手机麦克风权限已被撤销");
-            }
-            int minimum = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            if (minimum <= 0) {
-                throw new IllegalStateException("手机不支持 48 kHz 麦克风采集");
-            }
-            localRecorder = new AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minimum * 2, 8192));
-            if (localRecorder.getState() != AudioRecord.STATE_INITIALIZED) {
-                throw new IllegalStateException("无法初始化手机麦克风");
-            }
-            synchronized (stateLock) {
-                if (!running) {
-                    return;
-                }
-                recorder = localRecorder;
-                localRecorder.startRecording();
-            }
             byte[] chunk = new byte[CHUNK_BYTES];
-            long lastLevelAt = 0;
             while (running) {
-                int count = localRecorder.read(chunk, 0, chunk.length, AudioRecord.READ_BLOCKING);
-                if (count <= 0) {
+                long openedAt = SystemClock.elapsedRealtime();
+                try {
+                    localRecorder = openRecorder();
+                    synchronized (stateLock) {
+                        if (!running) {
+                            break;
+                        }
+                        recorder = localRecorder;
+                        localRecorder.startRecording();
+                    }
+                    if (localRecorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                        throw new IllegalStateException("手机麦克风未能开始录音");
+                    }
+                    long lastLevelAt = 0;
+                    while (running) {
+                        int count = localRecorder.read(chunk, 0, chunk.length, AudioRecord.READ_BLOCKING);
+                        if (count <= 0) {
+                            if (running) {
+                                throw new IllegalStateException("手机麦克风读取中断：" + count);
+                            }
+                            break;
+                        }
+                        byte[] frame = Arrays.copyOf(chunk, count);
+                        for (TargetSink sink : sinks.values()) {
+                            sink.offer(frame);
+                        }
+                        long now = SystemClock.elapsedRealtime();
+                        if (recovering) {
+                            recovering = false;
+                            listener.onCaptureRecovering(captureSessionId, 0, null);
+                        }
+                        if (failedAttempts > 0
+                                && now - openedAt >= SharedAudioPolicies.CAPTURE_STABLE_MS) {
+                            failedAttempts = 0;
+                        }
+                        if (silence.onFrame(chunk, count, now, localRecorder)) {
+                            listener.onMicrophoneSilenced(captureSessionId, silence.isSilenced());
+                        }
+                        if (now - lastLevelAt >= 100) {
+                            listener.onLevel(captureSessionId, calculateLevel(chunk, count));
+                            lastLevelAt = now;
+                        }
+                    }
+                } catch (SecurityException exception) {
                     if (running) {
-                        throw new IllegalStateException("手机麦克风读取中断：" + count);
+                        failure = exception.getMessage();
                     }
                     break;
+                } catch (Exception exception) {
+                    if (!running) {
+                        break;
+                    }
+                    // 来电、audioserver 重启或被抢占时只重建麦克风；到各电脑的连接保持不动。
+                    failedAttempts++;
+                    long delay = SharedAudioPolicies.captureRetryDelayMs(failedAttempts);
+                    if (delay < 0) {
+                        failure = exception.getMessage();
+                        break;
+                    }
+                    recovering = true;
+                    listener.onCaptureRecovering(captureSessionId, failedAttempts,
+                            exception.getMessage());
+                    releaseRecorder(localRecorder);
+                    localRecorder = null;
+                    feedSilence(delay);
                 }
-                byte[] frame = Arrays.copyOf(chunk, count);
-                for (TargetSink sink : sinks.values()) {
-                    sink.offer(frame);
-                }
-                long now = SystemClock.elapsedRealtime();
-                if (now - lastLevelAt >= 100) {
-                    listener.onLevel(captureSessionId, calculateLevel(chunk, count));
-                    lastLevelAt = now;
-                }
-            }
-        } catch (Exception exception) {
-            if (running) {
-                failure = exception.getMessage();
             }
         } finally {
             synchronized (stateLock) {
@@ -327,6 +357,60 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             }
             listener.onConnectionsChanged(captureSessionId);
             listener.onStopped(captureSessionId, failure);
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private AudioRecord openRecorder() {
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            throw new SecurityException("手机麦克风权限已被撤销");
+        }
+        int minimum = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        if (minimum <= 0) {
+            throw new IllegalStateException("手机不支持 48 kHz 麦克风采集");
+        }
+        AudioRecord created = new AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                Math.max(minimum * 2, 8192));
+        if (created.getState() != AudioRecord.STATE_INITIALIZED) {
+            created.release();
+            throw new IllegalStateException("无法初始化手机麦克风");
+        }
+        return created;
+    }
+
+    private void releaseRecorder(AudioRecord failed) {
+        if (failed == null) {
+            return;
+        }
+        synchronized (stateLock) {
+            if (recorder == failed) {
+                recorder = null;
+            }
+        }
+        try {
+            if (failed.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
+                failed.stop();
+            }
+        } catch (IllegalStateException ignored) {
+        }
+        failed.release();
+    }
+
+    /** Keeps every receiver stream alive with 20 ms silence while capture is rebuilt. */
+    private void feedSilence(long durationMs) {
+        long deadline = SystemClock.elapsedRealtime() + durationMs;
+        while (running && SystemClock.elapsedRealtime() < deadline) {
+            for (TargetSink sink : sinks.values()) {
+                sink.offer(SILENCE_FRAME);
+            }
+            SystemClock.sleep(20);
         }
     }
 

@@ -134,6 +134,9 @@ public final class PhoneAudioService extends Service {
     private volatile long emptyTargetsSinceElapsed;
     private volatile int lastLevel;
     private volatile String statusDetail = "正在准备";
+    /** Capture problems shown on top of the connection summary (main thread only). */
+    private boolean microphoneSilenced;
+    private int captureRecoveryAttempt;
     /** Last text posted to the ongoing notification; repeats are skipped (main thread only). */
     private String postedNotificationText;
     private final ConcurrentHashMap<String, String> receiverStates =
@@ -189,9 +192,37 @@ public final class PhoneAudioService extends Service {
                         // session merely because another target is still offline.
                         emptyTargetsSinceElapsed = 0L;
                     }
-                    statusDetail = connectedCount > 0
-                            ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
-                            : "正在等待音频接收端";
+                    if (!microphoneSilenced && captureRecoveryAttempt == 0) {
+                        statusDetail = connectionDetail();
+                    }
+                    publishStatus();
+                    updateNotification();
+                });
+            }
+
+            @Override
+            public void onCaptureRecovering(String sessionId, int attempt, String reason) {
+                handler.post(() -> {
+                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping) {
+                        return;
+                    }
+                    captureRecoveryAttempt = attempt;
+                    statusDetail = attempt > 0
+                            ? "手机麦克风中断，正在恢复（第 " + attempt + " 次）"
+                            : connectionDetail();
+                    publishStatus();
+                    updateNotification();
+                });
+            }
+
+            @Override
+            public void onMicrophoneSilenced(String sessionId, boolean silenced) {
+                handler.post(() -> {
+                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping) {
+                        return;
+                    }
+                    microphoneSilenced = silenced;
+                    statusDetail = silenced ? MicSilenceMonitor.message() : connectionDetail();
                     publishStatus();
                     updateNotification();
                 });
@@ -270,6 +301,8 @@ public final class PhoneAudioService extends Service {
         registerWifiLinkObserver();
         try {
             acquireLocks();
+            microphoneSilenced = false;
+            captureRecoveryAttempt = 0;
             postedNotificationText = notificationText();
             Notification notification = buildNotification();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -842,7 +875,9 @@ public final class PhoneAudioService extends Service {
         } else {
             emptyTargetsSinceElapsed = 0L;
         }
-        if (targets.size() > 0 && connectedCount > 0) {
+        if (microphoneSilenced || captureRecoveryAttempt > 0) {
+            // 麦克风问题比连接摘要更要紧：保留提示，直到采集恢复或不再被静音。
+        } else if (targets.size() > 0 && connectedCount > 0) {
             // 例：“正在向 2/3 台电脑供音 · 3号离线”，逐台说明未接收原因。
             statusDetail = MultiComputerStatus.summarize(receiverStates, slotByComputer);
         } else if (!targets.isEmpty()) {
@@ -1003,8 +1038,18 @@ public final class PhoneAudioService extends Service {
                 .build();
     }
 
+    private String connectionDetail() {
+        return connectedCount > 0
+                ? MultiComputerStatus.summarize(receiverStates, slotByComputer)
+                : "正在等待音频接收端";
+    }
+
     private String notificationText() {
-        return connectedCount + "/" + knownTotal + " 台电脑正在接收";
+        String text = connectedCount + "/" + knownTotal + " 台电脑正在接收";
+        if (microphoneSilenced) {
+            return text + " · 麦克风被其他应用占用";
+        }
+        return captureRecoveryAttempt > 0 ? text + " · 麦克风恢复中" : text;
     }
 
     private void updateNotification() {

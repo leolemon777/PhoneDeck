@@ -21,6 +21,9 @@ final class AudioStreamer implements AutoCloseable {
         void onReady(String sessionId);
         void onLevel(int percent);
         void onStopped(String sessionId, String reason);
+
+        /// 麦克风被其他应用占用、系统静默送 0 的状态变化（见 MicSilenceMonitor）。
+        default void onMicrophoneSilenced(String sessionId, boolean silenced) {}
     }
 
     private static final String LOG_TAG = "PhoneDeckAudio";
@@ -361,6 +364,7 @@ final class AudioStreamer implements AutoCloseable {
             byte[] silence = new byte[PAUSE_SILENCE_BYTES];
             boolean preRollFlushed = false;
             boolean firstPcmLogged = false;
+            MicSilenceMonitor silencedMonitor = new MicSilenceMonitor();
             long lastLevelUpdate = 0;
             while (shouldRun) {
                 if (paused) {
@@ -397,6 +401,10 @@ final class AudioStreamer implements AutoCloseable {
                 if (!firstPcmLogged) {
                     log(sessionId, "firstPcm", startedAt);
                     firstPcmLogged = true;
+                }
+                if (silencedMonitor.onFrame(chunk, count, SystemClock.elapsedRealtime(), localRecorder)) {
+                    log(sessionId, "microphoneSilenced=" + silencedMonitor.isSilenced(), startedAt);
+                    listener.onMicrophoneSilenced(sessionId, silencedMonitor.isSilenced());
                 }
                 if (linkFailure != null) {
                     throw linkFailure;
