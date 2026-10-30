@@ -1,5 +1,27 @@
 # PhoneDeck 项目交接说明
 
+## 2026-10-29 Windows 接收、诊断与 USB 恢复优化（最新源码状态）
+
+- 用户继续关注电脑端；本轮按“只优化，不需要测试”执行源码修改、静态复核与候选编译，不运行单元测试、设备测试或音频实测。
+  运行中的 Windows 接收端未替换，手机保持下方部署记录的优化 APK；没有改动个人配对、快捷键、系统音频输入或 Typeless 设置。
+- **USB 恢复**：看门狗 Start/Dispose 串行，异常 worker 可重建，设置切换立即唤醒。
+  ADB 标准输出/错误并行读取，命令超时后结束子进程，避免管道阻塞拖住恢复；正常路径每轮仍只查一次 reverse。
+  修复端口后先检查手机应用进程，已经运行时不重复 am start 抢前台。
+- **共享音频输出**：健康请求使用快速预热标记，不再等待可能阻塞的 WASAPI/COM 锁；合并后台预热，失败至少间隔 2 秒重试。
+  初始化放入音频闸门的 try/finally 范围，输出释放幂等且设备清理放在 finally；坏设备、重复停止或取消竞争不遗留永久占用。
+- **可信状态**：音频 owner/session/PCM 状态从同一锁内快照返回，听写 owner/session 以不可变对象一次发布，避免会话切换时字段串线。
+  health/diagnostics 增加可选 PCM 字节数、首次接收标记、最后收包年龄、通用运行错误和运行态采样时间；仅 owner 获得流的私有细节。
+  PCM 包含静音，不能作为播放/识别确认；Android 尚未消费这些字段，healthEvents 指纹不跟随计数和年龄变化。
+- **诊断容错**：错误保留原采样时间并标 stale；过期/失败的引擎观察作为 unknown。
+  超时不会释放仍在读取的 gate，且使用快照引用比对，避免迟到的超时覆盖新结果；关闭后不再发布或回调。
+- 统一入口 `scripts/build.ps1 -Platform Windows -Configuration Release -SkipTests` 已完成；Server 和 ControlCenter
+  Release build 均为 0 warning / 0 error，自包含单文件 publish 成功。按用户要求跳过测试，因此 manifest 为 `unverified`，不是设备验收通过。
+  产物目录为 `outputs/windows-receiver-optimization-20261029/20261030T005941Z-5d07f23e/`，不创建正式 Release。
+  Server SHA-256：`6404c71fc34d49c081189cc77b5be9b9468f95083973519142a99ac73188d7af`；
+  ControlCenter SHA-256：`06b9e2ab5ec62fda739468e9f1661cea6569f1da26ff1c9656703a7ee24ac6ee`。
+- 待办仍包括手机消费接收端 PCM 证据、实际通道诊断界面、Wi-Fi Network 绑定以及未来获准后的设备验收；
+  此次可选字段只是接收证据，不构成远端逐帧确认协议。
+
 ## 2026-10-29 优化版已同签名覆盖安装（最新部署状态）
 
 - 用户随后连接手机，已将源码 `cdb153f` 对应的优化 APK 通过 `adb install -r` 覆盖安装到 Samsung `SM-G9880`，未卸载或清数据。

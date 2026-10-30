@@ -76,7 +76,10 @@ using var diagnostics = new DiagnosticsMonitor(() =>
 },
     sessionActive: () => dictationSessions.IsActive || audioBridge.IsStreaming,
     refreshed: snapshot => dictationSessions.ObserveEngineCapturing(
-        snapshot.Engine?.Capturing, snapshot.CheckedAtMs));
+        snapshot.LastError is null
+            && Environment.TickCount64 - snapshot.CheckedAtMs <= DiagnosticsMonitor.StaleAfterMs
+                ? snapshot.Engine?.Capturing : null,
+        snapshot.CheckedAtMs));
 diagnostics.Start();
 // 采集会话状态一变就立即刷新，轮询只作兜底。
 using var engineStateEvents = new VoiceEngineStateEvents(diagnostics.Nudge);
@@ -205,8 +208,10 @@ object BuildHealth(HttpContext context)
     // 只读后台诊断快照与易变内存状态：零文件 IO、零 Core Audio 枚举、
     // 零跨线程锁等待，保证即使 Typeless 卡死也持续快速响应。
     var snapshot = diagnostics.Current;
+    var runtimeAudio = audioBridge.GetRuntimeSnapshot(requesterClientId);
+    var runtimeDictation = dictationSessions.GetRuntimeSnapshot(requesterClientId);
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
-    var stale = ageMs > DiagnosticsMonitor.StaleAfterMs;
+    var stale = ageMs > DiagnosticsMonitor.StaleAfterMs || snapshot.LastError is not null;
     var engine = snapshot.Engine;
     return new
     {
@@ -229,10 +234,15 @@ object BuildHealth(HttpContext context)
         {
             available = snapshot.AudioAvailable,
             device = snapshot.VirtualCableDevice,
-            streaming = audioBridge.IsStreaming,
+            streaming = runtimeAudio.Streaming,
             // 多手机：会话 ID 只告诉所属手机；其他手机只看到“正在使用”（streaming=true）。
-            sessionId = audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
-            mode = audioBridge.ActiveMode,
+            sessionId = runtimeAudio.SessionId,
+            mode = runtimeAudio.Mode,
+            receivedPcmBytes = runtimeAudio.ReceivedPcmBytes,
+            hasReceivedPcm = runtimeAudio.HasReceivedPcm,
+            lastPcmAgeMs = runtimeAudio.LastPcmAgeMs,
+            runtimeError = runtimeAudio.LastError,
+            runtimeCheckedAtMs = runtimeAudio.CheckedAtMs,
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
@@ -242,9 +252,8 @@ object BuildHealth(HttpContext context)
         },
         dictation = new
         {
-            active = dictationSessions.IsActive,
-            sessionId = dictationSessions.IsOwnedBy(requesterClientId)
-                ? dictationSessions.ActiveSessionId : null
+            active = runtimeDictation.Active,
+            sessionId = runtimeDictation.SessionId
         },
         foregroundApp = snapshot.ForegroundApp,
         usbWatchdog = new
@@ -380,6 +389,7 @@ app.MapGet("/api/diagnostics", async (HttpContext context) =>
 {
     // 深诊断：强制刷新一次（带超时），不阻塞 health、音频或快捷键请求。
     var snapshot = await diagnostics.RefreshAsync(2_000);
+    var runtimeAudio = audioBridge.GetRuntimeSnapshot(context.Items["ClientId"] as string);
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
     var engine = snapshot.Engine;
     return Results.Ok(new
@@ -423,10 +433,17 @@ app.MapGet("/api/diagnostics", async (HttpContext context) =>
         {
             available = snapshot.AudioAvailable,
             device = snapshot.VirtualCableDevice,
-            streaming = audioBridge.IsStreaming,
-            sessionId = audioBridge.IsStreamOwnedBy(context.Items["ClientId"] as string)
-                ? audioBridge.ActiveSessionId : null,
-            mode = audioBridge.ActiveMode
+            streaming = runtimeAudio.Streaming,
+            sessionId = runtimeAudio.SessionId,
+            mode = runtimeAudio.Mode,
+            receivedPcmBytes = runtimeAudio.ReceivedPcmBytes,
+            hasReceivedPcm = runtimeAudio.HasReceivedPcm,
+            lastPcmAgeMs = runtimeAudio.LastPcmAgeMs,
+            runtimeError = runtimeAudio.LastError,
+            runtimeCheckedAtMs = runtimeAudio.CheckedAtMs,
+            checkedAtMs = snapshot.CheckedAtMs,
+            ageMs,
+            stale = ageMs > DiagnosticsMonitor.StaleAfterMs || snapshot.LastError is not null
         },
         lan = new
         {

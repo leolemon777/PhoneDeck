@@ -20,6 +20,7 @@ internal sealed class WasapiPhoneAudioPlayback : IPhoneAudioPlayback
     private readonly WasapiOut output;
     private volatile bool stopRequested;
     private volatile bool faulted;
+    private int disposed;
 
     internal WasapiPhoneAudioPlayback(IWaveProvider source)
     {
@@ -63,21 +64,36 @@ internal sealed class WasapiPhoneAudioPlayback : IPhoneAudioPlayback
 
     public void Play()
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         stopRequested = false;
         output.Play();
     }
 
     public void Stop()
     {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            return;
+        }
         stopRequested = true;
         output.Stop();
     }
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
         stopRequested = true;
-        output.Dispose();
-        device.Dispose();
+        try
+        {
+            output.Dispose();
+        }
+        finally
+        {
+            device.Dispose();
+        }
     }
 }
 

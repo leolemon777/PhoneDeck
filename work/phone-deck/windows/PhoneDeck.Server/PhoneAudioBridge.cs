@@ -27,11 +27,15 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private readonly object warmSync = new();
     private SwitchingWaveProvider? warmSource;
     private IPhoneAudioPlayback? warmPlayback;
+    private int warmReady;
+    private long prewarmRetryAt;
     /// <summary>手机最近一次请求后保持预热这么久；之后关闭常驻输出，空闲时不占 CPU 与音频引擎。</summary>
     internal const int WarmIdleMs = 90_000;
+    private const int PrewarmRetryDelayMs = 2_000;
     private long lastPhoneActivity = Environment.TickCount64;
     private int prewarmQueued;
     private readonly Timer? idleReaper;
+    private int disposed;
     private CancellationTokenSource? activeCancellation;
     private ActiveStream? activeStream;
     private string? activeSessionId;
@@ -71,14 +75,28 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     /// <summary>手机请求（健康检查、音频）到达：记下时间，若常驻输出已关闭则在后台重新预热。</summary>
     internal void NotePhoneActivity()
     {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            return;
+        }
         Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
-        if (keepOutputWarm && !OutputWarm && Interlocked.Exchange(ref prewarmQueued, 1) == 0)
+        var warmOutputReady = IsWarmOutputReadyFast();
+        // Health/event polling must not take warmSync: EnsureWarmLocked can
+        // synchronously enter COM/WASAPI.  The ready/queued/retry flags are
+        // deliberately atomic so a 50ms poll only schedules one bounded task.
+        if (keepOutputWarm
+            && !warmOutputReady
+            && Environment.TickCount64 >= Volatile.Read(ref prewarmRetryAt)
+            && Interlocked.CompareExchange(ref prewarmQueued, 1, 0) == 0)
         {
             _ = Task.Run(() =>
             {
                 try
                 {
-                    Prewarm();
+                    if (Volatile.Read(ref disposed) == 0)
+                    {
+                        Prewarm();
+                    }
                 }
                 finally
                 {
@@ -88,20 +106,38 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         }
     }
 
+    private bool IsWarmOutputReadyFast()
+    {
+        if (Volatile.Read(ref warmReady) == 0)
+        {
+            return false;
+        }
+        var playback = Volatile.Read(ref warmPlayback);
+        if (playback is { IsFaulted: false } && Volatile.Read(ref disposed) == 0)
+        {
+            return true;
+        }
+        Volatile.Write(ref warmReady, 0);
+        return false;
+    }
+
     private void ReleaseIdleOutput()
     {
+        IPhoneAudioPlayback? playback;
         lock (warmSync)
         {
             // 会话全程持有 streamGate：计数为 1 说明没有音频流在用常驻输出。
-            if (warmPlayback is null || streamGate.CurrentCount == 0
+            if (Volatile.Read(ref disposed) != 0 || warmPlayback is null || streamGate.CurrentCount == 0
                 || Environment.TickCount64 - Volatile.Read(ref lastPhoneActivity) <= WarmIdleMs)
             {
                 return;
             }
-            warmPlayback.Dispose();
+            playback = warmPlayback;
             warmPlayback = null;
             warmSource = null;
+            Volatile.Write(ref warmReady, 0);
         }
+        TryDisposePlayback(playback, "idle");
         Console.WriteLine("[audio] 手机已空闲，关闭常驻虚拟声卡输出");
     }
 
@@ -110,9 +146,19 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     {
         get
         {
+            if (Volatile.Read(ref disposed) != 0
+                || Volatile.Read(ref warmReady) == 0)
+            {
+                return false;
+            }
             lock (warmSync)
             {
-                return warmPlayback is { IsFaulted: false };
+                var ready = warmPlayback is { IsFaulted: false };
+                if (!ready)
+                {
+                    Volatile.Write(ref warmReady, 0);
+                }
+                return ready;
             }
         }
     }
@@ -120,25 +166,54 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     /// <summary>启动时预热常驻输出；失败（例如未安装 VB-CABLE）时保持按会话创建。</summary>
     internal void Prewarm()
     {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            return;
+        }
+        if (streamGate.CurrentCount == 0)
+        {
+            Volatile.Write(
+                ref prewarmRetryAt,
+                Environment.TickCount64 + PrewarmRetryDelayMs);
+            return;
+        }
         lock (warmSync)
         {
+            // A stream may acquire the gate while this callback is waiting
+            // for warmSync; re-check under the lock before replacing an old
+            // playback object that an active stream may still own.
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return;
+            }
+            if (streamGate.CurrentCount == 0)
+            {
+                Volatile.Write(
+                    ref prewarmRetryAt,
+                    Environment.TickCount64 + PrewarmRetryDelayMs);
+                return;
+            }
             EnsureWarmLocked();
         }
     }
 
     private SwitchingWaveProvider? EnsureWarmLocked()
     {
-        if (!keepOutputWarm)
+        if (!keepOutputWarm || Volatile.Read(ref disposed) != 0)
         {
+            Volatile.Write(ref warmReady, 0);
             return null;
         }
         if (warmPlayback is { IsFaulted: false } && warmSource is not null)
         {
+            Volatile.Write(ref warmReady, 1);
             return warmSource;
         }
-        warmPlayback?.Dispose();
+        var stalePlayback = warmPlayback;
         warmPlayback = null;
         warmSource = null;
+        Volatile.Write(ref warmReady, 0);
+        TryDisposePlayback(stalePlayback, "warm-replace");
         try
         {
             var source = new SwitchingWaveProvider();
@@ -154,13 +229,35 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             }
             warmSource = source;
             warmPlayback = playback;
+            Volatile.Write(ref warmReady, 1);
             Console.WriteLine("[audio] 常驻虚拟声卡输出已启动");
             return source;
         }
         catch (Exception exception)
         {
+            Volatile.Write(ref warmReady, 0);
+            Volatile.Write(
+                ref prewarmRetryAt,
+                Environment.TickCount64 + PrewarmRetryDelayMs);
             Console.Error.WriteLine($"[audio] 常驻输出不可用，改为按会话创建：{exception.Message}");
             return null;
+        }
+    }
+
+    private static void TryDisposePlayback(IPhoneAudioPlayback? playback, string reason)
+    {
+        if (playback is null)
+        {
+            return;
+        }
+        try
+        {
+            playback.Dispose();
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(
+                $"[audio] playbackDisposeFailed={reason}:{exception.GetType().Name}");
         }
     }
 
@@ -180,6 +277,9 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         public volatile bool OutputFaulted;
         public long ReleasedAtMs = -1;
         public bool DrainSucceeded;
+        public long ReceivedPcmBytes;
+        public long LastPcmTick = -1;
+        public string? RuntimeError;
     }
 
     internal bool IsStreaming
@@ -234,6 +334,46 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 return activeMode?.ToWireValue();
             }
+        }
+    }
+
+    internal PhoneAudioRuntimeSnapshot GetRuntimeSnapshot(string? requesterClientId)
+    {
+        lock (sessionSync)
+        {
+            var checkedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var stream = activeStream;
+            if (stream is null || activeSessionId is null)
+            {
+                return new PhoneAudioRuntimeSnapshot(
+                    Streaming: false,
+                    SessionId: null,
+                    Mode: null,
+                    ReceivedPcmBytes: null,
+                    HasReceivedPcm: null,
+                    LastPcmAgeMs: null,
+                    LastError: null,
+                    CheckedAtMs: checkedAtMs);
+            }
+
+            var isOwner = string.Equals(
+                PhoneStopReceipts.NormalizeOwner(stream.OwnerId),
+                PhoneStopReceipts.NormalizeOwner(requesterClientId),
+                StringComparison.Ordinal);
+            long? lastPcmAgeMs = null;
+            if (isOwner && stream.LastPcmTick >= 0)
+            {
+                lastPcmAgeMs = Math.Max(0, Environment.TickCount64 - stream.LastPcmTick);
+            }
+            return new PhoneAudioRuntimeSnapshot(
+                Streaming: true,
+                SessionId: isOwner ? activeSessionId : null,
+                Mode: activeMode?.ToWireValue(),
+                ReceivedPcmBytes: isOwner ? stream.ReceivedPcmBytes : null,
+                HasReceivedPcm: isOwner ? stream.ReceivedPcmBytes > 0 : null,
+                LastPcmAgeMs: lastPcmAgeMs,
+                LastError: isOwner ? stream.RuntimeError : null,
+                CheckedAtMs: checkedAtMs);
         }
     }
 
@@ -293,7 +433,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             }
             cancellation = activeCancellation;
         }
-        cancellation?.Cancel();
+        TryCancel(cancellation, $"stop:{sessionId}");
         return true;
     }
 
@@ -349,6 +489,9 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         CancellationToken cancellationToken,
         string? ownerId = null)
     {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref disposed) != 0,
+            this);
         if (!await streamGate.WaitAsync(0, cancellationToken))
         {
             // Wi-Fi 抖动后手机会用同一共享 sessionId 重连，而服务端可能还没发现旧连接
@@ -372,25 +515,28 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             OwnerId = ownerId,
             Provider = new PhonePcmBuffer(mode)
         };
-        SwitchingWaveProvider? warm;
+        SwitchingWaveProvider? warm = null;
         IPhoneAudioPlayback? monitoredPlayback = null;
-        Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
-        lock (warmSync)
-        {
-            warm = EnsureWarmLocked();
-            warm?.Attach(stream.Provider);
-            // Capture the playback paired with this exact source while the
-            // same lock still protects the warm source/playback pair.
-            if (warm is not null)
-            {
-                monitoredPlayback = warmPlayback;
-            }
-        }
         IPhoneAudioPlayback? output = null;
         CancellationTokenSource? outputFaultMonitorCancellation = null;
         Task? outputFaultMonitor = null;
         try
         {
+            ObjectDisposedException.ThrowIf(
+                Volatile.Read(ref disposed) != 0,
+                this);
+            Volatile.Write(ref lastPhoneActivity, Environment.TickCount64);
+            lock (warmSync)
+            {
+                warm = EnsureWarmLocked();
+                warm?.Attach(stream.Provider);
+                // Capture the playback paired with this exact source while the
+                // same lock still protects the warm source/playback pair.
+                if (warm is not null)
+                {
+                    monitoredPlayback = warmPlayback;
+                }
+            }
             if (warm is null)
             {
                 output = createPlayback(stream.Provider);
@@ -485,6 +631,21 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                     if (carry == 1)
                     {
                         bytes[0] = bytes[completeBytes];
+                    }
+                    if (completeBytes > 0)
+                    {
+                        lock (sessionSync)
+                        {
+                            // A superseded stream may still finish one read
+                            // while the replacement is being admitted.  Do
+                            // not let that stale read update the new stream's
+                            // health counters.
+                            if (ReferenceEquals(activeStream, stream))
+                            {
+                                stream.ReceivedPcmBytes += completeBytes;
+                                stream.LastPcmTick = Environment.TickCount64;
+                            }
+                        }
                     }
                 }
 
@@ -588,6 +749,13 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 $"skippedSilenceBytes={stream.Provider.SkippedSilenceBytes}");
             if (stalled)
             {
+                lock (sessionSync)
+                {
+                    if (ReferenceEquals(activeStream, stream))
+                    {
+                        stream.RuntimeError = "stalled";
+                    }
+                }
                 throw new AudioStreamStalledException("手机音频流长时间无数据，连接已释放");
             }
             return totalBytes;
@@ -760,6 +928,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 return false;
             }
             stream.OutputFaulted = true;
+            stream.RuntimeError = "outputFault";
         }
         Console.Error.WriteLine(
             $"[audio:{sessionId}] playbackFaultObserved; cancelling upload");
@@ -782,7 +951,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             current.Superseded = true;
             cancellation = activeCancellation;
         }
-        cancellation?.Cancel();
+        TryCancel(cancellation, $"supersede:{sessionId}");
         return true;
     }
 
@@ -813,18 +982,42 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
         idleReaper?.Dispose();
         CancellationTokenSource? cancellation;
         lock (sessionSync)
         {
             cancellation = activeCancellation;
         }
-        cancellation?.Cancel();
+        TryCancel(cancellation, "bridge-dispose");
+        IPhoneAudioPlayback? playback;
         lock (warmSync)
         {
-            warmPlayback?.Dispose();
+            playback = warmPlayback;
             warmPlayback = null;
             warmSource = null;
+            Volatile.Write(ref warmReady, 0);
+        }
+        TryDisposePlayback(playback, "bridge-dispose");
+    }
+
+    private static void TryCancel(CancellationTokenSource? cancellation, string reason)
+    {
+        if (cancellation is null)
+        {
+            return;
+        }
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(
+                $"[audio] cancellationFailed={reason}:{exception.GetType().Name}");
         }
     }
 }

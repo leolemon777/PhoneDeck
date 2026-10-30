@@ -6,7 +6,7 @@ internal sealed class UsbWatchdog : IDisposable
     /// <summary>没连上或刚恢复时每 2 秒检查；adb reverse 已在位时放宽到 10 秒（每次只启动一个 adb 进程）。</summary>
     private const int CheckIntervalMilliseconds = 2_000;
     private const int HealthyIntervalMilliseconds = 10_000;
-    private bool lastCheckHealthy;
+    private volatile bool lastCheckHealthy;
     private const string MutexName = @"Local\PhoneDeckUsbReconnect";
     private static readonly Regex ReverseEntryPattern = new(
         @"tcp:8765\s+tcp:8765", RegexOptions.Compiled);
@@ -14,9 +14,31 @@ internal sealed class UsbWatchdog : IDisposable
     private readonly CancellationTokenSource cancellation = new();
     private readonly Mutex mutex;
     private readonly bool ownsMutex;
+    private readonly object lifecycleGate = new();
+    private readonly AutoResetEvent wakeSignal = new(false);
     private Thread? worker;
     private volatile bool enabled = true;
-    internal void SetEnabled(bool value) { enabled = value; if (value) Start(); }
+    private bool disposed;
+
+    internal void SetEnabled(bool value)
+    {
+        lock (lifecycleGate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+            enabled = value;
+            if (!value)
+            {
+                // Do not let a previous healthy sample delay a later re-enable
+                // by the full 10-second healthy interval.
+                lastCheckHealthy = false;
+            }
+        }
+        Wake();
+        if (value) Start();
+    }
 
     internal UsbWatchdog(string? configuredAdbPath)
     {
@@ -33,81 +55,152 @@ internal sealed class UsbWatchdog : IDisposable
 
     internal void Start()
     {
-        if (worker is not null)
+        lock (lifecycleGate)
         {
-            return;
+            if (disposed || !enabled || worker?.IsAlive == true)
+            {
+                return;
+            }
+            if (AdbPath is null)
+            {
+                Console.WriteLine(
+                    "USB 看门狗未启用：未找到 adb.exe。"
+                    + "可在 PhoneDeck 数据目录的 server-settings.json 配置 adbPath，"
+                    + "或把 platform-tools 放到程序目录旁。");
+                return;
+            }
+            if (!ownsMutex)
+            {
+                Console.WriteLine("USB 看门狗未启用：已有另一个看门狗在运行。");
+                return;
+            }
+            var nextWorker = new Thread(() => Run(cancellation.Token))
+            {
+                IsBackground = true,
+                Name = "PhoneDeckUsbWatchdog"
+            };
+            worker = nextWorker;
+            nextWorker.Start();
+            Console.WriteLine($"USB 看门狗已启动（adb：{AdbPath}）");
         }
-        if (AdbPath is null)
-        {
-            Console.WriteLine(
-                "USB 看门狗未启用：未找到 adb.exe。"
-                + "可在 PhoneDeck 数据目录的 server-settings.json 配置 adbPath，"
-                + "或把 platform-tools 放到程序目录旁。");
-            return;
-        }
-        if (!ownsMutex)
-        {
-            Console.WriteLine("USB 看门狗未启用：已有另一个看门狗在运行。");
-            return;
-        }
-        worker = new Thread(() => Run(cancellation.Token))
-        {
-            IsBackground = true,
-            Name = "PhoneDeckUsbWatchdog"
-        };
-        worker.Start();
-        Console.WriteLine($"USB 看门狗已启动（adb：{AdbPath}）");
     }
 
     private void Run(CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            try
+            while (!token.IsCancellationRequested)
             {
-                if (enabled) CheckAndRestore();
+                try
+                {
+                    if (enabled) CheckAndRestore(token);
+                }
+                catch (Exception exception)
+                {
+                    // 看门狗自身不能崩溃；单轮失败等下一轮，并保留短检查间隔。
+                    lastCheckHealthy = false;
+                    Console.WriteLine($"USB 看门狗本轮失败：{exception.Message}");
+                }
+                try
+                {
+                    using var cancellationRegistration = token.Register(
+                        static state => ((UsbWatchdog)state!).Wake(), this);
+                    if (wakeSignal.WaitOne(
+                            enabled && lastCheckHealthy
+                                ? HealthyIntervalMilliseconds : CheckIntervalMilliseconds))
+                    {
+                        token.ThrowIfCancellationRequested();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
-            catch (Exception exception)
+        }
+        catch (Exception exception) when (!token.IsCancellationRequested)
+        {
+            // A failure outside one check (for example a runtime wait failure)
+            // must not permanently strand the watchdog as a dead Thread.
+            lastCheckHealthy = false;
+            Console.WriteLine($"USB 看门狗循环异常：{exception.Message}");
+        }
+        finally
+        {
+            bool restart;
+            lock (lifecycleGate)
             {
-                // 看门狗自身不能崩溃；单轮失败静默等下一轮。
-                _ = exception;
+                if (ReferenceEquals(worker, Thread.CurrentThread))
+                {
+                    worker = null;
+                }
+                restart = !disposed && enabled && !token.IsCancellationRequested;
             }
-            try
+            if (restart)
             {
-                Task.Delay(enabled && lastCheckHealthy ? HealthyIntervalMilliseconds : CheckIntervalMilliseconds,
-                    token).Wait(token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
+                // Restart only after the current worker has detached. Start's
+                // gate prevents a concurrent settings request from creating a
+                // second loop.
+                Thread.Sleep(250);
+                Start();
             }
         }
     }
 
-    private void CheckAndRestore()
+    private void CheckAndRestore(CancellationToken token)
     {
         lastCheckHealthy = false;
         // 没有设备时 reverse --list 直接失败（返回 null），不必再单独跑 get-state。
-        if (RunAdb("reverse --list", out var listOutput, out _) is null)
+        if (RunAdb("reverse --list", token, out var listOutput, out _) is null)
         {
             return;
         }
         if (ReverseEntryPattern.IsMatch(listOutput))
         {
+            // Keep the healthy path to one adb reverse query. Process launch
+            // is considered only after a missing reverse has been repaired, so
+            // the normal 10-second polling path does not add foreground work.
             lastCheckHealthy = true;
             return;
         }
-        if (RunAdb("reverse tcp:8765 tcp:8765", out _, out _) is null)
+        if (RunAdb("reverse tcp:8765 tcp:8765", token, out _, out _) is null)
         {
             return;
         }
-        RunAdb("shell am start -n com.codex.phonedeck/.MainActivity", out _, out _);
+        if (!EnsurePhoneDeckProcess(token))
+        {
+            Console.WriteLine("USB 看门狗已恢复 reverse，但 PhoneDeck 进程未能启动。");
+            return;
+        }
         RestoreCount++;
         LastRestoredAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         Console.WriteLine($"USB 看门狗已恢复 adb reverse（第 {RestoreCount} 次，{LastRestoredAt}）");
     }
 
-    private string? RunAdb(string arguments, out string output, out string errors)
+    private bool EnsurePhoneDeckProcess(CancellationToken token)
+    {
+        var pidResult = RunAdb("shell pidof com.codex.phonedeck", token,
+            out var pidOutput, out _);
+        if (pidResult is null)
+        {
+            return RunAdb(
+                "shell am start -n com.codex.phonedeck/.MainActivity",
+                token, out _, out _) is not null;
+        }
+        if (!string.IsNullOrWhiteSpace(pidOutput))
+        {
+            // The process is already running. Do not use am start here: that
+            // would repeatedly bring the user's manually opened Activity to
+            // the foreground during healthy polling.
+            return true;
+        }
+        return RunAdb(
+            "shell am start -n com.codex.phonedeck/.MainActivity",
+            token, out _, out _) is not null;
+    }
+
+    private string? RunAdb(
+        string arguments, CancellationToken token, out string output, out string errors)
     {
         if (AdbPath is null)
         {
@@ -128,23 +221,33 @@ internal sealed class UsbWatchdog : IDisposable
                 CreateNoWindow = true
             };
             process.Start();
-            var finished = process.WaitForExit(4_000);
-            if (!finished)
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(4_000);
+            try
             {
-                try
-                {
-                    process.Kill(true);
-                }
-                catch (Exception)
-                {
-                    // 进程可能刚好已退出。
-                }
+                process.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                StopProcess(process);
                 output = string.Empty;
-                errors = "adb 超时";
+                errors = token.IsCancellationRequested ? "adb 已取消" : "adb 超时";
                 return null;
             }
-            output = process.StandardOutput.ReadToEnd();
-            errors = process.StandardError.ReadToEnd();
+            // Read both pipes concurrently. ADB normally writes very little,
+            // but sequential reads can deadlock if a diagnostic grows large.
+            var pipes = Task.WhenAll(outputTask, errorTask);
+            if (!pipes.Wait(1_000))
+            {
+                StopProcess(process);
+                output = string.Empty;
+                errors = "adb 输出读取超时";
+                return null;
+            }
+            output = outputTask.GetAwaiter().GetResult();
+            errors = errorTask.GetAwaiter().GetResult();
             return process.ExitCode == 0 ? output : null;
         }
         catch (Exception exception)
@@ -152,6 +255,30 @@ internal sealed class UsbWatchdog : IDisposable
             output = string.Empty;
             errors = exception.Message;
             return null;
+        }
+    }
+
+    private static void StopProcess(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception)
+        {
+            // The process may have exited between HasExited and Kill.
+        }
+        try
+        {
+            process.WaitForExit(1_000);
+        }
+        catch (Exception)
+        {
+            // Cleanup is best effort; the caller still returns to the next
+            // bounded watchdog round instead of waiting indefinitely.
         }
     }
 
@@ -192,10 +319,26 @@ internal sealed class UsbWatchdog : IDisposable
 
     public void Dispose()
     {
+        Thread? thread;
+        lock (lifecycleGate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            enabled = false;
+            lastCheckHealthy = false;
+            thread = worker;
+        }
         try
         {
             cancellation.Cancel();
-            worker?.Join(3_000);
+            Wake();
+            // RunAdb has a 4-second command budget plus a bounded process
+            // cleanup wait. Give the worker enough time to observe cancellation
+            // before disposing its token/mutex.
+            thread?.Join(6_000);
         }
         finally
         {
@@ -212,6 +355,20 @@ internal sealed class UsbWatchdog : IDisposable
                 }
             }
             mutex.Dispose();
+            wakeSignal.Dispose();
+        }
+    }
+
+    private void Wake()
+    {
+        try
+        {
+            wakeSignal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+            // A settings request can race process shutdown; disposal already
+            // made the worker ineligible for further work.
         }
     }
 }

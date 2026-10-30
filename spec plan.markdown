@@ -1,5 +1,23 @@
 # 言渡 · Yandu 产品规格与开发计划
 
+## 2026-10-29 电脑接收端继续优化（源码候选）
+
+- 延续用户“只优化，不需要测试”的要求，优化 Windows 接收、诊断与 USB 恢复；保留现有界面、电脑身份、逐手机凭据和快捷键格式。
+  本阶段生成独立 Windows 候选，不替换运行中的旧接收端，不改手机、系统默认输入设备或 Typeless 设置。
+- USB 看门狗启停串行化，设置变化立即唤醒；ADB 命令及输出读取有超时，异常退出可重建 worker。
+  正常轮询只检查 reverse；修复 reverse 后若手机应用已运行，不再重复拉到前台。
+- 健康请求不等待音频预热的慢锁；预热任务合并且失败有重试间隔。输出初始化、停止或释放失败仍必须释放本次音频闸门，
+  不能让后续连接永久被占用；运行中的流继续绑定原来的输出实例。
+- 诊断错误和超时保留最后实际读取的时间，立即标为 stale，不能将旧的 capturing=false 用作引擎已停止的证据。
+  超时后的 reader 仍占有诊断 gate；迟到的超时通知不能覆盖已经完成的新快照。
+- Windows health/diagnostics 的 audio 增加可选字段 receivedPcmBytes、hasReceivedPcm、lastPcmAgeMs、runtimeError、runtimeCheckedAtMs。
+  会话身份和 PCM 状态从同一次快照读取；sessionId、PCM 计数/年龄及通用错误代码仅对该流的 owner 返回。
+  streaming/mode 保留全局占用语义；无活动流或非 owner 的私有字段为 null。
+  runtimeCheckedAtMs 是 Unix 毫秒时间；诊断 checkedAtMs 和 lastPcmAgeMs 仍使用其原有单调时间语义。
+  计数包含静音 PCM，仅证明接收端读到完整采样，不等于设备播放、输入法采集或识别成功。
+- 协议 v2 与现有必选字段保持不变；Android 和 Mac 可缺省上述新字段。字节数及不断变化的时间不加入 healthEvents 状态指纹，
+  避免长轮询因计数变化持续返回。手机端消费这些接收证据及对应界面仍是后续工作。
+
 ## 2026-10-29 用户连接手机后覆盖安装优化版
 
 - 继续此前安装授权，以同一固定签名将 `cdb153f` 优化包覆盖到 Samsung；不卸载、不清数据，保留 UID 和配对密文。

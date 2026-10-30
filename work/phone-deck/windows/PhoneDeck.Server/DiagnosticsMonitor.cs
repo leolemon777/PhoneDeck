@@ -38,10 +38,17 @@ internal sealed class DiagnosticsMonitor : IDisposable
     private readonly CancellationTokenSource cancellation = new();
     private readonly CancellationToken cancellationToken;
     private readonly Thread worker;
+    private readonly object lifecycleGate = new();
+    private readonly object callbackGate = new();
     private int disposed;
+    private int started;
     private DiagnosticsSnapshot current = DiagnosticsSnapshot.Unavailable("诊断尚未运行");
 
-    internal DiagnosticsSnapshot Current => current;
+    /// <summary>
+    /// 不可变快照仍需显式 acquire/release 发布；否则健康请求线程可能继续看到旧引用，
+    /// 尤其是在后台读线程刚完成昂贵的 Core Audio 枚举时。
+    /// </summary>
+    internal DiagnosticsSnapshot Current => Volatile.Read(ref current);
 
     internal DiagnosticsMonitor(
         Func<DiagnosticsSnapshot> reader,
@@ -63,19 +70,49 @@ internal sealed class DiagnosticsMonitor : IDisposable
 
     internal void Start()
     {
-        if (!worker.IsAlive)
+        lock (lifecycleGate)
         {
-            worker.Start();
+            if (Volatile.Read(ref disposed) != 0
+                || worker.IsAlive
+                || Interlocked.CompareExchange(ref started, 1, 0) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                worker.Start();
+            }
+            catch
+            {
+                Volatile.Write(ref started, 0);
+                throw;
+            }
         }
     }
 
     internal bool Running => worker.IsAlive;
 
     /// <summary>会话开始等状态变化时立即刷新一次，并切换到会话期间的快速节奏。</summary>
-    internal void Nudge() => wake.Set();
+    internal void Nudge()
+    {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            wake.Set();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
+        {
+            // Keep late engine callbacks harmless during shutdown.
+        }
+    }
 
     internal int CurrentIntervalMs =>
-        sessionActive?.Invoke() == true
+        Volatile.Read(ref disposed) == 0 && sessionActive?.Invoke() == true
             ? Math.Min(refreshIntervalMs, ActiveRefreshIntervalMs)
             : refreshIntervalMs;
 
@@ -85,38 +122,54 @@ internal sealed class DiagnosticsMonitor : IDisposable
     {
         if (Volatile.Read(ref disposed) != 0)
         {
-            return current;
+            return Current;
         }
 
         try
         {
             if (!await refreshGate.WaitAsync(0))
             {
-                return current;
+                return Current;
             }
         }
         catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
         {
-            return current;
+            return Current;
         }
 
         var releaseWhenReadCompletes = false;
         try
         {
+            // The timeout marker may race the reader's final publication. Use
+            // this reference as an optimistic expected value so a completed
+            // read cannot be overwritten by a late timeout.
+            var expectedBeforeRead = Current;
             var read = Task.Run(() =>
             {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    return Current;
+                }
+
                 try
                 {
-                    current = reader();
+                    return PublishSnapshot(reader());
                 }
                 catch (Exception exception)
                 {
-                    current = current with { LastError = exception.Message };
+                    return PublishError(exception.Message);
                 }
-                return current;
             });
             var winner = await Task.WhenAny(read, Task.Delay(timeoutMs));
             if (winner == read)
+            {
+                return await read;
+            }
+
+            // When the timeout and the reader complete together, prefer the
+            // completed read; otherwise a late timeout marker could overwrite
+            // a snapshot that was already published successfully.
+            if (read.IsCompleted)
             {
                 return await read;
             }
@@ -131,7 +184,10 @@ internal sealed class DiagnosticsMonitor : IDisposable
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
             releaseWhenReadCompletes = true;
-            return current with { LastError = "诊断刷新超时" };
+            // Keep the old CheckedAtMs: a timeout is not a successful fresh read.
+            // Publish the error as well as returning it so /api/health cannot report
+            // an apparently healthy old snapshot while the expensive read is stuck.
+            return PublishError("诊断刷新超时", expectedBeforeRead);
         }
         finally
         {
@@ -155,6 +211,66 @@ internal sealed class DiagnosticsMonitor : IDisposable
         }
     }
 
+    private DiagnosticsSnapshot PublishSnapshot(DiagnosticsSnapshot snapshot)
+    {
+        lock (lifecycleGate)
+        {
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return Volatile.Read(ref current);
+            }
+
+            Volatile.Write(ref current, snapshot);
+            return snapshot;
+        }
+    }
+
+    private DiagnosticsSnapshot PublishError(string error, DiagnosticsSnapshot? expected = null)
+    {
+        lock (lifecycleGate)
+        {
+            var snapshot = Volatile.Read(ref current);
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return snapshot;
+            }
+
+            if (expected is not null && !ReferenceEquals(snapshot, expected))
+            {
+                return snapshot;
+            }
+
+            snapshot = snapshot with { LastError = error };
+            Volatile.Write(ref current, snapshot);
+            return snapshot;
+        }
+    }
+
+    private void NotifyRefreshed(DiagnosticsSnapshot snapshot)
+    {
+        // Keep the external callback out of lifecycleGate: a callback is allowed
+        // to observe or request another refresh without blocking publication.
+        lock (callbackGate)
+        {
+            lock (lifecycleGate)
+            {
+                if (Volatile.Read(ref disposed) != 0)
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                refreshed?.Invoke(snapshot);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"诊断刷新回调失败：{exception.Message}");
+            }
+        }
+    }
+
     private void Run()
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -171,29 +287,23 @@ internal sealed class DiagnosticsMonitor : IDisposable
 
             if (entered)
             {
+                DiagnosticsSnapshot snapshot;
                 try
                 {
                     try
                     {
-                        current = reader();
+                        snapshot = PublishSnapshot(reader());
                     }
                     catch (Exception exception)
                     {
-                        current = current with { LastError = exception.Message };
+                        snapshot = PublishError(exception.Message);
                     }
                 }
                 finally
                 {
                     ReleaseRefreshGate();
                 }
-                try
-                {
-                    refreshed?.Invoke(current);
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine($"诊断刷新回调失败：{exception.Message}");
-                }
+                NotifyRefreshed(snapshot);
             }
             try
             {
@@ -204,17 +314,31 @@ internal sealed class DiagnosticsMonitor : IDisposable
             {
                 break;
             }
+            catch (ObjectDisposedException) when (Volatile.Read(ref disposed) != 0)
+            {
+                break;
+            }
         }
     }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        lock (lifecycleGate)
         {
-            return;
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return;
+            }
+
+            Volatile.Write(ref disposed, 1);
         }
         // wake 不在此释放：后台线程可能仍在等待它，取消令牌已足以让线程退出。
         cancellation.Cancel();
+        // Do not let a late callback touch components that are disposed after
+        // this monitor. The callback itself never runs under lifecycleGate.
+        lock (callbackGate)
+        {
+        }
         refreshGate.Dispose();
         cancellation.Dispose();
     }
