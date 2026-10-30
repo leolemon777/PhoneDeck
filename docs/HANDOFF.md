@@ -49,6 +49,14 @@
     主程序 SHA-256 `c7e99467eadb6208389d2283d243061261a0ac507fa1c3f1aa148eeb38388e95`；旧 dev.4 包（`7cfef843…b890b`）备份在
     `~/Library/Application Support/PhoneDeck/backups/receiver-app-2.0.0-dev.4-20261030/`。首次 kickstart 被
     `OS_REASON_CODESIGNING` 拒绝一次，重试即启动；shared 供音自动重连、日志正常。新 ad-hoc 签名使辅助功能失效，需用户在列表中删除后重新添加。
+- **移植到 Windows（同分支）**：`ReceiverLog`、`AudioGapCounter`、`JitterPrefill` 移入 shared（Receiver.Core.props 引入），
+  Mac 按双声道、Windows 按单声道换算阈值，Mac 行为不变（测试 57/57）。Windows：
+  - 日志写入 `<数据目录>\logs\receiver.log` / `receiver-error.log`（托盘隐藏启动时 stdout 原先全部丢弃）；已核对控制台输出不含敏感信息。
+  - `PhonePcmBuffer` 加 40 ms 抖动缓冲与断续计数（ReadFully 补零前先记真实可读量），排空前 `Flush`；统计全零输入与最大积压。
+  - 每个会话结束（含出错路径）写一行质量摘要；`/api/diagnostics` 的 `audio.quality.current/last` 不带会话 ID（会话 ID 仍只按所属手机过滤）。
+  - 音频长流与 `/api/events` 关联 ApplicationStopping，ShutdownTimeout 5 s 兜底。
+  - 验证：Server Release build 0 warning / 0 error，测试项目编译通过（新增 4 个 PhonePcmBuffer 测试）；本机为 macOS，Windows 测试与
+    ControlCenter 由 CI 运行；未在 Windows 实机部署，抖动缓冲效果与退出耗时需在 Windows 上复测。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
 

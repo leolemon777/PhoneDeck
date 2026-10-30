@@ -42,6 +42,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private AudioStreamMode? activeMode;
     private string? completedSessionId;
     private bool completedDrainSucceeded;
+    private PhoneAudioQuality? lastQuality;
 
     /// <summary>同一共享会话重连时等待旧连接让出的上限。</summary>
     internal const int TakeoverWaitMs = 2_000;
@@ -334,6 +335,58 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 return activeMode?.ToWireValue();
             }
+        }
+    }
+
+    /// <summary>当前会话（若有）与上一个已结束会话的播放质量。</summary>
+    internal (PhoneAudioQuality? Current, PhoneAudioQuality? Last) Quality
+    {
+        get
+        {
+            lock (sessionSync)
+            {
+                var stream = activeStream;
+                return (stream is null || activeSessionId is null
+                    ? null : QualityOf(activeSessionId, stream), lastQuality);
+            }
+        }
+    }
+
+    private static PhoneAudioQuality QualityOf(string sessionId, ActiveStream stream)
+    {
+        var provider = stream.Provider;
+        return new PhoneAudioQuality(
+            sessionId,
+            stream.Mode.ToWireValue(),
+            ElapsedMs(stream.StartedAt),
+            Interlocked.Read(ref stream.ReceivedPcmBytes) / PcmLatency.MsToBytes(1),
+            provider.GapEvents,
+            provider.GapBytes / PcmLatency.MsToBytes(1),
+            provider.DroppedBytes / PcmLatency.MsToBytes(1),
+            provider.SkippedSilenceBytes / PcmLatency.MsToBytes(1),
+            provider.MaxBufferedBytes / PcmLatency.MsToBytes(1),
+            provider.BufferedBytes / PcmLatency.MsToBytes(1),
+            provider.DigitalSilenceBytes / PcmLatency.MsToBytes(1));
+    }
+
+    private void LogQuality(string sessionId, ActiveStream stream)
+    {
+        var quality = QualityOf(sessionId, stream);
+        lock (sessionSync)
+        {
+            lastQuality = quality;
+        }
+        Console.WriteLine(
+            $"[audio:{sessionId}] 结束 mode={quality.Mode} 时长={quality.DurationMs}ms " +
+            $"收到={quality.ReceivedMs}ms 断续={quality.GapEvents}次/{quality.GapMs}ms " +
+            $"溢出丢弃={quality.DroppedMs}ms 静音追赶={quality.SilenceSkippedMs}ms " +
+            $"最大积压={quality.MaxBufferedMs}ms 全零={quality.DigitalSilenceMs}ms " +
+            $"排空={(stream.DrainSucceeded ? "完成" : "未完成")}");
+        if (quality.ReceivedMs >= 2_000 && quality.DigitalSilenceMs * 10 >= quality.ReceivedMs * 9)
+        {
+            Console.Error.WriteLine(
+                $"[audio:{sessionId}] 手机送来的几乎全是数字静音（全零），" +
+                "手机麦克风可能被其他应用占用或被系统静音");
         }
     }
 
@@ -708,6 +761,8 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             // 尾部排空：把已放行的音频完整送入 CABLE 后再停 WASAPI，
             // 否则 pre-roll 突发灌入的尾部会被提前截断。被同会话新连接接管时
             // 由新连接继续供音，旧连接直接让出。
+            // 尾音不再凑抖动缓冲：剩余不足 40 ms 也要立即播完。
+            stream.Provider.Flush();
             var drainDeadline = Environment.TickCount64 + DrainMaxMs;
             while (!stream.Superseded && !stream.OutputFaulted && stream.Provider.BufferedBytes > 0
                 && Environment.TickCount64 < drainDeadline)
@@ -789,6 +844,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             }
             finally
             {
+                TryAudioCleanup(sessionId, "qualityLog", () => LogQuality(sessionId, stream));
                 TryAudioCleanup(sessionId, "sessionState", () =>
                 {
                     lock (sessionSync)
@@ -1044,3 +1100,20 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         }
     }
 }
+
+/// <summary>
+/// 单个音频会话的播放质量（毫秒）。Gap 为播放中途缺数据又恢复的断续；DigitalSilence 为整块全零的输入，
+/// 持续全零通常表示 Android 麦克风被其他应用占用或被系统静音。
+/// </summary>
+internal sealed record PhoneAudioQuality(
+    string SessionId,
+    string Mode,
+    long DurationMs,
+    long ReceivedMs,
+    long GapEvents,
+    long GapMs,
+    long DroppedMs,
+    long SilenceSkippedMs,
+    long MaxBufferedMs,
+    long BufferedMs,
+    long DigitalSilenceMs);

@@ -18,6 +18,11 @@ internal sealed class PhonePcmBuffer : IWaveProvider
     private readonly int? liveLimit;
     private byte[] discard = Array.Empty<byte>();
     private byte[] filtered = new byte[16 * 1024];
+    // 48 kHz 单声道 PCM16：每毫秒 96 字节。
+    private readonly AudioGapCounter gaps = new(PcmLatency.MsToBytes(PlaybackQuality.MaxGapMs));
+    private readonly JitterPrefill prefill = new(PcmLatency.MsToBytes(PlaybackQuality.PrefillMs));
+    private int maxBufferedBytes;
+    private long digitalSilenceBytes;
 
     internal PhonePcmBuffer(AudioStreamMode mode)
     {
@@ -42,11 +47,28 @@ internal sealed class PhonePcmBuffer : IWaveProvider
     // BufferedWaveProvider's CircularBuffer.Count is independently locked;
     // this read-only query need not contend with the producer gate.
     internal int BufferedBytes => buffer.BufferedBytes;
+    /// <summary>播放中途缺数据又恢复的断续次数与补静音字节（流结束的自然排空不计）。</summary>
+    internal long GapEvents => gaps.Events;
+    internal long GapBytes => gaps.Bytes;
+    internal int MaxBufferedBytes { get { lock (sync) { return maxBufferedBytes; } } }
+    /// <summary>整块全零的输入：持续全零通常表示 Android 麦克风被其他应用占用或被系统静音。</summary>
+    internal long DigitalSilenceBytes { get { lock (sync) { return digitalSilenceBytes; } } }
+
+    /// <summary>流结束、排空尾音：抖动缓冲不再等待凑够。</summary>
+    internal void Flush() => prefill.Flush();
 
     internal void AddSamples(byte[] samples, int offset, int count)
     {
         lock (sync)
         {
+            prefill.Resume();
+            for (var block = offset; block + PcmLatency.BlockBytes <= offset + count; block += PcmLatency.BlockBytes)
+            {
+                if (!samples.AsSpan(block, PcmLatency.BlockBytes).ContainsAnyExcept((byte)0))
+                {
+                    digitalSilenceBytes += PcmLatency.BlockBytes;
+                }
+            }
             if (filtered.Length < count)
             {
                 filtered = new byte[count];
@@ -74,6 +96,7 @@ internal sealed class PhonePcmBuffer : IWaveProvider
                 DroppedBytes += skip + remove;
             }
             buffer.AddSamples(samples, offset, count);
+            maxBufferedBytes = Math.Max(maxBufferedBytes, buffer.BufferedBytes);
         }
     }
 
@@ -81,7 +104,22 @@ internal sealed class PhonePcmBuffer : IWaveProvider
     {
         lock (sync)
         {
-            return buffer.Read(destination, offset, count);
+            // ReadFully 会把不足部分补零并照常返回 count，先记下真实可读量用于断续统计。
+            var available = buffer.BufferedBytes;
+            int copied;
+            if (prefill.ShouldPlay(available))
+            {
+                buffer.Read(destination, offset, count);
+                copied = Math.Min(available, count);
+            }
+            else
+            {
+                Array.Clear(destination, offset, count);
+                copied = 0;
+            }
+            prefill.AfterRead(copied, count);
+            gaps.Observe(copied, count);
+            return count;
         }
     }
 }

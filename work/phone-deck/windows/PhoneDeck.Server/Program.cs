@@ -22,12 +22,17 @@ if (!isFirstInstance)
     Console.WriteLine("手机键盘电脑端已经在运行。");
     return;
 }
+// 托盘以隐藏窗口启动接收端，标准输出无人接收；只有主实例写日志文件。
+ReceiverLog.Install(Path.Combine(PhoneDeckDataDirectory.Get(), "logs"));
 
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
 using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receiverIdentity.DisplayName, PhoneDeckDataDirectory.Get());
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
+// 共享音频是不会自行结束的长流；退出时下面的端点会主动收尾，这里只做兜底，
+// 避免默认 30 秒等待让重启/更新时新实例抢不到端口。
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(5));
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNameCaseInsensitive = true;
@@ -338,12 +343,14 @@ app.MapGet("/api/events", async Task<IResult> (HttpContext context) =>
     // Foreground activity is observed once on entry, not once per 50ms poll.
     NoteHealthActivity(context);
     var requesterClientId = context.Items["ClientId"] as string;
+    using var waiting = CancellationTokenSource.CreateLinkedTokenSource(
+        context.RequestAborted, app.Lifetime.ApplicationStopping);
     return Results.Json(await HealthEvents.WaitAsync(
         () => ReadHealthEventState(requesterClientId),
         () => BuildHealth(context),
         context.Request.Query["since"].FirstOrDefault(),
         HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-        context.RequestAborted));
+        waiting.Token));
 });
 
 // 共享麦克风联动开关：控制台界面或 Ctrl+Alt+M 热键从 loopback 调用；
@@ -410,6 +417,32 @@ app.MapGet("/api/config/voice-engines", () =>
 app.MapPost("/api/config/voice-engines", () => Results.Json(
     new { ok = false, error = "请在新版手机 App 的电脑与输入法页面修改设置" }, statusCode: 409));
 
+// 会话 ID 只按所属手机过滤后出现在 audio.sessionId；质量统计不重复带出。
+object AudioQualityView()
+{
+    var (current, last) = audioBridge.Quality;
+    return new
+    {
+        current = AudioQualitySessionView(current),
+        last = AudioQualitySessionView(last),
+        logFile = Path.Combine(PhoneDeckDataDirectory.Get(), "logs", "receiver.log")
+    };
+}
+
+static object? AudioQualitySessionView(PhoneAudioQuality? quality) => quality is null ? null : new
+{
+    mode = quality.Mode,
+    durationMs = quality.DurationMs,
+    receivedMs = quality.ReceivedMs,
+    gapEvents = quality.GapEvents,
+    gapMs = quality.GapMs,
+    droppedMs = quality.DroppedMs,
+    silenceSkippedMs = quality.SilenceSkippedMs,
+    maxBufferedMs = quality.MaxBufferedMs,
+    bufferedMs = quality.BufferedMs,
+    digitalSilenceMs = quality.DigitalSilenceMs
+};
+
 app.MapGet("/api/diagnostics", async (HttpContext context) =>
 {
     // 深诊断：强制刷新一次（带超时），不阻塞 health、音频或快捷键请求。
@@ -468,7 +501,8 @@ app.MapGet("/api/diagnostics", async (HttpContext context) =>
             runtimeCheckedAtMs = runtimeAudio.CheckedAtMs,
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
-            stale = ageMs > DiagnosticsMonitor.StaleAfterMs || snapshot.LastError is not null
+            stale = ageMs > DiagnosticsMonitor.StaleAfterMs || snapshot.LastError is not null,
+            quality = AudioQualityView()
         },
         lan = new
         {
@@ -569,11 +603,14 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
         // 撤销联动（设计 §6）：该 clientId 的音频长流链接"请求取消 + 客户端撤销令牌"，
         // 撤销经 ClientSessionRegistry.Cancel 即时终止长流（V12：不能只拦新 HTTP）。
         var streamClientId = (string?)request.HttpContext.Items["ClientId"];
+        // 退出时立即结束长流（已收到的尾音照常排空），不让关机等满超时。
         using var revocationCts = streamClientId is null
-            ? null
+            ? CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, app.Lifetime.ApplicationStopping)
             : CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, clientSessions.Register(streamClientId));
-        var streamToken = revocationCts?.Token ?? cancellationToken;
+                cancellationToken, app.Lifetime.ApplicationStopping,
+                clientSessions.Register(streamClientId));
+        var streamToken = revocationCts.Token;
         var bytes = await audioBridge.StreamAsync(
             request.Body,
             sessionId,
