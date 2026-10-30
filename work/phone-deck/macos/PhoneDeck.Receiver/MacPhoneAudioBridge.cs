@@ -17,6 +17,11 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private const int PreRollCapacityBytes = 48_000 * 2;
     internal const int ManagedTargetMs = 150;
     internal const int SharedTargetMs = 120;
+    /// <summary>
+    /// 共享模式的播放延迟硬上限，与 Windows PhonePcmBuffer.SharedQueueMs 一致。静音追赶依赖识别静音，
+    /// 手机底噪高时永远不触发；没有上限时每次 Wi-Fi 卡顿都会把延迟永久累加，实测会涨到缓冲上限 2 秒。
+    /// </summary>
+    internal const int SharedQueueMs = 240;
     private const int MonoBytesPerMs = 48_000 * 2 / 1_000;
     private const int StereoBytesPerMs = 48_000 * 4 / 1_000;
     internal const int TakeoverWaitMs = 2_000;
@@ -237,6 +242,8 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                     $"已有 {active.Mode.ToWireValue()} 音频会话正在使用接收端");
             }
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            // 常驻输出跨会话复用：每个会话开始时重新设定上限。managed 的 pre-roll 突发必须完整保留。
+            output.SetLatencyCap(mode == AudioStreamMode.Shared ? SharedQueueMs * StereoBytesPerMs : 0);
             session = new ActiveSession(sessionId, mode, output, cancellation)
             {
                 StartCounters = output.Counters,

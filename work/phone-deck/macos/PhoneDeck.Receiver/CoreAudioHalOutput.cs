@@ -14,6 +14,9 @@ internal interface IMacAudioOutput : IDisposable
 
     /// <summary>播放质量计数（只增不减），会话按起止差值统计。</summary>
     MacAudioOutputCounters Counters => default;
+
+    /// <summary>双声道字节的播放延迟上限（0 为不限）；超过时丢弃最旧的积压。</summary>
+    void SetLatencyCap(int stereoBytes) { }
 }
 
 /// <summary>
@@ -143,6 +146,8 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
     public int BufferedBytes => ring.Count;
 
     public MacAudioOutputCounters Counters => new(gaps.Events, gaps.Bytes, ring.DroppedBytes);
+
+    public void SetLatencyCap(int stereoBytes) => ring.LatencyCapBytes = stereoBytes - stereoBytes % 4;
 
     public void Write(ReadOnlySpan<byte> stereoPcm16)
     {

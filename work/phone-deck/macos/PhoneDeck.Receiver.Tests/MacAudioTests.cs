@@ -106,6 +106,30 @@ public sealed class MacAudioTests
     }
 
     [TestMethod]
+    public async Task SharedStreamCapsPlaybackLatencyButManagedKeepsPreRoll()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var shared = new ChannelStream();
+        var sharedSession = Guid.NewGuid().ToString();
+        var streaming = bridge.StreamAsync(
+            shared, sharedSession, AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None);
+        Assert.IsTrue(bridge.WaitForSessionActive(sharedSession, 1_000));
+        Assert.AreEqual(MacPhoneAudioBridge.SharedQueueMs * 192, factory.Outputs.Single().LatencyCap);
+        shared.Complete();
+        await streaming;
+
+        var managed = new ChannelStream();
+        var managedSession = Guid.NewGuid().ToString();
+        streaming = bridge.StreamAsync(
+            managed, managedSession, AudioStreamMode.Managed, (_, _) => { }, CancellationToken.None);
+        Assert.IsTrue(bridge.WaitForSessionActive(managedSession, 1_000));
+        Assert.AreEqual(0, factory.Outputs.Last().LatencyCap, "managed 不能截断 pre-roll 突发");
+        managed.Complete();
+        await streaming;
+    }
+
+    [TestMethod]
     public async Task StalledSharedStreamReleasesReceiverForManagedDictation()
     {
         // 回归：手机休眠/断网后共享长流成为半开连接，接收端永久被占，所有听写 409。
@@ -439,6 +463,8 @@ public sealed class MacAudioTests
         private readonly object syncRoot = new();
         internal List<byte[]> Writes { get; } = [];
         internal bool DrainCalled, Disposed;
+        internal int LatencyCap = -1;
+        public void SetLatencyCap(int stereoBytes) => LatencyCap = stereoBytes;
         public string DeviceName => "BlackHole 2ch";
         public string DeviceUid => "blackhole";
         public void Write(ReadOnlySpan<byte> stereoPcm16)

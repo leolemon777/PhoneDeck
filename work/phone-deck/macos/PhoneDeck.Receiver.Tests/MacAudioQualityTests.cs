@@ -53,6 +53,24 @@ public sealed class MacAudioQualityTests
     }
 
     [TestMethod]
+    public void RingLatencyCapKeepsOnlyNewestAudio()
+    {
+        var ring = new MacAudioRingBuffer(16) { LatencyCapBytes = 4 };
+        ring.Write(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+        var destination = new byte[8];
+
+        var read = ring.Read(destination);
+
+        Assert.AreEqual(4, read);
+        CollectionAssert.AreEqual(new byte[] { 7, 8, 9, 10, 0, 0, 0, 0 }, destination);
+        Assert.AreEqual(6, ring.DroppedBytes);
+
+        ring.LatencyCapBytes = 0;
+        ring.Write(new byte[10]);
+        Assert.AreEqual(10, ring.Read(new byte[16]), "上限为 0 时只受容量限制");
+    }
+
+    [TestMethod]
     public void PrefillWaitsForCushionAtStartAndAfterUnderrun()
     {
         var prefill = new JitterPrefill(100);
