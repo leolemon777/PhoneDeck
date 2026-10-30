@@ -11,6 +11,22 @@ internal interface IMacAudioOutput : IDisposable
 
     /// <summary>已写入但尚未被渲染的双声道字节，用于静音追赶判断积压。</summary>
     int BufferedBytes => 0;
+
+    /// <summary>播放质量计数（只增不减），会话按起止差值统计。</summary>
+    MacAudioOutputCounters Counters => default;
+}
+
+/// <summary>
+/// GapEvents/GapBytes：已在播放的音频中途取不到数据、随后又恢复的次数与补静音字节（可听见的断续）；
+/// 流结束时的自然排空不计入。DroppedBytes：积压超过缓冲上限被覆盖的字节。均为双声道 PCM16 字节。
+/// </summary>
+internal readonly record struct MacAudioOutputCounters(long GapEvents, long GapBytes, long DroppedBytes)
+{
+    public static MacAudioOutputCounters operator -(
+        MacAudioOutputCounters left, MacAudioOutputCounters right) => new(
+        left.GapEvents - right.GapEvents,
+        left.GapBytes - right.GapBytes,
+        left.DroppedBytes - right.DroppedBytes);
 }
 
 internal interface IMacAudioOutputFactory
@@ -63,6 +79,8 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
     private readonly MacAudioRingBuffer ring = new(48_000 * 4 * 2);
     private readonly RenderCallback renderCallback;
     private byte[] callbackScratch = new byte[32 * 1024];
+    private readonly AudioGapCounter gaps = new();
+    private readonly JitterPrefill prefill = new();
     private IntPtr audioUnit;
     private bool disposed;
 
@@ -123,17 +141,22 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
     public string DeviceUid { get; }
     public int BufferedBytes => ring.Count;
 
+    public MacAudioOutputCounters Counters => new(gaps.Events, gaps.Bytes, ring.DroppedBytes);
+
     public void Write(ReadOnlySpan<byte> stereoPcm16)
     {
         if (disposed)
         {
             return;
         }
+        prefill.Resume();
         ring.Write(stereoPcm16);
     }
 
     public async Task<bool> DrainAsync(int timeoutMilliseconds, int tailMilliseconds)
     {
+        // 尾音不再凑抖动缓冲：剩余不足 40 ms 也要立即播完。
+        prefill.Flush();
         if (disposed || !await ring.WaitForEmptyAsync(timeoutMilliseconds)) return false;
         // The last render callback has consumed PCM, but Core Audio and the input
         // method still need to receive it. Keep rendering silence during this tail.
@@ -168,8 +191,20 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
                 {
                     callbackScratch = new byte[requested];
                 }
-                ring.Read(callbackScratch.AsSpan(0, requested));
+                var scratch = callbackScratch.AsSpan(0, requested);
+                int copied;
+                if (prefill.ShouldPlay(ring.Count))
+                {
+                    copied = ring.Read(scratch);
+                }
+                else
+                {
+                    scratch.Clear();
+                    copied = 0;
+                }
+                prefill.AfterRead(copied, requested);
                 Marshal.Copy(callbackScratch, 0, buffer.Data, requested);
+                gaps.Observe(copied, requested);
             }
             return 0;
         }
@@ -430,4 +465,80 @@ internal sealed class CoreAudioHalOutput : IMacAudioOutput
         IntPtr value, IntPtr buffer, nint bufferSize, uint encoding);
     [DllImport(CoreFoundation)]
     private static extern void CFRelease(IntPtr value);
+}
+
+/// <summary>
+/// 统计播放中途的断续：已有音频后渲染取不到足够数据、随后又恢复，计一次。
+/// 超过 2 秒没有数据视为流已结束（排空、会话间空闲），不计入。
+/// <see cref="Observe"/> 只由实时渲染线程调用：不加锁、不分配。
+/// </summary>
+internal sealed class AudioGapCounter
+{
+    internal const long MaxGapBytes = 48_000 * 4 * 2;
+    private bool hadAudio;
+    private long pendingBytes;
+    private long events;
+    private long bytes;
+
+    internal long Events => Interlocked.Read(ref events);
+    internal long Bytes => Interlocked.Read(ref bytes);
+
+    internal void Observe(int copied, int requested)
+    {
+        if (copied > 0)
+        {
+            if (pendingBytes > 0)
+            {
+                Interlocked.Increment(ref events);
+                Interlocked.Add(ref bytes, pendingBytes);
+                pendingBytes = 0;
+            }
+            hadAudio = true;
+        }
+        if (copied < requested && hadAudio)
+        {
+            pendingBytes += requested - copied;
+            if (pendingBytes > MaxGapBytes)
+            {
+                pendingBytes = 0;
+                hadAudio = false;
+            }
+        }
+    }
+}
+
+/// <summary>
+/// 抖动缓冲：开始播放或播空后，先攒够 <see cref="DefaultPrefillBytes"/>（40 ms）再继续，
+/// 把网络晚到造成的频繁小断续换成一次很短的等待。排空尾音时（<see cref="Flush"/>）不再等待。
+/// <see cref="ShouldPlay"/>/<see cref="AfterRead"/> 只由实时渲染线程调用。
+/// </summary>
+internal sealed class JitterPrefill(int prefillBytes = JitterPrefill.DefaultPrefillBytes)
+{
+    internal const int DefaultPrefillBytes = 48_000 * 4 * 40 / 1_000;
+    private bool priming = true;
+    private volatile bool flushing;
+
+    internal bool ShouldPlay(int bufferedBytes)
+    {
+        if (priming && !flushing && bufferedBytes < prefillBytes)
+        {
+            return false;
+        }
+        priming = false;
+        return true;
+    }
+
+    internal void AfterRead(int copied, int requested)
+    {
+        if (copied < requested)
+        {
+            priming = true;
+        }
+    }
+
+    /// <summary>流结束、排空尾音：不足的部分也立即播放。</summary>
+    internal void Flush() => flushing = true;
+
+    /// <summary>有新音频写入：恢复抖动缓冲。</summary>
+    internal void Resume() => flushing = false;
 }

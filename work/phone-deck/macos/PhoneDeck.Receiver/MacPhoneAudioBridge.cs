@@ -17,6 +17,8 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private const int PreRollCapacityBytes = 48_000 * 2;
     internal const int ManagedTargetMs = 150;
     internal const int SharedTargetMs = 120;
+    private const int MonoBytesPerMs = 48_000 * 2 / 1_000;
+    private const int StereoBytesPerMs = 48_000 * 4 / 1_000;
     internal const int TakeoverWaitMs = 2_000;
     internal const int DrainMaxMs = 3_000;
     internal static readonly int OutputTailMs = PcmLatency.OutputTailMs;
@@ -44,6 +46,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
     private ActiveSession? active;
     private string? completedSessionId;
     private bool completedDrainSucceeded;
+    private MacAudioQuality? lastQuality;
 
     internal MacPhoneAudioBridge(IMacAudioOutputFactory outputFactory, bool keepOutputWarm = false,
         int stallTimeoutMs = DefaultStallTimeoutMs)
@@ -236,6 +239,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             session = new ActiveSession(sessionId, mode, output, cancellation)
             {
+                StartCounters = output.Counters,
                 OwnerId = ownerId,
                 PlaybackReleased = mode == AudioStreamMode.Shared,
                 CatchUp = new PcmSilenceCatchUp(
@@ -266,6 +270,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                     {
                         break;
                     }
+                    session.CountReceived(buffer.AsSpan(0, count));
                     if (session.PlaybackReleased)
                     {
                         session.WriteLive(buffer.AsSpan(0, count));
@@ -326,6 +331,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                         }
                     }
                     session.Cancellation.Dispose();
+                    LogQuality(session, drained, stalled);
                     // Signal before the callback: Stop may hold the dictation lock
                     // while waiting here, and the callback needs that same lock.
                     session.Ended.TrySetResult(drained);
@@ -335,6 +341,39 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         }
         if (stalled) throw new AudioStreamStalledException("手机音频流长时间无数据，连接已释放");
         if (!drained) throw new IOException("手机尾音未能在限定时间内播放完成");
+    }
+
+    /// <summary>当前会话（若有）与上一个已结束会话的播放质量。</summary>
+    internal (MacAudioQuality? Current, MacAudioQuality? Last) Quality
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return (active?.Quality(), lastQuality);
+            }
+        }
+    }
+
+    private void LogQuality(ActiveSession session, bool drained, bool stalled)
+    {
+        var quality = session.Quality();
+        lock (syncRoot)
+        {
+            lastQuality = quality;
+        }
+        Console.WriteLine(
+            $"[audio:{session.SessionId}] 结束 mode={quality.Mode} 时长={quality.DurationMs}ms " +
+            $"收到={quality.ReceivedMs}ms 断续={quality.GapEvents}次/{quality.GapMs}ms " +
+            $"溢出丢弃={quality.DroppedMs}ms 静音追赶={quality.SilenceSkippedMs}ms " +
+            $"最大积压={quality.MaxBufferedMs}ms 全零={quality.DigitalSilenceMs}ms " +
+            $"排空={(drained ? "完成" : "未完成")}{(stalled ? " 断流" : "")}");
+        if (quality.ReceivedMs >= 2_000 && quality.DigitalSilenceMs * 10 >= quality.ReceivedMs * 9)
+        {
+            Console.Error.WriteLine(
+                $"[audio:{session.SessionId}] 手机送来的几乎全是数字静音（全零），" +
+                "手机麦克风可能被其他应用占用或被系统静音");
+        }
     }
 
     public void BeginPlayback(string sessionId)
@@ -477,6 +516,41 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         internal string SessionId { get; } = sessionId;
         internal AudioStreamMode Mode { get; } = mode;
         internal IMacAudioOutput Output { get; } = output;
+        internal long StartedAt { get; } = Environment.TickCount64;
+        internal MacAudioOutputCounters StartCounters { get; init; }
+        private long receivedBytes;
+        private long digitalSilenceBytes;
+        private int maxBufferedBytes;
+
+        /// <summary>统计收到的单声道 PCM16：总量与整块全零（Android 静默采集）的部分；调用方持有桥接锁。</summary>
+        internal void CountReceived(ReadOnlySpan<byte> mono)
+        {
+            receivedBytes += mono.Length;
+            for (var offset = 0; offset + PcmLatency.BlockBytes <= mono.Length; offset += PcmLatency.BlockBytes)
+            {
+                if (!mono.Slice(offset, PcmLatency.BlockBytes).ContainsAnyExcept((byte)0))
+                {
+                    digitalSilenceBytes += PcmLatency.BlockBytes;
+                }
+            }
+        }
+
+        internal MacAudioQuality Quality()
+        {
+            var counters = Output.Counters - StartCounters;
+            return new MacAudioQuality(
+                SessionId,
+                Mode.ToWireValue(),
+                Environment.TickCount64 - StartedAt,
+                receivedBytes / MonoBytesPerMs,
+                counters.GapEvents,
+                counters.GapBytes / StereoBytesPerMs,
+                counters.DroppedBytes / StereoBytesPerMs,
+                CatchUp.SkippedBytes / MonoBytesPerMs,
+                maxBufferedBytes / StereoBytesPerMs,
+                Output.BufferedBytes / StereoBytesPerMs,
+                digitalSilenceBytes / MonoBytesPerMs);
+        }
         internal CancellationTokenSource Cancellation { get; } = cancellation;
         internal Queue<byte[]> PreRoll { get; } = new();
         internal int PreRollBytes { get; set; }
@@ -500,9 +574,27 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
             if (stereo.Length > 0)
             {
                 Output.Write(stereo);
+                maxBufferedBytes = Math.Max(maxBufferedBytes, Output.BufferedBytes);
             }
         }
         internal TaskCompletionSource<bool> Ended { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
+
+/// <summary>
+/// 单个音频会话的播放质量（毫秒）。Gap 为播放中途缺数据又恢复的断续；DigitalSilence 为整块全零的输入，
+/// 持续全零通常表示 Android 麦克风被其他应用占用或被系统静音。
+/// </summary>
+internal sealed record MacAudioQuality(
+    string SessionId,
+    string Mode,
+    long DurationMs,
+    long ReceivedMs,
+    long GapEvents,
+    long GapMs,
+    long DroppedMs,
+    long SilenceSkippedMs,
+    long MaxBufferedMs,
+    long BufferedMs,
+    long DigitalSilenceMs);

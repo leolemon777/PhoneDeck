@@ -31,6 +31,8 @@ if (!isFirstInstance)
     Console.WriteLine("PhoneDeck macOS 接收端已经在运行。");
     return;
 }
+// 只有主实例写日志文件：第二个实例会立即退出，不应覆盖或轮换正在使用的日志。
+ReceiverLog.Install();
 
 var capabilities = new[]
 {
@@ -68,6 +70,9 @@ using var lanDiscovery = new LanDiscoveryResponder(
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
+// 共享音频是不会自行结束的长流；退出时下面的端点会主动收尾，这里只做兜底，
+// 避免默认 30 秒等待让重启/升级时新实例抢不到端口。
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(5));
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNameCaseInsensitive = true;
@@ -331,6 +336,33 @@ JsonArray EngineModesJson(MacVoiceEngineProfile profile)
     return modes;
 }
 
+JsonObject AudioQualityJson()
+{
+    var (current, last) = audioBridge.Quality;
+    return new JsonObject
+    {
+        ["current"] = AudioQualitySessionJson(current),
+        ["last"] = AudioQualitySessionJson(last),
+        ["logFile"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Library", "Logs", "PhoneDeck", "receiver.log")
+    };
+}
+
+static JsonObject? AudioQualitySessionJson(MacAudioQuality? quality) => quality is null ? null : new JsonObject
+{
+    ["sessionId"] = quality.SessionId,
+    ["mode"] = quality.Mode,
+    ["durationMs"] = quality.DurationMs,
+    ["receivedMs"] = quality.ReceivedMs,
+    ["gapEvents"] = quality.GapEvents,
+    ["gapMs"] = quality.GapMs,
+    ["droppedMs"] = quality.DroppedMs,
+    ["silenceSkippedMs"] = quality.SilenceSkippedMs,
+    ["maxBufferedMs"] = quality.MaxBufferedMs,
+    ["bufferedMs"] = quality.BufferedMs,
+    ["digitalSilenceMs"] = quality.DigitalSilenceMs
+};
+
 JsonObject UsbWatchdogJson() => new()
 {
     ["enabled"] = settings.UsbWatchdog,
@@ -384,12 +416,14 @@ app.MapGet("/api/events", async Task<IResult> (HttpContext context) =>
     // 前台活动只在进入时记录一次，不随 50 ms 比对重复触发。
     NoteHealthActivity(context);
     var requesterClientId = context.Items["ClientId"] as string;
+    using var waiting = CancellationTokenSource.CreateLinkedTokenSource(
+        context.RequestAborted, app.Lifetime.ApplicationStopping);
     return Results.Json(await HealthEvents.WaitAsync(
         () => ReadHealthEventState(requesterClientId),
         () => BuildHealth(context, noteActivity: false),
         context.Request.Query["since"].FirstOrDefault(),
         HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-        context.RequestAborted), ReceiverApiJsonContext.Default.JsonNode);
+        waiting.Token), ReceiverApiJsonContext.Default.JsonNode);
 });
 
 app.MapGet("/api/diagnostics", () =>
@@ -420,7 +454,8 @@ app.MapGet("/api/diagnostics", () =>
             ["sessionId"] = audioBridge.ActiveSessionId,
             ["mode"] = audioBridge.ActiveMode?.ToWireValue(),
             ["lastError"] = audio.Error,
-            ["recommendedVirtualDevice"] = "BlackHole 2ch / 48 kHz"
+            ["recommendedVirtualDevice"] = "BlackHole 2ch / 48 kHz",
+            ["quality"] = AudioQualityJson()
         },
         ["voiceEngine"] = new JsonObject
         {
@@ -481,10 +516,13 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
         }
         // 撤销该手机即终止其音频长流（不只拦截新请求）。
         var streamClientId = context.Items["ClientId"] as string;
+        // 退出时立即结束长流（已收到的尾音照常排空），不让关机等满超时。
         using var revocation = streamClientId is null
-            ? null
+            ? CancellationTokenSource.CreateLinkedTokenSource(
+                context.RequestAborted, app.Lifetime.ApplicationStopping)
             : CancellationTokenSource.CreateLinkedTokenSource(
-                context.RequestAborted, clientSessions.Register(streamClientId));
+                context.RequestAborted, app.Lifetime.ApplicationStopping,
+                clientSessions.Register(streamClientId));
         await audioBridge.StreamAsync(
             context.Request.Body,
             sessionId!,
@@ -496,7 +534,7 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
                     dictationSessions.AudioEnded(endedSession);
                 }
             },
-            revocation?.Token ?? context.RequestAborted,
+            revocation.Token,
             streamClientId);
         return Results.Ok(new AudioStreamResult(true, sessionId, mode.ToWireValue()));
     }

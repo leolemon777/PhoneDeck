@@ -15,6 +15,7 @@ internal sealed class MacAudioRingBuffer
     private readonly byte[] data;
     private long writePosition;
     private long readPosition;
+    private long droppedBytes;
 
     internal MacAudioRingBuffer(int capacity)
     {
@@ -26,6 +27,9 @@ internal sealed class MacAudioRingBuffer
     }
 
     internal int Capacity => data.Length;
+
+    /// <summary>溢出时被覆盖、从未播放的字节累计（只增不减）。</summary>
+    internal long DroppedBytes => Volatile.Read(ref droppedBytes);
 
     internal int Count
     {
@@ -70,6 +74,7 @@ internal sealed class MacAudioRingBuffer
         var read = Volatile.Read(ref readPosition);
         if (write - read > data.Length)
         {
+            Volatile.Write(ref droppedBytes, droppedBytes + (write - data.Length - read));
             read = write - data.Length;
         }
         var copied = (int)Math.Min(write - read, destination.Length);
