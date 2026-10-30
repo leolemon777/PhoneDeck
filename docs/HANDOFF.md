@@ -57,6 +57,13 @@
   - 音频长流与 `/api/events` 关联 ApplicationStopping，ShutdownTimeout 5 s 兜底。
   - 验证：Server Release build 0 warning / 0 error，测试项目编译通过（新增 4 个 PhonePcmBuffer 测试）；本机为 macOS，Windows 测试与
     ControlCenter 由 CI 运行；未在 Windows 实机部署，抖动缓冲效果与退出耗时需在 Windows 上复测。
+- **Mac 共享延迟上限**：新日志 95 分钟 37 个 shared 会话中 18 个最大积压超过 1 秒、9 个顶到环形缓冲 2 秒上限，
+  溢出丢弃合计 19.1 秒，静音追赶 0 ms（手机底噪高于静音阈值，从不触发），即 Typeless 经常晚 1–2 秒听到声音。
+  Windows 早有 `SharedQueueMs = 240` 硬上限，Mac 缺失。现在 `MacAudioRingBuffer.LatencyCapBytes` 在读取端跳到最新 240 ms
+  （只由实时线程移动读位置，无锁），shared 会话开始设上限、managed 设 0 以保留 pre-roll。Mac 测试 59/59。
+  已安装到作者 Mac（主程序 SHA-256 `c3ab420d1f14b93c318aa4a0ec3a0de5afc75be134924e09ba67945097115195`），
+  同一 Wi-Fi shared 3 分钟：延迟稳定约 230 ms、写入侧最大 296 ms，丢弃 194 ms。重装后辅助功能需删除重加并重启接收端。
+- 作者用“共享 + Mac 按 Fn”方式听写，手机受控听写（managed）尚未经过新版，`capturing=true` 新探测与 managed 尾音仍待一次实测。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
 
