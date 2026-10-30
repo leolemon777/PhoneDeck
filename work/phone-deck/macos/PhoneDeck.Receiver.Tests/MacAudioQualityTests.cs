@@ -5,10 +5,12 @@ namespace PhoneDeck.MacReceiver.Tests;
 [TestClass]
 public sealed class MacAudioQualityTests
 {
+    private const long MaxGap = 48_000 * 4 * PlaybackQuality.MaxGapMs / 1_000;
+
     [TestMethod]
     public void GapIsCountedOnlyWhenAudioResumes()
     {
-        var gaps = new AudioGapCounter();
+        var gaps = new AudioGapCounter(MaxGap);
 
         gaps.Observe(0, 512); // 开始前的空闲不算断续
         gaps.Observe(512, 512);
@@ -24,9 +26,9 @@ public sealed class MacAudioQualityTests
     [TestMethod]
     public void EndOfStreamDrainIsNotAGap()
     {
-        var gaps = new AudioGapCounter();
+        var gaps = new AudioGapCounter(MaxGap);
         gaps.Observe(512, 512);
-        for (long silent = 0; silent <= AudioGapCounter.MaxGapBytes; silent += 512)
+        for (long silent = 0; silent <= MaxGap; silent += 512)
         {
             gaps.Observe(0, 512);
         }
@@ -53,7 +55,7 @@ public sealed class MacAudioQualityTests
     [TestMethod]
     public void PrefillWaitsForCushionAtStartAndAfterUnderrun()
     {
-        var prefill = new JitterPrefill(prefillBytes: 100);
+        var prefill = new JitterPrefill(100);
 
         Assert.IsFalse(prefill.ShouldPlay(99));
         Assert.IsTrue(prefill.ShouldPlay(100));
@@ -68,7 +70,7 @@ public sealed class MacAudioQualityTests
     [TestMethod]
     public void FlushPlaysTailWithoutWaitingForCushion()
     {
-        var prefill = new JitterPrefill(prefillBytes: 100);
+        var prefill = new JitterPrefill(100);
         prefill.AfterRead(0, 64);
 
         prefill.Flush();

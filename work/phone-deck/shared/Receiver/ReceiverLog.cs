@@ -1,10 +1,9 @@
 using System.Text;
 
-namespace PhoneDeck.MacReceiver;
-
 /// <summary>
-/// 把控制台输出同时写入 ~/Library/Logs/PhoneDeck/receiver.log（逐行时间戳，超过上限轮换一份旧文件）。
-/// launchd 启动时标准输出被丢弃，语音失败后没有任何记录可查；文件写入失败只停用文件，不影响接收端。
+/// 把控制台输出同时写入日志目录下的 receiver.log / receiver-error.log（逐行时间戳，超过上限轮换一份旧文件）。
+/// macOS 由 launchd、Windows 由托盘隐藏启动，标准输出都被丢弃，语音失败后没有任何记录可查；
+/// 文件写入失败只停用文件，不影响接收端。Windows 与 macOS 接收端共用。
 /// </summary>
 internal sealed class ReceiverLog : TextWriter
 {
@@ -30,13 +29,10 @@ internal sealed class ReceiverLog : TextWriter
     public override Encoding Encoding => Encoding.UTF8;
 
     /// <summary>为标准输出与错误输出安装日志；失败时保持原控制台不变。</summary>
-    internal static void Install()
+    internal static void Install(string directory)
     {
         try
         {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Library", "Logs", "PhoneDeck");
             Console.SetOut(new ReceiverLog(Console.Out, Path.Combine(directory, "receiver.log")));
             Console.SetError(new ReceiverLog(Console.Error, Path.Combine(directory, "receiver-error.log")));
         }

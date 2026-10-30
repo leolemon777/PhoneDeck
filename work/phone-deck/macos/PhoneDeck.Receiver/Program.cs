@@ -32,7 +32,7 @@ if (!isFirstInstance)
     return;
 }
 // 只有主实例写日志文件：第二个实例会立即退出，不应覆盖或轮换正在使用的日志。
-ReceiverLog.Install();
+ReceiverLog.Install(MacLogDirectory());
 
 var capabilities = new[]
 {
@@ -336,6 +336,9 @@ JsonArray EngineModesJson(MacVoiceEngineProfile profile)
     return modes;
 }
 
+static string MacLogDirectory() => Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Logs", "PhoneDeck");
+
 JsonObject AudioQualityJson()
 {
     var (current, last) = audioBridge.Quality;
@@ -343,8 +346,7 @@ JsonObject AudioQualityJson()
     {
         ["current"] = AudioQualitySessionJson(current),
         ["last"] = AudioQualitySessionJson(last),
-        ["logFile"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Library", "Logs", "PhoneDeck", "receiver.log")
+        ["logFile"] = Path.Combine(MacLogDirectory(), "receiver.log")
     };
 }
 

@@ -38,5 +38,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SessionLeaseRegistry.cs" Link="Core/SessionLeaseRegistry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TargetEnvelopeValidator.cs" Link="Core/TargetEnvelopeValidator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Audio/PcmLatency.cs" Link="Core/PcmLatency.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Audio/PlaybackQuality.cs" Link="Core/PlaybackQuality.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)ReceiverLog.cs" Link="Core/ReceiverLog.cs" />
   </ItemGroup>
 </Project>
