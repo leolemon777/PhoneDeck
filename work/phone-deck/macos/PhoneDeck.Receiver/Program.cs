@@ -207,13 +207,36 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
     _ => { }) { Presence = phonePresence });
 
 // 健康应答用 JsonObject 组装（原生编译不能序列化匿名对象），字段与旧版逐字一致。
-JsonObject BuildHealth(HttpContext context)
+void NoteHealthActivity(HttpContext context)
 {
-    var requesterClientId = context.Items["ClientId"] as string;
     // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
     if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
     {
         audioBridge.NotePhoneActivity();
+    }
+}
+
+// 长轮询等待期间只比较决定 stateVersion 的标量，取值与 BuildHealth 完全一致；
+// 完整健康 JSON 只在真正应答时组装一次。
+HealthEvents.State ReadHealthEventState(string? requesterClientId)
+{
+    return new HealthEvents.State(
+        audioBridge.Probe().Available,
+        audioBridge.IsStreaming,
+        audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
+        audioBridge.ActiveMode?.ToWireValue(),
+        dictationSessions.Receipts.For(requesterClientId),
+        dictationSessions.IsActive,
+        dictationSessions.IsOwnedBy(requesterClientId) ? dictationSessions.ActiveSessionId : null,
+        CachedCapturing(out _));
+}
+
+JsonObject BuildHealth(HttpContext context, bool noteActivity = true)
+{
+    var requesterClientId = context.Items["ClientId"] as string;
+    if (noteActivity)
+    {
+        NoteHealthActivity(context);
     }
     var audio = audioBridge.Probe();
     var capturing = CachedCapturing(out var capturingAgeMs);
@@ -356,11 +379,18 @@ app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(contex
 
 // healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
 // 显式 Task<IResult>：否则表达式体 lambda 会绑定到 RequestDelegate 重载，结果被丢弃、应答为空。
-app.MapGet("/api/events", async Task<IResult> (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
-    () => BuildHealth(context),
-    context.Request.Query["since"].FirstOrDefault(),
-    HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-    context.RequestAborted), ReceiverApiJsonContext.Default.JsonNode));
+app.MapGet("/api/events", async Task<IResult> (HttpContext context) =>
+{
+    // 前台活动只在进入时记录一次，不随 50 ms 比对重复触发。
+    NoteHealthActivity(context);
+    var requesterClientId = context.Items["ClientId"] as string;
+    return Results.Json(await HealthEvents.WaitAsync(
+        () => ReadHealthEventState(requesterClientId),
+        () => BuildHealth(context, noteActivity: false),
+        context.Request.Query["since"].FirstOrDefault(),
+        HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
+        context.RequestAborted), ReceiverApiJsonContext.Default.JsonNode);
+});
 
 app.MapGet("/api/diagnostics", () =>
 {
