@@ -27,9 +27,24 @@
 - **语音失效修复**：Mac 启动听写未在 2 秒内确认采集时，`ResetEngine` 原先无条件再按一次切换键；
   若引擎漏掉了首键，这一键反而让 Typeless 开始无人控制的录音，此后每次开始都因“已在采集”被拒。
   现与 Windows `TryStopEngine` 一致：先读真实状态，已停止只释放按住的键。新增回归测试，Mac 测试 51/51。
-- **待办（未改）**：手机麦克风读取出错（来电、audioserver 重启、被抢占）后共享麦克风直接停止且不重试；
-  Android 10+ 麦克风被其他应用占用时系统静默送 0，手机与电脑均无检测；Mac LaunchAgent 未设
-  StandardOutPath/StandardErrorPath，接收端日志全部丢弃；Mac 输出无欠载/丢弃/延迟计数，音质问题无法量化。
+- **可靠性与音质（同分支后续提交）**：
+  - Mac 日志：控制台输出同时写入 `~/Library/Logs/PhoneDeck/receiver.log` / `receiver-error.log`，逐行时间戳，
+    2 MB 轮换一份；仅主实例写入，写失败只停用文件。已核对控制台输出不含令牌、密码或配对码。
+  - Mac 音质计数：`/api/diagnostics` 的 `audio.quality.current/last` 新增可选字段（断续次数/时长、溢出丢弃、
+    静音追赶、最大积压、当前积压、全零输入），每个会话结束写一行摘要；全零占比 ≥90% 时写错误日志提示手机麦克风被占用。
+    不改 health/events 字段与 hash。
+  - Mac 抖动缓冲：开始播放或播空后先攒 40 ms 再继续；排空尾音时不等待。同一 Wi-Fi shared 会话实测
+    改前 60 s 5 次/115 ms 断续，改后 150 s 共 3 次/58 ms（约 5/min → 1.2/min），最大积压 ≤190 ms。
+  - Mac 退出：音频长流与 `/api/events` 关联 ApplicationStopping，HostOptions.ShutdownTimeout 5 s 兜底；
+    SIGTERM 后 shared 流 0.5 s 内排空结束，整体退出 31 s → 5.25 s（剩余为手机另一条 8766 连接等待兜底）。
+  - Android 共享麦克风：读取出错时只重建 AudioRecord（0.3/0.6/1.2/2/3/3 s 退避，稳定 5 s 清零），
+    期间向各接收端送 20 ms 静音保持长流；权限撤销或超过 6 次才停止。界面与通知显示“麦克风恢复中”。
+  - Android 静默采集检测：`MicSilenceMonitor` 在 API 29+ 每秒读 `isClientSilenced`，所有版本兜底检测连续 3 秒全零；
+    共享模式更新状态与通知，听写模式在界面红色提示。
+  - 验证：Mac 测试 57/57，AOT 包构建成功；Android assembleDebug 成功，单元测试 71/71，lint 0 error / 42 warning。
+    Mac 新包只在 dist 临时运行实测，已恢复原安装 App（辅助功能 trusted、shared 已重连），未替换 `~/Applications`。
+  - 未验证：Android 新 APK 未装机（无固定签名），麦克风恢复与占用提示需在实机用来电/微信语音复测；
+    managed 听写的抖动缓冲尾音与 Typeless `capturing=true` 新探测路径需一次真实听写确认；Windows 未做同类改动。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。
 
