@@ -199,8 +199,22 @@ internal sealed class DictationSessionManager : IDisposable
         }
         if (capturingBeforeStart is true)
         {
-            throw new InvalidOperationException(
-                $"{engine.EngineDisplayName} 已在听写，请先在电脑端停止后重试");
+            // 若当前并无受管听写会话，说明电脑端残留了孤立采集状态（如上次停止超时或误触）；
+            // 先自动尝试复位一次，避免手机端连续点按全部被 409 锁死。
+            lock (syncRoot)
+            {
+                if (activeDictationSessionId is null && TryStopEngine(requestId: null, out _))
+                {
+                    capturingBeforeStart = false;
+                    Console.WriteLine(
+                        $"[dictation:{normalizedSessionId}] 自动复位残留的 {engine.EngineDisplayName} 采集状态");
+                }
+            }
+            if (capturingBeforeStart is true)
+            {
+                throw new InvalidOperationException(
+                    $"{engine.EngineDisplayName} 已在听写，请先在电脑端停止后重试");
+            }
         }
 
         lock (syncRoot)

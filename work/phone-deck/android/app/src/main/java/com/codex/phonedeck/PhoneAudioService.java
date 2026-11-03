@@ -461,8 +461,8 @@ public final class PhoneAudioService extends Service {
                             ? null : outcome.result;
                     if (result == null) {
                         if (outcome != null && outcome.pairingRejected) {
-                            // 地址可达但令牌被明确拒绝：这是显式失效，不保留旧 sink。
-                            explicitRemovals.add(targetKey(device.computerId));
+                            // 地址可达但 LAN 令牌被拒绝：不保留旧 LAN sink，但也不加入 explicitRemovals，
+                            // 避免阻断同一台电脑已在线的 USB 兜底目标。
                             states.put(device.computerId, "需要重新配对");
                         } else {
                             RetainedTarget retained = retainTransientTarget(

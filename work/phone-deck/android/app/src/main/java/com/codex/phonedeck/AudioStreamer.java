@@ -55,6 +55,7 @@ final class AudioStreamer implements AutoCloseable {
     private volatile Exception linkFailure;
     private String activeSessionId;
     private boolean stopRequested;
+    private boolean captureLoopExited;
     private Thread worker;
 
     /// 按下话筒时预先创建（但不启动）的 AudioRecord：初始化在部分机型上要上百毫秒，
@@ -105,6 +106,7 @@ final class AudioStreamer implements AutoCloseable {
             }
             shouldRun = true;
             stopRequested = false;
+            captureLoopExited = false;
             activeSessionId = sessionId;
             paused = false;
             recorderNeedsRestart = false;
@@ -260,6 +262,7 @@ final class AudioStreamer implements AutoCloseable {
                     // 录音尚未完全启动或已经停止。
                 }
             }
+            syncRoot.notifyAll();
         }
         // Stop capture immediately, but let the upload thread close HTTP cleanly.
         AudioUpload.abortAfter(stoppingWorker, AudioUpload.FINISH_TIMEOUT_MS, () -> {
@@ -274,6 +277,29 @@ final class AudioStreamer implements AutoCloseable {
                 connection.disconnect();
             }
         });
+    }
+
+    /// 等待采音主循环退出并刷出最后一段 PCM，减少停止命令比音频尾帧先到电脑的竞态。
+    void awaitStopCapture(String expectedSessionId, long timeoutMs) {
+        if (timeoutMs <= 0) {
+            return;
+        }
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        synchronized (syncRoot) {
+            while (worker != null && worker.isAlive() && !captureLoopExited
+                    && (expectedSessionId == null || expectedSessionId.equals(activeSessionId))) {
+                long remaining = deadline - SystemClock.elapsedRealtime();
+                if (remaining <= 0) {
+                    break;
+                }
+                try {
+                    syncRoot.wait(remaining);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
     }
 
     /// 点击后最前面的 PCM 暂存环：只保留最近 PRE_ROLL_BYTES，
@@ -378,7 +404,11 @@ final class AudioStreamer implements AutoCloseable {
                             lastLevelUpdate = now;
                         }
                     }
-                    Thread.sleep(PAUSE_KEEPALIVE_INTERVAL_MS);
+                    synchronized (syncRoot) {
+                        if (shouldRun && paused) {
+                            syncRoot.wait(PAUSE_KEEPALIVE_INTERVAL_MS);
+                        }
+                    }
                     continue;
                 }
                 synchronized (syncRoot) {
@@ -434,10 +464,15 @@ final class AudioStreamer implements AutoCloseable {
                     lastLevelUpdate = now;
                 }
             }
+            if (linkOutput != null && !preRollFlushed) {
+                preRoll.drainTo(linkOutput);
+                linkOutput.flush();
+            }
+            synchronized (syncRoot) {
+                captureLoopExited = true;
+                syncRoot.notifyAll();
+            }
             if (linkOutput != null) {
-                if (!preRollFlushed) {
-                    preRoll.drainTo(linkOutput);
-                }
                 AudioUpload.finish(activeConnection, linkOutput);
                 log(sessionId, "tailConfirmed", startedAt);
             }
@@ -471,8 +506,10 @@ final class AudioStreamer implements AutoCloseable {
             }
             log(sessionId, "sessionStopped", startedAt);
             synchronized (syncRoot) {
+                captureLoopExited = true;
                 worker = null;
                 activeSessionId = null;
+                syncRoot.notifyAll();
             }
             listener.onStopped(sessionId, stoppedReason);
         }

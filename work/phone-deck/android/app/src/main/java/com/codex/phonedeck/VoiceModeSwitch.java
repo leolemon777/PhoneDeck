@@ -31,29 +31,33 @@ final class VoiceModeSwitch extends FrameLayout {
         super(context);
         this.theme = theme;
         this.minimal = minimal;
-        setBackground(theme.shape(context, minimal ? Color.TRANSPARENT : theme.primaryContainer, 28));
-        setPadding(dp(4), dp(4), dp(4), dp(4));
+        int buttonHeight = dp(minimal ? 36 : 44);
+        setBackground(minimal
+                ? theme.shape(context, theme.surface, 20, 1, theme.outline)
+                : theme.shape(context, theme.primaryContainer, 26));
+        setPadding(dp(3), dp(3), dp(3), dp(3));
         indicator = new View(context);
-        indicator.setBackground(theme.shape(context, minimal ? theme.surfaceRaised : theme.primary, 24));
+        indicator.setBackground(theme.shape(context,
+                minimal ? theme.primary : theme.primary, minimal ? 17 : 22));
         indicator.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        addView(indicator, new FrameLayout.LayoutParams(0, dp(48)));
+        addView(indicator, new FrameLayout.LayoutParams(0, buttonHeight));
         choices = new LinearLayout(context);
-        addView(choices, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(48)));
-        String[] labels = {"点击", "按住", "共享"};
+        addView(choices, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, buttonHeight));
+        String[] labels = {"点击说话", "按住说话", "共享麦克风"};
         String[] descriptions = {"点击说话，再次点击停止", "按住说话，松开停止", "共享麦克风，由电脑控制听写"};
         for (int i = 0; i < buttons.length; i++) {
             final String mode = modes[i];
             Button button = new Button(context);
             buttons[i] = button;
             button.setText(labels[i]);
-            button.setTextSize(13);
+            button.setTextSize(12.5f);
             button.setAllCaps(false);
             button.setSingleLine(true);
             button.setPadding(dp(2), 0, dp(2), 0);
             button.setGravity(Gravity.CENTER);
             button.setStateListAnimator(null);
             button.setBackground(theme.pressable(context, Color.TRANSPARENT,
-                    theme.surfaceRaised, 24));
+                    theme.surfaceRaised, minimal ? 17 : 22));
             button.setContentDescription(descriptions[i]);
             button.setAccessibilityDelegate(new View.AccessibilityDelegate() {
                 @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
@@ -65,7 +69,7 @@ final class VoiceModeSwitch extends FrameLayout {
             });
             TouchFeedback.install(button, null, false);
             button.setOnClickListener(view -> listener.onSelect(mode, view));
-            choices.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1f));
+            choices.addView(button, new LinearLayout.LayoutParams(0, buttonHeight, 1f));
         }
         setMode("tap", false);
     }
@@ -76,8 +80,8 @@ final class VoiceModeSwitch extends FrameLayout {
         for (int i = 0; i < buttons.length; i++) {
             boolean selected = modes[i].equals(mode);
             buttons[i].setSelected(selected);
-            buttons[i].setTextColor(minimal ? (selected ? theme.text : theme.muted)
-                    : (selected ? theme.onPrimary : theme.onPrimaryContainer));
+            buttons[i].setTextColor(selected ? theme.onPrimary
+                    : (minimal ? theme.muted : theme.onPrimaryContainer));
             buttons[i].setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
             if (selected) selectedIndex = i;
         }

@@ -54,8 +54,8 @@ final class SharedAudioPolicies {
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
     }
 
-    /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
-    static final double SILENCE_RMS = 130;
+    /// 与接收端 PcmLatency 一致：RMS 低于约 -42 dBFS 视为静音。
+    static final double SILENCE_RMS = 250;
 
     static boolean isSilent(byte[] pcm) {
         int samples = pcm.length / 2;

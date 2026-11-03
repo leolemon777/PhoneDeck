@@ -4,7 +4,7 @@
 /// </summary>
 internal static class PlaybackQuality
 {
-    /// <summary>抖动缓冲：开始播放或播空后先攒够这么多再继续。</summary>
+    /// <summary>抖动缓冲：开始播放或播空后先攒够这么多再继续（40 ms 为 20 ms 单帧留出抖动裕量且不增加尾音积压）。</summary>
     internal const int PrefillMs = 40;
 
     /// <summary>超过这么久没有数据视为流已结束（排空、会话间空闲），不计为断续。</summary>

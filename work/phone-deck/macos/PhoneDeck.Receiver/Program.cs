@@ -625,13 +625,24 @@ app.MapPost("/api/dictation/stop", (DictationCommand command, HttpContext contex
     }
 });
 
-app.MapPost("/api/input", (InputCommand command) =>
+app.MapPost("/api/input", async (InputCommand command, HttpContext context) =>
 {
     try
     {
+        if (audioBridge.IsStreaming
+            && string.Equals(command.Action, "typeless", StringComparison.Ordinal)
+            && engineController.IsCapturing() == true)
+        {
+            // 共享麦克风下通过手机快捷键结束听写：等待手机尾音经缓冲与虚拟声卡送达输入法后再发停止键。
+            await Task.Delay(260, context.RequestAborted);
+        }
         var result = inputProcessor.Execute(command, receiverIdentity.ComputerId);
         return Results.Ok(new InputResult(true, result.Duplicate, command.RequestId,
             receiverIdentity.ComputerId, result.Message, null));
+    }
+    catch (OperationCanceledException)
+    {
+        return Results.StatusCode(499);
     }
     catch (ArgumentException exception)
     {

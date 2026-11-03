@@ -10,8 +10,8 @@ using NAudio.Wave;
 internal sealed class PhonePcmBuffer : IWaveProvider
 {
     internal const int ManagedTargetMs = 150;
-    internal const int SharedTargetMs = 120;
-    internal const int SharedQueueMs = 240;
+    internal const int SharedTargetMs = 60;
+    internal const int SharedQueueMs = 220;
     private readonly object sync = new();
     private readonly BufferedWaveProvider buffer;
     private readonly PcmSilenceCatchUp catchUp;
@@ -30,14 +30,16 @@ internal sealed class PhonePcmBuffer : IWaveProvider
         buffer = new BufferedWaveProvider(new WaveFormat(48_000, 16, 1))
         {
             // Shared mode releases pre-roll immediately and enforces its own
-            // 240ms live queue below; do not allocate the managed 2.7s buffer
+            // 220ms live queue below; do not allocate the managed 2.7s buffer
             // for every shared microphone session.
             BufferDuration = TimeSpan.FromMilliseconds(
                 shared ? SharedQueueMs : PhoneAudioBridge.PreRollHoldMs + 1_200),
             DiscardOnBufferOverflow = true,
             ReadFully = true
         };
-        catchUp = new PcmSilenceCatchUp(shared ? SharedTargetMs : ManagedTargetMs);
+        catchUp = new PcmSilenceCatchUp(
+            shared ? SharedTargetMs : ManagedTargetMs,
+            shared ? PcmLatency.SharedHangoverMs : PcmLatency.HangoverMs);
         liveLimit = shared ? PcmLatency.MsToBytes(SharedQueueMs) : null;
     }
 

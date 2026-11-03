@@ -532,7 +532,16 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         {
             return true;
         }
-        return stream.Ended.Wait(timeoutMilliseconds) && stream.DrainSucceeded;
+        var eofGraceMs = Math.Min(timeoutMilliseconds, 800);
+        if (stream.Ended.Wait(eofGraceMs))
+        {
+            return stream.DrainSucceeded;
+        }
+        // 手机端已发 /api/dictation/stop，但音频流分块 EOF 可能在 Wi-Fi 上迟到；
+        // 800ms 仍未结束时主动结束输入读取，进入已收 PCM 排空与尾音播放阶段。
+        StopSession(sessionId);
+        var remainingMs = Math.Max(1, timeoutMilliseconds - eofGraceMs);
+        return stream.Ended.Wait(remainingMs) && stream.DrainSucceeded;
     }
 
     internal async Task<long> StreamAsync(

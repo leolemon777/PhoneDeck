@@ -217,8 +217,18 @@ final class LanDiscoveryClient {
         if (value == null || value.length == 0) {
             return null;
         }
-        // 电脑名可能是中文（如“往里走的MacBook Air”），TXT 值按 UTF-8 解码。
+        // 电脑名可能是中文（如“往里走的MacBook Air”），TXT 值按 UTF-8 解码；
+        // Windows mDNS 线格式会对非 ASCII 字节做 %XX 编码，此处兼容还原。
         String text = new String(value, java.nio.charset.StandardCharsets.UTF_8).trim();
+        if (text.indexOf('%') >= 0) {
+            try {
+                text = java.net.URLDecoder.decode(
+                        text.replace("+", "%2B"),
+                        java.nio.charset.StandardCharsets.UTF_8.name()).trim();
+            } catch (Exception ignored) {
+                // 非法百分号序列保留原样。
+            }
+        }
         return text.isEmpty() ? null : text;
     }
 

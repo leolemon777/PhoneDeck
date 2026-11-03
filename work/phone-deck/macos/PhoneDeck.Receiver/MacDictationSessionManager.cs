@@ -102,8 +102,24 @@ internal sealed class MacDictationSessionManager(
         }
         if (before is true)
         {
-            throw new InvalidOperationException(
-                $"{engine.EngineDisplayName} 已在采集，请先在电脑端停止");
+            lock (syncRoot)
+            {
+                if (activeSessionId is null)
+                {
+                    ResetEngine();
+                    if (engine.IsCapturing() is false)
+                    {
+                        before = false;
+                        Console.WriteLine(
+                            $"[dictation:{normalizedSession}] 自动复位残留的 {engine.EngineDisplayName} 采集状态");
+                    }
+                }
+            }
+            if (before is true)
+            {
+                throw new InvalidOperationException(
+                    $"{engine.EngineDisplayName} 已在采集，请先在电脑端停止");
+            }
         }
 
         lock (syncRoot)
@@ -206,8 +222,22 @@ internal sealed class MacDictationSessionManager(
                 }
                 else
                 {
-                    duplicate = engine.End(activeMode ?? engine.Modes.First(), normalizedRequest);
+                    var mode = activeMode ?? engine.Modes.First();
+                    duplicate = engine.End(mode, normalizedRequest);
                     stopped = engine.WaitForCapturing(false, 2_000);
+                    if (stopped is false)
+                    {
+                        var currentCapturing = engine.IsCapturing();
+                        if (currentCapturing is false)
+                        {
+                            stopped = true;
+                        }
+                        else if (currentCapturing is true)
+                        {
+                            engine.End(mode, null);
+                            stopped = engine.WaitForCapturing(false, 2_000);
+                        }
+                    }
                 }
             }
             catch (Exception exception)
@@ -280,8 +310,13 @@ internal sealed class MacDictationSessionManager(
             engine.ReleaseHeldKeys();
             return;
         }
-        engine.End(activeMode ?? engine.Modes.First(), null);
-        engine.WaitForCapturing(false, 2_000);
+        var mode = activeMode ?? engine.Modes.First();
+        engine.End(mode, null);
+        if (engine.WaitForCapturing(false, 2_000) is false && engine.IsCapturing() is true)
+        {
+            engine.End(mode, null);
+            engine.WaitForCapturing(false, 2_000);
+        }
     }
 
     public void Dispose()

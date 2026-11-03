@@ -18,4 +18,12 @@ public final class LanDiscoveryTxtTest {
         assertNull(LanDiscoveryClient.decodeAttribute(new byte[0]));
         assertNull(LanDiscoveryClient.decodeAttribute("   ".getBytes(StandardCharsets.US_ASCII)));
     }
+
+    @Test
+    public void decodesPercentEncodedUtf8DisplayName() {
+        assertEquals("往里走的COMPUTE",
+                LanDiscoveryClient.decodeAttribute(
+                        "%E5%BE%80%E9%87%8C%E8%B5%B0%E7%9A%84COMPUTE"
+                                .getBytes(StandardCharsets.US_ASCII)));
+    }
 }
