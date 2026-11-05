@@ -3806,9 +3806,12 @@ public final class MainActivity extends Activity {
                             RemoteVoiceState.fromHealth(health, probeStartedAt);
                     typelessVirtualCableSelected = parseVirtualCableSelected(health);
                     usbEngineName = parseEngineDisplayName(health);
-                    String healthForegroundApp = health.optString("foregroundApp", null);
+                    String healthForegroundApp = health.isNull("foregroundApp")
+                            ? null : health.optString("foregroundApp", null);
                     usbForegroundApp = healthForegroundApp == null
-                            || healthForegroundApp.isBlank() ? null : healthForegroundApp;
+                            || healthForegroundApp.isBlank()
+                            || "null".equalsIgnoreCase(healthForegroundApp.trim())
+                            ? null : healthForegroundApp;
                     EngineMode[] engineModes = parseEngineModes(health);
                     if (engineModes != null) {
                         usbTypelessModes = engineModes;
@@ -3999,6 +4002,10 @@ public final class MainActivity extends Activity {
                     lanTargets.putAll(next);
                     lanPairingRejected.clear();
                     lanPairingRejected.putAll(rejectedNext);
+                    if (usbConnected && usbComputerId != null
+                            && Boolean.TRUE.equals(lanPairingRejected.get(usbComputerId))) {
+                        testConnection();
+                    }
                     for (Runnable remoteUpdate : remoteUpdates) {
                         remoteUpdate.run();
                     }
@@ -4026,7 +4033,8 @@ public final class MainActivity extends Activity {
             }
         }
         JSONObject audio = health.optJSONObject("audio");
-        String lanForegroundApp = health.optString("foregroundApp", null);
+        String lanForegroundApp = health.isNull("foregroundApp")
+                ? null : health.optString("foregroundApp", null);
         return new LanTargetStatus(
                 result.endpoint,
                 health.optInt("protocolVersion", 0),
@@ -4036,6 +4044,7 @@ public final class MainActivity extends Activity {
                 parseEngineModes(health),
                 parseEngineDisplayName(health),
                 lanForegroundApp == null || lanForegroundApp.isBlank()
+                        || "null".equalsIgnoreCase(lanForegroundApp.trim())
                         ? null : lanForegroundApp);
     }
 

@@ -43,9 +43,9 @@ final class PhoneDeckLanClient {
     }
 
     /// 并行探测的连接/读取超时：短超时让死地址快速失败，
-    /// 不再像串行探测那样每个地址最多拖 2.2 秒。
-    private static final int PROBE_CONNECT_TIMEOUT_MS = 600;
-    private static final int PROBE_READ_TIMEOUT_MS = 900;
+    /// 同时兼容随身 Wi-Fi / 热点在节电唤醒时的抖动。
+    private static final int PROBE_CONNECT_TIMEOUT_MS = 800;
+    private static final int PROBE_READ_TIMEOUT_MS = 1000;
 
     /// 共享地址探测池（守护线程）：直接移交、不排队。固定小线程池在多台电脑同时探测时
     /// 会让后一台的地址任务排在前一台未结束的任务之后，等不到截止时间被误判离线。

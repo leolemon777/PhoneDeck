@@ -21,8 +21,15 @@ internal sealed class MdnsAdvertiser : IDisposable
         "managedDictation", "secureLan",
     };
 
+    private readonly object syncRoot = new();
     private MulticastService? multicast;
     private ServiceDiscovery? discovery;
+    private string? activeComputerId;
+    private string? activeDisplayName;
+    private string? activePlatform;
+    private int activeHttpsPort;
+    private string[]? activeCapabilities;
+    private NetworkAddressChangedEventHandler? addressChangedHandler;
     private volatile bool running;
 
     internal bool Running => running;
@@ -161,27 +168,82 @@ internal sealed class MdnsAdvertiser : IDisposable
     internal void Start(string computerId, string displayName, string platform,
         int httpsPort, string[]? capabilities = null)
     {
-        Stop();
+        lock (syncRoot)
+        {
+            StopCore();
+            activeComputerId = computerId;
+            activeDisplayName = displayName;
+            activePlatform = platform;
+            activeHttpsPort = httpsPort;
+            activeCapabilities = capabilities;
+            addressChangedHandler = (_, _) => RefreshAdvertisement();
+            NetworkChange.NetworkAddressChanged += addressChangedHandler;
+            StartCore(logStarted: true);
+        }
+    }
+
+    private void RefreshAdvertisement()
+    {
+        lock (syncRoot)
+        {
+            if (activeComputerId is null || activeDisplayName is null || activePlatform is null)
+            {
+                return;
+            }
+            StopInstanceOnly();
+            StartCore(logStarted: false);
+        }
+    }
+
+    private void StartCore(bool logStarted)
+    {
         try
         {
             var profile = CreateProfile(
-                computerId, displayName, platform, httpsPort, capabilities);
+                activeComputerId!, activeDisplayName!, activePlatform!, activeHttpsPort, activeCapabilities);
             multicast = new MulticastService(FilterNetworkInterfaces);
             discovery = new ServiceDiscovery(multicast);
             multicast.Start();
             discovery.Advertise(profile);
             running = true;
-            Console.WriteLine($"局域网发现在线：mDNS {ServiceName}.{ServiceProtocol}（TXT 无令牌/指纹）");
+            if (logStarted)
+            {
+                Console.WriteLine($"局域网发现在线：mDNS {ServiceName}.{ServiceProtocol}（TXT 无令牌/指纹）");
+            }
         }
         catch (Exception exception)
         {
             // 多播被网络/防火墙禁用是合法环境：降级到 UDP 回退，不影响服务。
-            Console.WriteLine($"mDNS 广播未启用（降级到 UDP 回退）：{exception.Message}");
-            Stop();
+            if (logStarted)
+            {
+                Console.WriteLine($"mDNS 广播未启用（降级到 UDP 回退）：{exception.Message}");
+            }
+            StopInstanceOnly();
         }
     }
 
     internal void Stop()
+    {
+        lock (syncRoot)
+        {
+            StopCore();
+        }
+    }
+
+    private void StopCore()
+    {
+        if (addressChangedHandler is not null)
+        {
+            NetworkChange.NetworkAddressChanged -= addressChangedHandler;
+            addressChangedHandler = null;
+        }
+        activeComputerId = null;
+        activeDisplayName = null;
+        activePlatform = null;
+        StopInstanceOnly();
+    }
+
+    private void StopInstanceOnly()
     {
         discovery?.Dispose();
         discovery = null;

@@ -59,6 +59,13 @@ final class LanDiscoveryClient {
 
     /// 手机当前局域网的前缀（如 "192.168.1."）；取不到时返回 null。
     static String currentSubnetPrefix() {
+        java.util.List<String> prefixes = activeSubnetPrefixes();
+        return prefixes.isEmpty() ? null : prefixes.get(0);
+    }
+
+    /// 手机所有活动的私有 IPv4 网段前缀（如 ["192.168.0."]），过滤回环、APIPA 与 198.18/19 TUN。
+    static java.util.List<String> activeSubnetPrefixes() {
+        java.util.List<String> prefixes = new java.util.ArrayList<>();
         try {
             Enumeration<NetworkInterface> interfaces =
                     NetworkInterface.getNetworkInterfaces();
@@ -71,10 +78,14 @@ final class LanDiscoveryClient {
                 while (addresses.hasMoreElements()) {
                     InetAddress address = addresses.nextElement();
                     String text = address.getHostAddress();
-                    if (address.isSiteLocalAddress() && text.indexOf('.') > 0) {
+                    if (address.isSiteLocalAddress() && text != null && text.indexOf('.') > 0
+                            && TargetDeviceManager.isAddressCandidateSafe(text)) {
                         int lastDot = text.lastIndexOf('.');
                         if (lastDot > 0) {
-                            return text.substring(0, lastDot + 1);
+                            String prefix = text.substring(0, lastDot + 1);
+                            if (!prefixes.contains(prefix)) {
+                                prefixes.add(prefix);
+                            }
                         }
                     }
                 }
@@ -82,14 +93,73 @@ final class LanDiscoveryClient {
         } catch (Exception ignored) {
             // 没有可用网络信息时由调用方退避。
         }
-        return null;
+        return prefixes;
+    }
+
+    /// 将形如 "192.168.0." 的前缀解析为前 3 个字节；格式不符返回 null。
+    private static byte[] parsePrefixBytes(String prefix) {
+        if (prefix == null) {
+            return null;
+        }
+        String[] parts = prefix.split("\\.");
+        if (parts.length < 3) {
+            return null;
+        }
+        try {
+            int b0 = Integer.parseInt(parts[0]);
+            int b1 = Integer.parseInt(parts[1]);
+            int b2 = Integer.parseInt(parts[2]);
+            if ((b0 | b1 | b2) < 0 || b0 > 255 || b1 > 255 || b2 > 255) {
+                return null;
+            }
+            return new byte[]{(byte) b0, (byte) b1, (byte) b2};
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    /// 随身 Wi-Fi（MiFi）、手机热点与部分路由器会丢弃 UDP 广播（.255）与 mDNS 组播，但允许单播。
+    /// 在同一 socket 上对当前 /24 子网快速发射 18 字节单播探测（无 DNS 解析，总流量 ~4.5 KB），
+    /// 优先探测路由器最常分配的 DHCP 区间（100..150、2..99、151..254）。
+    private static void sendUnicastSubnetSweep(DatagramSocket socket, byte[] payload, String prefix) {
+        byte[] prefixBytes = parsePrefixBytes(prefix);
+        if (prefixBytes == null) {
+            return;
+        }
+        int[] ranges = {100, 150, 2, 99, 151, 254};
+        for (int r = 0; r < ranges.length; r += 2) {
+            for (int host = ranges[r]; host <= ranges[r + 1]; host++) {
+                try {
+                    InetAddress target = InetAddress.getByAddress(
+                            new byte[]{prefixBytes[0], prefixBytes[1], prefixBytes[2], (byte) host});
+                    socket.send(new DatagramPacket(payload, payload.length, target, DISCOVERY_PORT));
+                } catch (Exception ignored) {
+                    // 单台不可达不影响其余主机探测。
+                }
+            }
+        }
     }
 
     /// 广播一次发现并收集接收窗口内的应答，按 computerId 去重；mDNS（NSD）并行并入。
     static Map<String, DiscoveredComputer> discover(Context context, int timeoutMs) {
         Map<String, DiscoveredComputer> found = new ConcurrentHashMap<>();
+        java.util.List<String> prefixes = activeSubnetPrefixes();
         Thread mdnsThread = new Thread(
-                () -> found.putAll(discoverMdns(context, timeoutMs)),
+                () -> {
+                    for (Map.Entry<String, DiscoveredComputer> entry
+                            : discoverMdns(context, timeoutMs).entrySet()) {
+                        DiscoveredComputer candidate = entry.getValue();
+                        // 不让跨旧网段的陈旧 mDNS 记录覆盖同网段的实时 UDP 应答。
+                        found.compute(entry.getKey(), (id, existing) -> {
+                            if (existing == null) {
+                                return candidate;
+                            }
+                            boolean existingSameSubnet = matchesAnyPrefix(existing.hostAddress, prefixes);
+                            boolean candidateSameSubnet = matchesAnyPrefix(candidate.hostAddress, prefixes);
+                            return (!existingSameSubnet && candidateSameSubnet) ? candidate : existing;
+                        });
+                    }
+                },
                 "PhoneDeckMdnsDiscovery");
         mdnsThread.start();
         WifiManager wifiManager = context.getApplicationContext()
@@ -105,9 +175,11 @@ final class LanDiscoveryClient {
             socket.setSoTimeout(Math.max(200, timeoutMs));
             byte[] magic = MAGIC.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             sendTo(socket, magic, "255.255.255.255");
-            String prefix = currentSubnetPrefix();
-            if (prefix != null) {
+            for (String prefix : prefixes) {
                 sendTo(socket, magic, prefix + "255");
+            }
+            for (String prefix : prefixes) {
+                sendUnicastSubnetSweep(socket, magic, prefix);
             }
             long deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs;
             byte[] buffer = new byte[MAX_PACKET_BYTES];
@@ -133,6 +205,18 @@ final class LanDiscoveryClient {
             Thread.currentThread().interrupt();
         }
         return Collections.unmodifiableMap(new HashMap<>(found));
+    }
+
+    private static boolean matchesAnyPrefix(String address, java.util.List<String> prefixes) {
+        if (address == null || prefixes == null) {
+            return false;
+        }
+        for (String prefix : prefixes) {
+            if (address.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// NSD（mDNS）并行发现：解析 _phonedeck._tcp 的 TXT（computerId 等）与主机/端口。
