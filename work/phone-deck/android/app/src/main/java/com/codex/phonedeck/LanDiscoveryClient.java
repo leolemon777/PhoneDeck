@@ -30,6 +30,8 @@ final class LanDiscoveryClient {
     private static final String MAGIC = "PHONEDECK-DISCOVER";
     private static final int MAX_PACKET_BYTES = 2048;
     private static final String NSD_SERVICE_TYPE = "_phonedeck._tcp.";
+    /// 广播后等这么久仍无任何 UDP 应答，才退回逐台单播扫描。
+    static final long SWEEP_AFTER_SILENT_MS = 300;
 
     static final class DiscoveredComputer {
         final String computerId;
@@ -140,26 +142,13 @@ final class LanDiscoveryClient {
         }
     }
 
-    /// 广播一次发现并收集接收窗口内的应答，按 computerId 去重；mDNS（NSD）并行并入。
+    /// 广播一次发现并收集接收窗口内的应答，按 computerId 去重；mDNS（NSD）并行，只补 UDP 没找到的电脑。
     static Map<String, DiscoveredComputer> discover(Context context, int timeoutMs) {
         Map<String, DiscoveredComputer> found = new ConcurrentHashMap<>();
+        Map<String, DiscoveredComputer> mdnsFound = new ConcurrentHashMap<>();
         java.util.List<String> prefixes = activeSubnetPrefixes();
         Thread mdnsThread = new Thread(
-                () -> {
-                    for (Map.Entry<String, DiscoveredComputer> entry
-                            : discoverMdns(context, timeoutMs).entrySet()) {
-                        DiscoveredComputer candidate = entry.getValue();
-                        // 不让跨旧网段的陈旧 mDNS 记录覆盖同网段的实时 UDP 应答。
-                        found.compute(entry.getKey(), (id, existing) -> {
-                            if (existing == null) {
-                                return candidate;
-                            }
-                            boolean existingSameSubnet = matchesAnyPrefix(existing.hostAddress, prefixes);
-                            boolean candidateSameSubnet = matchesAnyPrefix(candidate.hostAddress, prefixes);
-                            return (!existingSameSubnet && candidateSameSubnet) ? candidate : existing;
-                        });
-                    }
-                },
+                () -> mdnsFound.putAll(discoverMdns(context, timeoutMs)),
                 "PhoneDeckMdnsDiscovery");
         mdnsThread.start();
         WifiManager wifiManager = context.getApplicationContext()
@@ -172,23 +161,45 @@ final class LanDiscoveryClient {
         }
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setBroadcast(true);
-            socket.setSoTimeout(Math.max(200, timeoutMs));
             byte[] magic = MAGIC.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             sendTo(socket, magic, "255.255.255.255");
             for (String prefix : prefixes) {
                 sendTo(socket, magic, prefix + "255");
             }
-            for (String prefix : prefixes) {
-                sendUnicastSubnetSweep(socket, magic, prefix);
-            }
-            long deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs;
+            long startedAt = android.os.SystemClock.elapsedRealtime();
+            long deadline = startedAt + timeoutMs;
+            // 逐台单播扫描只在广播窗口内没有任何应答时才发：每次约 250 个单播会让手机为每个
+            // 未知地址发 ARP 广播，Wi-Fi 上广播按最低速率发送，多电脑供音时会加重断续；
+            // 普通路由器广播可达，不需要扫描。随身 Wi-Fi / 热点丢弃广播时仍会走到扫描。
+            long sweepAt = startedAt + Math.min(SWEEP_AFTER_SILENT_MS, timeoutMs / 2);
+            boolean sweepDecided = prefixes.isEmpty();
             byte[] buffer = new byte[MAX_PACKET_BYTES];
-            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            while (true) {
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (!sweepDecided && now >= sweepAt) {
+                    sweepDecided = true;
+                    if (found.isEmpty()) {
+                        for (String prefix : prefixes) {
+                            sendUnicastSubnetSweep(socket, magic, prefix);
+                        }
+                    }
+                }
+                long waitUntil = sweepDecided ? deadline : Math.min(deadline, sweepAt);
+                if (now >= waitUntil) {
+                    if (sweepDecided) {
+                        break;
+                    }
+                    continue;
+                }
+                socket.setSoTimeout((int) Math.max(1, waitUntil - now));
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 try {
                     socket.receive(packet);
                 } catch (SocketTimeoutException timeout) {
-                    break;
+                    if (sweepDecided) {
+                        break;
+                    }
+                    continue;
                 }
                 parseResponse(packet, found);
             }
@@ -203,6 +214,21 @@ final class LanDiscoveryClient {
             mdnsThread.join(Math.max(200, timeoutMs));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+        }
+        // UDP 应答的源地址就是手机实际到达这台电脑的地址，优先采用。mDNS 的 A 记录可能是
+        // Hyper-V / WSL / VMware / VPN 等虚拟网卡地址（Android 12 NSD 只给一个），
+        // 原先 putAll 会用它覆盖正确的 UDP 地址，电脑换 IP 后就一直找不回来。
+        // 只有 UDP 地址不在手机网段、而 mDNS 地址在时才改用 mDNS（跨旧网段的陈旧应答）。
+        for (Map.Entry<String, DiscoveredComputer> entry : mdnsFound.entrySet()) {
+            DiscoveredComputer candidate = entry.getValue();
+            found.compute(entry.getKey(), (id, existing) -> {
+                if (existing == null) {
+                    return candidate;
+                }
+                boolean existingSameSubnet = matchesAnyPrefix(existing.hostAddress, prefixes);
+                boolean candidateSameSubnet = matchesAnyPrefix(candidate.hostAddress, prefixes);
+                return !existingSameSubnet && candidateSameSubnet ? candidate : existing;
+            });
         }
         return Collections.unmodifiableMap(new HashMap<>(found));
     }
@@ -328,7 +354,8 @@ final class LanDiscoveryClient {
             }
             String address = host.getHostAddress();
             if (address == null || address.isBlank()
-                    || !TargetDeviceManager.isAddressCandidateSafe(address)) {
+                    || !TargetDeviceManager.isAddressCandidateSafe(address)
+                    || !isOnLocalIpv4Subnet(host)) {
                 return;
             }
             String displayName = decodeAttribute(attributes.get("displayName"));
@@ -338,6 +365,54 @@ final class LanDiscoveryClient {
         } catch (Exception ignored) {
             // 单条候选解析失败忽略。
         }
+    }
+
+    /// mDNS 只在本链路传播，真正能连上的地址应与手机的某个 IPv4 网段相同；不同网段的
+    /// 通常是电脑虚拟网卡地址。手机网段读不到或地址不是 IPv4 时不过滤（交给探测判断）。
+    static boolean isOnLocalIpv4Subnet(InetAddress host) {
+        if (!(host instanceof java.net.Inet4Address)) {
+            return true;
+        }
+        boolean sawLocalIpv4 = false;
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface network = interfaces.nextElement();
+                if (!network.isUp() || network.isLoopback()) {
+                    continue;
+                }
+                for (java.net.InterfaceAddress local : network.getInterfaceAddresses()) {
+                    InetAddress localAddress = local.getAddress();
+                    if (!(localAddress instanceof java.net.Inet4Address)) {
+                        continue;
+                    }
+                    sawLocalIpv4 = true;
+                    if (sameIpv4Subnet(localAddress.getAddress(), host.getAddress(),
+                            local.getNetworkPrefixLength())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            return true;
+        }
+        return !sawLocalIpv4;
+    }
+
+    /// 纯函数供单测：两个 IPv4 地址在给定前缀长度下是否同网段；前缀无效时视为同网段。
+    static boolean sameIpv4Subnet(byte[] left, byte[] right, int prefixLength) {
+        if (left == null || right == null || left.length != 4 || right.length != 4) {
+            return false;
+        }
+        if (prefixLength <= 0 || prefixLength > 32) {
+            return true;
+        }
+        int a = ((left[0] & 0xff) << 24) | ((left[1] & 0xff) << 16)
+                | ((left[2] & 0xff) << 8) | (left[3] & 0xff);
+        int b = ((right[0] & 0xff) << 24) | ((right[1] & 0xff) << 16)
+                | ((right[2] & 0xff) << 8) | (right[3] & 0xff);
+        int mask = prefixLength == 32 ? -1 : ~(-1 >>> prefixLength);
+        return (a & mask) == (b & mask);
     }
 
     /// 手动地址：直接向这台主机的 UDP 8767 问身份（跨路由/子网时广播发现不到，单播仍可达）。

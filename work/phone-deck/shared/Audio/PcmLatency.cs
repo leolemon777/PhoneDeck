@@ -17,20 +17,18 @@ internal static class PcmLatency
     /// <summary>判定粒度：10 ms。</summary>
     internal const int BlockBytes = BytesPerMs * 10;
 
-    /// <summary>RMS 低于约 -42 dBFS 视为静音；轻辅音通常远高于此值。</summary>
-    internal const double SilenceRms = 250;
-
-    /// <summary>动态底噪追赶上限（约 -36.5 dBFS）：房间空调/风扇交流底噪平稳且低于此值时允许追赶。</summary>
-    internal const double MaxAdaptiveSilenceRms = 480;
+    /// <summary>
+    /// RMS 低于约 -48 dBFS 视为静音；轻辅音通常高于此值。
+    /// 2026-11-05：f29f03d 提高到 250 并加“自适应底噪”后，Wi-Fi 共享会话断续从约 2–10 次/分升到 40–135 次/分
+    /// （作者 Mac 日志），轻声字被当静音跳过；已恢复原值。
+    /// </summary>
+    internal const double SilenceRms = 130;
 
     /// <summary>pre-roll 裁剪后在首个语音块前保留的静音。</summary>
     internal const int LeadInMs = 150;
 
     /// <summary>静音持续超过该时长后才允许跳过，保护词尾与句间自然停顿的开头。</summary>
     internal const int HangoverMs = 200;
-
-    /// <summary>共享麦克风由用户在电脑直接按键结束，句间 120 ms 短停顿即追赶积压，避免句末滞后吃字。</summary>
-    internal const int SharedHangoverMs = 120;
 
     internal static int MsToBytes(int milliseconds) => milliseconds * BytesPerMs;
 
@@ -47,31 +45,21 @@ internal static class PcmLatency
     internal static int ResolveOutputTailMs(string? configured) =>
         int.TryParse(configured, out var value) ? Math.Clamp(value, 100, 1_000) : DefaultOutputTailMs;
 
-    internal static double CalculateRms(ReadOnlySpan<byte> pcm, out bool hasZeroCrossing)
+    internal static bool IsSilent(ReadOnlySpan<byte> pcm)
     {
         var samples = pcm.Length / 2;
-        hasZeroCrossing = false;
         if (samples == 0)
         {
-            return 0;
+            return true;
         }
         double sum = 0;
-        var hasPositive = false;
-        var hasNegative = false;
         for (var index = 0; index + 1 < pcm.Length; index += 2)
         {
-            var sample = (short)(pcm[index] | (pcm[index + 1] << 8));
-            if (sample > 0) hasPositive = true;
-            else if (sample < 0) hasNegative = true;
-            double d = sample;
-            sum += d * d;
+            double sample = (short)(pcm[index] | (pcm[index + 1] << 8));
+            sum += sample * sample;
         }
-        hasZeroCrossing = hasPositive && hasNegative;
-        return Math.Sqrt(sum / samples);
+        return Math.Sqrt(sum / samples) < SilenceRms;
     }
-
-    internal static bool IsSilent(ReadOnlySpan<byte> pcm) =>
-        CalculateRms(pcm, out _) < SilenceRms;
 
     /// <summary>
     /// 返回 pre-roll 中应开始播放的偏移：首个语音块前保留 <paramref name="leadInBytes"/>；
@@ -99,8 +87,6 @@ internal sealed class PcmSilenceCatchUp
     private readonly int targetBacklogBytes;
     private readonly int hangoverBlocks;
     private int silentRun;
-    private double ambientNoiseRms = PcmLatency.SilenceRms;
-    private int steadyAmbientBlocks;
 
     internal PcmSilenceCatchUp(int targetBacklogMs, int hangoverMs = PcmLatency.HangoverMs)
     {
@@ -109,28 +95,6 @@ internal sealed class PcmSilenceCatchUp
     }
 
     internal long SkippedBytes { get; private set; }
-
-    private bool IsBlockSilentOrAmbient(ReadOnlySpan<byte> block)
-    {
-        var rms = PcmLatency.CalculateRms(block, out var hasZeroCrossing);
-        if (rms < PcmLatency.SilenceRms)
-        {
-            ambientNoiseRms = ambientNoiseRms * 0.9 + Math.Max(40.0, rms) * 0.1;
-            steadyAmbientBlocks = Math.Min(steadyAmbientBlocks + 1, 100);
-            return true;
-        }
-        if (hasZeroCrossing && rms <= PcmLatency.MaxAdaptiveSilenceRms)
-        {
-            ambientNoiseRms = ambientNoiseRms * 0.92 + rms * 0.08;
-            steadyAmbientBlocks = Math.Min(steadyAmbientBlocks + 1, 100);
-            var threshold = steadyAmbientBlocks >= 20
-                ? Math.Min(PcmLatency.MaxAdaptiveSilenceRms, Math.Max(PcmLatency.SilenceRms, ambientNoiseRms * 1.35))
-                : PcmLatency.SilenceRms;
-            return rms < threshold;
-        }
-        steadyAmbientBlocks = Math.Max(0, steadyAmbientBlocks - 2);
-        return false;
-    }
 
     /// <summary>
     /// 把 <paramref name="input"/> 中应播放的部分按序写入 <paramref name="output"/>（长度不小于输入），
@@ -144,7 +108,7 @@ internal sealed class PcmSilenceCatchUp
         {
             var block = input.Slice(offset, PcmLatency.BlockBytes);
             offset += PcmLatency.BlockBytes;
-            if (IsBlockSilentOrAmbient(block))
+            if (PcmLatency.IsSilent(block))
             {
                 silentRun++;
                 if (silentRun > hangoverBlocks && backlogBytes + written > targetBacklogBytes)

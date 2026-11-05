@@ -75,9 +75,10 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             new Semaphore(MAX_SHARED_WORKERS, true);
     private static final ConcurrentHashMap<String, WorkerLease> WORKER_LEASES =
             new ConcurrentHashMap<>();
-    /// 共享模式实时供音：有积压帧时合并发送，无积压时 20 ms 单帧立即发出，
-    /// 避免人为等待 25 ms 造成电脑端停止录音时末尾音节仍在手机发送队列中。
-    static final long BATCH_WAIT_MS = 0;
+    /// 共享模式长时间（含锁屏）供音：两帧 20 ms 合并成一个约 40 ms 的网络包，
+    /// TLS 记录与无线唤醒次数减半，代价是最多多出 20 ms 延迟。
+    /// f29f03d 曾改为 0（每 20 ms 一包），三台电脑同时供音时 Wi-Fi 包量翻倍，断续与断流明显增多，已恢复。
+    static final long BATCH_WAIT_MS = 25;
 
     private static final class WorkerLease {
         final String computerKey;

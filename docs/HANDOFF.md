@@ -1,5 +1,33 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-05 收回 f29f03d 引入的多电脑断连与断续回归（最新源码候选，未部署）
+
+- 用户反馈：3 台电脑同一 Wi-Fi，常有 1–2 台连不上、过会儿自己连上；第一次发语音没输入、之后又正常；断断续续。
+- **证据（作者 Mac `receiver.log` 逐会话摘要）**：Wi-Fi shared 长会话断续在 10-29～11-03 多为 2–10 次/分；
+  11-04 09:38 装上 f29f03d 接收端后升到 23–135 次/分（断续占时 5–31%），静音追赶从约 0 变成每会话数十秒。
+  手机 11-05 10:57（CST）装上 f29f03d APK 后同样偏高；同时段 USB 会话仅约 5 次/分、最大积压 ≤240 ms，问题集中在 Wi-Fi。
+  “5 s 未收到手机音频”断流在旧版本也有，不是本次新增，但仍会让单台电脑掉线后重连。
+- **接收端（Mac + Windows，shared/Audio 共用）**：
+  - `PcmLatency.SilenceRms` 250 → 130，删除“自适应底噪”判定（≤480 RMS 且有过零就当静音，会把轻声字跳过），删除 120 ms shared hangover。
+  - `SharedTargetMs` 60 → 120、`SharedQueueMs` 220 → 240（Mac `MacPhoneAudioBridge` 与 Windows `PhonePcmBuffer`）。
+    60 ms 目标让静音追赶把缓冲压到 60 ms，Wi-Fi 抖动超过 60 ms 就播空。
+  - 保留 f29f03d 中无害部分：输出尾音 480 ms、managed 停止 800 ms EOF 宽限、`/api/input` 停止前 260 ms 等待、TXT 非 ASCII 编码。
+- **Android**：
+  - `SharedAudioBroadcaster.BATCH_WAIT_MS` 0 → 25：恢复两帧合包，三台电脑同时供音时 Wi-Fi 包量减半；`SILENCE_RMS` 250 → 130 与接收端一致。
+  - `MainActivity.applyStoredTarget` 不再在当前电脑短暂离线时静默改选另一台在线电脑（违反“切换必须经新电脑确认”，
+    多电脑抖动时默认目标来回跳，手机语音键把听写发到别的电脑）；只在根本没有默认电脑时自动选一台。
+  - `LanDiscoveryClient.discover`：UDP 应答地址优先，mDNS 只补 UDP 没找到的电脑；mDNS 地址必须与手机某个 IPv4 网段相同（按真实前缀）。
+    原先 mDNS `putAll` 覆盖 UDP 结果，而 f29f03d 修好 Windows 中文名 mDNS 后，Android 12 NSD 只返回一个 A 记录，可能是虚拟网卡地址。
+  - 64f64c2 的逐台单播扫描（每轮约 250 个单播 → 每个未知地址一次 ARP 广播）改为广播发出 300 ms 内无任何 UDP 应答才执行；
+    已核对手机现装 APK 含该扫描。普通路由器广播可达时不再扫描，随身 Wi-Fi / 热点丢广播时仍保留该回退。
+  - `ReconnectBackoff.MAX_DELAY_MS` 30 s → 5 s：短暂断网后，探测已显示在线的电脑不再在退避睡眠里继续半分钟没声音。
+- **验证**：Mac Receiver Release build 0 error，Mac 测试 59/59；Windows Server 与测试项目在 Mac 交叉编译 0 error（Windows 测试需在 Windows/CI 运行，本机无法加载 Windows 程序集）；
+  Android assembleDebug 成功，单元测试 73/73，lint 0 error / 42 warning。
+- **未部署 / 未验证**：本 Mac 构建的 APK 证书（`ba44191d…`）与手机已装版（`df327953…`）不同，不能覆盖安装，须在持有固定签名的电脑上构建安装；
+  Mac 与两台 Windows 接收端均未替换。修复效果需三台电脑同 Wi-Fi shared 实测：看各端 `audio.quality` 断续次数、断流次数与手机端目标是否保持不变。
+- 取舍：恢复 120/240 ms 后，用电脑按键（如 Mac Fn）结束 shared 听写时，最后约 0.1–0.2 s 仍可能没送到输入法（f29f03d 想解决的尾字问题）。
+  若需要改善，应在不压缩抖动缓冲的前提下单独处理（例如电脑端检测到引擎停止时先排空缓冲），不要再降低目标积压。
+
 ## 2026-10-30 Mac 接收端与手机共享供音的 CPU 优化（最新源码候选）
 
 - 分支 `agent/mac-receiver-perf`，基于 PR 57（`agent/connection-mic-stability-audit`）。
@@ -63,6 +91,12 @@
   （只由实时线程移动读位置，无锁），shared 会话开始设上限、managed 设 0 以保留 pre-roll。Mac 测试 59/59。
   已安装到作者 Mac（主程序 SHA-256 `c3ab420d1f14b93c318aa4a0ec3a0de5afc75be134924e09ba67945097115195`），
   同一 Wi-Fi shared 3 分钟：延迟稳定约 230 ms、写入侧最大 296 ms，丢弃 194 ms。重装后辅助功能需删除重加并重启接收端。
+- **f29f03d 已安装到作者 Mac**（2026-11-04）：LAN 发现稳定、句末尾音保护（静音阈值 250、自适应底噪、shared 120 ms hangover、
+  尾音 480 ms）。Mac 测试 59/59，AOT lite 包主程序 SHA-256 `8bc178187e79af84302822133fa266a842fb66d5301c4dd5c9de6845c9e96940`；
+  旧 `c3ab420…` 包备份为 `~/Library/Application Support/PhoneDeck/backups/receiver-app-latency-cap-c3ab420-20261104.zip`
+  （备份不要留成同 Bundle ID 的 .app 目录，避免辅助功能列表解析到错误副本）。首次 kickstart 仍被 `OS_REASON_CODESIGNING`
+  拒绝一次，重试启动。从 Finder 拖入辅助功能列表两次均未生效（cdhash `a8236e9d…` 与磁盘一致，原因未确认）；
+  改用列表「+」→ ⌘⇧G 输入 `~/Applications` 选 App 后，09:38 重启显示已授权。真实听写与 LAN 发现未复测。
 - 作者用“共享 + Mac 按 Fn”方式听写，手机受控听写（managed）尚未经过新版，`capturing=true` 新探测与 managed 尾音仍待一次实测。
 - 未验证：Android 新 APK 未安装到手机（本 Mac 无固定签名私钥，不能同签名覆盖，禁止卸载规避），
   手机 CPU/帧率降幅、Typeless 采集中 `capturing=true` 的新路径、Windows 构建均待实机复测。

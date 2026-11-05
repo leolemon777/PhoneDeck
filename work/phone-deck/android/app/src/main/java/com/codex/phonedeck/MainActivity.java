@@ -3456,31 +3456,29 @@ public final class MainActivity extends Activity {
     private void applyStoredTarget() {
         TargetDeviceManager.Device active = targetDeviceManager == null
                 ? null : targetDeviceManager.find(targetDeviceManager.getActiveComputerId());
+        // 只在“还没有任何默认电脑”时自动选一台在线的。已选电脑短暂离线（Wi-Fi 抖动、探测超时）
+        // 绝不能被静默换成另一台：多电脑下默认目标会来回跳，手机语音键把听写发到别的电脑上，
+        // 也违反“切换目标必须经新电脑确认”。f29f03d 曾在离线时自动换目标，已收回。
         if (targetDeviceManager != null
                 && !isVoiceInteractionBusy()
                 && confirmingComputerId == null
-                && (active == null || !isDeviceOnline(active.computerId))) {
-            boolean userInspectingOtherCard = carouselFocusId != null
-                    && active != null
-                    && !sameComputer(carouselFocusId, active.computerId);
-            if (!userInspectingOtherCard) {
-                TargetDeviceManager.Device onlineCandidate = null;
-                if (usbConnected && usbComputerId != null) {
-                    onlineCandidate = targetDeviceManager.find(usbComputerId);
-                }
-                if (onlineCandidate == null) {
-                    for (TargetDeviceManager.Device candidate : targetDeviceManager.list()) {
-                        if (isDeviceOnline(candidate.computerId)) {
-                            onlineCandidate = candidate;
-                            break;
-                        }
+                && active == null) {
+            TargetDeviceManager.Device onlineCandidate = null;
+            if (usbConnected && usbComputerId != null) {
+                onlineCandidate = targetDeviceManager.find(usbComputerId);
+            }
+            if (onlineCandidate == null) {
+                for (TargetDeviceManager.Device candidate : targetDeviceManager.list()) {
+                    if (isDeviceOnline(candidate.computerId)) {
+                        onlineCandidate = candidate;
+                        break;
                     }
                 }
-                if (onlineCandidate != null && targetDeviceManager.select(onlineCandidate.computerId)) {
-                    active = onlineCandidate;
-                    carouselFocusId = onlineCandidate.computerId;
-                    lastComputerCardsSignature = null;
-                }
+            }
+            if (onlineCandidate != null && targetDeviceManager.select(onlineCandidate.computerId)) {
+                active = onlineCandidate;
+                carouselFocusId = onlineCandidate.computerId;
+                lastComputerCardsSignature = null;
             }
         }
         if (active == null) {

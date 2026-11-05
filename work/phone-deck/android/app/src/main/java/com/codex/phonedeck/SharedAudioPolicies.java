@@ -54,8 +54,8 @@ final class SharedAudioPolicies {
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
     }
 
-    /// 与接收端 PcmLatency 一致：RMS 低于约 -42 dBFS 视为静音。
-    static final double SILENCE_RMS = 250;
+    /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
+    static final double SILENCE_RMS = 130;
 
     static boolean isSilent(byte[] pcm) {
         int samples = pcm.length / 2;
@@ -142,7 +142,10 @@ final class SharedAudioPolicies {
     }
 
     static final class ReconnectBackoff {
-        private static final long MAX_DELAY_MS = 30_000;
+        /// 上限 5 秒：Wi-Fi 短暂中断恢复后，这台电脑最多再等 5 秒就重新收到声音。
+        /// 原来的 30 秒会让探测已显示在线的电脑在退避睡眠里继续“没声音”半分钟；
+        /// 离线电脑每 5 秒一次连接尝试的开销可以忽略，彻底离线的目标仍由探测在 15 秒后移出。
+        static final long MAX_DELAY_MS = 5_000;
         /// 只有连续实际写入一段时间后，才把失败退避恢复到初始值。
         /// 仅拿到 HTTP OutputStream 不能证明接收端已经接受音频。
         static final long STABLE_WRITE_WINDOW_MS = 5_000;

@@ -71,7 +71,8 @@ public final class SharedAudioPoliciesTest {
         for (int index = 0; index < 10; index++) {
             backoff.nextDelayMs();
         }
-        assertEquals(30_000, backoff.nextDelayMs());
+        assertEquals(5_000, SharedAudioPolicies.ReconnectBackoff.MAX_DELAY_MS);
+        assertEquals(SharedAudioPolicies.ReconnectBackoff.MAX_DELAY_MS, backoff.nextDelayMs());
         backoff.reset();
         assertEquals(500, backoff.nextDelayMs());
     }
