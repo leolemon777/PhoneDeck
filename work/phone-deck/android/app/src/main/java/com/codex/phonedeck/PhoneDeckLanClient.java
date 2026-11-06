@@ -103,8 +103,8 @@ final class PhoneDeckLanClient {
         return paired;
     }
 
-    /// 并行探测全部候选地址，任一地址返回匹配的 computerId 即在线。
-    /// 顺序仅用于平局时优先选择（last-good → 与手机同子网 → 其余）。
+    /// 探测候选地址，任一地址返回匹配的 computerId 即在线。有上次可用地址时先只探测它，
+    /// 失败或 0.6 秒无应答再并行探测其余地址；否则全部并行（last-good → 与手机同子网 → 其余）。
     /// 同时收集“地址可达但配对被拒”信号，供上层提示重新配对。
     static ProbeOutcome probe(TargetDeviceManager.Device device, ExecutorService pool) {
         if (device == null || !device.hasLanPairing()) {
@@ -121,28 +121,48 @@ final class PhoneDeckLanClient {
         long deadline = android.os.SystemClock.elapsedRealtime()
                 + PROBE_CONNECT_TIMEOUT_MS + PROBE_READ_TIMEOUT_MS + 400;
         boolean admissionSkipped = false;
+        boolean lastGoodFirst = shouldProbeLastGoodFirst(device.lastGoodAddress, candidates);
+        long fanOutAt = android.os.SystemClock.elapsedRealtime() + LAST_GOOD_HEAD_START_MS;
         try {
-            for (String address : candidates) {
+            List<String> firstWave = lastGoodFirst ? candidates.subList(0, 1) : candidates;
+            for (String address : firstWave) {
                 if (Thread.currentThread().isInterrupted()) {
                     return new ProbeOutcome(null, rejected.get());
                 }
-                try {
-                    attempts.add(completed.submit(() -> probeAddress(device, address, rejected)));
-                } catch (java.util.concurrent.RejectedExecutionException busy) {
-                    // A saturated pool must not move socket I/O onto the
-                    // monitor caller and exceed the whole probe's deadline.
-                    admissionSkipped = true;
-                }
+                admissionSkipped |= !submitProbe(completed, attempts, device, address, rejected);
             }
-            for (int remainingAttempts = attempts.size(); remainingAttempts > 0; remainingAttempts--) {
-                long remainingMs = deadline - android.os.SystemClock.elapsedRealtime();
-                if (remainingMs <= 0) {
+            boolean fannedOut = !lastGoodFirst;
+            int outstanding = attempts.size();
+            while (true) {
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (!fannedOut && (outstanding == 0 || now >= fanOutAt)) {
+                    // 上次可用地址失败或 0.6 秒没应答，才去试其余旧地址。
+                    fannedOut = true;
+                    int before = attempts.size();
+                    for (String address : candidates.subList(1, candidates.size())) {
+                        admissionSkipped |= !submitProbe(completed, attempts, device, address, rejected);
+                    }
+                    outstanding += attempts.size() - before;
+                }
+                if (outstanding == 0) {
                     break;
+                }
+                long waitUntil = fannedOut ? deadline : Math.min(deadline, fanOutAt);
+                long remainingMs = waitUntil - now;
+                if (remainingMs <= 0) {
+                    if (fannedOut) {
+                        break;
+                    }
+                    continue;
                 }
                 Future<ProbeResult> finished = completed.poll(remainingMs, TimeUnit.MILLISECONDS);
                 if (finished == null) {
-                    break;
+                    if (fannedOut) {
+                        break;
+                    }
+                    continue;
                 }
+                outstanding--;
                 try {
                     ProbeResult result = finished.get();
                     if (result != null) {
@@ -167,6 +187,30 @@ final class PhoneDeckLanClient {
                     attempt.cancel(true);
                 }
             }
+        }
+    }
+
+    /// 先只探测上次可用地址的时长；正常情况下它几十毫秒内应答（复用 keep-alive），
+    /// 其余历史地址就不必每 2 秒各发一次连接——同网段的失效地址每次都会让手机发 ARP 广播。
+    static final long LAST_GOOD_HEAD_START_MS = 600;
+
+    /// 纯函数供单测：有多个候选且第一个就是上次可用地址时，先单独探测它。
+    static boolean shouldProbeLastGoodFirst(String lastGood, List<String> orderedCandidates) {
+        return lastGood != null && orderedCandidates != null && orderedCandidates.size() > 1
+                && lastGood.equals(orderedCandidates.get(0));
+    }
+
+    /// 提交一个地址探测；线程池满时返回 false（不能把套接字 I/O 挪到调用线程上）。
+    private static boolean submitProbe(ExecutorCompletionService<ProbeResult> completed,
+                                       List<Future<ProbeResult>> attempts,
+                                       TargetDeviceManager.Device device,
+                                       String address,
+                                       java.util.concurrent.atomic.AtomicBoolean rejected) {
+        try {
+            attempts.add(completed.submit(() -> probeAddress(device, address, rejected)));
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            return false;
         }
     }
 

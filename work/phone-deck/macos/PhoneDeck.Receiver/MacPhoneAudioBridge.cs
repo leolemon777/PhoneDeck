@@ -1,21 +1,8 @@
 namespace PhoneDeck.MacReceiver;
 
-internal interface IMacPhoneAudioSessionController
+/// <summary>手机共享麦克风音频 → BlackHole。只支持共享模式（2026-11-05 删除受管听写与启动缓存）。</summary>
+internal sealed class MacPhoneAudioBridge : IDisposable
 {
-    bool WaitForSessionActive(string sessionId, int timeoutMilliseconds);
-    bool WaitForSessionEnd(string sessionId, int timeoutMilliseconds);
-    void BeginPlayback(string sessionId);
-    bool StopSession(string sessionId);
-
-    /// <summary>BlackHole 常驻输出已运行，引擎可与音频建连并行启动。</summary>
-    bool OutputWarm => false;
-}
-
-internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDisposable
-{
-    /// <summary>未放行前暂存的手机 PCM（mono）：最多 1 秒。</summary>
-    private const int PreRollCapacityBytes = 48_000 * 2;
-    internal const int ManagedTargetMs = 150;
     /// <summary>
     /// 共享模式静音追赶目标。f29f03d 曾降到 60 ms，Wi-Fi 抖动超过 60 ms 就播空断续；恢复 120 ms。
     /// </summary>
@@ -245,15 +232,13 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                     $"已有 {active.Mode.ToWireValue()} 音频会话正在使用接收端");
             }
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            // 常驻输出跨会话复用：每个会话开始时重新设定上限。managed 的 pre-roll 突发必须完整保留。
-            output.SetLatencyCap(mode == AudioStreamMode.Shared ? SharedQueueMs * StereoBytesPerMs : 0);
+            // 常驻输出跨会话复用：每个会话开始时重新设定上限。
+            output.SetLatencyCap(SharedQueueMs * StereoBytesPerMs);
             session = new ActiveSession(sessionId, mode, output, cancellation)
             {
                 StartCounters = output.Counters,
                 OwnerId = ownerId,
-                PlaybackReleased = mode == AudioStreamMode.Shared,
-                CatchUp = new PcmSilenceCatchUp(
-                    mode == AudioStreamMode.Shared ? SharedTargetMs : ManagedTargetMs)
+                CatchUp = new PcmSilenceCatchUp(SharedTargetMs)
             };
             active = session;
             Monitor.PulseAll(syncRoot);
@@ -281,20 +266,7 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                         break;
                     }
                     session.CountReceived(buffer.AsSpan(0, count));
-                    if (session.PlaybackReleased)
-                    {
-                        session.WriteLive(buffer.AsSpan(0, count));
-                    }
-                    else
-                    {
-                        session.PreRoll.Enqueue(buffer.AsSpan(0, count).ToArray());
-                        session.PreRollBytes += count;
-                        while (session.PreRollBytes > PreRollCapacityBytes
-                               && session.PreRoll.TryDequeue(out var dropped))
-                        {
-                            session.PreRollBytes -= dropped.Length;
-                        }
-                    }
+                    session.WriteLive(buffer.AsSpan(0, count));
                 }
             }
         }
@@ -309,14 +281,13 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         }
         finally
         {
-            bool released;
-            lock (syncRoot) { session.Ending = true; released = session.PlaybackReleased; }
+            lock (syncRoot) { session.Ending = true; }
             try
             {
                 // Cancellation stops intake immediately, not playback of PCM that
-                // was already delivered. Unreleased startup pre-roll is discarded.
+                // was already delivered.
                 // 被同会话新连接接管时由新连接继续供音，旧连接直接让出。
-                if (released && !session.Superseded)
+                if (!session.Superseded)
                     drained = await session.Output.DrainAsync(DrainMaxMs, OutputTailMs)
                         .WaitAsync(TimeSpan.FromMilliseconds(DrainMaxMs + OutputTailMs + 500));
             }
@@ -383,35 +354,6 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
             Console.Error.WriteLine(
                 $"[audio:{session.SessionId}] 手机送来的几乎全是数字静音（全零），" +
                 "手机麦克风可能被其他应用占用或被系统静音");
-        }
-    }
-
-    public void BeginPlayback(string sessionId)
-    {
-        lock (syncRoot)
-        {
-            var session = RequireSession(sessionId);
-            if (session.Ending) throw new InvalidOperationException("音频会话正在结束");
-            if (session.Mode != AudioStreamMode.Managed || session.PlaybackReleased)
-            {
-                return;
-            }
-            var preRoll = new byte[session.PreRollBytes];
-            var offset = 0;
-            while (session.PreRoll.TryDequeue(out var audio))
-            {
-                audio.CopyTo(preRoll, offset);
-                offset += audio.Length;
-            }
-            session.PreRollBytes = 0;
-            session.PlaybackReleased = true;
-            // 开口前的静音只会拉长整段延迟：放行时只保留首个语音块前 LeadInMs。
-            var trimmed = PcmLatency.LeadingSilenceTrimOffset(
-                preRoll, PcmLatency.MsToBytes(PcmLatency.LeadInMs));
-            session.WriteLive(preRoll.AsSpan(trimmed));
-            Console.WriteLine(
-                $"[audio:{sessionId}] playbackReleased preRollBytes={preRoll.Length} " +
-                $"leadingSilenceTrimmedBytes={trimmed}");
         }
     }
 
@@ -515,15 +457,6 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
         return true;
     }
 
-    private ActiveSession RequireSession(string sessionId)
-    {
-        var current = active;
-        return current is not null
-            && string.Equals(current.SessionId, sessionId, StringComparison.Ordinal)
-            ? current
-            : throw new InvalidOperationException("音频会话不存在或已断开");
-    }
-
     private sealed class ActiveSession(
         string sessionId,
         AudioStreamMode mode,
@@ -569,9 +502,6 @@ internal sealed class MacPhoneAudioBridge : IMacPhoneAudioSessionController, IDi
                 digitalSilenceBytes / MonoBytesPerMs);
         }
         internal CancellationTokenSource Cancellation { get; } = cancellation;
-        internal Queue<byte[]> PreRoll { get; } = new();
-        internal int PreRollBytes { get; set; }
-        internal bool PlaybackReleased { get; set; }
         internal bool Ending { get; set; }
         internal volatile bool Superseded;
         internal string? OwnerId { get; init; }

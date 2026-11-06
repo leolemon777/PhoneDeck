@@ -1,4 +1,3 @@
-using PhoneDeck.Desktop;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -9,12 +8,6 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 // 实时音频线程（WASAPI/AUHAL 回调）不能被长时间阻塞式 GC 打断。
 System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
-
-if (args.FirstOrDefault() == "--apply-fleet-update")
-{
-    Environment.ExitCode = await FleetUpdateWorker.Run(args);
-    return;
-}
 
 using var singleInstance = new Mutex(initiallyOwned: true, "PhoneDeck.Server.Singleton", out var isFirstInstance);
 if (!isFirstInstance)
@@ -27,7 +20,6 @@ ReceiverLog.Install(Path.Combine(PhoneDeckDataDirectory.Get(), "logs"));
 
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
-using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receiverIdentity.DisplayName, PhoneDeckDataDirectory.Get());
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 // 共享音频是不会自行结束的长流；退出时下面的端点会主动收尾，这里只做兜底，
@@ -39,7 +31,6 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 builder.WebHost.ConfigureKestrel(options =>
 {
-    phoneWeb.Listen(options);
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
@@ -51,14 +42,11 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
-phoneWeb.Map(app);
 var serverSettings = ServerSettings.LoadOrCreate();
-var fleetUpdates = new FleetUpdates();
 var configurationGate = new ConfigurationGate();
 using var audioBridge = new PhoneAudioBridge();
 // 常驻虚拟声卡输出放到后台预热，不阻塞 Kestrel 启动。
 // 常驻输出改为按需：手机请求到达时预热，手机空闲 90 秒后关闭（见 PhoneAudioBridge.WarmIdleMs）。
-using var dictationSessions = new DictationSessionManager(audioBridge);
 using var usbWatchdog = new UsbWatchdog(serverSettings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
     receiverIdentity,
@@ -68,33 +56,17 @@ using var diagnostics = new DiagnosticsMonitor(() =>
 {
     lock (VoiceEngines.ConfigurationLock)
     {
-    var engine = VoiceEngines.Active;
     return new DiagnosticsSnapshot
     {
         CheckedAtMs = Environment.TickCount64,
-        Engine = VoiceEngines.BuildSnapshot(
-            VoiceEngineStateProbe.IsCapturing(engine)),
+        // 只用共享模式：手机不需要知道 Typeless 是否在采集，诊断不再每轮枚举进程与音频会话。
+        Engine = VoiceEngines.BuildSnapshot(capturing: null),
         VirtualCableDevice = audioBridge.FindVirtualCable(),
         ForegroundApp = KeyboardInput.ForegroundAppName()
     };
     }
-},
-    // Only managed dictation needs sub-second engine-stop observations. Shared
-    // audio is independent of the engine and keeps normal diagnostic polling.
-    sessionActive: () => dictationSessions.IsActive,
-    refreshed: snapshot => dictationSessions.ObserveEngineCapturing(
-        snapshot.LastError is null
-            && Environment.TickCount64 - snapshot.CheckedAtMs <= DiagnosticsMonitor.StaleAfterMs
-                ? snapshot.Engine?.Capturing : null,
-        snapshot.CheckedAtMs));
+});
 diagnostics.Start();
-// 采集会话状态一变就立即刷新，轮询只作兜底。
-using var engineStateEvents = new VoiceEngineStateEvents(diagnostics.Nudge);
-_ = Task.Run(engineStateEvents.Start);
-await using var bluetoothReceiver = new BluetoothReceiver(
-    receiverIdentity.ComputerId,
-    receiverIdentity.DisplayName);
-bluetoothReceiver.Start(app.Lifetime.ApplicationStopping);
 usbWatchdog.SetEnabled(serverSettings.UsbWatchdog);
 lanDiscovery.SetEnabled(serverSettings.LanDiscovery);
 // mDNS 与 UDP 应答共用“局域网发现”开关；多播不可用时内部优雅降级到 UDP 回退。
@@ -138,7 +110,6 @@ app.Use(async (context, next) =>
 
 app.Use(async (context, next) =>
 {
-    if (context.Connection.LocalPort == LegacyPhoneWebHost.Port) { await next(); return; }
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料即授权证明，不经令牌鉴权（设计 §3/§10）。
     var isPairingBootstrap = context.Connection.LocalPort == 8766
         && HttpMethods.IsPost(context.Request.Method)
@@ -172,20 +143,6 @@ app.Use(async (context, next) =>
 
 app.Use(async (context, next) =>
 {
-    var isUse = HttpMethods.IsPost(context.Request.Method)
-        && !context.Request.Path.StartsWithSegments("/api/updates");
-    if (!isUse) { await next(); return; }
-    if (!fleetUpdates.EnterUse())
-    {
-        context.Response.StatusCode = 503;
-        await context.Response.WriteAsJsonAsync(new { ok = false, error = "正在更新，请稍后重试" });
-        return;
-    }
-    try { await next(); }
-    finally { fleetUpdates.ExitUse(); }
-});
-app.Use(async (context, next) =>
-{
     var use = HttpMethods.IsPost(context.Request.Method)
         && !context.Request.Path.StartsWithSegments("/api/config/desktop");
     if (!use) { await next(); return; }
@@ -198,11 +155,8 @@ app.Use(async (context, next) =>
     try { await next(); } finally { configurationGate.ExitUse(); }
 });
 DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configurationGate,
-    () => audioBridge.IsStreaming || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true,
+    () => audioBridge.IsStreaming,
     () => serverSettings, value => serverSettings = value, usbWatchdog, lanDiscovery, diagnostics);
-
-fleetUpdates.Map(app, receiverIdentity.ComputerId, () => audioBridge.IsStreaming
-    || dictationSessions.IsActive || diagnostics.Current.Engine?.Capturing == true);
 
 void NoteHealthActivity(HttpContext context)
 {
@@ -213,17 +167,6 @@ void NoteHealthActivity(HttpContext context)
     }
 }
 
-HealthEvents.State ReadHealthEventState(string? requesterClientId)
-{
-    var snapshot = diagnostics.Current;
-    var audio = audioBridge.GetRuntimeSnapshot(requesterClientId);
-    var dictation = dictationSessions.GetRuntimeSnapshot(requesterClientId);
-    return new HealthEvents.State(
-        snapshot.AudioAvailable, audio.Streaming, audio.SessionId, audio.Mode,
-        dictationSessions.Receipts.For(requesterClientId),
-        dictation.Active, dictation.SessionId, snapshot.Engine?.Capturing);
-}
-
 object BuildHealth(HttpContext context)
 {
     var requesterClientId = context.Items["ClientId"] as string;
@@ -232,7 +175,6 @@ object BuildHealth(HttpContext context)
     // 不等待声卡或引擎慢锁；音频状态仅使用短时内存锁。
     var snapshot = diagnostics.Current;
     var runtimeAudio = audioBridge.GetRuntimeSnapshot(requesterClientId);
-    var runtimeDictation = dictationSessions.GetRuntimeSnapshot(requesterClientId);
     var ageMs = unchecked(Environment.TickCount64 - snapshot.CheckedAtMs);
     var stale = ageMs > DiagnosticsMonitor.StaleAfterMs || snapshot.LastError is not null;
     var engine = snapshot.Engine;
@@ -240,8 +182,7 @@ object BuildHealth(HttpContext context)
     {
         ok = true,
         name = "PhoneDeck",
-        version = FleetUpdates.Version,
-        updates = fleetUpdates.Health,
+        version = ReceiverVersion.Version,
         protocolVersion = 2,
         computerId = receiverIdentity.ComputerId,
         displayName = receiverIdentity.DisplayName,
@@ -250,8 +191,8 @@ object BuildHealth(HttpContext context)
         capabilities = new[]
         {
             "fixedAction", "keyChord", "text", "macro", "phoneAudio",
-            "managedDictation", "sharedMicrophone", "secureLan", "fleetUpdatesV1", "phoneManagedSettingsV1",
-            "phoneStopV1", "healthEventsV1"
+            "sharedMicrophone", "secureLan", "phoneManagedSettingsV1",
+            PhoneAudioFormat.Wifi16kCapability
         },
         audio = new
         {
@@ -269,14 +210,13 @@ object BuildHealth(HttpContext context)
             checkedAtMs = snapshot.CheckedAtMs,
             ageMs,
             lastError = snapshot.LastError,
-            stale,
-            // phoneStopV1：只返回给发起该 managed 会话的手机，60 秒内有效。
-            stopRequestedSessionId = dictationSessions.Receipts.For(requesterClientId)
+            stale
         },
+        // 已删除受管听写；字段保留给旧版手机与契约，恒为未听写。
         dictation = new
         {
-            active = runtimeDictation.Active,
-            sessionId = runtimeDictation.SessionId
+            active = false,
+            sessionId = (string?)null
         },
         foregroundApp = snapshot.ForegroundApp,
         usbWatchdog = new
@@ -335,23 +275,6 @@ object BuildHealth(HttpContext context)
 }
 
 app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
-
-// healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
-// 显式 Task<IResult>：否则表达式体 lambda 会绑定到 RequestDelegate 重载，结果被丢弃、应答为空。
-app.MapGet("/api/events", async Task<IResult> (HttpContext context) =>
-{
-    // Foreground activity is observed once on entry, not once per 50ms poll.
-    NoteHealthActivity(context);
-    var requesterClientId = context.Items["ClientId"] as string;
-    using var waiting = CancellationTokenSource.CreateLinkedTokenSource(
-        context.RequestAborted, app.Lifetime.ApplicationStopping);
-    return Results.Json(await HealthEvents.WaitAsync(
-        () => ReadHealthEventState(requesterClientId),
-        () => BuildHealth(context),
-        context.Request.Query["since"].FirstOrDefault(),
-        HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-        waiting.Token));
-});
 
 // 共享麦克风联动开关：控制台界面或 Ctrl+Alt+M 热键从 loopback 调用；
 // 局域网调用仍需令牌。手机轮询 /api/health 里的 shared.requested 自动跟随，
@@ -554,6 +477,16 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
     {
         return Results.BadRequest(new { ok = false, error = "不支持的音频格式" });
     }
+    int audioRate;
+    try
+    {
+        audioRate = PhoneAudioFormat.ParseRate(
+            request.Headers[PhoneAudioFormat.RateHeader].FirstOrDefault());
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
 
     int? protocolVersion = null;
     var protocolHeader = request.Headers["X-PhoneDeck-Protocol"].FirstOrDefault();
@@ -597,6 +530,18 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
     {
         return Results.BadRequest(new { ok = false, error = exception.Message });
     }
+    if (audioMode != AudioStreamMode.Shared)
+    {
+        return Results.BadRequest(new { ok = false, error = "只支持共享麦克风" });
+    }
+    try
+    {
+        PhoneAudioFormat.RequireAllowed(audioRate, audioMode);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { ok = false, error = exception.Message });
+    }
 
     try
     {
@@ -611,17 +556,12 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
                 cancellationToken, app.Lifetime.ApplicationStopping,
                 clientSessions.Register(streamClientId));
         var streamToken = revocationCts.Token;
+        // Wi-Fi 共享供音可能是 16 kHz：进入播放缓冲前还原为 48 kHz，后续逻辑不变。
         var bytes = await audioBridge.StreamAsync(
-            request.Body,
+            PhoneAudioFormat.ToBaseline(request.Body, audioRate),
             sessionId,
             audioMode,
-            (endedSessionId, endedMode) =>
-            {
-                if (endedMode.ControlsTypeless())
-                {
-                    dictationSessions.AudioEnded(endedSessionId);
-                }
-            },
+            (_, _) => { },
             streamToken,
             streamClientId);
         return Results.Ok(new
@@ -659,70 +599,13 @@ app.MapPost("/api/audio/stream", async (HttpRequest request, CancellationToken c
     }
 });
 
-app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext context) =>
-    ExecuteDictationCommand(() =>
-    {
-        TargetEnvelopeValidator.Validate(
-            command.ProtocolVersion,
-            command.RequestId,
-            command.SessionId,
-            command.TargetComputerId,
-            receiverIdentity.ComputerId);
-        diagnostics.Nudge();
-        var duplicate = dictationSessions.Start(
-            command.SessionId,
-            command.RequestId,
-            VoiceEngines.NormalizeMode(command.Mode),
-            context.Items["ClientId"] as string);
-        diagnostics.Nudge();
-        return Results.Ok(new
-        {
-            ok = true,
-            duplicate,
-            requestId = command.RequestId,
-            sessionId = command.SessionId,
-            computerId = receiverIdentity.ComputerId,
-            active = true
-        });
-    }));
-
-app.MapPost("/local/dictation/stop", () => ExecuteDictationCommand(() =>
-{
-    // 先发 phoneStopV1 凭据让手机停止供音，收尾才不会空等手机尾音。
-    dictationSessions.StopFromDesktop();
-    return Results.Ok(new { ok = true });
-}));
-
-app.MapPost("/api/dictation/stop", (DictationCommand command, HttpContext context) =>
-    ExecuteDictationCommand(() =>
-    {
-        TargetEnvelopeValidator.Validate(
-            command.ProtocolVersion,
-            command.RequestId,
-            command.SessionId,
-            command.TargetComputerId,
-            receiverIdentity.ComputerId);
-        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId,
-            context.Items["ClientId"] as string, checkOwner: true);
-        return Results.Ok(new
-        {
-            ok = true,
-            duplicate,
-            requestId = command.RequestId,
-            sessionId = command.SessionId,
-            computerId = receiverIdentity.ComputerId,
-            active = false
-        });
-    }));
-
 app.MapPost("/api/input", async (InputCommand command, HttpContext context) =>
 {
     try
     {
         if (audioBridge.IsStreaming
             && string.Equals(command.Action, "typeless", StringComparison.Ordinal)
-            && (diagnostics.Current.Engine?.Capturing == true
-                || VoiceEngineStateProbe.IsCapturing(VoiceEngines.Active) == true))
+            && VoiceEngineStateProbe.IsCapturing(VoiceEngines.Active) == true)
         {
             // 共享麦克风下通过手机快捷键结束听写：等待手机尾音经缓冲与虚拟声卡送达输入法后再发停止键。
             await Task.Delay(260, context.RequestAborted);
@@ -766,7 +649,6 @@ app.Lifetime.ApplicationStarted.Register(() =>
                     (mdnsAdvertiser.Running ? $" + mDNS {MdnsAdvertiser.ServiceName}.{MdnsAdvertiser.ServiceProtocol}" : "（mDNS 不可用，仅 UDP）") +
         (serverSettings.LanDiscovery ? "（应答中）" : "（已关闭）"));
     Console.WriteLine($"  电脑身份：{receiverIdentity.DisplayName} / {receiverIdentity.ComputerId}");
-    Console.WriteLine("  蓝牙通道：正在查找已配对的手机");
     Console.WriteLine($"  手机麦克风：{audioBridge.FindVirtualCable() ?? "未找到 VB-CABLE"}");
     var engineProfile = VoiceEngines.Active;
     Console.WriteLine(
@@ -810,27 +692,6 @@ catch (Exception exception) when (exception is IOException or System.Net.Sockets
     Environment.ExitCode = 1;
 }
 
-static IResult ExecuteDictationCommand(Func<IResult> execute)
-{
-    try
-    {
-        return execute();
-    }
-    catch (ArgumentException exception)
-    {
-        return Results.BadRequest(new { ok = false, error = exception.Message });
-    }
-    catch (InvalidOperationException exception)
-    {
-        return Results.Conflict(new { ok = false, error = exception.Message });
-    }
-    catch (Exception exception)
-    {
-        Console.Error.WriteLine($"语音听写会话处理失败：{exception.Message}");
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
-}
-
 /// <summary>旧 typeless 健康块只暴露 dictation/translation/ask 三个槽位；
 /// 从当前引擎快照按 id 取，引擎没有该模式时为 null。</summary>
 static string[]? LegacyModeKeys(VoiceEngineSnapshot? engine, string modeId)
@@ -857,12 +718,6 @@ internal sealed record MacroStep(
     string? Text,
     bool? Submit,
     int? DelayBeforeMs);
-internal sealed record DictationCommand(
-    int? ProtocolVersion,
-    string? SessionId,
-    string? RequestId,
-    string? TargetComputerId,
-    string? Mode);
 internal sealed record SharedMicrophoneRequest(bool Requested);
 
 internal static class KeyboardInput

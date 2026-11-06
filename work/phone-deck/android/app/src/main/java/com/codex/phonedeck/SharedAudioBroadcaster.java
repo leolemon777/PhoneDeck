@@ -37,11 +37,23 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         final String computerId;
         final String displayName;
         final PhoneDeckEndpoint endpoint;
+        /// 上传采样率：48000（基线、USB、旧接收端）或 16000（Wi-Fi 且接收端声明 sharedPcm16kV1）。
+        final int sampleRate;
 
         Target(String computerId, String displayName, PhoneDeckEndpoint endpoint) {
+            this(computerId, displayName, endpoint, SAMPLE_RATE);
+        }
+
+        Target(String computerId, String displayName, PhoneDeckEndpoint endpoint, int sampleRate) {
             this.computerId = computerId;
             this.displayName = displayName;
             this.endpoint = endpoint;
+            this.sampleRate = sampleRate == Pcm16kDownsampler.OUTPUT_RATE
+                    ? Pcm16kDownsampler.OUTPUT_RATE : SAMPLE_RATE;
+        }
+
+        boolean uses16k() {
+            return sampleRate == Pcm16kDownsampler.OUTPUT_RATE;
         }
 
         boolean sameEndpoint(Target other) {
@@ -54,6 +66,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     ? other.computerId == null
                     : other.computerId != null && computerId.equalsIgnoreCase(other.computerId);
             return sameComputer
+                    && sampleRate == other.sampleRate
                     && Objects.equals(endpoint.baseUrl, other.endpoint.baseUrl)
                     && Objects.equals(endpoint.accessToken, other.endpoint.accessToken)
                     && Objects.equals(endpoint.clientId, other.endpoint.clientId)
@@ -65,6 +78,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
     private static final int CHUNK_BYTES = SAMPLE_RATE * 2 * 20 / 1_000;
     /// 采集重建期间送给各接收端的 20 ms 静音，避免接收端 5 秒无数据判定断流。只读，可共享。
     private static final byte[] SILENCE_FRAME = new byte[CHUNK_BYTES];
+    private static final byte[] SILENCE_FRAME_16K = new byte[CHUNK_BYTES / Pcm16kDownsampler.FACTOR];
     // 240 ms：吸收常见 Wi-Fi 抖动；满了优先丢静音（见 FrameQueue），接收端再跳过积压静音。
     private static final int QUEUE_FRAMES = 12;
     /// A platform socket can ignore both interrupt and disconnect for a while.
@@ -247,6 +261,8 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         AudioRecord localRecorder = null;
         String failure = null;
         MicSilenceMonitor silence = new MicSilenceMonitor();
+        // 只采一次 48 kHz；声明 16 kHz 的接收端共用同一份抽取结果（每帧最多算一次）。
+        Pcm16kDownsampler downsampler = new Pcm16kDownsampler();
         int failedAttempts = 0;
         boolean recovering = false;
         try {
@@ -275,8 +291,16 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                             break;
                         }
                         byte[] frame = Arrays.copyOf(chunk, count);
+                        byte[] frame16k = null;
                         for (TargetSink sink : sinks.values()) {
-                            sink.offer(frame);
+                            if (sink.target.uses16k()) {
+                                if (frame16k == null) {
+                                    frame16k = downsampler.process(chunk, count);
+                                }
+                                sink.offer(frame16k);
+                            } else {
+                                sink.offer(frame);
+                            }
                         }
                         long now = SystemClock.elapsedRealtime();
                         if (recovering) {
@@ -409,7 +433,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         long deadline = SystemClock.elapsedRealtime() + durationMs;
         while (running && SystemClock.elapsedRealtime() < deadline) {
             for (TargetSink sink : sinks.values()) {
-                sink.offer(SILENCE_FRAME);
+                sink.offer(sink.target.uses16k() ? SILENCE_FRAME_16K : SILENCE_FRAME);
             }
             SystemClock.sleep(20);
         }
@@ -948,8 +972,14 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                         continue;
                     }
                     local.setRequestMethod("POST");
-                    local.setRequestProperty("Content-Type", "audio/L16; rate=48000; channels=1");
+                    local.setRequestProperty("Content-Type", target.uses16k()
+                            ? "audio/L16; rate=16000; channels=1"
+                            : "audio/L16; rate=48000; channels=1");
                     local.setRequestProperty("X-PhoneDeck-Audio", "pcm-s16le");
+                    if (target.uses16k()) {
+                        // 接收端（sharedPcm16kV1）入缓冲前还原为 48 kHz；旧接收端不会收到此头。
+                        local.setRequestProperty("X-PhoneDeck-Audio-Rate", "16000");
+                    }
                     local.setRequestProperty("X-PhoneDeck-Audio-Mode", "shared");
                     local.setRequestProperty("X-PhoneDeck-Protocol", "2");
                     local.setRequestProperty("X-PhoneDeck-Session", ownerSessionId);

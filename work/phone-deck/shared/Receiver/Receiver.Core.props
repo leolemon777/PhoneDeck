@@ -18,12 +18,15 @@
     <PackageReference Include="Makaretu.Dns" Version="2.0.1" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
+  <!-- 状态页的配对二维码图片（NativePairingEndpoints，原生精简版不含）。 -->
+  <ItemGroup Condition="'$(PublishAot)' != 'true'">
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)AudioStreamMode.cs" Link="Core/AudioStreamMode.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ClientCredentials.cs" Link="Core/ClientCredentials.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ClientSessionRegistry.cs" Link="Core/ClientSessionRegistry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DesktopConfigurationCore.cs" Link="Core/DesktopConfigurationCore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)HealthEvents.cs" Link="Core/HealthEvents.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)LanRequestAuthenticator.cs" Link="Core/LanRequestAuthenticator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)LoopbackOriginGuard.cs" Link="Core/LoopbackOriginGuard.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)MdnsAdvertiser.cs" Link="Core/MdnsAdvertiser.cs" />
@@ -35,9 +38,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)ReceiverJsonContexts.cs" Link="Core/ReceiverJsonContexts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TrustJsonContexts.cs" Link="Core/TrustJsonContexts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ReceiverApiModels.cs" Link="Core/ReceiverApiModels.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SessionLeaseRegistry.cs" Link="Core/SessionLeaseRegistry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TargetEnvelopeValidator.cs" Link="Core/TargetEnvelopeValidator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Audio/PcmLatency.cs" Link="Core/PcmLatency.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Audio/PhoneAudioFormat.cs" Link="Core/PhoneAudioFormat.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Audio/PlaybackQuality.cs" Link="Core/PlaybackQuality.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ReceiverLog.cs" Link="Core/ReceiverLog.cs" />
   </ItemGroup>

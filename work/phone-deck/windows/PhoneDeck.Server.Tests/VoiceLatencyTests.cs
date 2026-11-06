@@ -338,20 +338,6 @@ public sealed class VoiceLatencyTests
         Assert.AreEqual(1_000, PcmLatency.ResolveOutputTailMs("5000"));
     }
 
-    [TestMethod]
-    public void SessionEventsAreANoOpOffWindowsAndDisposeSafely()
-    {
-        var signals = 0;
-        using var events = new VoiceEngineStateEvents(() => signals++);
-        if (!OperatingSystem.IsWindows())
-        {
-            events.Start();
-            Assert.AreEqual(0, events.WatchedSessions);
-        }
-        events.Dispose();
-        Assert.AreEqual(0, signals);
-    }
-
     private sealed class RecordingPlayback(IWaveProvider source) : IPhoneAudioPlayback
     {
         private volatile bool playing;

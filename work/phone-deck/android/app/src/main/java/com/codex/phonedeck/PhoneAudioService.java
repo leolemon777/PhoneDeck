@@ -118,6 +118,10 @@ public final class PhoneAudioService extends Service {
     private TargetDeviceManager deviceManager;
     private SharedAudioBroadcaster broadcaster;
     private WifiManager.WifiLock wifiLock;
+    /// 熄屏供音用：LOW_LATENCY 只在前台且亮屏时生效，熄屏后 Wi-Fi 进入省电，电脑回的 TCP ACK 被
+    /// 路由器攒到 DTIM 才下发，发送窗口卡住、声音成串到达。HIGH_PERF 在 Android 10–13 熄屏也关闭省电；
+    /// Android 14 起系统自动把它当 LOW_LATENCY 处理，没有副作用。只在共享供音期间持有。
+    private WifiManager.WifiLock screenOffWifiLock;
     private PowerManager.WakeLock wakeLock;
     private volatile boolean desiredRunning;
     private boolean stopping;
@@ -164,7 +168,6 @@ public final class PhoneAudioService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        TranscriptRelay.acquire(this);
         deviceManager = TargetDeviceManager.get(this);
         createNotificationChannel();
         broadcaster = new SharedAudioBroadcaster(this, new SharedAudioBroadcaster.Listener() {
@@ -485,7 +488,8 @@ public final class PhoneAudioService extends Service {
                     SharedAudioReadiness readiness = sharedAudioReadiness(result.health);
                     if (readiness == SharedAudioReadiness.READY) {
                         SharedAudioBroadcaster.Target target = new SharedAudioBroadcaster.Target(
-                                device.computerId, device.displayName, result.endpoint);
+                                device.computerId, device.displayName, result.endpoint,
+                                SharedAudioPolicies.wifiUploadRate(capabilityList(result.health)));
                         targets.put(device.computerId, target);
                         nextRetained.put(device.computerId,
                                 new RetainedTarget(target, observedAt, 0));
@@ -944,6 +948,17 @@ public final class PhoneAudioService extends Service {
         return shared != null && shared.optBoolean("requested", false);
     }
 
+    private static java.util.List<String> capabilityList(JSONObject health) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        JSONArray capabilities = health == null ? null : health.optJSONArray("capabilities");
+        if (capabilities != null) {
+            for (int index = 0; index < capabilities.length(); index++) {
+                result.add(capabilities.optString(index));
+            }
+        }
+        return result;
+    }
+
     private static boolean hasSharedCapability(JSONObject health) {
         JSONArray capabilities = health.optJSONArray("capabilities");
         if (capabilities == null) {
@@ -982,6 +997,8 @@ public final class PhoneAudioService extends Service {
     }
 
     private void acquireLocks() {
+        // 重入时先放掉旧锁对象，避免被覆盖的引用一直持有到 GC。
+        releaseLocks();
         WifiManager wifi = getApplicationContext().getSystemService(WifiManager.class);
         if (wifi != null) {
             int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
@@ -990,6 +1007,12 @@ public final class PhoneAudioService extends Service {
             wifiLock = wifi.createWifiLock(mode, "PhoneDeckSharedMicrophone");
             wifiLock.setReferenceCounted(false);
             wifiLock.acquire();
+            if (mode != WifiManager.WIFI_MODE_FULL_HIGH_PERF) {
+                screenOffWifiLock = wifi.createWifiLock(
+                        WifiManager.WIFI_MODE_FULL_HIGH_PERF, "PhoneDeckSharedMicrophoneScreenOff");
+                screenOffWifiLock.setReferenceCounted(false);
+                screenOffWifiLock.acquire();
+            }
         }
         PowerManager power = getSystemService(PowerManager.class);
         if (power != null) {
@@ -1005,6 +1028,10 @@ public final class PhoneAudioService extends Service {
             wifiLock.release();
         }
         wifiLock = null;
+        if (screenOffWifiLock != null && screenOffWifiLock.isHeld()) {
+            screenOffWifiLock.release();
+        }
+        screenOffWifiLock = null;
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
@@ -1070,7 +1097,6 @@ public final class PhoneAudioService extends Service {
     @Override
     public void onDestroy() {
         serviceDestroyed = true;
-        TranscriptRelay.release();
         serviceSessionRevision++;
         desiredRunning = false;
         unregisterWifiLinkObserver();

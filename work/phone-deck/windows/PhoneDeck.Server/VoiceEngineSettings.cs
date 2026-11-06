@@ -4,12 +4,11 @@ using System.Text.Json;
 /// 手机通过带目标与版本校验的配置 API 保存并热应用；手工改文件仍需重启。</summary>
 internal sealed class VoiceEngineSettings
 {
-    /// <summary>激活引擎 id（如 typeless、doubao、wetype 或扩展档案的 id）。</summary>
+    /// <summary>激活引擎 id；只支持 typeless，保留字段以兼容旧配置文件与手机设置接口。</summary>
     public string ActiveEngine { get; set; } = VoiceEngineCatalog.DefaultEngineId;
 
     /// <summary>手动快捷键覆盖：engineId → modeId → 绑定串（如 "Ctrl+Shift+V"）。
-    /// 优先级高于引擎配置文件与档案默认值；无配置可读的引擎（如微信输入法）
-    /// 必须在这里填写快捷键后受管听写才可用。</summary>
+    /// 优先级高于 Typeless 自己的配置；读不到 Typeless 配置时可在这里填写。</summary>
     public Dictionary<string, Dictionary<string, string>>? ShortcutOverrides { get; set; }
 
     internal string? ShortcutOverrideFor(string engineId, string modeId)
@@ -73,12 +72,10 @@ internal sealed class VoiceEngineSettings
                 File.WriteAllText(SettingsPath,
                     "{\n"
                     + "  // 语音引擎设置。改动后重启 PhoneDeck.Server.exe 生效。\n"
-                    + "  // activeEngine：当前语音转文字引擎，可选内置 typeless/doubao/wetype，\n"
-                    + "  // 或 data\\voice-engines\\ 目录中扩展档案的 id。详见 docs/guides/VOICE_ENGINES.md。\n"
+                    + "  // 只支持 Typeless；快捷键默认从 Typeless 自己的设置读取。\n"
                     + "  \"activeEngine\": \"typeless\",\n"
-                    + "  // shortcutOverrides：手动指定某引擎某模式的快捷键，优先级最高。\n"
-                    + "  // 无配置可读的引擎（如微信输入法）必须在这里填写才能使用，例如：\n"
-                    + "  // \"shortcutOverrides\": { \"wetype\": { \"dictation\": \"Ctrl+Shift+V\" } }\n"
+                    + "  // shortcutOverrides：读不到 Typeless 设置时手动指定快捷键，例如：\n"
+                    + "  // \"shortcutOverrides\": { \"typeless\": { \"dictation\": \"RightAlt\" } }\n"
                     + "  \"shortcutOverrides\": {}\n"
                     + "}\n");
             }

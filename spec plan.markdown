@@ -1,5 +1,50 @@
 # 言渡 · Yandu 产品规格与开发计划
 
+## 2026-11-05 只保留共享麦克风（用户决策）
+
+- 用户要求“现在只要共享模式，把其他模式删了，节省内存 CPU”。删除手机控制听写（点击说话 / 按住说话，managed）：
+  手机主按钮只开关共享麦克风，听写由每台电脑自己的 Typeless 快捷键开始与停止。取代“点击与按住两种语音模式继续工作”的约束。
+- 手机：删除 `AudioStreamer`、`RemoteStopPolicy`、`RemoteVoiceState`、`VoiceModeSwitch`、预热与听写状态同步、听写/翻译/提问模式选择、
+  4 个只服务听写的线程池，以及只对接 Desktop 2.0 的“同步文字”（`TranscriptRelay`）。设置页“语音输入”只剩共享说明。
+- 电脑端：Mac 删除 `MacDictationSessionManager`、启动缓存（pre-roll）与 `/api/events`；Windows 删除 `DictationSessionManager`、
+  常驻 Core Audio 会话监听 `VoiceEngineStateEvents` 与 `/api/events`；两端删除 `/api/dictation/start|stop` 与 `/local/dictation/stop`，
+  `X-PhoneDeck-Audio-Mode: managed` 的音频流返回 400。能力不再声明 `managedDictation`、`phoneStopV1`、`healthEventsV1`。
+- 健康检查不再探测 Typeless 是否在采集（Mac 每次健康检查查 Core Audio 进程表、Windows 每 3 秒枚举进程与音频会话的诊断，
+  原为共享模式下主要的接收端 CPU 消耗）；`dictation.active=false`、`voiceEngine.capturing=null` 保留给旧版手机与契约。
+  只有手机快捷键发出“切换 Typeless”时才探测一次，用于结束前等待 260 ms 尾音。
+- Windows `PhoneAudioBridge` 的受管启动缓存分支已不可达，保留待 Windows 上能跑测试时再删。
+
+## 2026-11-05 收窄范围：只为作者自用、只用 Typeless（用户决策）
+
+- 用户说明“只为我自己设计、只用 Typeless”，选择删除四类为多人分发或多输入法准备的内容；本条取代下文与第 0 章中
+  多输入法兼容矩阵、开源发布、外部用户验收、iPhone 网页、Desktop 2.0 与蓝牙相关的规划与优先级。
+- **多引擎**：Windows `VoiceEngineCatalog` 与 Mac `MacVoiceEngineCatalog` 只内置 Typeless，不再加载 `voice-engines/*.json`
+  扩展档案；其他 `activeEngine` 一律回退/拒绝。Typeless 快捷键仍从 Typeless 自己的设置（或 `shortcutOverrides`）读取，不写死键位。
+  手机设置页只显示 Typeless。说明：采集探测原本只针对当前引擎，删除档案不降低 CPU。
+- **统一更新与发布**：删除 Windows `FleetUpdates`/`UpdatePackage`/更新工作进程与 `/api/updates`、能力 `fleetUpdatesV1`，
+  Android 设备更新页、APK 安装授权与发布者公钥，`build-update-package.ps1`、`Install-UpdateSupport`，`scripts/release` 与 CI B03 作业，
+  以及开源发布规格、R0 发布门、Beta 3 发行说明。Windows 版本常量移至 `ReceiverVersion.cs`，版本同步脚本随之更新。
+  **保留** `contracts/` 与两端一致性测试：它们检查手机与电脑协议一致，不只服务发布。
+- **Desktop 2.0 与 iPhone 网页**：删除 `work/phone-deck/desktop/`、`shared/PhoneWeb`（两端 8768 网关）、`build-desktop.ps1`、
+  CI `desktop-preview.yml`、Android `.desktoppreview` 渠道与手机端 Desktop 设置页。状态页配对二维码保留（QRCoder 移入 Receiver.Core）。
+- **蓝牙**：删除 Windows `BluetoothReceiver`、Android `BluetoothTransport` 与蓝牙权限；传输只剩 USB 与 Wi-Fi。
+
+## 2026-11-05 Wi-Fi 共享供音改为可协商 16 kHz（用户决策）
+
+- 用户反馈 3 台电脑同 Wi-Fi 时断连、断续，要求“性能榨干到最好、减少 Wi-Fi 损耗”，并在 16 kHz PCM / Opus / 保持 48 kHz
+  三个选项中选择 **16 kHz PCM**。本条取代 §0 与 2026-10-05 中“48 kHz PCM 不变、编码协商未实施”在 Wi-Fi 共享供音上的约束；
+  USB、受管听写与旧接收端仍为 48 kHz / PCM16 / mono 基线（AGENTS 的 USB 基线不变）。
+- 协商：接收端 health `capabilities` 新增 `sharedPcm16kV1`；手机只对声明该能力的 Wi-Fi 共享目标发 16 kHz，
+  请求头 `X-PhoneDeck-Audio-Rate: 16000`。缺省或 `48000` 为原基线，其他值 400；16 kHz 只允许 `shared` 模式。
+  能力缺失按 `send-48k` 降级。契约：`definitions.capabilityName`、`capability-policy.downgradeMatrix`、
+  `request.audio-stream`（新头、`sampleRateHz` 枚举与条件约束）、`audio-budgets.sampleRateConversion`。
+- 处理：手机仍只采一次 48 kHz，Kaiser 窗 144 抽头（截止约 7.4 kHz）抽取到 16 kHz，多个 16 kHz 目标共用一次结果；
+  接收端在进入播放缓冲前用 144 抽头多相 FIR 升采样回 48 kHz，抖动缓冲、静音追赶、延迟上限与虚拟声卡输出不变。
+  语音识别只用到 8 kHz 以内，预期不影响识别；需实机确认 Typeless 等引擎准确率。
+- 效果（计算值）：每台电脑 768 → 256 kbit/s，3 台约 2.4 → 0.8 Mbit/s；每次发送 1280 字节，约 1 个 TCP 段。
+- 同轮其它 Wi-Fi 减负：共享两帧合包（25 次/秒/台）、探测先只试上次可用地址、单播扫描只在广播无应答时执行、
+  熄屏共享时持有 HIGH_PERF Wi-Fi 锁（Android 10–13 熄屏关闭省电，代价是共享期间耗电增加）。
+
 ## 2026-10-29 电脑端 CPU 与内存优化
 
 - 用户要求进一步降低 CPU 与内存；继续按“不需要测试”执行代码分析、只读运行态采样与编译，不运行功能/音频测试。

@@ -703,19 +703,16 @@ public final class ShortcutEditActivity extends Activity {
                 if (candidate.isTextAction()) {
                     message = PhoneDeckUsbClient.sendText(
                             this,
-                            candidate.textForSend(),
-                            BluetoothTransport.current());
+                            candidate.textForSend());
                 } else if (candidate.isMacroAction()) {
                     message = PhoneDeckUsbClient.sendMacro(
                             this,
-                            candidate.steps,
-                            BluetoothTransport.current());
+                            candidate.steps);
                 } else {
                     message = PhoneDeckUsbClient.sendKeyChord(
                             this,
                             candidate.keys,
-                            candidate.holdMs,
-                            BluetoothTransport.current());
+                            candidate.holdMs);
                 }
                 runOnUiThread(() -> {
                     showFeedback("✓  " + message, theme.success);

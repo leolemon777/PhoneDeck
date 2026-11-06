@@ -69,15 +69,6 @@ android {
             resValue "string", "app_name", isolatedUiPreview ? "言渡·对话白" : "言渡 UI 预览"
         }
 
-        // Stable owner-signed candidate, separate from both legacy fleet updates and ADB UI fixtures.
-        desktopPreview {
-            initWith release
-            applicationIdSuffix ".desktoppreview"
-            versionNameSuffix ""
-            debuggable false
-            resValue "string", "app_name", "言渡"
-            matchingFallbacks = ["release"]
-        }
     }
 
     lint {
@@ -93,27 +84,12 @@ androidComponents {
             output.versionCode.set(29)
         }
     }
-    onVariants(selector().withBuildType("desktopPreview")) { variant ->
-        variant.outputs.each { output ->
-            output.versionName.set("2.0.0-alpha.1")
-            output.versionCode.set(4)
-        }
-    }
 }
 
 dependencies {
     testImplementation "junit:junit:4.13.2"
 }
 
-tasks.configureEach {
-    if (name == "packageDesktopPreview") {
-        doFirst {
-            if (!hasPhoneDeckSigning) {
-                throw new GradleException("Desktop preview distribution requires the owner's fixed signing.properties. Use uiPreview for development only.")
-            }
-        }
-    }
-}
 
 // Gradle's Windows test worker can lose loose .class directories when the
 // workspace path contains CJK characters. Package them first so local unit

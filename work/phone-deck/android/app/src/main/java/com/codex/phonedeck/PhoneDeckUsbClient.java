@@ -58,32 +58,29 @@ final class PhoneDeckUsbClient {
     static String sendKeyChord(
             Context context,
             List<String> keys,
-            int holdMs,
-            BluetoothTransport bluetoothTransport) throws Exception {
+            int holdMs) throws Exception {
         JSONArray keyArray = new JSONArray();
         for (String key : KeyCatalog.normalizeChord(keys)) {
             keyArray.put(key);
         }
-        return sendAction(context, bluetoothTransport,
+        return sendAction(context,
                 (requestId, sessionId, computerId) -> createKeyChordBody(
                         keyArray, holdMs, requestId, sessionId, computerId));
     }
 
     static String sendText(
             Context context,
-            String text,
-            BluetoothTransport bluetoothTransport) throws Exception {
+            String text) throws Exception {
         if (text == null || text.isEmpty() || text.length() > 513) {
             throw new IllegalArgumentException("文本指令长度无效");
         }
-        return sendAction(context, bluetoothTransport,
+        return sendAction(context,
                 (requestId, sessionId, computerId) -> createTextBody(
                         text, requestId, sessionId, computerId));
     }
 
     private static String sendAction(
             Context context,
-            BluetoothTransport bluetoothTransport,
             BodyFactory bodyFactory) throws Exception {
         String requestId = UUID.randomUUID().toString();
         String sessionId = UUID.randomUUID().toString();
@@ -102,8 +99,6 @@ final class PhoneDeckUsbClient {
         if (activeComputerId == null || activeComputerId.isBlank()) {
             if (usbServer != null && !usbServer.computerId.isEmpty()) {
                 activeComputerId = usbServer.computerId;
-            } else if (canUseBluetooth(bluetoothTransport)) {
-                activeComputerId = bluetoothTransport.getComputerId();
             }
         }
 
@@ -117,7 +112,7 @@ final class PhoneDeckUsbClient {
                         lanResult.endpoint, "/api/input", body, 1800);
                 return result.optString("message", "电脑已确认") + " · Wi-Fi";
             } catch (Exception ignored) {
-                // 使用同一 requestId 尝试同一目标电脑的 USB/蓝牙备用通道。
+                // 使用同一 requestId 尝试同一目标电脑的 USB 备用通道。
             }
         }
 
@@ -127,37 +122,16 @@ final class PhoneDeckUsbClient {
                 && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
             JSONObject body = bodyFactory.create(
                     requestId, sessionId, usbServer.computerId);
-            try {
-                return post("/api/input", body) + " · USB";
-            } catch (Exception exception) {
-                if (canUseBluetooth(bluetoothTransport)
-                        && usbServer.computerId.equalsIgnoreCase(
-                        bluetoothTransport.getComputerId())
-                        && bluetoothTransport.sendAndWaitForAck(body, 1400)) {
-                    return "电脑已确认 · 蓝牙";
-                }
-                // USB 请求可能已经执行但响应丢失。只有同一 computerId 的
-                // 蓝牙连接可以用同一 requestId 安全补收 ACK，不能误发给另一台电脑。
-                throw exception;
-            }
+            return post("/api/input", body) + " · USB";
         }
         if (usbServer != null && usbServer.computerId.equalsIgnoreCase(activeComputerId)) {
             usbFailure = new IllegalStateException(
                     "USB 电脑端需要升级到 PhoneDeck 1.5.0");
         }
 
-        if (canUseBluetooth(bluetoothTransport)
-                && bluetoothTransport.getComputerId().equalsIgnoreCase(activeComputerId)) {
-            JSONObject body = bodyFactory.create(
-                    requestId, sessionId, bluetoothTransport.getComputerId());
-            if (bluetoothTransport.sendAndWaitForAck(body, 1400)) {
-                return "电脑已确认 · 蓝牙";
-            }
-            throw new IllegalStateException("蓝牙电脑没有确认测试按键", usbFailure);
-        }
         throw new IllegalStateException(
                 usbFailure == null || usbFailure.getMessage() == null
-                        ? "当前目标电脑没有可用的 Wi-Fi、USB 或蓝牙连接"
+                        ? "当前目标电脑没有可用的 Wi-Fi 或 USB 连接"
                         : usbFailure.getMessage(),
                 usbFailure);
     }
@@ -165,14 +139,6 @@ final class PhoneDeckUsbClient {
     private interface BodyFactory {
         JSONObject create(String requestId, String sessionId, String computerId)
                 throws Exception;
-    }
-
-    private static boolean canUseBluetooth(BluetoothTransport transport) {
-        return transport != null
-                && transport.isConnected()
-                && transport.getProtocolVersion() >= 2
-                && transport.getComputerId() != null
-                && !transport.getComputerId().isBlank();
     }
 
     private static JSONObject createKeyChordBody(
@@ -194,8 +160,7 @@ final class PhoneDeckUsbClient {
 
     static String sendMacro(
             Context context,
-            List<ShortcutButtonConfig.MacroStep> steps,
-            BluetoothTransport bluetoothTransport) throws Exception {
+            List<ShortcutButtonConfig.MacroStep> steps) throws Exception {
         if (steps == null || steps.isEmpty() || steps.size() > 8) {
             throw new IllegalArgumentException("宏必须包含 1–8 个步骤");
         }
@@ -203,7 +168,7 @@ final class PhoneDeckUsbClient {
         for (ShortcutButtonConfig.MacroStep step : steps) {
             stepArray.put(step.toJson());
         }
-        return sendAction(context, bluetoothTransport,
+        return sendAction(context,
                 (requestId, sessionId, computerId) -> {
                     JSONObject body = new JSONObject();
                     body.put("protocolVersion", 2);

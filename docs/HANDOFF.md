@@ -1,5 +1,31 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-05 只保留共享麦克风（源码，未部署）
+
+- 用户决定只用共享模式，删除点击 / 按住的受管听写（详见规格 2026-11-05“只保留共享麦克风”）。
+- 手机：`MainActivity` 5 423 → 约 4 000 行；删除 6 个类（AudioStreamer、RemoteStopPolicy、RemoteVoiceState、VoiceModeSwitch、
+  TranscriptRelay、TranscriptSyncActivity）与 4 个线程池；主按钮只开关共享；设置页去掉手机控制听写与点击/按住选项。
+- 电脑端：两端删除听写会话管理、听写接口、`/api/events`；健康检查与 Windows 诊断不再探测 Typeless 采集状态；
+  Windows 删除常驻 Core Audio 会话监听线程；Mac 音频桥删除启动缓存；共享代码删除 `HealthEvents`、`SessionLeaseRegistry`。
+  受管模式音频流一律 400。健康字段 `dictation`、`voiceEngine.capturing` 保留为常量，契约不变。
+- 验证：Android assembleDebug、单元测试 71/71、lint 0 error / 39 warning；Mac 测试 48/48；Windows Server、测试项目、托盘交叉编译 0 error
+  （Windows 测试需 CI）。均为“代码通过构建”，CPU / 内存降幅未在设备上实测。
+- 待办：装机后对比 Mac `top` 与 Windows 任务管理器中接收端 CPU（之前记录 Mac shared 约 1.2–3.6%、Windows 约 4.5%）；
+  Windows `PhoneAudioBridge` / `PreRollBuffer` 的受管分支待在 Windows 上跑测试后删除。
+
+## 2026-11-05 精简为作者自用、只用 Typeless（源码，未部署）
+
+- 用户决定只为自己设计、只用 Typeless，删除四类内容（详见规格 2026-11-05“收窄范围”）：多引擎档案、统一更新与发布流程、
+  Desktop 2.0 实验 + iPhone 网页、蓝牙通道。配对、USB、Wi-Fi、共享麦克风与受管听写保留。
+- 删除量：`desktop/` 整个实验项目（约 13 MB）、Windows 蓝牙/统一更新约 900 行、Android 蓝牙/统一更新/Desktop 设置约 1 300 行、
+  Mac/Windows 非 Typeless 档案与扩展加载、`scripts/release`、CI `b03_release_tests` 与 `desktop-preview.yml`、10 份过时文档。
+- 契约保留：只去掉 `fleetUpdatesV1`；`validate.py` 全部通过。一致性测试（`ContractsConformanceTests`）继续检查手机与电脑协议。
+- 版本：Windows 版本常量从 `FleetUpdates.cs` 移到 `ReceiverVersion.cs`，`Assert-ReleaseVersions.ps1` 与其测试夹具同步改名。
+  `Test-ReleaseVersions.puredata.ps1` 在本 Mac 上原版就报同样的参数为空错误（与本次无关），以 CI（Linux）结果为准。
+- 手机端注意：旧版手机的“设备更新”入口与蓝牙连接在新版中消失；Desktop 2.0 的 `.desktoppreview` 安装包不再构建。
+- 验证：Mac 测试 64/64、Native AOT 发布成功；Windows Server/测试/托盘交叉编译 0 error（Windows 测试由 CI 运行）；
+  Android assembleDebug 成功、单元测试 78/78、lint 0 error。均为“代码通过构建”，未在设备上验证。
+
 ## 2026-11-05 收回 f29f03d 引入的多电脑断连与断续回归（最新源码候选，未部署）
 
 - 用户反馈：3 台电脑同一 Wi-Fi，常有 1–2 台连不上、过会儿自己连上；第一次发语音没输入、之后又正常；断断续续。
@@ -13,18 +39,36 @@
     60 ms 目标让静音追赶把缓冲压到 60 ms，Wi-Fi 抖动超过 60 ms 就播空。
   - 保留 f29f03d 中无害部分：输出尾音 480 ms、managed 停止 800 ms EOF 宽限、`/api/input` 停止前 260 ms 等待、TXT 非 ASCII 编码。
 - **Android**：
-  - `SharedAudioBroadcaster.BATCH_WAIT_MS` 0 → 25：恢复两帧合包，三台电脑同时供音时 Wi-Fi 包量减半；`SILENCE_RMS` 250 → 130 与接收端一致。
+  - `SharedAudioBroadcaster.BATCH_WAIT_MS` 0 → 25：恢复两帧合包，每台电脑每秒发送 50 → 25 次（TLS 记录与无线唤醒减半，TCP 数据包约少四分之一）；`SILENCE_RMS` 250 → 130 与接收端一致。
   - `MainActivity.applyStoredTarget` 不再在当前电脑短暂离线时静默改选另一台在线电脑（违反“切换必须经新电脑确认”，
     多电脑抖动时默认目标来回跳，手机语音键把听写发到别的电脑）；只在根本没有默认电脑时自动选一台。
   - `LanDiscoveryClient.discover`：UDP 应答地址优先，mDNS 只补 UDP 没找到的电脑；mDNS 地址必须与手机某个 IPv4 网段相同（按真实前缀）。
     原先 mDNS `putAll` 覆盖 UDP 结果，而 f29f03d 修好 Windows 中文名 mDNS 后，Android 12 NSD 只返回一个 A 记录，可能是虚拟网卡地址。
   - 64f64c2 的逐台单播扫描（每轮约 250 个单播 → 每个未知地址一次 ARP 广播）改为广播发出 300 ms 内无任何 UDP 应答才执行；
     已核对手机现装 APK 含该扫描。普通路由器广播可达时不再扫描，随身 Wi-Fi / 热点丢广播时仍保留该回退。
+  - `PhoneDeckLanClient.probe`：有上次可用地址时先只探测它（keep-alive 下几十毫秒应答），失败或 0.6 s 无应答才并行探测其余历史地址。
+    原先每 2 s 对每台电脑最多 6 个地址同时发连接，同网段失效地址每轮都触发 ARP 广播。
   - `ReconnectBackoff.MAX_DELAY_MS` 30 s → 5 s：短暂断网后，探测已显示在线的电脑不再在退避睡眠里继续半分钟没声音。
-- **验证**：Mac Receiver Release build 0 error，Mac 测试 59/59；Windows Server 与测试项目在 Mac 交叉编译 0 error（Windows 测试需在 Windows/CI 运行，本机无法加载 Windows 程序集）；
-  Android assembleDebug 成功，单元测试 73/73，lint 0 error / 42 warning。
+- **Wi-Fi 共享改发 16 kHz（用户选择，见规格 2026-11-05）**：接收端 health 新增 `sharedPcm16kV1`，
+  `shared/Audio/PhoneAudioFormat.cs` 解析 `X-PhoneDeck-Audio-Rate`（缺省 48000，其他值 400，16 kHz 仅 shared），
+  `Pcm16kTo48kStream` 在进入播放缓冲前 144 抽头多相升采样回 48 kHz，Mac 与 Windows 共用。手机 `Pcm16kDownsampler`
+  对 48 kHz 采集做 144 抽头抗混叠抽取，只给声明该能力的 Wi-Fi 目标（`SharedAudioPolicies.wifiUploadRate`），
+  USB 目标、受管听写与旧接收端仍为 48 kHz；`Target.sameEndpoint` 含采样率，接收端升级后会重建该路连接。
+  契约同步（capabilityName、downgradeMatrix `send-48k`、audio-stream 头/条件约束、audio-budgets、合法与非法样本），`validate.py` 全部通过。
+- **熄屏 Wi-Fi 省电**：共享服务原只持有 LOW_LATENCY 锁，Android 10+ 仅在前台亮屏生效；现另持 HIGH_PERF 锁，
+  Android 10–13 熄屏也关闭 Wi-Fi 省电（减少 ACK 被攒到 DTIM 造成的成串到达），Android 14+ 系统自动按 LOW_LATENCY 处理。
+  代价是共享期间耗电增加，停止共享即释放。
+- **手机 Wi-Fi 流量预算（3 台电脑共享供音）**：音频 16 kHz 时每台 256 kbps、3 台约 0.8 Mbps 上行（48 kHz 旧接收端每台 768 kbps），
+  每次发送 1280 字节约 1 个 TCP 段，每台约 25 个数据包/秒；健康探测每台每 2 s 一次小 HTTPS 请求（复用 keep-alive，约几 KB/s）；首页前台每 15 s 一次附近发现
+  （2 个 UDP 广播 + mDNS 查询）；缺失电脑时的发现至少间隔 10 s；单播扫描只在广播无应答时。电脑端只应答、不定时发包。
+  普通 802.11n/ac 远高于此；真正伤 Wi-Fi 的是广播/ARP 风暴和过多小包，已分别处理。
+- **验证**：Mac Receiver Release build 0 error，Mac 测试 65/65（新增 16 kHz 解析、模式限制、直流、1 kHz 幅度、逐字节读取），
+  Mac Native AOT 发布成功（既有 IL2026/IL3050 警告与本次无关）；Windows Server 与测试项目在 Mac 交叉编译 0 error（Windows 测试需在 Windows/CI 运行，本机无法加载 Windows 程序集）；
+  Android assembleDebug 成功，单元测试 80/80（新增抽取幅度、12 kHz 混叠抑制、跨帧连续、能力协商、探测顺序），lint 0 error / 42 warning；
+  `contracts/tools/validate.py` 全部通过。Windows Server 的 1 个 CA1416 警告来自 64f64c2 的 `TypelessSettingsReader.cs`。
 - **未部署 / 未验证**：本 Mac 构建的 APK 证书（`ba44191d…`）与手机已装版（`df327953…`）不同，不能覆盖安装，须在持有固定签名的电脑上构建安装；
   Mac 与两台 Windows 接收端均未替换。修复效果需三台电脑同 Wi-Fi shared 实测：看各端 `audio.quality` 断续次数、断流次数与手机端目标是否保持不变。
+  16 kHz 需实测 Typeless / 微信 / 豆包 / 千问识别准确率与听感；电脑端须先升级才会收到 16 kHz（手机按能力自动选择）。
 - 取舍：恢复 120/240 ms 后，用电脑按键（如 Mac Fn）结束 shared 听写时，最后约 0.1–0.2 s 仍可能没送到输入法（f29f03d 想解决的尾字问题）。
   若需要改善，应在不压缩抖动缓冲的前提下单独处理（例如电脑端检测到引擎停止时先排空缓冲），不要再降低目标积压。
 

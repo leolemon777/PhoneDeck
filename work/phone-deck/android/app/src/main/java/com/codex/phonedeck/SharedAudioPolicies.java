@@ -49,6 +49,16 @@ final class SharedAudioPolicies {
         return Math.min(WATCHDOG_POLL_MS, remaining);
     }
 
+    /// 接收端声明此能力后，Wi-Fi 共享供音改发 16 kHz（接收端入缓冲前还原 48 kHz）。
+    static final String WIFI_16K_CAPABILITY = "sharedPcm16kV1";
+
+    /// Wi-Fi 目标的上传采样率：接收端声明 sharedPcm16kV1 才用 16 kHz，否则保持 48 kHz 基线。
+    /// USB 目标不走这里，始终 48 kHz。
+    static int wifiUploadRate(java.util.Collection<String> capabilities) {
+        return capabilities != null && capabilities.contains(WIFI_16K_CAPABILITY)
+                ? Pcm16kDownsampler.OUTPUT_RATE : 48_000;
+    }
+
     static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
         return emptySinceElapsed > 0L
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;

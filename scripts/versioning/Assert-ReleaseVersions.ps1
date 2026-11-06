@@ -53,8 +53,7 @@ $paths = [ordered]@{
     Descriptor          = $DescriptorPath
     WindowsProps        = Join-Path $PhoneDeckRoot 'windows/Directory.Build.props'
     MacProps            = Join-Path $PhoneDeckRoot 'macos/Directory.Build.props'
-    FleetUpdates        = Join-Path $PhoneDeckRoot 'windows/PhoneDeck.Server/FleetUpdates.cs'
-    BluetoothReceiver   = Join-Path $PhoneDeckRoot 'windows/PhoneDeck.Server/BluetoothReceiver.cs'
+    ReceiverVersion     = Join-Path $PhoneDeckRoot 'windows/PhoneDeck.Server/ReceiverVersion.cs'
     AndroidGradle       = Join-Path $PhoneDeckRoot 'android/app/build.gradle'
     MacProgram          = Join-Path $PhoneDeckRoot 'macos/PhoneDeck.Receiver/Program.cs'
     MacInfoPlist        = Join-Path $PhoneDeckRoot 'macos/PhoneDeck.Receiver/Packaging/Info.plist'
@@ -326,21 +325,15 @@ function Read-ReleaseDescriptor {
 function Get-SourceSnapshot {
     param([Parameter(Mandatory)]$Paths)
 
-    $fleet = Read-Utf8Text -Path $Paths.FleetUpdates
+    $fleet = Read-Utf8Text -Path $Paths.ReceiverVersion
     if ($fleet -notmatch 'internal const string Version = "([^"]+)"') {
-        throw "Could not read FleetUpdates.Version from $($Paths.FleetUpdates)"
+        throw "Could not read ReceiverVersion.Version from $($Paths.ReceiverVersion)"
     }
     $fleetVersion = $Matches[1]
     if ($fleet -notmatch 'internal const long Sequence = (\d+)') {
-        throw "Could not read FleetUpdates.Sequence from $($Paths.FleetUpdates)"
+        throw "Could not read ReceiverVersion.Sequence from $($Paths.ReceiverVersion)"
     }
     $fleetSequence = [long]$Matches[1]
-
-    $bt = Read-Utf8Text -Path $Paths.BluetoothReceiver
-    if ($bt -notmatch '(?s)private static void SendHello\b.*?version = "([^"]+)"') {
-        throw "Could not read BluetoothReceiver hello version from $($Paths.BluetoothReceiver)"
-    }
-    $btVersion = $Matches[1]
 
     $gradle = Read-Utf8Text -Path $Paths.AndroidGradle
     if ($gradle -notmatch 'versionCode\s+(\d+)') {
@@ -380,7 +373,6 @@ function Get-SourceSnapshot {
     return [pscustomobject]@{
         FleetVersion = $fleetVersion
         FleetSequence = $fleetSequence
-        BluetoothVersion = $btVersion
         AndroidVersionCode = $androidCode
         AndroidVersionName = $androidName
         MacHealthVersion = $macHealth
@@ -523,13 +515,10 @@ function Compare-Expected {
     $drift = New-Object System.Collections.Generic.List[string]
 
     if ($Actual.FleetVersion -ne $Descriptor.WindowsVersion) {
-        [void]$drift.Add("FleetUpdates.Version='$($Actual.FleetVersion)' != windows.version='$($Descriptor.WindowsVersion)'")
+        [void]$drift.Add("ReceiverVersion.Version='$($Actual.FleetVersion)' != windows.version='$($Descriptor.WindowsVersion)'")
     }
     if ($Actual.FleetSequence -ne $Descriptor.WindowsSequence) {
-        [void]$drift.Add("FleetUpdates.Sequence=$($Actual.FleetSequence) != windows.sequence=$($Descriptor.WindowsSequence)")
-    }
-    if ($Actual.BluetoothVersion -ne $Descriptor.WindowsVersion) {
-        [void]$drift.Add("BluetoothReceiver hello version='$($Actual.BluetoothVersion)' != windows.version='$($Descriptor.WindowsVersion)'")
+        [void]$drift.Add("ReceiverVersion.Sequence=$($Actual.FleetSequence) != windows.sequence=$($Descriptor.WindowsSequence)")
     }
     if ($Actual.AndroidVersionName -ne $Descriptor.AndroidVersionName) {
         [void]$drift.Add("android versionName='$($Actual.AndroidVersionName)' != '$($Descriptor.AndroidVersionName)'")
@@ -583,25 +572,13 @@ function Sync-ProductSources {
     Write-Utf8NoBom -Path $Paths.WindowsProps -Content (New-WindowsPropsContent -Descriptor $Descriptor)
     Write-Utf8NoBom -Path $Paths.MacProps -Content (New-MacPropsContent -Descriptor $Descriptor)
 
-    $fleet = Read-Utf8Text -Path $Paths.FleetUpdates
+    $fleet = Read-Utf8Text -Path $Paths.ReceiverVersion
     $fleet2 = [regex]::Replace($fleet, 'internal const string Version = "[^"]+"', "internal const string Version = `"$($Descriptor.WindowsVersion)`"", 1)
     $fleet2 = [regex]::Replace($fleet2, 'internal const long Sequence = \d+', "internal const long Sequence = $($Descriptor.WindowsSequence)", 1)
     if ($fleet2 -eq $fleet -and ($fleet -notmatch [regex]::Escape($Descriptor.WindowsVersion) -or $fleet -notmatch "Sequence = $($Descriptor.WindowsSequence)")) {
-        throw 'Failed to sync FleetUpdates.cs version/sequence'
+        throw 'Failed to sync ReceiverVersion.cs version/sequence'
     }
-    Write-Utf8NoBom -Path $Paths.FleetUpdates -Content $fleet2
-
-    $bt = Read-Utf8Text -Path $Paths.BluetoothReceiver
-    $bt2 = [regex]::Replace(
-        $bt,
-        '(?s)(private static void SendHello\b.*?version = ")[^"]+(")',
-        "`${1}$($Descriptor.WindowsVersion)`${2}",
-        1
-    )
-    if ($bt2 -eq $bt -and $bt -notmatch [regex]::Escape("version = `"$($Descriptor.WindowsVersion)`"")) {
-        throw 'Failed to sync BluetoothReceiver hello version'
-    }
-    Write-Utf8NoBom -Path $Paths.BluetoothReceiver -Content $bt2
+    Write-Utf8NoBom -Path $Paths.ReceiverVersion -Content $fleet2
 
     $gradle = Read-Utf8Text -Path $Paths.AndroidGradle
     $gradle2 = [regex]::Replace($gradle, 'versionCode\s+\d+', "versionCode $($Descriptor.AndroidVersionCode)", 1)

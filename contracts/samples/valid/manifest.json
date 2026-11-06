@@ -98,6 +98,12 @@
       "covers": "受管听写建流：完整头集 + PCM 基线 48k/mono/20ms"
     },
     {
+      "file": "audio-stream-shared-16k.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "covers": "Wi-Fi 共享供音协商 16 kHz：X-PhoneDeck-Audio-Rate: 16000 + sampleRateHz=16000（sharedPcm16kV1）"
+    },
+    {
       "file": "audio-stream-shared.json",
       "schema": "request.audio-stream.schema.json",
       "domain": "audio",
