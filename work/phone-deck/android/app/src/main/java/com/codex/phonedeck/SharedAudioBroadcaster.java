@@ -559,6 +559,17 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 this.openedAt = openedAt;
             }
 
+            /// 供日志使用：当前阶段与距上次进展的时长（读 volatile 字段，不加锁）。
+            String stageName() {
+                return ConnectionDiagnostics.stage(outputOpenedAt, firstWriteAt, finishingAt);
+            }
+
+            long idleMs(long nowElapsed) {
+                long last = lastProgressAt != Long.MIN_VALUE ? lastProgressAt
+                        : outputOpenedAt != Long.MIN_VALUE ? outputOpenedAt : openedAt;
+                return Math.max(0, nowElapsed - last);
+            }
+
             void outputOpened(long nowElapsed) {
                 synchronized (attemptLock) {
                     outputOpenedAt = nowElapsed;
@@ -730,6 +741,10 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             }
         }
 
+        private String label() {
+            return ConnectionDiagnostics.targetLabel(target.displayName, target.computerId);
+        }
+
         private boolean abortTimedOutAttempt(ConnectionAttempt attempt) {
             boolean scheduleDisconnect = false;
             boolean connectedChanged;
@@ -746,6 +761,8 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 if (!SharedAudioPolicies.watchdogExpired(now, attempt.deadline())) {
                     return false;
                 }
+                ConnectionDiagnostics.log(context, label(), "看门狗判定卡住并断开", attempt.stageName(),
+                        now - attempt.openedAt, attempt.idleMs(now), null);
                 attempt.abortRequested = true;
                 if (!attempt.disconnectScheduled) {
                     attempt.disconnectScheduled = true;
@@ -1000,7 +1017,12 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                             }
                             output.flush();
                             long flushedAt = SystemClock.elapsedRealtime();
+                            boolean firstWrite = attempt.firstWriteAt == Long.MIN_VALUE;
                             attempt.frameFlushed(flushedAt);
+                            if (firstWrite) {
+                                ConnectionDiagnostics.log(context, label(), "开始供音",
+                                        null, flushedAt - attempt.openedAt, -1, null);
+                            }
                             if (!attempt.abortRequested) {
                                 backoff.frameWritten(flushedAt);
                             }
@@ -1022,8 +1044,15 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     }
                     // A connection watchdog interrupted a blocked queue read;
                     // retry this target with its current backoff.
-                } catch (Exception ignored) {
+                } catch (Exception failure) {
                     // Retry only this computer; capture and other sinks continue.
+                    if (shouldRun && !finishing) {
+                        long now = SystemClock.elapsedRealtime();
+                        ConnectionDiagnostics.log(context, label(), "连接中断，将重试",
+                                attempt == null ? "建立连接" : attempt.stageName(),
+                                attempt == null ? -1 : now - attempt.openedAt,
+                                attempt == null ? -1 : attempt.idleMs(now), failure);
+                    }
                 } finally {
                     if (watchdog != null) {
                         watchdog.close();
@@ -1047,7 +1076,10 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                 }
                 if (shouldRun && !finishing) {
                     try {
-                        Thread.sleep(backoff.nextDelayMs());
+                        long retryMs = backoff.nextDelayMs();
+                        ConnectionDiagnostics.log(context, label(), "等待重连 " + retryMs + "ms",
+                                null, -1, -1, null);
+                        Thread.sleep(retryMs);
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
                         break;

@@ -224,6 +224,11 @@ public final class MainActivity extends Activity {
     /// 避免请求风暴与高频耗电；成功后立即恢复正常节奏。
     private long nextHealthCheckDelayMs() {
         long base = HEALTH_CHECK_INTERVAL_MS;
+        PhoneAudioService.Snapshot shared = PhoneAudioService.getSnapshot();
+        if (shared.running && shared.total > 0 && shared.connected >= shared.total) {
+            // 共享供音全部正常时界面也不必 2 秒一刷；服务那边另有同样的放慢。
+            base = SharedAudioPolicies.STEADY_PROBE_INTERVAL_MS;
+        }
         if (lanCheckFailStreak > 0) {
             long[] backoff = {HEALTH_CHECK_INTERVAL_MS, 4_000, 8_000, 16_000, 30_000};
             base = backoff[Math.min(backoff.length - 1, lanCheckFailStreak)];
@@ -238,7 +243,6 @@ public final class MainActivity extends Activity {
         theme = PhoneDeckTheme.load(this);
         appliedThemeId = theme.id;
         theme.applyWindow(this);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         configRepository = new ShortcutConfigRepository(this);
@@ -382,6 +386,11 @@ public final class MainActivity extends Activity {
         }
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         keepConnectionAlive = preferences.getBoolean("keep_connection_alive", true);
+        if (preferences.getBoolean("keep_screen_on", false)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
         applyWifiLock();
         requestImmediateLanCheck("App 回到前台");
         if (typelessButton != null) {

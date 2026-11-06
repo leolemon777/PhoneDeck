@@ -23,11 +23,17 @@ internal sealed record DiagnosticsSnapshot
 /// 后台线程与 RefreshAsync 通过同一信号量串行，避免并发 COM 枚举互抢。</summary>
 internal sealed class DiagnosticsMonitor : IDisposable
 {
-    internal const int RefreshIntervalMs = 3_000;
+    /// <summary>
+    /// 后台诊断间隔。只用共享模式后，诊断只剩“虚拟声卡是否就绪、前台应用、Typeless 快捷键配置”，
+    /// 不再需要亚秒级响应；原 3 秒一轮要枚举 Core Audio 设备并读配置文件，放慢到 10 秒。
+    /// 手机据此判断“虚拟麦克风未就绪”，最多晚 10 秒看到变化；/api/diagnostics 仍会强制刷新。
+    /// </summary>
+    internal const int RefreshIntervalMs = 10_000;
 
     /// <summary>语音会话进行中的刷新间隔：电脑端停止要在亚秒级同步到手机。</summary>
     internal const int ActiveRefreshIntervalMs = 250;
-    internal const int StaleAfterMs = 6_000;
+    /// <summary>超过刷新间隔的 2.5 倍才算过期，否则每轮都会有一半时间显示 stale，手机会把设备状态当“未知”。</summary>
+    internal const int StaleAfterMs = 25_000;
 
     private readonly Func<DiagnosticsSnapshot> reader;
     private readonly int refreshIntervalMs;

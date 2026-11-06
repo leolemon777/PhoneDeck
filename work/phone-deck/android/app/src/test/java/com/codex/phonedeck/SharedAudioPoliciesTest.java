@@ -2,6 +2,8 @@ package com.codex.phonedeck;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -129,6 +131,17 @@ public final class SharedAudioPoliciesTest {
         backoff.frameWritten(7_000);
         backoff.frameWritten(8_001); // 超过允许间隔，重新开始稳定计时。
         assertEquals(4_000, backoff.nextDelayMs());
+    }
+
+    @Test
+    public void probesSlowDownOnlyWhileEveryTargetIsStreaming() {
+        assertEquals(6_000, SharedAudioPolicies.probeIntervalMs(true));
+        assertEquals(2_000, SharedAudioPolicies.probeIntervalMs(false));
+        assertTrue(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, true, true)));
+        assertFalse(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, false, true)));
+        assertFalse(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, null)));
+        assertFalse("没有目标时保持快节奏，方便发现新电脑", SharedAudioPolicies.allStreaming(java.util.Collections.emptyList()));
+        assertFalse(SharedAudioPolicies.allStreaming(null));
     }
 
     private static byte[] voiced(byte marker) {

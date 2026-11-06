@@ -56,7 +56,6 @@ public final class SettingsActivity extends Activity {
         super.onCreate(savedInstanceState);
         theme = PhoneDeckTheme.load(this);
         theme.applyWindow(this);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         repository = new ShortcutConfigRepository(this);
         setContentView(createInterface());
@@ -126,6 +125,7 @@ public final class SettingsActivity extends Activity {
         page.addView(navRow("devices", "多电脑配置", computerSummary,
                 () -> startActivity(new Intent(this, ComputerSettingsActivity.class))), fullWidthMargins(dp(10)));
         page.addView(keepAliveRow(), fullWidthMargins(dp(10)));
+        page.addView(keepScreenOnRow(), fullWidthMargins(dp(10)));
         TextView privacy = text(getString(R.string.brand_name) + " · Yandu · 本地连接\n手机音频默认不保存；转写由电脑本地语音引擎或已选输入法处理。", 12, theme.muted, Typeface.NORMAL);
         privacy.setLineSpacing(dp(4), 1f);
         page.addView(privacy, topMargin(dp(28)));
@@ -386,13 +386,30 @@ public final class SettingsActivity extends Activity {
     }
 
     private LinearLayout keepAliveRow() {
-        boolean enabled = preferences.getBoolean("keep_connection_alive", true);
+        return switchRow("connection", "保持无线连接",
+                "运行期间保持 Wi-Fi 活跃，减少省电造成的断流。",
+                "keep_connection_alive", true, "Wi-Fi 保活",
+                "已开启 Wi-Fi 保活", "已关闭 Wi-Fi 保活");
+    }
+
+    /// 打开言渡时是否让屏幕常亮。共享麦克风在前台服务里运行，熄屏不影响供音，默认关闭以省电。
+    private LinearLayout keepScreenOnRow() {
+        return switchRow("appearance", "打开言渡时屏幕常亮",
+                "只影响应用在前台的时候；共享麦克风熄屏也会继续供音。",
+                "keep_screen_on", false, "屏幕常亮",
+                "已开启屏幕常亮", "已关闭屏幕常亮");
+    }
+
+    private LinearLayout switchRow(String glyph, String title, String description,
+                                   String preferenceKey, boolean defaultValue, String label,
+                                   String announceOn, String announceOff) {
+        boolean enabled = preferences.getBoolean(preferenceKey, defaultValue);
 
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), dp(14), dp(16), dp(14));
         row.setBackground(roundRect(theme.surface, 14, 0, 0));
-        row.addView(iconTile("connection"), new LinearLayout.LayoutParams(dp(38), dp(38)));
+        row.addView(iconTile(glyph), new LinearLayout.LayoutParams(dp(38), dp(38)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -401,20 +418,17 @@ public final class SettingsActivity extends Activity {
         copyParams.leftMargin = dp(14);
         row.addView(copy, copyParams);
 
-        copy.addView(text("保持无线连接", 16, theme.text, Typeface.BOLD));
-        TextView detail = text(
-                "运行期间保持 Wi-Fi 活跃，减少省电造成的断流。",
-                12, theme.muted, Typeface.NORMAL);
+        copy.addView(text(title, 16, theme.text, Typeface.BOLD));
+        TextView detail = text(description, 12, theme.muted, Typeface.NORMAL);
         detail.setLineSpacing(0, 1.15f);
         copy.addView(detail, topMargin(dp(3)));
 
         Switch switchView = new Switch(this);
         switchView.setChecked(enabled);
-        switchView.setContentDescription("Wi-Fi 保活开关");
+        switchView.setContentDescription(label + "开关");
         switchView.setOnCheckedChangeListener((view, checked) -> {
-            preferences.edit().putBoolean("keep_connection_alive", checked).apply();
-            row.announceForAccessibility(checked
-                    ? "已开启 Wi-Fi 保活" : "已关闭 Wi-Fi 保活");
+            preferences.edit().putBoolean(preferenceKey, checked).apply();
+            row.announceForAccessibility(checked ? announceOn : announceOff);
         });
         row.addView(switchView, new LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT,

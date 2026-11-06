@@ -41,7 +41,8 @@ public final class PhoneAudioService extends Service {
 
     private static final int NOTIFICATION_ID = 1701;
     private static final String CHANNEL_ID = "phonedeck_shared_microphone";
-    private static final long PROBE_INTERVAL_MS = 2_000;
+    /// 上一轮探测后所有共享目标都在正常写入时为 true，决定下一次检查的间隔。
+    private volatile boolean allTargetsStreaming;
     /**
      * A health probe is advisory while the audio sink is already running. Keep
      * the last accepted target for a short, bounded window so one Wi-Fi roam or
@@ -161,7 +162,7 @@ public final class PhoneAudioService extends Service {
                 return;
             }
             probeReceivers();
-            handler.postDelayed(this, PROBE_INTERVAL_MS);
+            handler.postDelayed(this, SharedAudioPolicies.probeIntervalMs(allTargetsStreaming));
         }
     };
 
@@ -456,6 +457,11 @@ public final class PhoneAudioService extends Service {
                 Map<String, Boolean> connectionSnapshot = broadcaster == null
                         ? java.util.Collections.emptyMap() : broadcaster.connectionSnapshot();
                 final long observedAt = android.os.SystemClock.elapsedRealtime();
+                java.util.List<Boolean> groupConnected = new java.util.ArrayList<>();
+                for (TargetDeviceManager.Device device : group) {
+                    groupConnected.add(isConnected(connectionSnapshot, device.computerId));
+                }
+                allTargetsStreaming = SharedAudioPolicies.allStreaming(groupConnected);
                 for (TargetDeviceManager.Device device : group) {
                     // M1-B/DEV-03：共享组是显式集合，新增配对不自动入组。
                     states.put(device.computerId, "离线");

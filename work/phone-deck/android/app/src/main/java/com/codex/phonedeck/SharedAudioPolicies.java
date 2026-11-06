@@ -59,6 +59,28 @@ final class SharedAudioPolicies {
                 ? Pcm16kDownsampler.OUTPUT_RATE : 48_000;
     }
 
+    /// 所有目标都在正常供音时，连接检查放慢到这个间隔：音频在持续写入本身就证明连接是通的，
+    /// 检查只用来发现电脑下线或改地址；任何一台没连上就回到快节奏。
+    static final long STEADY_PROBE_INTERVAL_MS = 6_000;
+    static final long FAST_PROBE_INTERVAL_MS = 2_000;
+
+    static long probeIntervalMs(boolean allTargetsStreaming) {
+        return allTargetsStreaming ? STEADY_PROBE_INTERVAL_MS : FAST_PROBE_INTERVAL_MS;
+    }
+
+    /// 共享组非空且每台都已有成功写入的连接。
+    static boolean allStreaming(java.util.Collection<Boolean> groupConnected) {
+        if (groupConnected == null || groupConnected.isEmpty()) {
+            return false;
+        }
+        for (Boolean connected : groupConnected) {
+            if (!Boolean.TRUE.equals(connected)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
         return emptySinceElapsed > 0L
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
