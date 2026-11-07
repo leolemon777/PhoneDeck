@@ -1,5 +1,17 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-06 Mac 接收端已换成新版（625a7bc），其余设备待装
+
+- **已完成（本 Mac）**：`~/Applications/PhoneDeck Receiver.app` 替换为 625a7bc 的 AOT 精简包，主程序 SHA-256 `e7171f83…`；旧包（`8bc17818…`，f29f03d）
+  已压成 `~/Library/Application Support/PhoneDeck/backups/receiver-app-8bc17818-20261106.zip`，解压后核对哈希一致。launchd 服务 running，
+  首次启动没有被 `OS_REASON_CODESIGNING` 拒绝。`/api/health` 的 capabilities 含 `sharedPcm16kV1`、不含 `managedDictation`/`phoneStopV1`/`healthEventsV1`，
+  `/api/admin/presence` 显示手机（SM-G9880）通过 USB 与 Wi-Fi 两条通道都已连上新接收端。
+- **待用户**：辅助功能因换 ad-hoc 签名变为“未授权”（`accessibilityTrusted=false`），在系统设置里删除旧条目、用「+」重新添加 `~/Applications` 下的 App，
+  再 `launchctl kickstart -k gui/$UID/com.phonedeck.receiver`；授权前 Mac 上的按键注入不工作。
+- **未完成**：两台 Windows 接收端（包在 `outputs/personal-slim-20261106/`）、手机 APK（本 Mac 的签名 `ba44191d…` ≠ 手机已装 `df327953…`，
+  不能覆盖安装，禁止卸载规避）、三台电脑 40 分钟实测与 CPU 对比。详见 `docs/guides/INSTALL_PERSONAL.md`。
+- 手机此刻仍是旧 APK（1.6.0-dev.22，含 f29f03d 的发包改动），所以仍发 48 kHz；Mac 侧 16 kHz 路径要等手机更新后才会启用。
+
 ## 2026-11-05 连接日志、放慢后台检查、屏幕常亮可选（源码，未部署）
 
 - **手机连接日志**：`ConnectionDiagnostics` 在 logcat 标签 `PhoneDeckNet` 里记录每台电脑共享连接的“开始供音（耗时）/看门狗判定卡住（阶段、无进展时长）/
