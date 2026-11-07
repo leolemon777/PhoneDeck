@@ -25,8 +25,13 @@
         "available": { "type": "boolean" },
         "device": { "type": ["string", "null"] },
         "streaming": { "type": "boolean" },
-        "sessionId": { "type": ["string", "null"] },
+        "sessionId": { "type": ["string", "null"], "description": "仅向当前音频会话的 owner 返回；身份判定与会话读取使用同一运行态快照。" },
         "mode": { "type": ["string", "null"], "enum": ["managed", "shared", null] },
+        "receivedPcmBytes": { "type": ["integer", "null"], "minimum": 0, "description": "可选：本次音频会话已收到的完整 PCM 字节数，仅 owner 可见；其他手机或无活动流为 null。" },
+        "hasReceivedPcm": { "type": ["boolean", "null"], "description": "可选：本次音频会话是否收到完整 PCM；静音数据也计入，不代表声卡播放或输入法识别成功。仅 owner 可见。" },
+        "lastPcmAgeMs": { "type": ["integer", "null"], "minimum": 0, "description": "可选：距最近完整 PCM 到达的单调时间差；尚未收到、非 owner 或无活动流为 null。" },
+        "runtimeError": { "type": ["string", "null"], "maxLength": 64, "description": "可选：当前流的通用故障代码，仅 owner 可见，不含会话、凭据或原始异常文本。" },
+        "runtimeCheckedAtMs": { "type": "integer", "minimum": 0, "description": "可选：运行态快照生成时的 Unix 毫秒时间；独立于设备诊断 checkedAtMs/ageMs/stale。" },
         "permissionDenied": {
           "type": "boolean",
           "description": "【目标字段】权限被拒绝与 available（设备缺失）/busy（占用）分开表达（规格 §16.2 能力行“supported/available/busy/permissionDenied 分开”）；语义见 contracts/capability-policy.json。"

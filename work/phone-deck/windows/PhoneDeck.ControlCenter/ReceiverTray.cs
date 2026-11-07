@@ -92,6 +92,17 @@ internal sealed class ReceiverTray : ApplicationContext
         try
         {
             using var doc = await GetJson("api/admin/pairing/status");
+            if (doc is null && !reconnecting)
+            {
+                var existing = ServerProcesses();
+                var running = existing.Count > 0;
+                foreach (var process in existing) process.Dispose();
+                if (!running)
+                {
+                    await Reconnect();
+                    return;
+                }
+            }
             var root = doc?.RootElement;
             string? pairingId = null, label = null, code = null;
             var seconds = 60;

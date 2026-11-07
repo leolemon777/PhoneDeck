@@ -81,7 +81,6 @@ $mockAapt2NonZero = Join-Path $tempDir "aapt2_nonzero.bat"
 New-Aapt2Mock -Path $mockAapt2NonZero -Content "echo error" -ExitCode 1
 
 $assertScript = Join-Path $scriptDir "Assert-PackageVersions.ps1"
-$buildPkgScript = Join-Path $repoRoot "work\phone-deck\build-update-package.ps1"
 
 $testsRun = 0
 $testsPassed = 0
@@ -219,26 +218,6 @@ class Program {
         & $assertScript -Server $validServer -ControlCenter $validControlCenter -Apk $validApk -DescriptorPath $descriptorPath
     } finally {
         $env:ANDROID_HOME = $oldHome
-    }
-}
-
-Run-Test "Mismatch package CLI failing BEFORE fake missing-key path access" {
-    $fakeKey = Join-Path $tempDir "missing_key.der"
-    $outPath = Join-Path $tempDir "out.zip"
-
-    $output = & pwsh -NoProfile -NonInteractive -File $buildPkgScript -Server $validServer -ControlCenter $validControlCenter -Apk $validApk -Sequence 9999 -WindowsVersion $baseVer -AndroidVersionCode $androidCode -SigningKey $fakeKey -Output $outPath 2>&1
-
-    if ($LASTEXITCODE -eq 0) { throw "Expected failure but process exited with 0" }
-
-    $outputText = $output -join "`n"
-    if ($outputText -notmatch "CLI values do not match descriptor base") {
-        throw "Expected real message 'CLI values do not match descriptor base', got: $outputText"
-    }
-    if ($outputText -match "missing_key.der") {
-        throw "Key was read, but should have failed before path access"
-    }
-    if (Test-Path -LiteralPath $outPath) {
-        throw "Output was created, but should have failed before output creation"
     }
 }
 

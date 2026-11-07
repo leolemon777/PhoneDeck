@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://phonedeck.dev/contracts/schemas/request.audio-stream.schema.json",
   "title": "POST /api/audio/stream 建流描述（音频域）",
-  "description": "音频上传走请求头而非 JSON 体（Program.cs:403-499）。本 schema 把建流所需头与 PCM 基线固化为可跨语言断言的描述文档。PCM 基线 48 kHz / PCM16 / mono / 20 ms 帧（规格 §9 MIC-04；AGENTS“USB 音频维持 48 kHz / PCM16 / mono 基线”）。X-PhoneDeck-Token 为 LAN 鉴权头（Program.cs:78-89）。样本值一律占位。",
+  "description": "音频上传走请求头而非 JSON 体（Program.cs:403-499）。本 schema 把建流所需头与 PCM 基线固化为可跨语言断言的描述文档。PCM 基线 48 kHz / PCM16 / mono / 20 ms 帧（规格 §9 MIC-04；AGENTS“USB 音频维持 48 kHz / PCM16 / mono 基线”）。X-PhoneDeck-Token 为 LAN 鉴权头（Program.cs:78-89）。样本值一律占位。Wi-Fi 共享供音在接收端声明 sharedPcm16kV1 时可协商 16 kHz：请求头 X-PhoneDeck-Audio-Rate: 16000，接收端入缓冲前升采样回 48 kHz；USB 与受管听写仍为 48 kHz 基线。",
   "type": "object",
   "properties": {
     "endpoint": { "const": "/api/audio/stream" },
@@ -26,6 +26,10 @@
           "$ref": "definitions.schema.json#/definitions/sessionId",
           "description": "音频会话 GUID；缺省由接收端新建，但契约样本必须显式携带（Program.cs:438-446）。"
         },
+        "X-PhoneDeck-Audio-Rate": {
+          "enum": ["48000", "16000"],
+          "description": "上传采样率（可省略，缺省 48000）。16000 仅用于 Wi-Fi 共享供音且接收端 health 声明 sharedPcm16kV1；其他值 400（PhoneAudioFormat.ParseRate）。"
+        },
         "X-PhoneDeck-Audio-Mode": {
           "enum": ["managed", "shared"],
           "description": "音频模式：managed=受管听写（控制引擎），shared=共享供音（不操纵引擎）。AudioStreamMode.cs:9-26。"
@@ -48,7 +52,10 @@
       "description": "PCM 载荷基线（规格 §9 MIC-04）。字节序 little-endian 由格式头 pcm-s16le 表达；EOF 由 HTTP 请求体结束表达。",
       "properties": {
         "format": { "const": "pcm-s16le" },
-        "sampleRateHz": { "const": 48000 },
+        "sampleRateHz": {
+          "enum": [48000, 16000],
+          "description": "线上采样率：48000 为基线；16000 只在协商 sharedPcm16kV1 的 Wi-Fi 共享供音中出现，且必须带 X-PhoneDeck-Audio-Rate: 16000。"
+        },
         "channels": { "const": 1 },
         "frameMs": { "const": 20 },
         "deviceSampleRateHz": {
@@ -61,5 +68,33 @@
     }
   },
   "required": ["endpoint", "headers", "audio"],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "audio": { "properties": { "sampleRateHz": { "const": 16000 } }, "required": ["sampleRateHz"] } },
+        "required": ["audio"]
+      },
+      "then": {
+        "properties": {
+          "headers": {
+            "properties": {
+              "X-PhoneDeck-Audio-Rate": { "const": "16000" },
+              "X-PhoneDeck-Audio-Mode": { "const": "shared" }
+            },
+            "required": ["X-PhoneDeck-Audio-Rate"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "headers": { "properties": { "X-PhoneDeck-Audio-Rate": { "const": "16000" } }, "required": ["X-PhoneDeck-Audio-Rate"] } },
+        "required": ["headers"]
+      },
+      "then": {
+        "properties": { "audio": { "properties": { "sampleRateHz": { "const": 16000 } } } }
+      }
+    }
+  ],
   "additionalProperties": false
 }

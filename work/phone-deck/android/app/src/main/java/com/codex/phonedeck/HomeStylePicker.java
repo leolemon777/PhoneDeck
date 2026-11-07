@@ -71,9 +71,9 @@ final class HomeStylePicker {
         }
         Button close = new Button(activity);
         close.setText("返回语音");
-        close.setTextColor(theme.text);
+        close.setTextColor(theme.onPrimary);
         close.setAllCaps(false);
-        close.setBackground(theme.pressable(activity, theme.surfaceRaised, theme.primaryContainer, 16));
+        close.setBackground(theme.pressable(activity, theme.primary, theme.primaryPressed, 14));
         close.setStateListAnimator(null);
         TouchFeedback.install(close, null);
         close.setOnClickListener(view -> dialog.dismiss());
@@ -84,7 +84,7 @@ final class HomeStylePicker {
         Window window = dialog.getWindow();
         if (window != null) {
             window.setGravity(Gravity.BOTTOM);
-            window.setBackgroundDrawable(theme.shape(activity, theme.background, 28));
+            theme.applySheetGlass(activity, window, 20);
             window.setLayout(-1, Math.min(dp(activity, 560),
                     activity.getResources().getDisplayMetrics().heightPixels * 85 / 100));
         }
