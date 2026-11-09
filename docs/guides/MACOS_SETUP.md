@@ -69,7 +69,7 @@ work/phone-deck/dist/macos/osx-x64/PhoneDeck Receiver.app
 系统设置 → 隐私与安全性 → 辅助功能
 ```
 
-添加并启用 `PhoneDeck Receiver.app`，完全退出接收端后重新启动。执行下面的命令检查状态：
+添加并启用 `PhoneDeck Receiver.app`（显示名「言渡接收端」），完全退出接收端后重新启动。执行下面的命令检查状态：
 
 Typeless 还需要它自己的麦克风权限：进入“系统设置 → 隐私与安全性 → 麦克风”，确认
 Typeless 已启用。PhoneDeck Receiver 只向 BlackHole 输出手机 PCM，不读取 Mac 的物理

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECT="$ROOT_DIR/work/phone-deck/macos/PhoneDeck.Receiver/PhoneDeck.Receiver.csproj"
 PLIST="$ROOT_DIR/work/phone-deck/macos/PhoneDeck.Receiver/Packaging/Info.plist"
+ICON_SOURCE="$ROOT_DIR/work/phone-deck/android/artwork/yandu-app-icon-1024.png"
 DOTNET_BIN="${DOTNET_BIN:-dotnet}"
 
 REQUESTED_ARCH="${1:-$(uname -m)}"
@@ -43,7 +44,7 @@ case "$APP_DIR" in
 esac
 
 rm -rf -- "$PUBLISH_DIR" "$APP_DIR"
-mkdir -p "$PUBLISH_DIR" "$APP_DIR/Contents/MacOS"
+mkdir -p "$PUBLISH_DIR" "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 if [[ "$VARIANT" == "lite" ]]; then
   # Native AOT：需要 Xcode 命令行工具（clang）。不含 iPhone 浏览器网关与二维码图片。
@@ -63,6 +64,18 @@ else
 fi
 
 cp "$PLIST" "$APP_DIR/Contents/Info.plist"
+# 使用已确认的言渡图标，生成包含标准及 Retina 尺寸的 macOS 图标。
+ICONSET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/yandu-icon.XXXXXX")/Yandu.iconset"
+trap 'rm -rf -- "${ICONSET_DIR:h}"' EXIT
+mkdir -p "$ICONSET_DIR"
+for size in 16 32 128 256 512; do
+  /usr/bin/sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null
+  double=$((size * 2))
+  /usr/bin/sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
+done
+/usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/Yandu.icns"
+rm -rf -- "${ICONSET_DIR:h}"
+trap - EXIT
 # 只复制可执行文件与运行所需资源，不带 .dbg/.pdb 等调试文件。
 find "$PUBLISH_DIR" -maxdepth 1 -type f ! -name "*.dbg" ! -name "*.pdb" ! -name "*.dSYM" \
   -exec cp {} "$APP_DIR/Contents/MacOS/" \;

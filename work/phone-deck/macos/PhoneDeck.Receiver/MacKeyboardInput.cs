@@ -442,7 +442,7 @@ internal sealed class MacKeyboardInput
         if (!sink.IsAccessibilityTrusted)
         {
             throw new InvalidOperationException(
-                "PhoneDeck 尚未获得 macOS 辅助功能权限；请在系统设置 → 隐私与安全性 → 辅助功能中启用 PhoneDeck Receiver");
+                "言渡尚未获得 macOS 辅助功能权限；请在系统设置 → 隐私与安全性 → 辅助功能中启用言渡接收端");
         }
     }
 
