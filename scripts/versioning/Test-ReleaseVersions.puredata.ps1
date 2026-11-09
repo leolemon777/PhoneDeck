@@ -126,27 +126,14 @@ function New-ProductTree {
     )
 
     $fleet = @"
-internal sealed class FleetUpdates
+internal static class ReceiverVersion
 {
     internal const string Version = "$WindowsVersion";
     internal const long Sequence = $WindowsSequence;
 }
 "@
-    Write-Utf8NoBom -Path (Join-Path $Root 'windows/PhoneDeck.Server/FleetUpdates.cs') -Content $fleet
+    Write-Utf8NoBom -Path (Join-Path $Root 'windows/PhoneDeck.Server/ReceiverVersion.cs') -Content $fleet
 
-    $bt = @"
-private static void SendHello(IntPtr socket, string computerId, string displayName)
-{
-    var json = JsonSerializer.Serialize(new
-    {
-        type = "hello",
-        name = "PhoneDeck",
-        version = "$WindowsVersion",
-        protocolVersion = 2
-    });
-}
-"@
-    Write-Utf8NoBom -Path (Join-Path $Root 'windows/PhoneDeck.Server/BluetoothReceiver.cs') -Content $bt
 
     $gradle = @"
 android {
@@ -271,13 +258,11 @@ Assert-True -Condition ($r3.Output -match 'historicBundleMapping') -Message 'mis
 $fx4 = New-FixtureRoot
 New-ProductTree -Root $fx4 -WindowsVersion '9.9.9-dev.1' -WithGeneratedProps
 Write-Descriptor -Path (Join-Path $fx4 'release-versions.json') -Object (New-ValidDescriptorObject)
-$fleetPath = Join-Path $fx4 'windows/PhoneDeck.Server/FleetUpdates.cs'
-$btPath = Join-Path $fx4 'windows/PhoneDeck.Server/BluetoothReceiver.cs'
+$fleetPath = Join-Path $fx4 'windows/PhoneDeck.Server/ReceiverVersion.cs'
 $gradlePath = Join-Path $fx4 'android/app/build.gradle'
 $winPropsPath = Join-Path $fx4 'windows/Directory.Build.props'
 $hashBefore = @{
     fleet = Get-FileSha256 $fleetPath
-    bt = Get-FileSha256 $btPath
     gradle = Get-FileSha256 $gradlePath
     winProps = Get-FileSha256 $winPropsPath
 }
@@ -285,8 +270,7 @@ $r4 = Invoke-Assert -PhoneDeckRoot $fx4
 Assert-True -Condition ($r4.ExitCode -ne 0) -Message 'source drift exits nonzero in validate-only mode'
 Assert-True -Condition ($r4.Output -match 'drift|!=') -Message 'source drift reports mismatch details'
 Assert-True -Condition ($r4.Output -match 'Sync') -Message 'validate-only drift hints at -Sync'
-Assert-True -Condition ((Get-FileSha256 $fleetPath) -eq $hashBefore.fleet) -Message 'validate-only does not mutate FleetUpdates.cs'
-Assert-True -Condition ((Get-FileSha256 $btPath) -eq $hashBefore.bt) -Message 'validate-only does not mutate BluetoothReceiver.cs'
+Assert-True -Condition ((Get-FileSha256 $fleetPath) -eq $hashBefore.fleet) -Message 'validate-only does not mutate ReceiverVersion.cs'
 Assert-True -Condition ((Get-FileSha256 $gradlePath) -eq $hashBefore.gradle) -Message 'validate-only does not mutate build.gradle'
 Assert-True -Condition ((Get-FileSha256 $winPropsPath) -eq $hashBefore.winProps) -Message 'validate-only does not mutate windows Directory.Build.props'
 
@@ -309,9 +293,9 @@ Assert-True -Condition ($r6b.ExitCode -eq 0) -Message 'Sync repairs drift and ex
 $r6c = Invoke-Assert -PhoneDeckRoot $fx6
 Assert-True -Condition ($r6c.ExitCode -eq 0) -Message 'post-Sync validate-only still passes'
 
-$fleetText = [System.IO.File]::ReadAllText((Join-Path $fx6 'windows/PhoneDeck.Server/FleetUpdates.cs'))
-Assert-True -Condition ($fleetText -match 'Version = "1\.6\.0-dev\.11"') -Message 'Sync wrote FleetUpdates windows.version'
-Assert-True -Condition ($fleetText -match 'Sequence = 23') -Message 'Sync wrote FleetUpdates windows.sequence'
+$fleetText = [System.IO.File]::ReadAllText((Join-Path $fx6 'windows/PhoneDeck.Server/ReceiverVersion.cs'))
+Assert-True -Condition ($fleetText -match 'Version = "1\.6\.0-dev\.11"') -Message 'Sync wrote ReceiverVersion windows.version'
+Assert-True -Condition ($fleetText -match 'Sequence = 23') -Message 'Sync wrote ReceiverVersion windows.sequence'
 
 $winProps = [System.IO.File]::ReadAllText((Join-Path $fx6 'windows/Directory.Build.props'))
 Assert-True -Condition ($winProps -match 'GENERATED FILE') -Message 'Sync marked windows props as GENERATED'

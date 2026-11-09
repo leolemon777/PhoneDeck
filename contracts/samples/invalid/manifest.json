@@ -250,6 +250,14 @@
       "specRef": "规格 §9 MIC-04；AGENTS“USB 音频维持 48 kHz / PCM16 / mono 基线”"
     },
     {
+      "file": "audio-stream-16k-managed.json",
+      "schema": "request.audio-stream.schema.json",
+      "domain": "audio",
+      "boundary": "协商",
+      "violates": "16 kHz 上传只允许 Wi-Fi 共享供音（X-PhoneDeck-Audio-Mode=shared）；受管听写保持 48 kHz 基线",
+      "specRef": "capability-policy.json downgradeMatrix.sharedPcm16kV1；PhoneAudioFormat.cs"
+    },
+    {
       "file": "config-desktop-missing-target.json",
       "schema": "request.config-desktop.schema.json",
       "domain": "config",

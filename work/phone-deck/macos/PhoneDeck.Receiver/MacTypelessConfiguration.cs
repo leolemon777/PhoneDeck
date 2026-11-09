@@ -24,6 +24,7 @@ internal static class MacTypelessConfiguration
     private sealed class CacheEntry
     {
         public MacTypelessConfig? Config;
+        public string? ConfiguredPath;
         public string? Path;
         public DateTime WriteTime;
         public long Length;
@@ -34,8 +35,8 @@ internal static class MacTypelessConfiguration
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MacReceiverSettings, CacheEntry> Cache = new();
 
     /// <summary>
-    /// 健康检查每次会读十几次快捷键/麦克风字段：同一设置对象 1 秒内直接复用，
-    /// 超过 1 秒只看文件修改时间与大小，文件变了才重新解析。
+    /// 健康检查每次会读十几次快捷键/麦克风字段：同一设置对象 5 秒内直接复用，
+    /// 超过 5 秒优先检查已解析路径的文件修改时间与大小，文件变了才重新解析。
     /// </summary>
     internal static MacTypelessConfig Load(MacReceiverSettings settings)
     {
@@ -44,11 +45,15 @@ internal static class MacTypelessConfiguration
         lock (entry)
         {
             // Config 为空即“从未读取”，不依赖 CheckedAt 初值。
-            if (entry.Config is not null && now - entry.CheckedAt < 1_000)
+            if (entry.Config is not null && now - entry.CheckedAt < 5_000)
             {
                 return entry.Config;
             }
-            var path = ResolvePath(settings.TypelessSettingsPath);
+            var path = entry.Path is not null
+                && string.Equals(entry.ConfiguredPath, settings.TypelessSettingsPath, StringComparison.Ordinal)
+                && File.Exists(entry.Path)
+                ? entry.Path
+                : ResolvePath(settings.TypelessSettingsPath);
             DateTime writeTime = default;
             long length = -1;
             if (path is not null)
@@ -68,6 +73,7 @@ internal static class MacTypelessConfiguration
                 || entry.WriteTime != writeTime || entry.Length != length)
             {
                 entry.Config = LoadUncached(settings, path);
+                entry.ConfiguredPath = settings.TypelessSettingsPath;
                 entry.Path = path;
                 entry.WriteTime = writeTime;
                 entry.Length = length;

@@ -216,7 +216,19 @@ internal static class MacVoiceEngineStateProbe
 {
     private const string CoreAudio =
         "/System/Library/Frameworks/CoreAudio.framework/CoreAudio";
+    private const string LibSystem = "/usr/lib/libSystem.dylib";
     private const uint SystemObject = 1;
+    private const int ProcessNameBufferSize = 256;
+
+    // Core Audio 进程对象 ID 在进程退出前不变：缓存“是否属于当前引擎”，
+    // 每次只读一遍音频进程列表，避免逐个枚举全部系统进程（数百个 proc_info 调用）。
+    private static readonly object ProbeGate = new();
+    private static readonly List<bool?> ProbeStates = new();
+    private static readonly byte[] NameBuffer = new byte[ProcessNameBufferSize];
+    private static MacVoiceEngineProfile? matchProfile;
+    private static Dictionary<uint, bool> matchCache = new();
+    private static Dictionary<uint, bool> nextMatchCache = new();
+    private static uint[] processObjects = new uint[64];
 
     internal static bool? IsCapturing(MacVoiceEngineProfile profile)
     {
@@ -224,6 +236,101 @@ internal static class MacVoiceEngineStateProbe
         {
             return null;
         }
+        lock (ProbeGate)
+        {
+            try
+            {
+                var count = ReadProcessObjects();
+                if (count >= 0)
+                {
+                    return CombineCaptureStates(ReadAudioProcessStates(profile, count));
+                }
+            }
+            catch
+            {
+                // 读不到音频进程列表时退回逐进程枚举。
+            }
+        }
+        return IsCapturingByProcessScan(profile);
+    }
+
+    private static List<bool?> ReadAudioProcessStates(MacVoiceEngineProfile profile, int count)
+    {
+        if (!ReferenceEquals(matchProfile, profile))
+        {
+            matchCache.Clear();
+            matchProfile = profile;
+        }
+        nextMatchCache.Clear();
+        ProbeStates.Clear();
+        for (var index = 0; index < count; index++)
+        {
+            var processObject = processObjects[index];
+            if (!matchCache.TryGetValue(processObject, out var matches)
+                && !TryMatchProcessObject(profile, processObject, out matches))
+            {
+                // 进程刚退出、PID 不可读：不缓存，下次重试。
+                continue;
+            }
+            nextMatchCache[processObject] = matches;
+            if (matches)
+            {
+                ProbeStates.Add(ReadRunningInputOfObject(processObject));
+            }
+        }
+        (matchCache, nextMatchCache) = (nextMatchCache, matchCache);
+        return ProbeStates;
+    }
+
+    private static int ReadProcessObjects()
+    {
+        var address = new AudioObjectPropertyAddress(FourCC("prs#"), FourCC("glob"), 0);
+        if (AudioObjectGetPropertyDataSize(SystemObject, ref address, 0, IntPtr.Zero, out var size) != 0)
+        {
+            return -1;
+        }
+        var count = (int)(size / sizeof(uint));
+        if (count > processObjects.Length)
+        {
+            processObjects = new uint[Math.Max(count, processObjects.Length * 2)];
+        }
+        size = (uint)(processObjects.Length * sizeof(uint));
+        if (AudioObjectGetPropertyData(SystemObject, ref address, 0, IntPtr.Zero, ref size, processObjects) != 0)
+        {
+            return -1;
+        }
+        return Math.Min((int)(size / sizeof(uint)), processObjects.Length);
+    }
+
+    private static bool TryMatchProcessObject(
+        MacVoiceEngineProfile profile, uint processObject, out bool matches)
+    {
+        matches = false;
+        var address = new AudioObjectPropertyAddress(FourCC("ppid"), FourCC("glob"), 0);
+        uint size = sizeof(int);
+        if (AudioObjectGetPropertyData(processObject, ref address, 0, IntPtr.Zero, ref size, out int pid) != 0
+            || pid <= 0)
+        {
+            return false;
+        }
+        // 名称读不到的是其他用户（root/系统服务）的进程，语音引擎以当前用户运行，按不匹配缓存。
+        var length = proc_name(pid, NameBuffer, ProcessNameBufferSize);
+        matches = length > 0
+            && MatchesProcess(profile, System.Text.Encoding.UTF8.GetString(NameBuffer, 0, length));
+        return true;
+    }
+
+    private static bool? ReadRunningInputOfObject(uint processObject)
+    {
+        var address = new AudioObjectPropertyAddress(FourCC("piri"), FourCC("glob"), 0);
+        uint size = sizeof(int);
+        return AudioObjectGetPropertyData(processObject, ref address, 0, IntPtr.Zero, ref size, out int running) == 0
+            ? running != 0
+            : null;
+    }
+
+    private static bool? IsCapturingByProcessScan(MacVoiceEngineProfile profile)
+    {
         try
         {
             var states = new List<bool?>();
@@ -328,4 +435,22 @@ internal static class MacVoiceEngineStateProbe
     private static extern int AudioObjectGetPropertyData(
         uint objectId, ref AudioObjectPropertyAddress address,
         uint qualifierDataSize, IntPtr qualifierData, ref uint dataSize, IntPtr data);
+
+    [DllImport(CoreAudio)]
+    private static extern int AudioObjectGetPropertyData(
+        uint objectId, ref AudioObjectPropertyAddress address,
+        uint qualifierDataSize, IntPtr qualifierData, ref uint dataSize, [Out] uint[] data);
+
+    [DllImport(CoreAudio)]
+    private static extern int AudioObjectGetPropertyData(
+        uint objectId, ref AudioObjectPropertyAddress address,
+        uint qualifierDataSize, IntPtr qualifierData, ref uint dataSize, out int data);
+
+    [DllImport(CoreAudio)]
+    private static extern int AudioObjectGetPropertyDataSize(
+        uint objectId, ref AudioObjectPropertyAddress address,
+        uint qualifierDataSize, IntPtr qualifierData, out uint dataSize);
+
+    [DllImport(LibSystem)]
+    private static extern int proc_name(int pid, [Out] byte[] buffer, uint bufferSize);
 }

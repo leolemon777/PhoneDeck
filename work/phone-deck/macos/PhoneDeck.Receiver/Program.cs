@@ -1,6 +1,3 @@
-#if PHONEDECK_PHONE_WEB
-using PhoneDeck.Desktop;
-#endif
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Http.Features;
@@ -31,12 +28,14 @@ if (!isFirstInstance)
     Console.WriteLine("PhoneDeck macOS 接收端已经在运行。");
     return;
 }
+// 只有主实例写日志文件：第二个实例会立即退出，不应覆盖或轮换正在使用的日志。
+ReceiverLog.Install(MacLogDirectory());
 
 var capabilities = new[]
 {
     "fixedAction", "keyChord", "text", "macro", "secureLan", "macInput",
-    "phoneAudio", "sharedMicrophone", "managedDictation", "phoneStopV1", "healthEventsV1",
-    "phoneManagedSettingsV1"
+    "phoneAudio", "sharedMicrophone",
+    "phoneManagedSettingsV1", PhoneAudioFormat.Wifi16kCapability
 };
 // 再次双击 App：已有接收端在跑就只打开它的状态页，不再启动第二个（端口会冲突）。
 if (MacLaunch.ReceiverAlreadyRunning())
@@ -46,19 +45,13 @@ if (MacLaunch.ReceiverAlreadyRunning())
 }
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
-#if PHONEDECK_PHONE_WEB
-using var phoneWeb = new LegacyPhoneWebHost(receiverIdentity.ComputerId, receiverIdentity.DisplayName, PhoneDeckDataDirectory.Get());
-#endif
-var settings = MacReceiverSettings.LoadOrCreate();
+var settings = MacVoiceEngines.Catalog.ReceiverSettings;
 var keyboard = new MacKeyboardInput();
 using var audioBridge = new MacPhoneAudioBridge(
     new CoreAudioHalOutputFactory(settings.AudioDeviceUid),
     keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0");
 // 常驻 BlackHole 输出放到后台预热，不阻塞 Kestrel 启动。
 // 常驻输出改为按需：手机请求到达时预热，手机空闲 90 秒后关闭（见 MacPhoneAudioBridge.WarmIdleMs）。
-using var engineController = new MacVoiceEngineController(keyboard);
-var capturingCache = new CapturingCacheBox();
-using var dictationSessions = new MacDictationSessionManager(audioBridge, engineController);
 var inputProcessor = new InputCommandProcessor(keyboard);
 using var usbWatchdog = new UsbWatchdog(settings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -68,6 +61,9 @@ using var lanDiscovery = new LanDiscoveryResponder(
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
+// 共享音频是不会自行结束的长流；退出时下面的端点会主动收尾，这里只做兜底，
+// 避免默认 30 秒等待让重启/升级时新实例抢不到端口。
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(5));
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNameCaseInsensitive = true;
@@ -77,9 +73,6 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 builder.WebHost.ConfigureKestrel(options =>
 {
-#if PHONEDECK_PHONE_WEB
-    phoneWeb.Listen(options);
-#endif
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 64 * 1024;
     options.ListenLocalhost(8765, listen => listen.Protocols = HttpProtocols.Http1);
@@ -91,9 +84,6 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
-#if PHONEDECK_PHONE_WEB
-phoneWeb.Map(app);
-#endif
 
 // Receiver.Core：与 Windows 相同的逐手机凭据、免扫码连接（本机确认）、撤销与 mDNS。
 var clientCredentials = new ClientCredentialsStore(
@@ -143,7 +133,6 @@ app.Use(async (context, next) =>
 
 app.Use(async (context, next) =>
 {
-    if (context.Connection.LocalPort == 8768) { await next(); return; } // iPhone 浏览器网关（LegacyPhoneWebHost.Port）自带鉴权
     // /api/lan/pair/qr 是凭据自举端点：TLS + 一次性材料 + 本机确认即授权证明。
     var isPairingBootstrap = context.Connection.LocalPort == lanIdentity.HttpsPort
         && HttpMethods.IsPost(context.Request.Method)
@@ -188,8 +177,14 @@ app.Use(async (context, next) =>
     try { await next(); } finally { configurationGate.ExitUse(); }
 });
 MacDesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configurationGate,
-    () => audioBridge.IsStreaming || dictationSessions.IsActive || engineController.IsCapturing() == true,
-    () => settings, value => settings = value, usbWatchdog, lanDiscovery);
+    () => audioBridge.IsStreaming,
+    () => settings,
+    value =>
+    {
+        settings = value;
+        MacVoiceEngines.UpdateReceiverSettings(value);
+    },
+    usbWatchdog, lanDiscovery);
 
 NativePairingEndpoints.Map(app, new NativePairingHost(
     receiverIdentity.ComputerId,
@@ -202,21 +197,36 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
     clientCredentials,
     clientSessions,
     pairingWindows,
-    // macOS 没有跨请求按住的普通按键；撤销后音频长流由 clientSessions 终止，
-    // managed 会话随断流复位输入法。
+    // macOS 没有跨请求按住的普通按键；撤销后音频长流由 clientSessions 终止。
     _ => { }) { Presence = phonePresence });
 
 // 健康应答用 JsonObject 组装（原生编译不能序列化匿名对象），字段与旧版逐字一致。
+void NoteHealthActivity(HttpContext context)
+{
+    var foreground = context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault();
+    if (foreground == "0")
+    {
+        return;
+    }
+    // 8765 回环同样被本机状态网页轮询；只有带手机前台头或 Android UA 的请求才算手机活动，
+    // 避免本机状态页每 1.5 秒轮询阻止常驻虚拟声卡输出在空闲后休眠。
+    if (context.Connection.LocalPort == 8765
+        && foreground is null
+        && context.Request.Headers.UserAgent.FirstOrDefault()?.StartsWith(
+            "Dalvik/", StringComparison.OrdinalIgnoreCase) != true)
+    {
+        return;
+    }
+    audioBridge.NotePhoneActivity();
+}
+
 JsonObject BuildHealth(HttpContext context)
 {
     var requesterClientId = context.Items["ClientId"] as string;
-    // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
-    if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
-    {
-        audioBridge.NotePhoneActivity();
-    }
+    NoteHealthActivity(context);
     var audio = audioBridge.Probe();
-    var capturing = CachedCapturing(out var capturingAgeMs);
+    // 只用共享模式：各电脑自己按快捷键，手机不需要知道输入法是否在采集；不再每次健康检查探测 Core Audio。
+    bool? capturing = null;
     var engineProfile = MacVoiceEngines.Active;
     var readerConfig = MacTypelessConfiguration.Load(settings);
     bool? virtualCableSelected = engineProfile.VerifiesMicrophone
@@ -248,15 +258,15 @@ JsonObject BuildHealth(HttpContext context)
             // 多手机：会话 ID 只告诉所属手机；其他手机只看到“正在使用”。
             ["sessionId"] = audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
             ["mode"] = audioBridge.ActiveMode?.ToWireValue(),
-            ["lastError"] = audio.Error,
-            // phoneStopV1：只返回给发起该 managed 会话的手机（USB 与旧共享令牌为同一 legacy 身份）。
-            ["stopRequestedSessionId"] = dictationSessions.Receipts.For(requesterClientId)
+            ["hasReceivedPcm"] = audioBridge.HasReceivedPcm(requesterClientId),
+            ["lastPcmAgeMs"] = audioBridge.LastPcmAgeMs(requesterClientId),
+            ["lastError"] = audio.Error
         },
+        // 已删除受管听写；字段保留给旧版手机与契约，恒为未听写。
         ["dictation"] = new JsonObject
         {
-            ["active"] = dictationSessions.IsActive,
-            ["sessionId"] = dictationSessions.IsOwnedBy(requesterClientId)
-                ? dictationSessions.ActiveSessionId : null
+            ["active"] = false,
+            ["sessionId"] = null
         },
         ["foregroundApp"] = null,
         ["usbWatchdog"] = UsbWatchdogJson(),
@@ -265,8 +275,6 @@ JsonObject BuildHealth(HttpContext context)
         ["typeless"] = new JsonObject
         {
             ["capturing"] = capturing,
-            // 样本年龄：手机只用开始确认之后采到的样本判断“电脑已停止”。
-            ["ageMs"] = capturingAgeMs,
             ["virtualCableSelected"] = virtualCableSelected,
             ["microphone"] = MacVoiceEngines.MicrophoneDescription,
             ["settingsPath"] = readerConfig.SettingsPath,
@@ -308,6 +316,35 @@ JsonArray EngineModesJson(MacVoiceEngineProfile profile)
     return modes;
 }
 
+static string MacLogDirectory() => Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Logs", "PhoneDeck");
+
+JsonObject AudioQualityJson()
+{
+    var (current, last) = audioBridge.Quality;
+    return new JsonObject
+    {
+        ["current"] = AudioQualitySessionJson(current),
+        ["last"] = AudioQualitySessionJson(last),
+        ["logFile"] = Path.Combine(MacLogDirectory(), "receiver.log")
+    };
+}
+
+static JsonObject? AudioQualitySessionJson(MacAudioQuality? quality) => quality is null ? null : new JsonObject
+{
+    ["sessionId"] = quality.SessionId,
+    ["mode"] = quality.Mode,
+    ["durationMs"] = quality.DurationMs,
+    ["receivedMs"] = quality.ReceivedMs,
+    ["gapEvents"] = quality.GapEvents,
+    ["gapMs"] = quality.GapMs,
+    ["droppedMs"] = quality.DroppedMs,
+    ["silenceSkippedMs"] = quality.SilenceSkippedMs,
+    ["maxBufferedMs"] = quality.MaxBufferedMs,
+    ["bufferedMs"] = quality.BufferedMs,
+    ["digitalSilenceMs"] = quality.DigitalSilenceMs
+};
+
 JsonObject UsbWatchdogJson() => new()
 {
     ["enabled"] = settings.UsbWatchdog,
@@ -331,36 +368,7 @@ static JsonArray? JsonStrings(IEnumerable<string>? values)
     return array;
 }
 
-// 输入法采集状态要查询 Core Audio 进程对象：健康快照（含 /api/events 每 50 ms 的比对）150 ms 内复用。
-// 听写开始/停止的确认仍直接查询（MacDictationSessionManager），不受此缓存影响。
-// 会话一变化就重新采样：否则开始确认后的第一个快照会带着开始前的“未采集”，手机会误以为电脑已停止。
-bool? CachedCapturing(out long ageMs)
-{
-    lock (capturingCache)
-    {
-        var now = Environment.TickCount64;
-        var session = dictationSessions.IsActive ? dictationSessions.ActiveSessionId ?? "" : null;
-        if (!capturingCache.Valid || now - capturingCache.At >= 150 || capturingCache.Session != session)
-        {
-            capturingCache.Value = engineController.IsCapturing();
-            capturingCache.At = now;
-            capturingCache.Session = session;
-            capturingCache.Valid = true;
-        }
-        ageMs = now - capturingCache.At;
-        return capturingCache.Value;
-    }
-}
-
 app.MapGet("/api/health", (HttpContext context) => Results.Ok(BuildHealth(context)));
-
-// healthEventsV1：状态一变立即返回，手机听写期间据此同步，不再高频轮询。
-// 显式 Task<IResult>：否则表达式体 lambda 会绑定到 RequestDelegate 重载，结果被丢弃、应答为空。
-app.MapGet("/api/events", async Task<IResult> (HttpContext context) => Results.Json(await HealthEvents.WaitAsync(
-    () => BuildHealth(context),
-    context.Request.Query["since"].FirstOrDefault(),
-    HealthEvents.ClampTimeout(context.Request.Query["timeoutMs"].FirstOrDefault()),
-    context.RequestAborted), ReceiverApiJsonContext.Default.JsonNode));
 
 app.MapGet("/api/diagnostics", () =>
 {
@@ -390,14 +398,15 @@ app.MapGet("/api/diagnostics", () =>
             ["sessionId"] = audioBridge.ActiveSessionId,
             ["mode"] = audioBridge.ActiveMode?.ToWireValue(),
             ["lastError"] = audio.Error,
-            ["recommendedVirtualDevice"] = "BlackHole 2ch / 48 kHz"
+            ["recommendedVirtualDevice"] = "BlackHole 2ch / 48 kHz",
+            ["quality"] = AudioQualityJson()
         },
         ["voiceEngine"] = new JsonObject
         {
             ["id"] = engineProfile.Id,
             ["displayName"] = engineProfile.DisplayName,
             ["experimental"] = engineProfile.Experimental,
-            ["capturing"] = engineController.IsCapturing(),
+            ["capturing"] = MacVoiceEngineStateProbe.IsCapturing(engineProfile),
             ["microphone"] = MacVoiceEngines.MicrophoneDescription,
             ["settingsPath"] = readerConfig.SettingsPath,
             ["usesBlackHole"] = MacVoiceEngines.UsesVirtualCable,
@@ -439,6 +448,13 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
         }
         var mode = AudioStreamModes.Parse(
             context.Request.Headers["X-PhoneDeck-Audio-Mode"].FirstOrDefault());
+        if (mode != AudioStreamMode.Shared)
+        {
+            return Results.BadRequest(ApiResult.Fail("只支持共享麦克风"));
+        }
+        var audioRate = PhoneAudioFormat.ParseRate(
+            context.Request.Headers[PhoneAudioFormat.RateHeader].FirstOrDefault());
+        PhoneAudioFormat.RequireAllowed(audioRate, mode);
         var probe = audioBridge.Probe();
         if (!probe.Available)
         {
@@ -451,24 +467,28 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
         }
         // 撤销该手机即终止其音频长流（不只拦截新请求）。
         var streamClientId = context.Items["ClientId"] as string;
+        // 退出时立即结束长流（已收到的尾音照常排空），不让关机等满超时。
         using var revocation = streamClientId is null
-            ? null
+            ? CancellationTokenSource.CreateLinkedTokenSource(
+                context.RequestAborted, app.Lifetime.ApplicationStopping)
             : CancellationTokenSource.CreateLinkedTokenSource(
-                context.RequestAborted, clientSessions.Register(streamClientId));
+                context.RequestAborted, app.Lifetime.ApplicationStopping,
+                clientSessions.Register(streamClientId));
+        // Wi-Fi 共享供音可能是 16 kHz：进入播放缓冲前还原为 48 kHz，后续逻辑不变。
         await audioBridge.StreamAsync(
-            context.Request.Body,
+            PhoneAudioFormat.ToBaseline(context.Request.Body, audioRate),
             sessionId!,
             mode,
-            (endedSession, endedMode) =>
-            {
-                if (endedMode == AudioStreamMode.Managed)
-                {
-                    dictationSessions.AudioEnded(endedSession);
-                }
-            },
-            revocation?.Token ?? context.RequestAborted,
+            (_, _) => { },
+            revocation.Token,
             streamClientId);
         return Results.Ok(new AudioStreamResult(true, sessionId, mode.ToWireValue()));
+    }
+    catch (AudioStreamStalledException)
+    {
+        // 半开连接收不到响应；直接中止，Kestrel 不再等待剩余请求体。
+        context.Abort();
+        return Results.Empty;
     }
     catch (AudioStreamConflictException exception)
     {
@@ -484,78 +504,24 @@ app.MapPost("/api/audio/stream", async (HttpContext context) =>
     }
 });
 
-app.MapPost("/api/dictation/start", (DictationCommand command, HttpContext context) =>
+app.MapPost("/api/input", async (InputCommand command, HttpContext context) =>
 {
     try
     {
-        TargetEnvelopeValidator.Validate(
-            command.ProtocolVersion,
-            command.RequestId,
-            command.SessionId,
-            command.TargetComputerId,
-            receiverIdentity.ComputerId);
-        var duplicate = dictationSessions.Start(
-            command.SessionId, command.RequestId, command.Mode,
-            context.Items["ClientId"] as string);
-        return Results.Ok(new DictationResult(true, duplicate, dictationSessions.IsActive,
-            dictationSessions.ActiveSessionId));
-    }
-    catch (ArgumentException exception)
-    {
-        return Results.BadRequest(ApiResult.Fail(exception.Message));
-    }
-    catch (InvalidOperationException exception)
-    {
-        return Results.Conflict(ApiResult.Fail(exception.Message));
-    }
-});
-
-app.MapPost("/local/dictation/stop", () =>
-{
-    try
-    {
-        // 先发 phoneStopV1 凭据让手机停止供音，收尾才不会空等手机尾音。
-        dictationSessions.StopFromDesktop();
-        return Results.Ok(ApiResult.Success);
-    }
-    catch (InvalidOperationException exception)
-    {
-        return Results.Conflict(ApiResult.Fail(exception.Message));
-    }
-});
-
-app.MapPost("/api/dictation/stop", (DictationCommand command, HttpContext context) =>
-{
-    try
-    {
-        TargetEnvelopeValidator.Validate(
-            command.ProtocolVersion,
-            command.RequestId,
-            command.SessionId,
-            command.TargetComputerId,
-            receiverIdentity.ComputerId);
-        var duplicate = dictationSessions.Stop(command.SessionId, command.RequestId,
-            context.Items["ClientId"] as string, checkOwner: true);
-        return Results.Ok(new DictationResult(true, duplicate, dictationSessions.IsActive,
-            dictationSessions.ActiveSessionId));
-    }
-    catch (ArgumentException exception)
-    {
-        return Results.BadRequest(ApiResult.Fail(exception.Message));
-    }
-    catch (InvalidOperationException exception)
-    {
-        return Results.Conflict(ApiResult.Fail(exception.Message));
-    }
-});
-
-app.MapPost("/api/input", (InputCommand command) =>
-{
-    try
-    {
+        if (audioBridge.IsStreaming
+            && string.Equals(command.Action, "typeless", StringComparison.Ordinal)
+            && MacVoiceEngineStateProbe.IsCapturing(MacVoiceEngines.Active) == true)
+        {
+            // 共享麦克风下通过手机快捷键结束听写：等待手机尾音经缓冲与虚拟声卡送达输入法后再发停止键。
+            await Task.Delay(260, context.RequestAborted);
+        }
         var result = inputProcessor.Execute(command, receiverIdentity.ComputerId);
         return Results.Ok(new InputResult(true, result.Duplicate, command.RequestId,
             receiverIdentity.ComputerId, result.Message, null));
+    }
+    catch (OperationCanceledException)
+    {
+        return Results.StatusCode(499);
     }
     catch (ArgumentException exception)
     {
@@ -621,12 +587,3 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 await app.RunAsync();
-
-/// <summary>健康快照用的采集状态缓存（见 CachedCapturing）。</summary>
-internal sealed class CapturingCacheBox
-{
-    public bool Valid;
-    public long At;
-    public bool? Value;
-    public string? Session;
-}

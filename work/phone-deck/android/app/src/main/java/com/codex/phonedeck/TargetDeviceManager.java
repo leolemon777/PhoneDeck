@@ -65,12 +65,19 @@ final class TargetDeviceManager {
             this.lastSeenAt = lastSeenAt;
             this.lanAddresses = new ArrayList<>(lanAddresses);
             this.lanPort = lanPort;
-            this.lanToken = lanToken;
-            this.clientId = clientId == null || clientId.isBlank() ? null : clientId.trim();
+            this.lanToken = cleanNullableString(lanToken);
+            this.clientId = cleanNullableString(clientId);
             this.sharedGroup = sharedGroup;
-            this.certificateSha256 = certificateSha256;
-            this.lastGoodAddress = lastGoodAddress == null || lastGoodAddress.isBlank()
-                    ? null : lastGoodAddress.trim();
+            this.certificateSha256 = cleanNullableString(certificateSha256);
+            this.lastGoodAddress = cleanNullableString(lastGoodAddress);
+        }
+
+        private static String cleanNullableString(String value) {
+            if (value == null) {
+                return null;
+            }
+            String trimmed = value.trim();
+            return trimmed.isEmpty() || "null".equalsIgnoreCase(trimmed) ? null : trimmed;
         }
 
         Device withAddresses(List<String> addresses, String lastGood) {
@@ -267,16 +274,20 @@ final class TargetDeviceManager {
         if (safeAddresses.isEmpty()) {
             return null;
         }
-        String lastGood = base.lastGoodAddress != null
-                && safeAddresses.contains(base.lastGoodAddress)
-                ? base.lastGoodAddress : null;
+        ArrayList<String> mergedAddresses = new ArrayList<>(base.lanAddresses);
+        for (String addr : safeAddresses) {
+            mergedAddresses.remove(addr);
+            mergedAddresses.add(addr);
+        }
+        String lastGood = safeAddresses.get(safeAddresses.size() - 1);
+        List<String> cappedAddresses = capAddresses(mergedAddresses, lastGood, MAX_ADDRESSES);
         // USB 只签发电脑的共享令牌：保存时不能再带旧的逐手机 clientId（否则 Bearer 组合无效、
         // 电脑一直回 401，显示“配对已失效”）。之后可经升级提示换领新的独立凭据。
         String token = accessToken.trim();
         String clientId = null;
         Device paired = new Device(
                 base.computerId, base.displayName, base.platform,
-                base.slot, System.currentTimeMillis(), safeAddresses, port,
+                base.slot, System.currentTimeMillis(), cappedAddresses, port,
                 token, clientId, base.sharedGroup,
                 certificateSha256.trim().toLowerCase(), lastGood, base.nameLocked);
         devices.remove(base);
@@ -441,6 +452,7 @@ final class TargetDeviceManager {
                 raw = "[]";
             }
         }
+        boolean cleanedCorruptedNull = false;
         try {
             JSONArray array = new JSONArray(raw);
             for (int index = 0; index < array.length() && devices.size() < MAX_DEVICES; index++) {
@@ -461,9 +473,11 @@ final class TargetDeviceManager {
                         }
                     }
                 }
-                String lastGood = item.optString("lastGoodAddress", null);
-                String lanToken = item.optString("lanToken", null);
-                String certificateSha256 = item.optString("certificateSha256", null);
+                String lastGood = optNullableString(item, "lastGoodAddress");
+                String lanToken = optNullableString(item, "lanToken");
+                String certificateSha256 = optNullableString(item, "certificateSha256");
+                String rawClientId = item.optString("clientId", null);
+                String clientId = optNullableString(item, "clientId");
                 // 迁移：旧记录无 sharedGroup 字段时，已配对设备默认入组（DEV-03 存量兼容）。
                 boolean sharedGroup = item.has("sharedGroup")
                         ? item.optBoolean("sharedGroup")
@@ -479,11 +493,14 @@ final class TargetDeviceManager {
                         addresses,
                         item.optInt("lanPort", 0),
                         lanToken,
-                        item.optString("clientId", null),
+                        clientId,
                         sharedGroup,
                         certificateSha256,
                         hostAcceptable(lastGood) ? lastGood : null,
                         item.optBoolean("nameLocked", false)));
+                if ("null".equalsIgnoreCase(rawClientId)) {
+                    cleanedCorruptedNull = true;
+                }
             }
         } catch (Exception ignored) {
             devices.clear();
@@ -493,6 +510,20 @@ final class TargetDeviceManager {
         if (find(activeComputerId) == null) {
             activeComputerId = devices.isEmpty() ? null : devices.get(0).computerId;
         }
+        if (cleanedCorruptedNull) {
+            save();
+        }
+    }
+
+    private static String optNullableString(JSONObject item, String key) {
+        if (item == null || item.isNull(key)) {
+            return null;
+        }
+        Object raw = item.opt(key);
+        if (!(raw instanceof String)) {
+            return null;
+        }
+        return Device.cleanNullableString((String) raw);
     }
 
     private void save() {

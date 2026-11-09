@@ -11,10 +11,10 @@ public sealed class MacManagedSettingsTests
     public void ValidatorAcceptsKnownEngineAndMacBindings()
     {
         var settings = MacVoiceSettingsValidator.ValidateVoice(Catalog(), new DesktopVoiceRequest(
-            "pc", "rev", "doubao", new() { ["doubao"] = new() { ["dictation"] = "Control+Option+D" } }));
+            "pc", "rev", "typeless", new() { ["typeless"] = new() { ["dictation"] = "Control+Option+D" } }));
 
-        Assert.AreEqual("doubao", settings.ActiveEngine);
-        Assert.AreEqual("Control+Option+D", settings.ShortcutOverrideFor("doubao", "dictation"));
+        Assert.AreEqual("typeless", settings.ActiveEngine);
+        Assert.AreEqual("Control+Option+D", settings.ShortcutOverrideFor("typeless", "dictation"));
     }
 
     [TestMethod]
@@ -22,6 +22,9 @@ public sealed class MacManagedSettingsTests
     {
         Assert.ThrowsExactly<ArgumentException>(() => MacVoiceSettingsValidator.ValidateVoice(Catalog(),
             new DesktopVoiceRequest("pc", "rev", "no-such-engine", null)));
+        // 只支持 Typeless：已移除的豆包/微信输入法同样拒绝。
+        Assert.ThrowsExactly<ArgumentException>(() => MacVoiceSettingsValidator.ValidateVoice(Catalog(),
+            new DesktopVoiceRequest("pc", "rev", "doubao", null)));
         Assert.ThrowsExactly<ArgumentException>(() => MacVoiceSettingsValidator.ValidateVoice(Catalog(),
             new DesktopVoiceRequest("pc", "rev", "typeless", new() { ["typeless"] = new() { ["teleport"] = "Fn" } })));
         var error = Assert.ThrowsExactly<ArgumentException>(() => MacVoiceSettingsValidator.ValidateVoice(Catalog(),
@@ -30,15 +33,14 @@ public sealed class MacManagedSettingsTests
     }
 
     [TestMethod]
-    public void CatalogWithSettingsSwitchesActiveEngineWithoutReloadingProfiles()
+    public void CatalogOnlyContainsTypelessAndFallsBackToIt()
     {
         var catalog = Catalog();
-        var switched = catalog.WithSettings(new MacVoiceEngineSettings { ActiveEngine = "wetype" });
-        var fallback = catalog.WithSettings(new MacVoiceEngineSettings { ActiveEngine = "missing" });
+        var fallback = catalog.WithSettings(new MacVoiceEngineSettings { ActiveEngine = "wetype" });
 
-        Assert.AreEqual("wetype", switched.Active.Id);
+        Assert.AreEqual(1, catalog.Profiles.Count);
+        Assert.AreEqual(MacVoiceEngineCatalog.DefaultEngineId, catalog.Profiles.Single().Id);
         Assert.AreEqual(MacVoiceEngineCatalog.DefaultEngineId, fallback.Active.Id);
-        Assert.AreEqual(catalog.Profiles.Count, switched.Profiles.Count);
     }
 
     [TestMethod]

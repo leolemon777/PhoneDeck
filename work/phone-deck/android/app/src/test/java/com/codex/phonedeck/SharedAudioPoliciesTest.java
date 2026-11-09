@@ -2,6 +2,8 @@ package com.codex.phonedeck;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -71,9 +73,75 @@ public final class SharedAudioPoliciesTest {
         for (int index = 0; index < 10; index++) {
             backoff.nextDelayMs();
         }
-        assertEquals(30_000, backoff.nextDelayMs());
+        assertEquals(5_000, SharedAudioPolicies.ReconnectBackoff.MAX_DELAY_MS);
+        assertEquals(SharedAudioPolicies.ReconnectBackoff.MAX_DELAY_MS, backoff.nextDelayMs());
         backoff.reset();
         assertEquals(500, backoff.nextDelayMs());
+    }
+
+    @Test
+    public void rapidConnectionFailuresKeepIncreasingBackoffUntilStableWrites() {
+        SharedAudioPolicies.ReconnectBackoff backoff =
+                new SharedAudioPolicies.ReconnectBackoff();
+
+        long now = 10_000;
+        assertEquals(500, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 100);
+        backoff.connectionClosed();
+
+        now += 500;
+        assertEquals(1_000, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 200);
+        backoff.connectionClosed();
+
+        now += 1_000;
+        assertEquals(2_000, backoff.nextDelayMs());
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now + 300);
+        backoff.connectionClosed();
+
+        // 只有连续实际写入满 5 秒后才恢复初始退避。
+        now += 2_000;
+        backoff.connectionOpened(now);
+        backoff.frameWritten(now);
+        for (int index = 1; index < 125; index++) {
+            backoff.frameWritten(now + index * 40L);
+        }
+        assertEquals(4_000, backoff.nextDelayMs());
+        backoff.frameWritten(now + 5_000);
+        backoff.connectionClosed();
+        assertEquals(500, backoff.nextDelayMs());
+    }
+
+    @Test
+    public void connectionSetupWithoutSustainedWritesCannotResetBackoff() {
+        SharedAudioPolicies.ReconnectBackoff backoff =
+                new SharedAudioPolicies.ReconnectBackoff();
+
+        assertEquals(500, backoff.nextDelayMs());
+        backoff.connectionOpened(1_000);
+        // 模拟 getOutputStream 成功但迟迟没有任何 PCM 写入。
+        assertEquals(1_000, backoff.nextDelayMs());
+        backoff.frameWritten(6_001); // 首次写入才开始稳定计时。
+        assertEquals(2_000, backoff.nextDelayMs());
+
+        backoff.connectionOpened(7_000);
+        backoff.frameWritten(7_000);
+        backoff.frameWritten(8_001); // 超过允许间隔，重新开始稳定计时。
+        assertEquals(4_000, backoff.nextDelayMs());
+    }
+
+    @Test
+    public void probesSlowDownOnlyWhileEveryTargetIsStreaming() {
+        assertEquals(6_000, SharedAudioPolicies.probeIntervalMs(true));
+        assertEquals(2_000, SharedAudioPolicies.probeIntervalMs(false));
+        assertTrue(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, true, true)));
+        assertFalse(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, false, true)));
+        assertFalse(SharedAudioPolicies.allStreaming(java.util.Arrays.asList(true, null)));
+        assertFalse("没有目标时保持快节奏，方便发现新电脑", SharedAudioPolicies.allStreaming(java.util.Collections.emptyList()));
+        assertFalse(SharedAudioPolicies.allStreaming(null));
     }
 
     private static byte[] voiced(byte marker) {

@@ -17,8 +17,13 @@ internal static class PcmLatency
     /// <summary>判定粒度：10 ms。</summary>
     internal const int BlockBytes = BytesPerMs * 10;
 
-    /// <summary>RMS 低于约 -48 dBFS 视为静音；轻辅音通常高于此值。</summary>
+    /// <summary>
+    /// RMS 低于约 -48 dBFS 视为静音；轻辅音通常高于此值。
+    /// 2026-11-05：f29f03d 提高到 250 并加“自适应底噪”后，Wi-Fi 共享会话断续从约 2–10 次/分升到 40–135 次/分
+    /// （作者 Mac 日志），轻声字被当静音跳过；已恢复原值。
+    /// </summary>
     internal const double SilenceRms = 130;
+    private const long SilenceSquareThreshold = (long)(SilenceRms * SilenceRms);
 
     /// <summary>pre-roll 裁剪后在首个语音块前保留的静音。</summary>
     internal const int LeadInMs = 150;
@@ -28,10 +33,10 @@ internal static class PcmLatency
 
     internal static int MsToBytes(int milliseconds) => milliseconds * BytesPerMs;
 
-    internal const int DefaultOutputTailMs = 400;
+    internal const int DefaultOutputTailMs = 480;
 
     /// <summary>
-    /// 尾音排空后继续输出静音的时长，让虚拟声卡与输入法收到最后几帧。默认 400 ms；
+    /// 尾音排空后继续输出静音的时长，让虚拟声卡与输入法收到最后几帧。默认 480 ms；
     /// 用 voice-loopback-delay 实测出虚拟声卡延迟后，可用环境变量
     /// PHONEDECK_OUTPUT_TAIL_MS 调整（100–1000），无需重新编译。
     /// </summary>
@@ -48,13 +53,13 @@ internal static class PcmLatency
         {
             return true;
         }
-        double sum = 0;
+        long sum = 0;
         for (var index = 0; index + 1 < pcm.Length; index += 2)
         {
-            double sample = (short)(pcm[index] | (pcm[index + 1] << 8));
+            long sample = (short)(pcm[index] | (pcm[index + 1] << 8));
             sum += sample * sample;
         }
-        return Math.Sqrt(sum / samples) < SilenceRms;
+        return sum < SilenceSquareThreshold * samples;
     }
 
     /// <summary>

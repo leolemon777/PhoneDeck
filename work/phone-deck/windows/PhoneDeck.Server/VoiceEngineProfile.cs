@@ -7,7 +7,7 @@ internal static class EngineTriggers
     /// <summary>按一下快捷键开始，再按一下结束（Typeless 风格）。</summary>
     internal const string Toggle = "toggle";
 
-    /// <summary>按住快捷键说话，松开结束（微信输入法等“按住说话”风格）；
+    /// <summary>按住快捷键说话，松开结束；
     /// 受管会话开始时按下并保持，结束时释放。</summary>
     internal const string Hold = "hold";
 }
@@ -33,11 +33,10 @@ internal sealed record VoiceEngineMode
 }
 
 /// <summary>语音引擎档案：描述一个第三方语音转文字软件如何被触发与探测。
-/// 内置档案见 VoiceEngineCatalog；用户可在 data\voice-engines\*.json 中
-/// 按 id 覆盖内置档案或新增引擎，无需修改代码。</summary>
+/// 只内置 Typeless（见 VoiceEngineCatalog）。</summary>
 internal sealed record VoiceEngineProfile
 {
-    /// <summary>引擎 id（小写），如 typeless、doubao、wetype。</summary>
+    /// <summary>引擎 id（小写）；目前只有 typeless。</summary>
     public required string Id { get; init; }
 
     public required string DisplayName { get; init; }

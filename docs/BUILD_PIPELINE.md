@@ -1,5 +1,11 @@
 # PhoneDeck 构建、打包与发布流程
 
+> **2026-11-05 精简（当前范围）**：只为作者自用、只用 Typeless。已删除 Desktop 2.0（`desktop/`、`build-desktop.ps1`、
+> `.desktoppreview`）、iPhone 网页（`shared/PhoneWeb`）、蓝牙通道、设备统一更新（`build-update-package.ps1`、
+> `FleetUpdates`、`UpdateBundle`）与 B03 候选/发布事务（`scripts/release`、CI `b03_release_tests`）。
+> 构建仍用 `build.ps1`/`build.sh` 与 `scripts/versioning`；Windows 版本常量改在 `windows/PhoneDeck.Server/ReceiverVersion.cs`。
+> 下文涉及上述已删内容的段落只作历史记录，不再执行。
+
 ## 2026-10-07 主线 beta.3 分发与版本收尾（当前）
 
 主线公开版本为 `v1.6.0-beta.3` 技术预览：Android `1.6.0-dev.22`/code28，Windows 接收端与托盘
@@ -224,9 +230,8 @@ ad-hoc 签名仅用于开发预览，不等于 Developer ID 签名、公证或�
 | 字段 | 现有位置 | 要核对的关系 |
 |---|---|---|
 | Android versionName / versionCode | `android/app/build.gradle` | APK 内元数据必须一致，覆盖升级时 code 递增 |
-| Windows Version / Sequence | `windows/PhoneDeck.Server/FleetUpdates.cs` | 更新清单 windowsVersion/sequence 必须与新接收端健康结果一致 |
+| Windows Version / Sequence | `windows/PhoneDeck.Server/ReceiverVersion.cs` | 必须与 release-versions.json 及接收端健康结果一致 |
 | Mac 版本 | `macos/PhoneDeck.Receiver/Program.cs` 与 `Packaging/Info.plist` | 健康信息、Bundle 版本和发布说明一起核对 |
-| 更新清单 | `build-update-package.ps1` 命令参数 | 参数必须与 release-versions.json 一致；打包前校验源码和实际PE/APK，失败不读取签名私钥 |
 | 协议/配置版本 | 各端协议与配置实现 | 不能随营销版本号盲目递增；兼容性单独验收 |
 
 版本唯一描述为 work/phone-deck/release-versions.json。默认运行 `pwsh -File scripts/versioning/Assert-ReleaseVersions.ps1` 只校验；维护者修改描述后显式加 `-Sync` 才同步源码与生成的程序集属性。控制台随Windows版本，Mac历史bundleVersion=2映射显式保留。统一构建在产品编译前运行该校验。Windows发布序号当前映射PE FileVersion最后一段，范围1–65535；后续超出范围必须先迁移映射。

@@ -13,9 +13,9 @@ internal sealed class ReceiverTray : ApplicationContext
     private readonly NotifyIcon tray;
     private readonly ToolStripMenuItem header, autoStart;
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 2500 };
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 3000 };
     // 同一 Wi-Fi 的手机点「连接」时弹出本机确认；只读回环状态，不常驻窗口。
-    private readonly System.Windows.Forms.Timer nearbyTimer = new() { Interval = 2000 };
+    private readonly System.Windows.Forms.Timer nearbyTimer = new() { Interval = 3000 };
     private readonly RegisteredWaitHandle activation;
     private ReceiverStatusWindow? window;
     private ConnectRequestForm? request;
@@ -92,6 +92,17 @@ internal sealed class ReceiverTray : ApplicationContext
         try
         {
             using var doc = await GetJson("api/admin/pairing/status");
+            if (doc is null && !reconnecting)
+            {
+                var existing = ServerProcesses();
+                var running = existing.Count > 0;
+                foreach (var process in existing) process.Dispose();
+                if (!running)
+                {
+                    await Reconnect();
+                    return;
+                }
+            }
             var root = doc?.RootElement;
             string? pairingId = null, label = null, code = null;
             var seconds = 60;
