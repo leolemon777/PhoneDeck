@@ -43,6 +43,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
     private string? completedSessionId;
     private bool completedDrainSucceeded;
     private PhoneAudioQuality? lastQuality;
+    private volatile string? cachedCableName;
 
     /// <summary>同一共享会话重连时等待旧连接让出的上限。</summary>
     internal const int TakeoverWaitMs = 2_000;
@@ -264,7 +265,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     private sealed class ActiveStream
     {
-        public required PreRollBuffer Preroll { get; init; }
+        public PreRollBuffer? Preroll { get; init; }
         public required PhonePcmBuffer Provider { get; init; }
         public required object PlaybackGate { get; init; }
         public required ManualResetEventSlim Ended { get; init; }
@@ -435,6 +436,10 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     internal string? FindVirtualCable()
     {
+        if (IsWarmOutputReadyFast() && cachedCableName is { Length: > 0 } warmName)
+        {
+            return warmName;
+        }
         using var enumerator = new MMDeviceEnumerator();
         var devices = enumerator
             .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
@@ -442,6 +447,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         try
         {
             _ = SelectDevice(devices, out var name);
+            cachedCableName = name;
             return name;
         }
         finally
@@ -569,14 +575,18 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
+        var isShared = mode == AudioStreamMode.Shared;
         var stream = new ActiveStream
         {
-            Preroll = new PreRollBuffer(PreRollHoldBytes),
+            // 共享麦克风直通虚拟声卡，无需分配 144 KB（LOH）pre-roll 缓冲。
+            Preroll = isShared ? null : new PreRollBuffer(PreRollHoldBytes),
             PlaybackGate = new object(),
             Ended = new ManualResetEventSlim(false),
             Mode = mode,
             OwnerId = ownerId,
-            Provider = new PhonePcmBuffer(mode)
+            Provider = new PhonePcmBuffer(mode),
+            PlaybackReleased = isShared,
+            ReleasedAtMs = isShared ? 0 : -1
         };
         SwitchingWaveProvider? warm = null;
         IPhoneAudioPlayback? monitoredPlayback = null;
@@ -631,11 +641,10 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                     outputFaultMonitorCancellation.Token,
                     sessionCancellation);
             }
-            if (mode == AudioStreamMode.Shared)
+            if (isShared)
             {
                 // 共享麦克风长期向虚拟声卡供音，不等待或控制 Typeless。
-                // 每台电脑自己的 Typeless 快捷键决定何时开始采集。
-                ReleasePreRoll(stream, sessionId, "shared");
+                stream.ReleasedAtMs = ElapsedMs(stream.StartedAt);
             }
 
             var bytes = new byte[16 * 1024];
@@ -672,6 +681,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                         lock (stream.PlaybackGate)
                         {
                             if (!stream.PlaybackReleased
+                                && stream.Preroll is not null
                                 && stream.Preroll.StoredBytes + completeBytes
                                     >= stream.Preroll.CapacityBytes)
                             {
@@ -685,7 +695,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                             }
                             else
                             {
-                                stream.Preroll.Write(bytes, 0, completeBytes);
+                                stream.Preroll?.Write(bytes, 0, completeBytes);
                             }
                         }
                         totalBytes += completeBytes;
@@ -740,7 +750,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
             {
                 lock (stream.PlaybackGate)
                 {
-                    var discarded = stream.Preroll.TakeAll().Length;
+                    var discarded = stream.Preroll?.TakeAll().Length ?? 0;
                     stream.PlaybackReleased = true;
                     if (discarded > 0)
                     {
@@ -757,7 +767,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 {
                     // 会话结束前 Typeless 从未确认：按序丢弃暂存音频，
                     // 不把孤立语音播进 CABLE。
-                    var discarded = stream.Preroll.TakeAll().Length;
+                    var discarded = stream.Preroll?.TakeAll().Length ?? 0;
                     stream.PlaybackReleased = true;
                     if (discarded > 0)
                     {
@@ -793,7 +803,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
                 Console.WriteLine(
                     $"[audio:{sessionId}] drained=+{ElapsedMs(stream.StartedAt)}ms");
             }
-            if (!stream.Superseded && totalBytes > 0 && stream.ReleasedAtMs >= 0)
+            if (!stream.Superseded && !stalled && totalBytes > 0 && stream.ReleasedAtMs >= 0)
             {
                 // ReadFully 在输入排空后继续生成静音，不额外打开手机麦克风。
                 await Task.Delay(OutputTailMs, CancellationToken.None);
@@ -1008,9 +1018,17 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
         {
             var current = activeStream;
             if (mode != AudioStreamMode.Shared || current is null
-                || current.Mode != AudioStreamMode.Shared
-                || !string.Equals(activeSessionId, sessionId, StringComparison.Ordinal)
-                || !string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal))
+                || current.Mode != AudioStreamMode.Shared)
+            {
+                return false;
+            }
+            var sameSession = string.Equals(activeSessionId, sessionId, StringComparison.Ordinal)
+                && (string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal)
+                    || current.OwnerId is null
+                    || ownerId is null);
+            var sameAuthenticatedPhone = !string.IsNullOrEmpty(ownerId)
+                && string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal);
+            if (!sameSession && !sameAuthenticatedPhone)
             {
                 return false;
             }
@@ -1023,7 +1041,7 @@ internal sealed class PhoneAudioBridge : IPhoneAudioSessionController, IDisposab
 
     private static void ReleasePreRoll(ActiveStream stream, string sessionId, string reason)
     {
-        var preRollAudio = stream.Preroll.TakeAll();
+        var preRollAudio = stream.Preroll?.TakeAll() ?? Array.Empty<byte>();
         // 开口前的静音只会拉长整段延迟：放行时只保留首个语音块前 LeadInMs。
         var trimmed = PcmLatency.LeadingSilenceTrimOffset(
             preRollAudio, PcmLatency.MsToBytes(PcmLatency.LeadInMs));

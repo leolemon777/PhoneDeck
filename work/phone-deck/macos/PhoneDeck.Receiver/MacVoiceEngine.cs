@@ -259,6 +259,9 @@ internal sealed class MacVoiceEngineCatalog
         return new MacVoiceEngineCatalog(profiles, active, settings, ReceiverSettings);
     }
 
+    internal MacVoiceEngineCatalog WithReceiverSettings(MacReceiverSettings receiverSettings) =>
+        new(profiles, Active, Settings, receiverSettings);
+
     /// <summary>server-settings.json（含旧版 typelessSettingsPath/typelessShortcuts 覆盖）。</summary>
     internal MacReceiverSettings ReceiverSettings { get; }
 
@@ -317,6 +320,14 @@ internal static class MacVoiceEngines
             DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings,
                 MacFileWriteJsonContext.Default.MacVoiceEngineSettings);
             Volatile.Write(ref configured, next);
+        }
+    }
+
+    internal static void UpdateReceiverSettings(MacReceiverSettings receiverSettings)
+    {
+        lock (ConfigurationLock)
+        {
+            Volatile.Write(ref configured, Catalog.WithReceiverSettings(receiverSettings));
         }
     }
 

@@ -29,6 +29,25 @@ public sealed class MacAudioTests
     }
 
     [TestMethod]
+    public async Task SharedStreamPreservesSampleAlignmentAcrossOddByteReads()
+    {
+        var factory = new RecordingOutputFactory();
+        using var bridge = new MacPhoneAudioBridge(factory);
+        var source = new ChannelStream();
+        var voice = Voice(20);
+        // 第 1 次只读到 1 字节，第 2 次读到剩余奇数个字节：桥接层必须先按 2 字节样本对齐再进静音过滤。
+        source.Push(voice[..1]);
+        source.Push(voice[1..]);
+        source.Complete();
+
+        await bridge.StreamAsync(source, Guid.NewGuid().ToString(),
+            AudioStreamMode.Shared, (_, _) => { }, CancellationToken.None);
+
+        var written = factory.Outputs.Single().Writes.SelectMany(chunk => chunk).ToArray();
+        CollectionAssert.AreEqual(MacAudioRingBuffer.MonoPcm16ToStereo(voice), written);
+    }
+
+    [TestMethod]
     public void RingDropsOldestAndPadsUnderrunWithSilence()
     {
         var ring = new MacAudioRingBuffer(4);

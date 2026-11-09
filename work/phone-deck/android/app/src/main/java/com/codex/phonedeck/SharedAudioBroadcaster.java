@@ -247,6 +247,29 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         }
     }
 
+    /**
+     * Aborts the active HTTP stream attempt for {@code computerId} when a
+     * side-channel {@code /api/health} response proves that the receiver is not
+     * receiving our audio despite the local TCP send buffer still accepting
+     * writes (half-open / zombie socket).
+     */
+    boolean reconnectIfReceiverStalled(String computerId,
+                                       String expectedSessionId,
+                                       long probeStartedAtElapsed,
+                                       String reason) {
+        TargetSink sink;
+        synchronized (stateLock) {
+            if (!running || expectedSessionId == null
+                    || !expectedSessionId.equals(sessionId)
+                    || computerId == null) {
+                return false;
+            }
+            sink = sinks.get(computerId);
+        }
+        return sink != null && sink.abortIfReceiverStalled(
+                expectedSessionId, probeStartedAtElapsed, reason);
+    }
+
     private void addSink(Target target) {
         TargetSink sink = new TargetSink(target, sessionId);
         TargetSink previous = sinks.putIfAbsent(target.computerId, sink);
@@ -290,7 +313,7 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                             }
                             break;
                         }
-                        byte[] frame = Arrays.copyOf(chunk, count);
+                        byte[] frame = null;
                         byte[] frame16k = null;
                         for (TargetSink sink : sinks.values()) {
                             if (sink.target.uses16k()) {
@@ -299,6 +322,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                                 }
                                 sink.offer(frame16k);
                             } else {
+                                if (frame == null) {
+                                    frame = Arrays.copyOf(chunk, count);
+                                }
                                 sink.offer(frame);
                             }
                         }
@@ -315,7 +341,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                             listener.onMicrophoneSilenced(captureSessionId, silence.isSilenced());
                         }
                         if (now - lastLevelAt >= 100) {
-                            listener.onLevel(captureSessionId, calculateLevel(chunk, count));
+                            if (PhoneAudioService.hasInProcessListener()) {
+                                listener.onLevel(captureSessionId, calculateLevel(chunk, count));
+                            }
                             lastLevelAt = now;
                         }
                     }
@@ -745,6 +773,29 @@ final class SharedAudioBroadcaster implements AutoCloseable {
             return ConnectionDiagnostics.targetLabel(target.displayName, target.computerId);
         }
 
+        boolean abortIfReceiverStalled(String expectedSessionId,
+                                       long probeStartedAtElapsed,
+                                       String reason) {
+            ConnectionAttempt attempt;
+            long now = SystemClock.elapsedRealtime();
+            synchronized (attemptLock) {
+                attempt = activeAttempt;
+                if (attempt == null || !isCurrentAttemptLocked(attempt)
+                        || !expectedSessionId.equals(attempt.sessionId)
+                        || attempt.abortRequested
+                        || attempt.finishingAt != Long.MIN_VALUE
+                        || attempt.firstWriteAt == Long.MIN_VALUE
+                        || probeStartedAtElapsed - attempt.firstWriteAt < 1_500L) {
+                    return false;
+                }
+            }
+            ConnectionDiagnostics.log(context, label(),
+                    reason != null ? reason : "健康检查发现电脑端未收到音频，立即重连",
+                    attempt.stageName(), now - attempt.openedAt, attempt.idleMs(now), null);
+            abortAttempt(attempt);
+            return true;
+        }
+
         private boolean abortTimedOutAttempt(ConnectionAttempt attempt) {
             boolean scheduleDisconnect = false;
             boolean connectedChanged;
@@ -1001,7 +1052,9 @@ final class SharedAudioBroadcaster implements AutoCloseable {
                     local.setRequestProperty("X-PhoneDeck-Protocol", "2");
                     local.setRequestProperty("X-PhoneDeck-Session", ownerSessionId);
                     local.setRequestProperty("X-PhoneDeck-Computer-Id", target.computerId);
-                    local.setChunkedStreamingMode(CHUNK_BYTES);
+                    int frameBytes = target.uses16k()
+                            ? CHUNK_BYTES / Pcm16kDownsampler.FACTOR : CHUNK_BYTES;
+                    local.setChunkedStreamingMode(frameBytes * 2);
                     local.setDoOutput(true);
                     try (OutputStream output = local.getOutputStream()) {
                         attempt.outputOpened(SystemClock.elapsedRealtime());
@@ -1136,14 +1189,13 @@ final class SharedAudioBroadcaster implements AutoCloseable {
         if (sampleCount == 0) {
             return 0;
         }
-        double sumSquares = 0;
+        long sumSquares = 0;
         for (int index = 0; index + 1 < count; index += 2) {
-            short sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
-            double normalized = sample / 32768.0;
-            sumSquares += normalized * normalized;
+            long sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
+            sumSquares += sample * sample;
         }
         return (int) Math.min(100,
-                Math.round(Math.sqrt(sumSquares / sampleCount) * 420));
+                Math.round(Math.sqrt((double) sumSquares / sampleCount) * (420.0 / 32768.0)));
     }
 
     @Override

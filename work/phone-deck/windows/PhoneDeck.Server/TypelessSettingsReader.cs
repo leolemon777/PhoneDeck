@@ -25,12 +25,39 @@ internal static class TypelessSettingsReader
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Typeless.exe", "app-settings.json");
 
-    /// <summary>一次读取聚合状态；读取失败返回全空状态（听写绑定由调用方回退默认键）。</summary>
+    private static readonly object CacheLock = new();
+    private static TypelessConfigState? cachedState;
+    private static DateTime cachedWriteUtc;
+    private static long cachedLength = -1;
+    private static long cachedAtTick;
+    private const int CacheTtlMs = 30_000;
+
+    /// <summary>一次读取聚合状态；文件未变化且虚拟声卡已就绪时直接复用缓存，减少周期磁盘 IO 与 JSON 解析。</summary>
     internal static TypelessConfigState Read()
     {
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(SettingsPath));
+            var path = SettingsPath;
+            var info = new FileInfo(path);
+            if (!info.Exists)
+            {
+                return new TypelessConfigState(null, false, null, null, null);
+            }
+            var now = Environment.TickCount64;
+            var writeUtc = info.LastWriteTimeUtc;
+            var length = info.Length;
+            lock (CacheLock)
+            {
+                if (cachedState is { UsesVirtualCable: true } cached
+                    && writeUtc == cachedWriteUtc
+                    && length == cachedLength
+                    && now - cachedAtTick < CacheTtlMs)
+                {
+                    return cached;
+                }
+            }
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
 
             string? ReadBinding(string propertyName)
@@ -83,12 +110,20 @@ internal static class TypelessSettingsReader
                 }
             }
 
-            return new TypelessConfigState(
+            var state = new TypelessConfigState(
                 microphone,
                 usesVirtualCable,
                 ReadBinding("dictationMode"),
                 ReadBinding("translationMode"),
                 ReadBinding("askAnythingMode"));
+            lock (CacheLock)
+            {
+                cachedState = state;
+                cachedWriteUtc = writeUtc;
+                cachedLength = length;
+                cachedAtTick = now;
+            }
+            return state;
         }
         catch (Exception)
         {

@@ -13,9 +13,9 @@ internal sealed class ReceiverTray : ApplicationContext
     private readonly NotifyIcon tray;
     private readonly ToolStripMenuItem header, autoStart;
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(2) };
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 2500 };
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 3000 };
     // 同一 Wi-Fi 的手机点「连接」时弹出本机确认；只读回环状态，不常驻窗口。
-    private readonly System.Windows.Forms.Timer nearbyTimer = new() { Interval = 2000 };
+    private readonly System.Windows.Forms.Timer nearbyTimer = new() { Interval = 3000 };
     private readonly RegisteredWaitHandle activation;
     private ReceiverStatusWindow? window;
     private ConnectRequestForm? request;

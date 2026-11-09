@@ -75,7 +75,6 @@ public final class MainActivity extends Activity {
     private View statusDot;
     private TextView actionFeedback;
     private TextView microphoneLevel;
-    private TextView targetTitleText;
     private Button typelessButton;
     private TextView voiceButtonCaption;
     private TextView voiceStatusCaption;
@@ -84,23 +83,17 @@ public final class MainActivity extends Activity {
     private MicrophoneGlyphDrawable voiceIcon;
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
-    private LinearLayout targetDeviceRow;
-    /// 对话白首页的“你的电脑”卡片区（其他首页样式为 null）。
+    /// 对话白首页的“你的电脑”卡片区。
     private LinearLayout computerSection;
-    private CardPager computerCarousel;
     private LinearLayout computerCardRow;
-    private LinearLayout carouselDots;
+    private TextView fleetSummaryBadge;
     private String lastComputerCardsSignature;
-    private final java.util.List<String> carouselIds = new java.util.ArrayList<>();
-    private int carouselCardWidth;
     /// 居中的卡片（停在哪台就是在跟哪台说话）：已连接电脑的 id；附近/添加卡片为 null。
     private String carouselFocusId;
-    private int carouselFocusPage = -1;
     /// 滑到后确认没连上的电脑：中部提示，点按卡片重试，不弹回原来那台。
     private String carouselFailedId;
     /// 正在确认的电脑（滑到或点到它后，实时探测成功才真正切换）。
     private String confirmingComputerId;
-    private LinearLayout recentList;
     /// 同一 Wi-Fi 里发现、尚未连接的电脑（computerId → 发现结果）。
     private final java.util.Map<String, LanDiscoveryClient.DiscoveredComputer> nearbyComputers =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -112,11 +105,8 @@ public final class MainActivity extends Activity {
     private boolean nearbyPairingInFlight;
     private final Runnable nearbyScan = this::scanNearbyComputers;
     private View quickRow;
-    private LinearLayout targetDockRow;
     private ScrollView shortcutScroll;
     private android.app.Dialog shortcutDialog;
-    private android.app.Dialog homeStyleDialog;
-    private HomeStyle homeStyle = HomeStyle.CENTER;
     private TextView shortcutPanelFeedback;
     private boolean sharedStartPending;
     private boolean sharedStatusReceiverRegistered;
@@ -140,9 +130,6 @@ public final class MainActivity extends Activity {
     /// 长按连发的组合键（按词移动与按词删除），键序与 normalizeChord 一致：修饰键在前。
     private static final java.util.Set<String> REPEATABLE_CHORDS = new java.util.HashSet<>(
             java.util.Arrays.asList("CTRL,LEFT", "CTRL,RIGHT", "CTRL,BACKSPACE", "CTRL,DELETE"));
-    /// agentGoal 已从默认面板停用；语音区 Goal 按钮在配置缺失时退回这个内置动作。
-    private static final ShortcutButtonConfig GOAL_FALLBACK = ShortcutButtonConfig.textAction(
-            "agentGoal", "Goal", "blue", true, 0, false, "/goal", true, 0);
     private Runnable repeatRunnable;
     private ShortcutButtonConfig repeatConfig;
     private ShortcutKeyView repeatSource;
@@ -151,13 +138,14 @@ public final class MainActivity extends Activity {
     private GridLayout homeShortcutGrid;
     private Button homeEditButton;
     private TextView homeShortcutSubtitle;
-    private LinearLayout commandChipsContainer;
     private java.util.ArrayList<ShortcutButtonConfig> lastRemovedSnapshot;
     private final Runnable clearUndoSnapshot = () -> lastRemovedSnapshot = null;
     private TextView shortcutHintText;
     private TextView shortcutNormalHintText;
     private volatile String usbForegroundApp;
     private volatile boolean phoneAudioAvailable;
+    private volatile boolean usbEngineCapturing;
+    private volatile boolean usbAudioStreaming;
     /// null = 电脑端引擎无可读配置、无法校验麦克风（不阻断启动）。
     private volatile Boolean typelessVirtualCableSelected;
     private volatile int serverProtocolVersion;
@@ -211,12 +199,23 @@ public final class MainActivity extends Activity {
     private final Runnable periodicHealthCheck = new Runnable() {
         @Override
         public void run() {
-            if (isFinishing() || isDestroyed()) {
+            if (!PhoneDeckHttp.appInForeground || isFinishing() || isDestroyed()) {
                 return;
             }
             testConnection();
             testLanConnections();
             mainHandler.postDelayed(this, nextHealthCheckDelayMs());
+        }
+    };
+
+    private final Runnable inProcessAudioListener = () -> {
+        if (sharedRenderPending.compareAndSet(false, true)) {
+            mainHandler.post(() -> {
+                sharedRenderPending.set(false);
+                if (PhoneDeckHttp.appInForeground && !isDestroyed()) {
+                    renderSharedAudioStatus(PhoneAudioService.getSnapshot());
+                }
+            });
         }
     };
 
@@ -249,17 +248,7 @@ public final class MainActivity extends Activity {
         targetDeviceManager = TargetDeviceManager.get(this);
         setContentView(createInterface());
         registerSharedAudioStatusReceiver();
-        // 共享麦克风音量每 100 ms 更新：走进程内回调，合并成至多一个待处理的界面刷新。
-        PhoneAudioService.setInProcessListener(() -> {
-            if (sharedRenderPending.compareAndSet(false, true)) {
-                mainHandler.post(() -> {
-                    sharedRenderPending.set(false);
-                    if (!isDestroyed()) {
-                        renderSharedAudioStatus(PhoneAudioService.getSnapshot());
-                    }
-                });
-            }
-        });
+        PhoneAudioService.setInProcessListener(inProcessAudioListener);
         registerNetworkCallbacks();
         testConnection();
         testLanConnections();
@@ -305,7 +294,7 @@ public final class MainActivity extends Activity {
             ConnectionMonitor.get(this).reset();
         }
         mainHandler.post(() -> {
-            if (isFinishing() || isDestroyed()) {
+            if (!PhoneDeckHttp.appInForeground || isFinishing() || isDestroyed()) {
                 return;
             }
             pendingLanRefresh.request(reason, invalidate,
@@ -315,7 +304,7 @@ public final class MainActivity extends Activity {
     }
 
     private void schedulePendingLanCheck() {
-        if (isFinishing() || isDestroyed() || lanCheckInFlight
+        if (!PhoneDeckHttp.appInForeground || isFinishing() || isDestroyed() || lanCheckInFlight
                 || !pendingLanRefresh.isPending()) {
             return;
         }
@@ -326,7 +315,7 @@ public final class MainActivity extends Activity {
     }
 
     private void runImmediateLanCheck(String reason, boolean probeUsb) {
-        if (isFinishing() || isDestroyed()) {
+        if (!PhoneDeckHttp.appInForeground || isFinishing() || isDestroyed()) {
             return;
         }
         long waitForDebounce = Math.max(0L,
@@ -354,13 +343,21 @@ public final class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         PhoneDeckHttp.appInForeground = false;
+        PhoneAudioService.setInProcessListener(null);
         mainHandler.removeCallbacks(nearbyScan);
+        mainHandler.removeCallbacks(periodicHealthCheck);
+        mainHandler.removeCallbacks(pendingLanCheck);
+        pendingLanRefresh.clear();
+        releaseWifiLock();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         PhoneDeckHttp.appInForeground = true;
+        PhoneAudioService.setInProcessListener(inProcessAudioListener);
+        mainHandler.removeCallbacks(periodicHealthCheck);
+        mainHandler.postDelayed(periodicHealthCheck, HEALTH_CHECK_INTERVAL_MS);
         mainHandler.post(nearbyScan);
         // 调试/自动化入口：adb 启动时带 open_shortcut_panel=true 直接打开快捷键面板，
         // 或 open_shortcut_settings=true 直接打开「快捷键与布局」管理页。
@@ -455,18 +452,12 @@ public final class MainActivity extends Activity {
     }
 
     private View createInterface() {
-        if (homeStyleDialog != null) {
-            homeStyleDialog.dismiss();
-            homeStyleDialog = null;
-        }
-        homeStyle = HomeStyle.load(this);
-        boolean dialogue = homeStyle == HomeStyle.CENTER;
         voiceStatusCaption = null;
         voiceHint = null;
+        fleetSummaryBadge = null;
         homeShortcutGrid = null;
         homeEditButton = null;
         homeShortcutSubtitle = null;
-        commandChipsContainer = null;
         if (shortcutDialog != null) {
             shortcutDialog.dismiss();
             shortcutDialog = null;
@@ -501,107 +492,49 @@ public final class MainActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(24), dp(12), dp(24), dp(8));
+        header.setPadding(dp(18), dp(10), dp(18), dp(6));
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = text(getString(R.string.brand_name), dialogue ? 20 : 24, theme.text, Typeface.BOLD);
-        brandRow.addView(brand, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        if (!dialogue) {
-            Button appearance = smallButton("界面");
-            appearance.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
-            appearance.setTextColor(theme.muted);
-            appearance.setContentDescription("切换首页 UI，当前：" + homeStyle.title);
-            appearance.setOnClickListener(view -> showHomeStylePicker(appearance));
-            brandRow.addView(appearance, new LinearLayout.LayoutParams(dp(52), dp(48)));
-            Button shortcuts = smallButton("快捷键");
-            shortcuts.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
-            shortcuts.setTextColor(theme.muted);
-            shortcuts.setContentDescription("打开完整快捷键面板");
-            shortcuts.setOnClickListener(view -> showShortcutPanel());
-            brandRow.addView(shortcuts, new LinearLayout.LayoutParams(dp(64), dp(48)));
-        } else {
-            Button manageBtn = smallButton("指令库");
-            manageBtn.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
-            manageBtn.setTextColor(theme.muted);
-            manageBtn.setContentDescription("打开全部快捷指令与布局管理");
-            manageBtn.setOnClickListener(view -> showShortcutPanel());
-            brandRow.addView(manageBtn, new LinearLayout.LayoutParams(dp(58), dp(44)));
-        }
-        Button settings = smallButton(dialogue ? "⋯" : "设置");
+        TextView brand = text(getString(R.string.brand_name), 21, theme.text, Typeface.BOLD);
+        brandRow.addView(brand, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        View headerSpacer = new View(this);
+        brandRow.addView(headerSpacer, new LinearLayout.LayoutParams(0, dp(1), 1f));
+
+        fleetSummaryBadge = text("检测中…", 12, theme.muted, Typeface.BOLD);
+        fleetSummaryBadge.setSingleLine(true);
+        fleetSummaryBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        fleetSummaryBadge.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 12));
+        fleetSummaryBadge.setContentDescription("电脑在线状态，点击立即刷新");
+        fleetSummaryBadge.setOnClickListener(view -> {
+            showActionFeedback("●  正在刷新电脑状态…", theme.muted);
+            runImmediateLanCheck("手动刷新", true);
+            scanNearbyComputers();
+        });
+        brandRow.addView(fleetSummaryBadge, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button settings = smallButton("⋯");
         settings.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 16));
         settings.setTextColor(theme.muted);
-        settings.setContentDescription(dialogue ? "更多：输入模式、快捷键、首页样式和设置" : "打开设置");
-        if (dialogue) settings.setTextSize(24);
-        settings.setOnClickListener(view -> {
-            if (dialogue) showHomeMenu(settings);
-            else startActivity(new Intent(this, SettingsActivity.class));
-        });
-        brandRow.addView(settings, new LinearLayout.LayoutParams(dp(dialogue ? 48 : 60), dp(48)));
+        settings.setContentDescription("更多：快捷键管理、管理电脑和设置");
+        settings.setTextSize(22);
+        settings.setOnClickListener(view -> showHomeMenu(settings));
+        brandRow.addView(settings, new LinearLayout.LayoutParams(dp(40), dp(38)));
         header.addView(brandRow);
 
+        // 连接文字控件保留用于内部状态与无障碍读屏。
         connectionCard = new LinearLayout(this);
-        connectionCard.setGravity(Gravity.CENTER_VERTICAL);
-        connectionCard.setPadding(dp(dialogue ? 0 : 14), dp(dialogue ? 10 : 4), dp(2), dp(dialogue ? 12 : 4));
-        connectionCard.setBackground(theme.pressable(this, dialogue ? Color.TRANSPARENT : theme.surface,
-                theme.surfaceRaised, 16));
-        connectionCard.setOnClickListener(view -> showDeviceList());
-        connectionCard.setContentDescription("连接电脑，点击查看全部电脑");
-        connectionCard.setFocusable(true);
-        installTouchFeedback(connectionCard);
         statusDot = new View(this);
         statusDot.setBackground(roundRect(theme.muted, 20));
-        if (dialogue) {
-            connectionCard.addView(new DeckIconView(this, "devices", theme.muted),
-                    new LinearLayout.LayoutParams(dp(30), dp(24)));
-        } else connectionCard.addView(statusDot, new LinearLayout.LayoutParams(dp(6), dp(6)));
-        LinearLayout connectionCopy = new LinearLayout(this);
-        connectionCopy.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        copyParams.leftMargin = dp(10);
-        connectionCard.addView(connectionCopy, copyParams);
         statusText = text("连接你的电脑", 14, theme.text, Typeface.NORMAL);
-        statusText.setMaxLines(1);
-        statusText.setEllipsize(TextUtils.TruncateAt.END);
-        connectionCopy.addView(statusText);
         statusDetailText = text("正在检测连接…", 11, theme.muted, Typeface.NORMAL);
-        statusDetailText.setMaxLines(2);
-        statusDetailText.setEllipsize(TextUtils.TruncateAt.END);
-        if (dialogue) {
-            LinearLayout detail = new LinearLayout(this);
-            detail.setGravity(Gravity.CENTER_VERTICAL);
-            detail.addView(statusDot, new LinearLayout.LayoutParams(dp(5), dp(5)));
-            detail.addView(statusDetailText, margins(dp(5), 0, 0, 0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            connectionCopy.addView(detail, marginTop(dp(4)));
-        } else connectionCopy.addView(statusDetailText);
-        Button retry = smallButton(dialogue ? "›" : "↻");
-        retry.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 24));
-        retry.setTextColor(theme.muted);
-        retry.setTextSize(21);
-        retry.setContentDescription(dialogue ? "选择电脑" : "重新检测电脑连接");
-        retry.setOnClickListener(view -> {
-            if (dialogue) showDeviceList();
-            else testConnection();
-        });
-        connectionCard.addView(retry, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        // 对话白：多台电脑以卡片列出，取代单行连接状态；连接文字控件仍保留用于状态与无障碍。
-        computerSection = null;
-        computerCarousel = null;
-        computerCardRow = null;
-        carouselDots = null;
-        recentList = null;
-        lastComputerCardsSignature = null;
-        if (dialogue) {
-            computerSection = buildComputerCarousel(landscape);
-        } else {
-            header.addView(connectionCard, margins(0, dp(10), 0, 0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        }
 
-        // Keep the existing editable grid in a secondary panel. The home screen
-        // remains focused on speech without changing any shortcut dispatch logic.
+        computerSection = buildComputerCarousel();
+        computerCardRow = (LinearLayout) computerSection.getChildAt(0);
+        lastComputerCardsSignature = null;
+
+        // 全部快捷指令二级抽屉面板
         shortcutScroll = new ScrollView(this);
         shortcutScroll.setVerticalScrollBarEnabled(true);
         LinearLayout shortcutPage = new LinearLayout(this);
@@ -655,29 +588,10 @@ public final class MainActivity extends Activity {
         shortcutPage.addView(shortcutGrid, margins(dp(-4), dp(6), dp(-4), 0,
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout voiceDock = new LinearLayout(this);
-        voiceDock.setOrientation(LinearLayout.VERTICAL);
-        voiceDock.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        voiceDock.setPadding(dp(24), dp(16), dp(24), dp(20));
-        LinearLayout voiceBody = new LinearLayout(this);
-        voiceBody.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        voiceBody.setGravity(Gravity.CENTER);
-        voiceDock.addView(voiceBody, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        int micSize = dialogue ? (landscape ? 104
-                : getResources().getConfiguration().screenHeightDp < 720 ? 112
-                : getResources().getConfiguration().screenHeightDp >= 820 ? 148 : 136)
-                : homeStyle == HomeStyle.PANEL ? (landscape || !compact ? 128 : 104)
-                : homeStyle == HomeStyle.DOCK ? (landscape || compact ? 112 : 160)
-                : landscape || compact ? 128 : 184;
-        FrameLayout voiceRing = new FrameLayout(this);
-        voiceHalo = voiceRing;
-        voiceRing.setBackground(theme.shape(this,
-                dialogue ? Color.TRANSPARENT : theme.mix(theme.background, theme.primaryContainer, 0.65f), (micSize + 28) / 2));
+        voiceHalo = null;
         voiceIcon = new MicrophoneGlyphDrawable(this, theme.onPrimary);
         typelessButton = new RoundVoiceButton(this, voiceIcon);
-        if (dialogue) ((RoundVoiceButton) typelessButton).setGlyphScale(0.30f);
+        ((RoundVoiceButton) typelessButton).setGlyphScale(0.30f);
         typelessButton.setTextColor(theme.onPrimary);
         typelessButton.setAllCaps(false);
         typelessButton.setGravity(Gravity.CENTER);
@@ -685,46 +599,14 @@ public final class MainActivity extends Activity {
         typelessButton.setBackground(voiceButtonBackground(theme.primary, theme.primaryPressed));
         typelessButton.setElevation(0);
         typelessButton.setStateListAnimator(null);
-        typelessButton.setContentDescription("语音输入");
+        typelessButton.setContentDescription("开启或关闭共享麦克风");
         installVoiceGesture();
-        voiceRing.addView(typelessButton, new FrameLayout.LayoutParams(
-                dp(micSize), dp(micSize), Gravity.CENTER));
-        voiceBody.addView(voiceRing, new LinearLayout.LayoutParams(dp(micSize + 28), dp(micSize + 28)));
 
-        LinearLayout voiceCopy = new LinearLayout(this);
-        voiceCopy.setOrientation(LinearLayout.VERTICAL);
-        voiceCopy.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams voiceCopyParams = landscape
-                ? new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                : new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        voiceCopyParams.topMargin = landscape ? 0 : dp(compact ? 16 : 24);
-        voiceCopyParams.leftMargin = landscape ? dp(18) : 0;
-        voiceBody.addView(voiceCopy, voiceCopyParams);
-        int captionSize = landscape ? 20 : dialogue ? 32
-                : homeStyle == HomeStyle.DOCK ? (compact ? 24 : 32)
-                : homeStyle == HomeStyle.PANEL ? (compact ? 20 : 24) : 24;
-        voiceButtonCaption = text("点击开始说话", captionSize, theme.text, Typeface.NORMAL);
-        voiceButtonCaption.setGravity(Gravity.CENTER);
-        voiceButtonCaption.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        if (dialogue) {
-            voiceStatusCaption = text("●  准备好了", 12, theme.muted, Typeface.NORMAL);
-            voiceStatusCaption.setGravity(Gravity.CENTER);
-            voiceCopy.addView(voiceStatusCaption, margins(0, 0, 0, dp(12), -1, -2));
-        }
-        voiceCopy.addView(voiceButtonCaption);
-        if (dialogue) {
-            voiceHint = text("轻点开始，再点结束", 13, theme.muted, Typeface.NORMAL);
-            voiceHint.setGravity(Gravity.CENTER);
-            voiceCopy.addView(voiceHint, margins(0, dp(12), 0, 0, -1, -2));
-        }
+        voiceButtonCaption = text("开启共享麦克风", 16, theme.text, Typeface.NORMAL);
+        voiceStatusCaption = text("●  准备好了", 12, theme.muted, Typeface.NORMAL);
+        voiceHint = text("轻点开始，再点结束", 13, theme.muted, Typeface.NORMAL);
         microphoneLevel = text("手机麦克风 · 未启动", 12, theme.muted, Typeface.NORMAL);
-        microphoneLevel.setGravity(Gravity.CENTER);
-        if (dialogue) microphoneLevel.setVisibility(View.GONE);
-        voiceCopy.addView(microphoneLevel, marginTop(dp(7)));
         voiceMeter = new VoiceLevelView(this, theme);
-        voiceCopy.addView(voiceMeter, margins(0, dp(10), 0, 0, dp(128), dp(14)));
-
 
         actionFeedback = text("", 12, theme.muted, Typeface.NORMAL);
         actionFeedback.setGravity(Gravity.CENTER);
@@ -732,318 +614,134 @@ public final class MainActivity extends Activity {
         actionFeedback.setVisibility(View.GONE);
         actionFeedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         actionFeedback.setOnClickListener(view -> tryUndoRemoveShortcut());
-        voiceDock.addView(actionFeedback, margins(0, dp(12), 0, 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout voiceEditRow = new LinearLayout(this);
-        voiceEditRow.setGravity(Gravity.CENTER);
-        if (dialogue) {
-            voiceEditRow.setPadding(dp(5), dp(5), dp(5), dp(5));
-            voiceEditRow.setBackground(theme.shape(this, theme.surfaceRaised, 30));
-        }
-        Button goal = voiceEditButton("Goal");
-        goal.setContentDescription("发送配置的 Goal 指令");
-        goal.setOnClickListener(view -> triggerConfiguredGoal(goal));
-        installTouchFeedback(goal);
-        voiceEditRow.addView(goal, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        Button backspace = voiceEditButton("退格");
-        backspace.setContentDescription("退格。点按删除一个字符，长按全部删除");
-        backspace.setOnClickListener(view -> triggerVoiceEditAction(
-                backspace, "退格", "BACKSPACE", "backspace"));
-        backspace.setOnLongClickListener(view -> {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            triggerDeleteAll(backspace);
-            return true;
-        });
-        installTouchFeedback(backspace);
-        LinearLayout.LayoutParams backspaceParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        backspaceParams.leftMargin = dp(dialogue ? 4 : 8);
-        voiceEditRow.addView(backspace, backspaceParams);
-        Button enter = voiceEditButton("回车");
-        enter.setContentDescription("向电脑发送回车键");
-        enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
-        installTouchFeedback(enter);
-        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        enterParams.leftMargin = dp(dialogue ? 4 : 8);
-        voiceEditRow.addView(enter, enterParams);
-        voiceDock.addView(voiceEditRow, margins(0, dp(landscape ? 10 : 24), 0, 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        RoundVoiceButton voiceBar = (RoundVoiceButton) typelessButton;
+        voiceBar.setTextSize(16);
+        voiceBar.setLetterSpacing(0.05f);
+        int barHeight = dp(landscape || compact ? 50 : 56);
 
-        targetDockRow = new LinearLayout(this);
-        targetDockRow.setGravity(Gravity.CENTER_VERTICAL);
-        targetTitleText = text("输入到", 12, theme.muted, Typeface.NORMAL);
-        targetTitleText.setMinHeight(dp(48));
-        targetTitleText.setGravity(Gravity.CENTER_VERTICAL);
-        targetTitleText.setOnClickListener(view -> showDeviceList());
-        targetTitleText.setContentDescription("查看全部电脑并选择输入目标");
-        targetDockRow.addView(targetTitleText);
-        HorizontalScrollView targetScroller = new HorizontalScrollView(this);
-        targetScroller.setHorizontalScrollBarEnabled(false);
-        targetScroller.setFillViewport(true);
-        targetDeviceRow = new LinearLayout(this);
-        targetDeviceRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        targetScroller.addView(targetDeviceRow, new HorizontalScrollView.LayoutParams(
-                HorizontalScrollView.LayoutParams.MATCH_PARENT,
-                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams targetParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        targetParams.leftMargin = dp(10);
-        targetDockRow.addView(targetScroller, targetParams);
-        voiceDock.addView(targetDockRow, margins(0, dp(8), 0, 0,
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        refreshTargetSwitcher();
         refreshShortcutGrid();
+        quickRow = buildQuickRow();
+        View thumbEditRow = buildThumbEditRow();
+        if (!landscape) {
+            LinearLayout middle = new LinearLayout(this);
+            middle.setOrientation(LinearLayout.VERTICAL);
+            middle.setPadding(0, dp(2), 0, dp(4));
+            middle.addView(computerSection, new LinearLayout.LayoutParams(-1, -2));
+            middle.addView(actionFeedback, margins(dp(16), dp(6), dp(16), 0, -1, -2));
 
-        if (dialogue) {
-            // 对话白（方案二）：电脑大卡左右滑动、卡内切换输入法模式；说话按钮是拇指区的
-            // 长条（像微信「按住 说话」），下面是指令栏和说话方式。录音、会话和手势仍由原有控件负责。
-            voiceBody.removeView(voiceCopy);
-            voiceBody.removeView(voiceRing);
-            voiceRing.removeView(typelessButton);
-            voiceHalo = null;
-            RoundVoiceButton voiceBar = (RoundVoiceButton) typelessButton;
-            voiceBar.setTextSize(17);
-            voiceBar.setLetterSpacing(0.06f);
-            int barHeight = dp(landscape || compact ? 56 : 64);
-            for (View control : new View[] {voiceEditRow, actionFeedback}) {
-                voiceDock.removeView(control);
-            }
-            ((android.view.ViewGroup) voiceStatusCaption.getParent()).removeView(voiceStatusCaption);
-            voiceStatusCaption.setPadding(dp(10), dp(3), dp(10), dp(3));
-            voiceButtonCaption.setTextSize(19);
-            if (voiceHint != null) {
-                ((LinearLayout.LayoutParams) voiceHint.getLayoutParams()).topMargin = dp(4);
-            }
-            voiceCopy.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
-            recentList = new LinearLayout(this);
-            recentList.setOrientation(LinearLayout.VERTICAL);
-            quickRow = buildQuickRow();
-            View commandBar = buildCommandBar();
-            ((android.view.ViewGroup) voiceMeter.getParent()).removeView(voiceMeter);
-            voiceCopy.addView(voiceMeter, margins(0, dp(6), 0, 0, dp(180), dp(12)));
-            if (!landscape) {
-                LinearLayout middle = new LinearLayout(this);
-                middle.setOrientation(LinearLayout.VERTICAL);
-                middle.setGravity(Gravity.CENTER_HORIZONTAL);
-                middle.setPadding(dp(20), dp(2), dp(20), dp(4));
-                middle.addView(voiceStatusCaption, new LinearLayout.LayoutParams(-2, -2));
-                middle.addView(voiceCopy, margins(0, dp(2), 0, 0, -1, -2));
-                middle.addView(actionFeedback, margins(0, dp(4), 0, dp(4), -1, -2));
-                middle.addView(quickRow, margins(0, dp(6), 0, 0, -1, -2));
-                middle.addView(recentList, margins(0, dp(8), 0, 0, -1, -2));
-                ScrollView middleScroll = new ScrollView(this);
-                middleScroll.setFillViewport(true);
-                middleScroll.setVerticalScrollBarEnabled(false);
-                middleScroll.addView(middle);
-                LinearLayout footer = new LinearLayout(this);
-                footer.setOrientation(LinearLayout.VERTICAL);
-                // 说话按钮不贴底：下面还有指令栏和说话方式，长条落在屏幕约四分之三高度的拇指区。
-                footer.setPadding(dp(16), dp(4), dp(16), dp(compact ? 10 : 14));
-                footer.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
-                footer.addView(commandBar, margins(0, dp(8), 0, 0, -1, dp(50)));
-                LinearLayout page = new LinearLayout(this);
-                page.setOrientation(LinearLayout.VERTICAL);
-                page.addView(header);
-                page.addView(computerSection, new LinearLayout.LayoutParams(-1, -2));
-                page.addView(middleScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-                page.addView(footer);
-                root.addView(page, new FrameLayout.LayoutParams(-1, -1));
-            } else {
-                header.setPadding(dp(20), dp(8), dp(12), 0);
-                LinearLayout left = new LinearLayout(this);
-                left.setOrientation(LinearLayout.VERTICAL);
-                left.addView(header);
-                left.addView(computerSection, new LinearLayout.LayoutParams(-1, -2));
-                left.addView(quickRow, margins(dp(20), dp(12), dp(20), 0, -1, -2));
-                left.addView(recentList, margins(dp(20), dp(12), dp(20), dp(12), -1, -2));
-                ScrollView leftScroll = new ScrollView(this);
-                leftScroll.setVerticalScrollBarEnabled(false);
-                leftScroll.addView(left);
-                voiceButtonCaption.setGravity(Gravity.START);
-                voiceHint.setGravity(Gravity.START);
-                voiceCopy.setGravity(Gravity.START);
-                LinearLayout copyColumn = new LinearLayout(this);
-                copyColumn.setOrientation(LinearLayout.VERTICAL);
-                copyColumn.addView(voiceStatusCaption, new LinearLayout.LayoutParams(-2, -2));
-                copyColumn.addView(voiceCopy, margins(0, dp(6), 0, 0, -1, -2));
-                copyColumn.addView(actionFeedback, margins(0, dp(8), 0, 0, -1, -2));
-                LinearLayout stage = new LinearLayout(this);
-                stage.setGravity(Gravity.CENTER_VERTICAL);
-                stage.addView(copyColumn, new LinearLayout.LayoutParams(0, -2, 1f));
-                LinearLayout right = new LinearLayout(this);
-                right.setOrientation(LinearLayout.VERTICAL);
-                right.setPadding(dp(16), dp(12), dp(16), dp(12));
-                right.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
-                right.addView(voiceBar, margins(0, dp(10), 0, 0, -1, barHeight));
-                right.addView(commandBar, margins(0, dp(10), 0, 0, -1, dp(56)));
-                View divider = new View(this);
-                divider.setBackgroundColor(theme.outline);
-                LinearLayout console = new LinearLayout(this);
-                console.addView(leftScroll, new LinearLayout.LayoutParams(
-                        getResources().getDisplayMetrics().widthPixels * 46 / 100, -1));
-                console.addView(divider, new LinearLayout.LayoutParams(dp(1), -1));
-                console.addView(right, new LinearLayout.LayoutParams(0, -1, 1f));
-                root.addView(console, new FrameLayout.LayoutParams(-1, -1));
-            }
-            loadRecentActions();
-            refreshComputerCards();
-            refreshRecentList();
-            return root;
-        }
+            FrameLayout quickHolder = new FrameLayout(this);
+            FrameLayout.LayoutParams qrParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER_VERTICAL);
+            qrParams.setMargins(dp(16), dp(6), dp(16), dp(6));
+            quickHolder.addView(quickRow, qrParams);
+            middle.addView(quickHolder, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        if (homeStyle == HomeStyle.PANEL) {
-            // One compact control surface: status above, mic left, editing keys right.
-            voiceBody.removeView(voiceCopy);
-            voiceDock.removeView(voiceBody);
-            voiceDock.removeView(voiceEditRow);
-            voiceBody.setOrientation(LinearLayout.HORIZONTAL);
-            voiceEditRow.setOrientation(LinearLayout.VERTICAL);
-            for (int index = 0; index < voiceEditRow.getChildCount(); index++) {
-                LinearLayout.LayoutParams keyParams = new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
-                keyParams.topMargin = index == 0 ? 0 : dp(8);
-                voiceEditRow.getChildAt(index).setLayoutParams(keyParams);
-            }
-            voiceBody.addView(voiceEditRow, margins(dp(12), 0, 0, 0,
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT));
-            ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).weight = 1f;
-            LinearLayout panel = new LinearLayout(this);
-            panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setPadding(dp(16), dp(16), dp(16), dp(16));
-            panel.setBackground(theme.shape(this, theme.surface, 28, 1, theme.outline));
-            voiceCopy.setGravity(Gravity.START);
-            voiceButtonCaption.setGravity(Gravity.START);
-            microphoneLevel.setGravity(Gravity.START);
-            panel.addView(voiceCopy, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            panel.addView(voiceBody, margins(0, dp(14), 0, 0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            voiceDock.addView(panel, 0, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        } else if (homeStyle == HomeStyle.DOCK && !landscape) {
-            voiceBody.removeView(voiceRing);
-            voiceCopyParams.topMargin = 0;
-            voiceCopy.setGravity(Gravity.START);
-            voiceButtonCaption.setGravity(Gravity.START);
-            microphoneLevel.setGravity(Gravity.START);
-        }
+            ScrollView middleScroll = new ScrollView(this);
+            middleScroll.setFillViewport(true);
+            middleScroll.setVerticalScrollBarEnabled(false);
+            middleScroll.addView(middle);
 
-        ScrollView voiceScroll = new ScrollView(this);
-        voiceScroll.setFillViewport(true);
-        voiceScroll.setVerticalScrollBarEnabled(false);
-        voiceScroll.addView(voiceDock);
-        LinearLayout console = new LinearLayout(this);
-        console.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        if (landscape) {
-            ScrollView headerScroll = new ScrollView(this);
-            headerScroll.addView(header);
-            console.addView(headerScroll, new LinearLayout.LayoutParams(
-                    getResources().getDisplayMetrics().widthPixels * 34 / 100,
-                    LinearLayout.LayoutParams.MATCH_PARENT));
-            console.addView(voiceScroll, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
-        } else {
-            // Keep the small editing controls reachable while the microphone area
-            // can scroll independently on a short screen or with enlarged text.
             LinearLayout footer = new LinearLayout(this);
             footer.setOrientation(LinearLayout.VERTICAL);
             footer.setGravity(Gravity.CENTER_HORIZONTAL);
-            footer.setPadding(dp(24), dp(8), dp(24), dp(20));
-            View[] footerControls = homeStyle == HomeStyle.PANEL
-                    ? new View[] {actionFeedback, targetDockRow}
-                    : new View[] {actionFeedback, voiceEditRow, targetDockRow};
-            for (View control : footerControls) {
-                voiceDock.removeView(control);
-                footer.addView(control);
-            }
-            if (homeStyle != HomeStyle.PANEL) {
-                ((LinearLayout.LayoutParams) voiceEditRow.getLayoutParams()).topMargin = dp(16);
-            }
-            if (homeStyle == HomeStyle.DOCK) {
-                LinearLayout.LayoutParams ringParams = new LinearLayout.LayoutParams(
-                        dp(micSize + 28), dp(micSize + 28));
-                ringParams.topMargin = dp(12);
-                footer.addView(voiceRing, footer.indexOfChild(voiceEditRow), ringParams);
-            }
-            voiceDock.setGravity(homeStyle == HomeStyle.CENTER ? Gravity.CENTER
-                    : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-            voiceDock.setPadding(dp(24), dp(12), dp(24), dp(compact ? 8 : 24));
-            console.addView(header);
-            console.addView(voiceScroll, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-            console.addView(footer);
+            footer.setPadding(dp(16), dp(4), dp(16), dp(compact ? 10 : 14));
+            footer.addView(voiceMeter, margins(0, 0, 0, dp(6), dp(120), dp(10)));
+            footer.addView(thumbEditRow, new LinearLayout.LayoutParams(-1, dp(48)));
+            footer.addView(voiceBar, margins(0, dp(8), 0, 0, -1, barHeight));
+
+            LinearLayout page = new LinearLayout(this);
+            page.setOrientation(LinearLayout.VERTICAL);
+            page.addView(header);
+            page.addView(middleScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+            page.addView(footer);
+            root.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        } else {
+            header.setPadding(dp(16), dp(6), dp(12), dp(2));
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.addView(header);
+            left.addView(computerSection, new LinearLayout.LayoutParams(-1, -2));
+            ScrollView leftScroll = new ScrollView(this);
+            leftScroll.setVerticalScrollBarEnabled(false);
+            leftScroll.addView(left);
+
+            LinearLayout rightTop = new LinearLayout(this);
+            rightTop.setOrientation(LinearLayout.VERTICAL);
+            rightTop.addView(actionFeedback, margins(0, 0, 0, dp(6), -1, -2));
+            rightTop.addView(quickRow, new LinearLayout.LayoutParams(-1, -2));
+            ScrollView rightScroll = new ScrollView(this);
+            rightScroll.setVerticalScrollBarEnabled(false);
+            rightScroll.addView(rightTop);
+
+            LinearLayout right = new LinearLayout(this);
+            right.setOrientation(LinearLayout.VERTICAL);
+            right.setPadding(dp(14), dp(8), dp(14), dp(10));
+            right.addView(rightScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+            right.addView(thumbEditRow, margins(0, dp(6), 0, 0, -1, dp(46)));
+            right.addView(voiceBar, margins(0, dp(8), 0, 0, -1, barHeight));
+            View divider = new View(this);
+            divider.setBackgroundColor(theme.outline);
+            LinearLayout console = new LinearLayout(this);
+            console.addView(leftScroll, new LinearLayout.LayoutParams(
+                    getResources().getDisplayMetrics().widthPixels * 46 / 100, -1));
+            console.addView(divider, new LinearLayout.LayoutParams(dp(1), -1));
+            console.addView(right, new LinearLayout.LayoutParams(0, -1, 1f));
+            root.addView(console, new FrameLayout.LayoutParams(-1, -1));
         }
-        root.addView(console, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        refreshComputerCards();
         return root;
     }
 
-    // ---------- 对话白（方案二）：电脑大卡轮播 ----------
+    // ---------- 对话白（全览仪表盘版）：全部电脑状态一屏并列展示 ----------
 
-    private LinearLayout buildComputerCarousel(boolean landscape) {
-        int screen = getResources().getDisplayMetrics().widthPixels;
-        int column = landscape ? screen * 46 / 100 : screen;
-        carouselCardWidth = Math.min(dp(340), column - dp(landscape ? 56 : 72));
+    private LinearLayout buildComputerCarousel() {
         LinearLayout section = new LinearLayout(this);
         section.setOrientation(LinearLayout.VERTICAL);
-        computerCarousel = new CardPager(this, this::onCarouselPage);
         computerCardRow = new LinearLayout(this);
-        computerCardRow.setPadding(dp(16), dp(4), column - dp(16) - carouselCardWidth, dp(4));
-        computerCarousel.addView(computerCardRow, new HorizontalScrollView.LayoutParams(-2, -2));
-        computerCarousel.setOnScrollChangeListener((view, x, y, oldX, oldY) ->
-                updateCarouselDots(computerCarousel.currentPage()));
-        section.addView(computerCarousel, new LinearLayout.LayoutParams(-1, -2));
-        carouselDots = new LinearLayout(this);
-        carouselDots.setGravity(Gravity.CENTER);
-        section.addView(carouselDots, margins(0, dp(8), 0, dp(4), -1, dp(8)));
+        computerCardRow.setOrientation(LinearLayout.VERTICAL);
+        computerCardRow.setPadding(dp(16), dp(2), dp(16), dp(2));
+        section.addView(computerCardRow, new LinearLayout.LayoutParams(-1, -2));
         return section;
     }
 
-    private int carouselStep() {
-        return carouselCardWidth + dp(10);
-    }
-
-    /// 翻页停定：居中的电脑就是说话目标。在线就确认切换；离线或附近/添加卡片只更新中部提示，
-    /// 不切换、不弹回（目标切换仍须新电脑确认，见 AGENTS 设计原则）。
-    private void onCarouselPage(int page) {
-        carouselFocusPage = page;
-        carouselFocusId = page >= 0 && page < carouselIds.size() ? carouselIds.get(page) : null;
-        updateCarouselDots(page);
-        if (carouselFocusId == null || sameComputer(carouselFocusId, targetDeviceManager.getActiveComputerId())) {
-            carouselFailedId = null;
-            updateVoiceControls();
+    private void onComputerCardTap(String computerId) {
+        if (targetDeviceManager == null || computerId == null) return;
+        TargetDeviceManager.Device device = targetDeviceManager.find(computerId);
+        if (device == null) return;
+        boolean online = isDeviceOnline(device.computerId);
+        boolean rejected = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId));
+        if (rejected && !online) {
+            showManageComputerActions(device);
             return;
         }
-        TargetDeviceManager.Device device = targetDeviceManager.find(carouselFocusId);
-        if (device == null || confirmingComputerId != null) {
-            updateVoiceControls();
+        if (sameComputer(computerId, targetDeviceManager.getActiveComputerId())) {
+            showActionFeedback("✓  当前快捷键目标：" + device.slot + "号 · "
+                    + device.displayName + "（长按卡片可重命名/管理）", theme.success);
+            performResultHaptic(computerCardRow, true);
+            requestImmediateLanCheck("点按当前电脑");
             return;
         }
-        if (!isDeviceOnline(device.computerId)) {
-            updateVoiceControls();
+        if (confirmingComputerId != null) {
             return;
         }
         carouselFailedId = null;
-        confirmingComputerId = device.computerId;
-        lastComputerCardsSignature = null;
-        refreshComputerCards();
-        updateVoiceControls();
-        selectTargetDevice(device, computerCarousel);
-        if (!targetSwitchInFlight) finishCarouselConfirmation();
-    }
-
-    /// 点按卡片：旁边露出的卡片翻过来；居中但未切换成功的卡片重新确认。
-    private void onComputerCardTap(String computerId) {
-        int index = carouselIds.indexOf(computerId);
-        if (index < 0 || computerCarousel == null) return;
-        if (index != computerCarousel.currentPage()) {
-            computerCarousel.showPage(index, true, true);
-        } else if (!sameComputer(computerId, targetDeviceManager.getActiveComputerId())) {
-            onCarouselPage(index);
+        carouselFocusId = device.computerId;
+        if (device.hasLanPairing() || online) {
+            confirmingComputerId = device.computerId;
+            lastComputerCardsSignature = null;
+            refreshComputerCards();
+            updateVoiceControls();
+        }
+        selectTargetDevice(device, computerCardRow);
+        if (!targetSwitchInFlight && confirmingComputerId != null) {
+            finishCarouselConfirmation();
         }
     }
 
-    /// 切换确认结束（成功或失败）：卡片停在原处；没切过去就在中部说明原因。
+    /// 切换确认结束（成功或失败）：恢复卡片状态并刷新提示。
     private void finishCarouselConfirmation() {
         String tried = confirmingComputerId;
         confirmingComputerId = null;
@@ -1054,98 +752,102 @@ public final class MainActivity extends Activity {
         updateVoiceControls();
     }
 
-    private void updateCarouselDots(int index) {
-        if (carouselDots == null) return;
-        int count = carouselIds.size();
-        if (carouselDots.getChildCount() != count) {
-            carouselDots.removeAllViews();
-            for (int i = 0; i < count; i++) {
-                carouselDots.addView(new View(this), margins(dp(3), 0, dp(3), 0, dp(6), dp(6)));
+    private void updateFleetSummaryAndTargetBadge(java.util.List<TargetDeviceManager.Device> devices) {
+        int total = devices.size();
+        int onlineCount = 0;
+        int capturingCount = 0;
+        for (TargetDeviceManager.Device d : devices) {
+            if (isDeviceOnline(d.computerId)) {
+                onlineCount++;
+            }
+            if (isEngineCapturingFor(d.computerId)) {
+                capturingCount++;
             }
         }
-        for (int i = 0; i < count; i++) {
-            View dot = carouselDots.getChildAt(i);
-            boolean on = i == index;
-            dot.setBackground(roundRect(on ? theme.primary : theme.outline, 4));
-            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) dot.getLayoutParams();
-            params.width = dp(on ? 18 : 6);
-            dot.setLayoutParams(params);
+        if (fleetSummaryBadge != null) {
+            PhoneAudioService.Snapshot snap = PhoneAudioService.getSnapshot();
+            String badgeText;
+            int badgeInk;
+            if (total == 0) {
+                badgeText = "未连接";
+                badgeInk = theme.muted;
+            } else if (capturingCount > 0) {
+                badgeText = "🔴 听写中";
+                badgeInk = theme.success;
+            } else if (snap.running) {
+                badgeText = "● 供音 " + snap.connected + "/" + snap.total;
+                badgeInk = snap.connected > 0 ? theme.success : theme.warning;
+            } else {
+                badgeText = "● " + onlineCount + "/" + total + " 在线";
+                badgeInk = onlineCount > 0 ? theme.success : theme.muted;
+            }
+            fleetSummaryBadge.setText(badgeText);
+            fleetSummaryBadge.setTextColor(badgeInk);
         }
-        carouselDots.setVisibility(count > 1 ? View.VISIBLE : View.INVISIBLE);
     }
 
     private String computerCardsSignature(java.util.List<TargetDeviceManager.Device> devices) {
-        java.util.Map<String, String> sharedStates = PhoneAudioService.getSnapshot().receiverStates;
-        StringBuilder signature = new StringBuilder("S|")
+        PhoneAudioService.Snapshot audioSnap = PhoneAudioService.getSnapshot();
+        java.util.Map<String, String> sharedStates = audioSnap.receiverStates;
+        StringBuilder signature = new StringBuilder("S2|")
                 .append(targetDeviceManager.getActiveComputerId()).append('|')
                 .append(confirmingComputerId).append('|')
+                .append(audioSnap.running).append('|')
+                .append(audioSnap.connected).append('/').append(audioSnap.total).append('|')
                 .append(isVoiceInteractionBusy()).append('|');
-        for (String nearbyId : new java.util.TreeSet<>(nearbyComputers.keySet())) signature.append("N:").append(nearbyId).append(',');
+        for (String nearbyId : new java.util.TreeSet<>(nearbyComputers.keySet())) {
+            signature.append("N:").append(nearbyId).append(',');
+        }
         for (TargetDeviceManager.Device device : devices) {
+            LanTargetStatus lan = lanTargets.get(device.computerId);
+            boolean usbThis = usbConnected && sameComputer(device.computerId, usbComputerId);
             signature.append(device.computerId).append(',').append(device.slot).append(',')
                     .append(device.displayName).append(',').append(device.platform).append(',')
-                    .append(device.sharedGroup).append(',').append(isDeviceOnline(device.computerId))
-                    .append(',').append(lanPairingRejected.get(device.computerId)).append(',')
+                    .append(device.sharedGroup).append(',').append(lan != null).append(',')
+                    .append(usbThis).append(',')
+                    .append(lanPairingRejected.get(device.computerId)).append(',')
                     .append(engineNameFor(device.computerId)).append(',')
+                    .append(audioReadyFor(device.computerId)).append(',')
+                    .append(virtualCableSelectedFor(device.computerId)).append(',')
+                    .append(isEngineCapturingFor(device.computerId)).append(',')
+                    .append(isAudioStreamingFor(device.computerId)).append(',')
+                    .append(lan != null && lan.supports16k).append(',')
+                    .append(foregroundAppFor(device.computerId)).append(',')
                     .append(sharedStates.get(device.computerId)).append(';');
         }
         return signature.toString();
     }
 
-    /// 每 2 秒的健康检查都会调用：内容没变就不重建，否则会打断滑动、长按与读屏焦点。
+    /// 每 2 秒的健康检查都会调用：内容没变就不重建，避免打断点击、长按与读屏焦点。
     private void refreshComputerCards() {
-        if (computerCardRow == null || targetDeviceManager == null) return;
-        if (computerCarousel != null && computerCarousel.isDragging()) return; // 拖动中不重建，等下一轮刷新
+        if (targetDeviceManager == null) return;
         java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+        updateFleetSummaryAndTargetBadge(devices);
+        if (computerCardRow == null) return;
         String signature = computerCardsSignature(devices);
         if (signature.equals(lastComputerCardsSignature) && computerCardRow.getChildCount() > 0) return;
         lastComputerCardsSignature = signature;
         computerCardRow.removeAllViews();
-        carouselIds.clear();
         if (devices.isEmpty() && nearbyComputers.isEmpty()) {
-            computerCardRow.addView(emptyComputerCard(),
-                    new LinearLayout.LayoutParams(carouselCardWidth + dp(56), -2));
-            updateCarouselDots(0);
+            computerCardRow.addView(emptyComputerCard(), new LinearLayout.LayoutParams(-1, -2));
             return;
         }
         String activeId = targetDeviceManager.getActiveComputerId();
         java.util.Map<String, String> sharedStates = PhoneAudioService.getSnapshot().receiverStates;
-        for (TargetDeviceManager.Device device : devices) {
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
             boolean selected = sameComputer(device.computerId, activeId);
             boolean confirming = sameComputer(device.computerId, confirmingComputerId);
-            View card = selected || confirming
-                    ? heroComputerCard(device, selected, confirming, sharedStates.get(device.computerId))
-                    : peekComputerCard(device, sharedStates.get(device.computerId));
-            final String tappedComputerId = device.computerId;
-            card.setOnClickListener(view -> onComputerCardTap(tappedComputerId));
-            computerCardRow.addView(card, margins(0, 0, dp(10), 0, carouselCardWidth, -1));
-            carouselIds.add(device.computerId);
+            View card = buildComputerStatusCard(
+                    device, selected, confirming, sharedStates.get(device.computerId));
+            int bottomMargin = (i < devices.size() - 1 || !nearbyComputers.isEmpty()) ? dp(8) : 0;
+            computerCardRow.addView(card, margins(0, 0, 0, bottomMargin, -1, -2));
         }
-        for (LanDiscoveryClient.DiscoveredComputer computer : sortedNearby()) {
-            computerCardRow.addView(nearbyComputerCard(computer), margins(0, 0, dp(10), 0, carouselCardWidth, -1));
-        }
-        if (devices.size() < TargetDeviceManager.MAX_DEVICES) {
-            computerCardRow.addView(addComputerCard(), margins(0, 0, 0, 0, carouselCardWidth, -1));
-        }
-        if (computerCarousel == null) return;
-        computerCarousel.configure(carouselStep(), computerCardRow.getChildCount());
-        // 重建只换卡片内容：停在原来居中的那张（按 id 找回），首次显示才定位到当前电脑。
-        int page;
-        // 只有真正第一次显示（还没有居中页）才定位到当前电脑；切换确认中的重建保持原页。
-        if (carouselFocusPage < 0) {
-            page = Math.max(0, carouselIds.indexOf(activeId));
-            carouselFocusPage = page;
-            carouselFocusId = page < carouselIds.size() ? carouselIds.get(page) : null;
-        } else if (carouselFocusId != null && carouselIds.contains(carouselFocusId)) {
-            page = carouselIds.indexOf(carouselFocusId);
-        } else {
-            page = Math.min(carouselFocusPage, computerCardRow.getChildCount() - 1);
-        }
-        carouselFocusPage = page;
-        // 拖动或翻页动画进行中不定位，交给松手/动画结束后的选中处理。
-        if (!computerCarousel.isDragging() && !computerCarousel.hasPendingChoice()) {
-            computerCarousel.holdPage(page);
-            updateCarouselDots(page);
+        java.util.List<LanDiscoveryClient.DiscoveredComputer> nearbyList = sortedNearby();
+        for (int i = 0; i < nearbyList.size(); i++) {
+            int bottomMargin = i < nearbyList.size() - 1 ? dp(6) : 0;
+            computerCardRow.addView(nearbyComputerCard(nearbyList.get(i)),
+                    margins(0, 0, 0, bottomMargin, -1, -2));
         }
     }
 
@@ -1161,123 +863,210 @@ public final class MainActivity extends Activity {
         return usbConnected && sameComputer(computerId, usbComputerId) ? usbEngineName : null;
     }
 
-    private View heroComputerCard(TargetDeviceManager.Device device, boolean selected, boolean confirming,
-                                  String sharedState) {
-        int ink = theme.primary;
-        int onInk = theme.onPrimary;
-        int soft = theme.mix(onInk, ink, 0.32f);
-        boolean online = isDeviceOnline(device.computerId);
-        boolean rejected = !online && Boolean.TRUE.equals(lanPairingRejected.get(device.computerId));
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(15), dp(18), dp(15));
-        card.setBackground(theme.pressable(this, ink, theme.mix(ink, onInk, 0.18f), 16));
-
-        LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(new DeckIconView(this, "macos".equalsIgnoreCase(device.platform) ? "laptop" : "devices", onInk),
-                new LinearLayout.LayoutParams(dp(22), dp(22)));
-        top.addView(text(device.slot + "号 · " + platformLabel(device.platform), 13, soft, Typeface.NORMAL),
-                margins(dp(10), 0, 0, 0, 0, -2));
-        ((LinearLayout.LayoutParams) top.getChildAt(1).getLayoutParams()).weight = 1f;
-        String badgeText = confirming ? "确认中" : "当前";
-        TextView badge = text(badgeText, 11, ink, Typeface.BOLD);
-        badge.setPadding(dp(10), dp(3), dp(10), dp(3));
-        badge.setBackground(roundRect(onInk, 10));
-        top.addView(badge);
-        card.addView(top);
-
-        TextView name = text(device.displayName, 22, onInk, Typeface.BOLD);
-        name.setMaxLines(1);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(name, margins(0, dp(10), 0, 0, -1, -2));
-
-        String onlineChannel = lanTargets.containsKey(device.computerId) ? "Wi-Fi 在线"
-                : (usbConnected && sameComputer(device.computerId, usbComputerId) ? "USB 在线" : "在线");
-        String state = confirming ? "正在确认…" : rejected ? "配对已失效 · 长按重新配对"
-                : device.sharedGroup ? (sharedState == null ? "共享组 · 等待供音" : sharedState)
-                : online ? onlineChannel + " · 未加入共享组" : "离线 · 未加入共享组";
-        int dotColor = confirming ? theme.warning : rejected ? theme.warning
-                : online ? theme.mix(theme.success, onInk, 0.35f) : soft;
-        LinearLayout stateRow = new LinearLayout(this);
-        stateRow.setGravity(Gravity.CENTER_VERTICAL);
-        View dot = new View(this);
-        dot.setBackground(roundRect(dotColor, 20));
-        stateRow.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
-        stateRow.addView(text(state, 12, onInk, Typeface.NORMAL), margins(dp(6), 0, 0, 0, -2, -2));
-        String engine = engineNameFor(device.computerId);
-        if (engine != null) stateRow.addView(text(engine, 12, soft, Typeface.NORMAL), margins(dp(14), 0, 0, 0, -2, -2));
-        card.addView(stateRow, margins(0, dp(4), 0, 0, -1, -2));
-
-        if (selected && !device.sharedGroup) {
-            TextView join = text("加入共享组", 13, ink, Typeface.BOLD);
-            join.setGravity(Gravity.CENTER);
-            join.setBackground(theme.pressable(this, onInk, theme.mix(onInk, ink, 0.15f), 14));
-            join.setContentDescription("把这台电脑加入共享组");
-            join.setOnClickListener(view -> toggleSharedGroupFromCard(device));
-            card.addView(join, margins(0, dp(12), 0, 0, -1, dp(40)));
-            TextView hint = text("只有共享组里的电脑会收到手机的声音", 12, soft, Typeface.NORMAL);
-            card.addView(hint, margins(0, dp(8), 0, 0, -1, -2));
-        } else if (selected) {
-            TextView note = text("共享时由这台电脑自己的快捷键开始和停止，模式按它的输入法设置", 12, soft, Typeface.NORMAL);
-            note.setLineSpacing(0, 1.25f);
-            card.addView(note, margins(0, dp(12), 0, 0, -1, -2));
-        }
-        card.setContentDescription(device.slot + "号电脑 " + device.displayName + "，" + state
-                + (engine == null ? "" : "，" + engine) + (selected ? "，当前输入目标" : "") + "，长按管理");
-        card.setFocusable(true);
-        card.setOnClickListener(view -> { if (rejected) showManageComputerActions(device); });
-        card.setOnLongClickListener(view -> {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            showManageComputerActions(device);
-            return true;
-        });
-        return card;
+    private boolean audioReadyFor(String computerId) {
+        if (computerId == null) return false;
+        LanTargetStatus status = lanTargets.get(computerId);
+        if (status != null) return status.phoneAudioAvailable;
+        return usbConnected && sameComputer(computerId, usbComputerId) && phoneAudioAvailable;
     }
 
-    private View peekComputerCard(TargetDeviceManager.Device device, String sharedState) {
-        boolean online = isDeviceOnline(device.computerId);
-        boolean rejected = Boolean.TRUE.equals(lanPairingRejected.get(device.computerId));
-        boolean busy = isVoiceInteractionBusy();
+    private Boolean virtualCableSelectedFor(String computerId) {
+        if (computerId == null) return null;
+        LanTargetStatus status = lanTargets.get(computerId);
+        if (status != null) return status.typelessVirtualCableSelected;
+        return usbConnected && sameComputer(computerId, usbComputerId) ? typelessVirtualCableSelected : null;
+    }
+
+    private boolean isEngineCapturingFor(String computerId) {
+        if (computerId == null) return false;
+        LanTargetStatus status = lanTargets.get(computerId);
+        if (status != null) return status.engineCapturing;
+        return usbConnected && sameComputer(computerId, usbComputerId) && usbEngineCapturing;
+    }
+
+    private boolean isAudioStreamingFor(String computerId) {
+        if (computerId == null) return false;
+        LanTargetStatus status = lanTargets.get(computerId);
+        if (status != null) return status.audioStreaming;
+        return usbConnected && sameComputer(computerId, usbComputerId) && usbAudioStreaming;
+    }
+
+    private String foregroundAppFor(String computerId) {
+        if (computerId == null) return null;
+        LanTargetStatus status = lanTargets.get(computerId);
+        if (status != null && status.foregroundApp != null) return status.foregroundApp;
+        return usbConnected && sameComputer(computerId, usbComputerId) ? usbForegroundApp : null;
+    }
+
+    private static String cleanComputerName(String raw) {
+        if (raw == null || raw.isBlank()) return "电脑";
+        String s = raw.trim();
+        if (s.endsWith(".local")) {
+            s = s.substring(0, s.length() - 6);
+        }
+        if (s.startsWith("wanglizoude") && s.length() > "wanglizoude".length()) {
+            s = s.substring("wanglizoude".length());
+        }
+        return s.replace('-', ' ');
+    }
+
+    private static boolean isSystemNoiseWindow(String app) {
+        if (app == null || app.isBlank()) return true;
+        String lower = app.trim().toLowerCase(java.util.Locale.ROOT);
+        return "dwm".equals(lower)
+                || "explorer".equals(lower)
+                || "searchhost".equals(lower)
+                || "shellexperiencehost".equals(lower)
+                || "applicationframehost".equals(lower)
+                || "lockapp".equals(lower)
+                || "idle".equals(lower);
+    }
+
+    /// 极简全状态电脑卡片：无冗余边框与次要按钮，一眼区分当前目标、在线状态、虚拟声卡与前台窗口。
+    private View buildComputerStatusCard(
+            TargetDeviceManager.Device device,
+            boolean selected,
+            boolean confirming,
+            String sharedState) {
+        LanTargetStatus lanStatus = lanTargets.get(device.computerId);
+        boolean usbThis = usbConnected && sameComputer(device.computerId, usbComputerId);
+        boolean online = lanStatus != null || usbThis;
+        boolean rejected = !online && Boolean.TRUE.equals(lanPairingRejected.get(device.computerId));
+        boolean audioReady = audioReadyFor(device.computerId);
+        Boolean cableSelected = virtualCableSelectedFor(device.computerId);
+        boolean hasAudioWarning = online && (!audioReady || Boolean.FALSE.equals(cableSelected));
+        boolean capturing = isEngineCapturingFor(device.computerId);
+        boolean micRunning = PhoneAudioService.getSnapshot().running;
+
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(15), dp(18), dp(15));
-        card.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 16, 1, theme.outline));
-        card.setAlpha(online && !busy ? 0.92f : 0.6f);
+        card.setPadding(dp(14), dp(11), dp(14), dp(11));
+
+        int cardFill = selected || confirming
+                ? theme.mix(theme.surface, theme.primaryContainer, 0.35f)
+                : theme.surface;
+        int borderStroke = selected || confirming ? 2 : 0;
+        int borderColor = confirming ? theme.warning
+                : selected ? theme.primary
+                : Color.TRANSPARENT;
+        card.setBackground(theme.pressable(
+                this, cardFill, theme.surfaceRaised, 16, borderStroke, borderColor));
+        card.setAlpha(online || selected || confirming || rejected ? 1f : 0.72f);
+
+        // 第一行：状态圆点 + 电脑名 +（当前标签）+ 右侧单个共享开关胶囊
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(new DeckIconView(this, "macos".equalsIgnoreCase(device.platform) ? "laptop" : "devices", theme.muted),
-                new LinearLayout.LayoutParams(dp(22), dp(22)));
-        top.addView(text(device.slot + "号 · " + platformLabel(device.platform), 13, theme.muted, Typeface.NORMAL),
-                margins(dp(8), 0, 0, 0, 0, -2));
-        ((LinearLayout.LayoutParams) top.getChildAt(1).getLayoutParams()).weight = 1f;
-        card.addView(top);
-        TextView name = text(device.displayName, 19, theme.text, Typeface.BOLD);
-        name.setMaxLines(1);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(name, margins(0, dp(10), 0, 0, -1, -2));
-        String engine = engineNameFor(device.computerId);
-        String state = rejected ? "配对已失效" : busy ? "说话时不能切换"
-                : device.sharedGroup ? (sharedState == null ? "共享组" : "共享组 · " + sharedState)
-                : "未加入共享组";
-        LinearLayout stateRow = new LinearLayout(this);
-        stateRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        int dotColor = confirming || rejected || hasAudioWarning ? theme.warning
+                : online ? theme.success : theme.muted;
         View dot = new View(this);
-        dot.setBackground(roundRect(rejected ? theme.warning : online ? theme.success : theme.muted, 20));
-        stateRow.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
-        TextView stateText = text(state, 12, online && !rejected ? theme.success : rejected ? theme.warning : theme.muted, Typeface.NORMAL);
-        stateText.setMaxLines(1);
-        stateText.setEllipsize(TextUtils.TruncateAt.END);
-        stateRow.addView(stateText, margins(dp(6), 0, 0, 0, -1, -2));
-        card.addView(stateRow, margins(0, dp(4), 0, 0, -1, -2));
-        TextView switchHint = text(online && !busy ? "点按切换到此电脑 ›" : "长按管理此电脑", 11, theme.muted, Typeface.NORMAL);
-        card.addView(switchHint, margins(0, dp(18), 0, 0, -1, -2));
-        card.setContentDescription(device.slot + "号电脑 " + device.displayName + "，" + state + "，点按或滑到这里切换，长按管理");
+        dot.setBackground(roundRect(dotColor, 20));
+        top.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
+
+        String cleanName = device.nameLocked ? device.displayName : cleanComputerName(device.displayName);
+        TextView nameView = text(
+                device.slot + " · " + cleanName,
+                15,
+                selected || online ? theme.text : theme.muted,
+                Typeface.BOLD);
+        nameView.setSingleLine(true);
+        nameView.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        nameParams.leftMargin = dp(8);
+        nameParams.rightMargin = dp(8);
+        top.addView(nameView, nameParams);
+
+        if (selected || confirming) {
+            TextView activeBadge = text(
+                    confirming ? "切换中" : "当前",
+                    10,
+                    confirming ? theme.warning : theme.onPrimary,
+                    Typeface.BOLD);
+            activeBadge.setSingleLine(true);
+            activeBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
+            activeBadge.setBackground(roundRect(confirming ? theme.warningContainer : theme.primary, 8));
+            top.addView(activeBadge, margins(0, 0, dp(6), 0, -2, -2));
+        }
+
+        boolean streamingNow = device.sharedGroup && micRunning
+                && ((sharedState != null && sharedState.contains("正在供音"))
+                || isAudioStreamingFor(device.computerId));
+        String sharedLabel;
+        int sharedInk;
+        int sharedBg;
+        if (streamingNow) {
+            sharedLabel = "🎙 供音中";
+            sharedInk = theme.success;
+            sharedBg = theme.successContainer;
+        } else if (device.sharedGroup) {
+            sharedLabel = "✓ 共享";
+            sharedInk = online ? theme.success : theme.muted;
+            sharedBg = online
+                    ? theme.mix(theme.surfaceRaised, theme.successContainer, 0.55f)
+                    : theme.surfaceRaised;
+        } else {
+            sharedLabel = "未共享";
+            sharedInk = theme.muted;
+            sharedBg = theme.surfaceRaised;
+        }
+        TextView sharedPill = text(sharedLabel, 11, sharedInk, Typeface.BOLD);
+        sharedPill.setSingleLine(true);
+        sharedPill.setPadding(dp(8), dp(3), dp(8), dp(3));
+        sharedPill.setBackground(theme.pressable(this, sharedBg, theme.outline, 10));
+        sharedPill.setContentDescription((device.sharedGroup ? "移出共享组：" : "加入共享组：") + device.displayName);
+        sharedPill.setOnClickListener(view -> toggleSharedGroupFromCard(device));
+        top.addView(sharedPill, new LinearLayout.LayoutParams(-2, -2));
+
+        card.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+        // 第二行：极简状态行（连接通道 · 语音状态 · 活动应用）
+        java.util.List<String> telemetry = new java.util.ArrayList<>();
+        if (lanStatus != null && usbThis) {
+            telemetry.add("Wi-Fi + USB");
+        } else if (lanStatus != null) {
+            telemetry.add("Wi-Fi");
+        } else if (usbThis) {
+            telemetry.add("USB");
+        } else if (rejected) {
+            telemetry.add("配对失效 · 点按重配");
+        } else {
+            telemetry.add("离线");
+        }
+
+        if (online) {
+            if (capturing) {
+                telemetry.add("🔴 正在听写");
+            } else if (!audioReady) {
+                telemetry.add("声卡未就绪");
+            } else if (Boolean.FALSE.equals(cableSelected)) {
+                telemetry.add("Typeless 未选虚拟麦");
+            } else {
+                telemetry.add("就绪");
+            }
+            String fg = foregroundAppFor(device.computerId);
+            if (!isSystemNoiseWindow(fg)) {
+                telemetry.add(fg.trim());
+            }
+        }
+
+        String telemetryLine = String.join("  ·  ", telemetry);
+        int telemetryColor = capturing ? theme.success
+                : (rejected || hasAudioWarning) ? theme.warning
+                : online ? theme.muted : theme.muted;
+        TextView detailView = text(
+                telemetryLine,
+                12,
+                telemetryColor,
+                capturing ? Typeface.BOLD : Typeface.NORMAL);
+        detailView.setSingleLine(true);
+        detailView.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(detailView, margins(dp(16), dp(3), 0, 0, -1, -2));
+
+        final String tappedId = device.computerId;
+        card.setContentDescription(device.slot + "号电脑 " + device.displayName + "，"
+                + (selected ? "当前目标，" : "") + sharedLabel + "，" + telemetryLine);
         card.setFocusable(true);
-        card.setOnClickListener(view -> {
-            int index = carouselIds.indexOf(device.computerId);
-            if (index >= 0 && computerCarousel != null) computerCarousel.smoothScrollTo(index * carouselStep(), 0);
-        });
+        card.setOnClickListener(view -> onComputerCardTap(tappedId));
         card.setOnLongClickListener(view -> {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             showManageComputerActions(device);
@@ -1287,64 +1076,52 @@ public final class MainActivity extends Activity {
         return card;
     }
 
-    private View addComputerCard() {
-        LinearLayout add = new LinearLayout(this);
-        add.setOrientation(LinearLayout.VERTICAL);
-        add.setGravity(Gravity.CENTER);
-        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 24);
-        dashed.setStroke(dp(1), theme.outline, dp(6), dp(4));
-        add.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
-        add.addView(new DeckIconView(this, "plus", theme.muted), new LinearLayout.LayoutParams(dp(24), dp(24)));
-        add.addView(text("添加电脑", 14, theme.muted, Typeface.NORMAL), marginTop(dp(8)));
-        add.setContentDescription("添加电脑：同一 Wi-Fi 里的电脑会自动出现");
-        add.setFocusable(true);
-        add.setOnClickListener(view -> showAddComputerHelp());
-        installTouchFeedback(add);
-        return add;
-    }
-
     private View emptyComputerCard() {
         LinearLayout empty = new LinearLayout(this);
         empty.setOrientation(LinearLayout.VERTICAL);
-        empty.setPadding(dp(20), dp(18), dp(20), dp(18));
-        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 24);
+        empty.setPadding(dp(16), dp(14), dp(16), dp(14));
+        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 18);
         dashed.setStroke(dp(1), theme.outline, dp(6), dp(4));
         empty.setBackground(dashed);
-        empty.addView(new DeckIconView(this, "laptop", theme.muted), new LinearLayout.LayoutParams(dp(28), dp(28)));
-        empty.addView(text("连接第一台电脑", 20, theme.text, Typeface.BOLD), marginTop(dp(10)));
-        TextView body = text("在电脑上打开言渡接收端，手机连同一个 Wi-Fi，电脑会自动出现在这里。", 13, theme.muted, Typeface.NORMAL);
-        body.setLineSpacing(0, 1.3f);
-        empty.addView(body, marginTop(dp(6)));
-        Button retry = smallButton("重新查找");
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(new DeckIconView(this, "laptop", theme.muted), new LinearLayout.LayoutParams(dp(22), dp(22)));
+        top.addView(text("连接第一台电脑", 16, theme.text, Typeface.BOLD), margins(dp(8), 0, 0, 0, 0, -2));
+        ((LinearLayout.LayoutParams) top.getChildAt(1).getLayoutParams()).weight = 1f;
+        Button retry = smallButton("查找电脑");
         retry.setTextColor(theme.onPrimary);
-        retry.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 22));
-        retry.setPadding(dp(20), 0, dp(20), 0);
+        retry.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 14));
+        retry.setPadding(dp(14), 0, dp(14), 0);
         retry.setOnClickListener(view -> {
             showActionFeedback("●  正在查找同一 Wi-Fi 里的电脑…", theme.muted);
             scanNearbyComputers();
         });
         installTouchFeedback(retry);
-        empty.addView(retry, margins(0, dp(14), 0, 0, -2, dp(44)));
+        top.addView(retry, new LinearLayout.LayoutParams(-2, dp(34)));
+        empty.addView(top);
+        TextView body = text("在电脑上打开言渡接收端并连同一 Wi-Fi，电脑会自动出现在这里。", 12, theme.muted, Typeface.NORMAL);
+        empty.addView(body, marginTop(dp(6)));
         return empty;
     }
 
-    /// 附近（同一 Wi-Fi）尚未连接的电脑：虚线卡，点按请求连接，电脑上点「允许」后加入。
+    /// 附近（同一 Wi-Fi）尚未连接的电脑：紧凑虚线横条，点按请求连接，电脑上点「允许」后加入。
     private View nearbyComputerCard(LanDiscoveryClient.DiscoveredComputer computer) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 24);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(12), dp(9), dp(12), dp(9));
+        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, 14);
         dashed.setStroke(dp(1), theme.primary, dp(6), dp(4));
         card.setBackground(new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
         card.addView(new DeckIconView(this, "macos".equalsIgnoreCase(computer.platform) ? "laptop" : "devices",
-                theme.primary), new LinearLayout.LayoutParams(dp(22), dp(22)));
-        TextView name = text(computer.displayName, 17, theme.text, Typeface.NORMAL);
-        name.setMaxLines(1);
+                theme.primary), new LinearLayout.LayoutParams(dp(18), dp(18)));
+        TextView name = text("发现附近电脑：" + computer.displayName, 13, theme.text, Typeface.BOLD);
+        name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(name, margins(0, dp(10), 0, 0, -1, -2));
-        card.addView(text("附近 · 点按连接", 12, theme.primary, Typeface.BOLD), margins(0, dp(4), 0, 0, -1, -2));
+        card.addView(name, margins(dp(8), 0, dp(8), 0, 0, -2));
+        ((LinearLayout.LayoutParams) name.getLayoutParams()).weight = 1f;
+        TextView connectBadge = text("点按配对 ›", 11, theme.primary, Typeface.BOLD);
+        card.addView(connectBadge);
         card.setContentDescription("附近的电脑 " + computer.displayName + "，点按连接，然后在电脑上点允许");
         card.setFocusable(true);
         card.setOnClickListener(view -> startNearbyPairing(computer));
@@ -1352,7 +1129,7 @@ public final class MainActivity extends Activity {
         return card;
     }
 
-    // ---------- 常用快捷指令区（4 列桌面图标风格：点按发送，长按拖动调序，编辑可点 × 删除或新增） ----------
+    // ---------- 快捷与指令矩阵（4×3 完整对称网格：含常用按键与常用斜杠指令，无孤立空位） ----------
 
     private View buildQuickRow() {
         LinearLayout section = new LinearLayout(this);
@@ -1360,25 +1137,24 @@ public final class MainActivity extends Activity {
 
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("常用快捷指令", 15, theme.text, Typeface.BOLD);
+        TextView title = text("快捷指令", 14, theme.muted, Typeface.BOLD);
         headerRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
-
-        Button addBtn = smallButton("＋ 新增");
-        addBtn.setTextSize(12);
-        addBtn.setTextColor(theme.body);
-        addBtn.setBackground(theme.pressable(this, theme.surface, theme.outline, 14, 1, theme.outline));
-        addBtn.setPadding(dp(12), 0, dp(12), 0);
-        addBtn.setOnClickListener(view -> startActivity(new Intent(this, ShortcutEditActivity.class)));
-        headerRow.addView(addBtn, margins(0, 0, dp(6), 0, -2, dp(30)));
 
         homeEditButton = smallButton(gridEditMode ? "完成" : "编辑");
         homeEditButton.setTextSize(12);
-        homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
-        homeEditButton.setBackground(theme.pressable(this,
-                gridEditMode ? theme.primary : theme.surface, theme.outline, 14, 1, theme.outline));
-        homeEditButton.setPadding(dp(12), 0, dp(12), 0);
+        homeEditButton.setTextColor(gridEditMode ? theme.primary : theme.muted);
+        homeEditButton.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 10));
+        homeEditButton.setPadding(dp(10), dp(2), dp(10), dp(2));
         homeEditButton.setOnClickListener(view -> toggleGridEditMode());
         headerRow.addView(homeEditButton, new LinearLayout.LayoutParams(-2, dp(30)));
+
+        Button allBtn = smallButton("全部 ›");
+        allBtn.setTextSize(12);
+        allBtn.setTextColor(theme.muted);
+        allBtn.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 10));
+        allBtn.setPadding(dp(8), dp(2), dp(4), dp(2));
+        allBtn.setOnClickListener(view -> showShortcutPanel());
+        headerRow.addView(allBtn, new LinearLayout.LayoutParams(-2, dp(30)));
 
         section.addView(headerRow, new LinearLayout.LayoutParams(-1, -2));
 
@@ -1393,7 +1169,7 @@ public final class MainActivity extends Activity {
         homeShortcutGrid = new GridLayout(this);
         homeShortcutGrid.setColumnCount(4);
         homeShortcutGrid.setUseDefaultMargins(false);
-        section.addView(homeShortcutGrid, margins(dp(-4), dp(8), dp(-4), 0, -1, -2));
+        section.addView(homeShortcutGrid, margins(dp(-4), dp(4), dp(-4), 0, -1, -2));
 
         refreshHomeShortcuts();
         return section;
@@ -1404,25 +1180,42 @@ public final class MainActivity extends Activity {
             return;
         }
         homeShortcutGrid.removeAllViews();
-        java.util.List<ShortcutButtonConfig> picks = new java.util.ArrayList<>();
+        int maxHomeShortcuts = 12;
+        java.util.List<ShortcutButtonConfig> regularPicks = new java.util.ArrayList<>();
+        java.util.List<ShortcutButtonConfig> slashPicks = new java.util.ArrayList<>();
         try {
             for (ShortcutButtonConfig config : configRepository.load()) {
-                if (picks.size() == 8) break;
-                boolean isSlash = config.isTextAction() && config.text != null
-                        && config.text.trim().startsWith("/");
-                if (!config.visible || isSlash
-                        || "enter".equals(config.id) || "backspace".equals(config.id)) {
+                if (!config.visible
+                        || "enter".equals(config.id)
+                        || "backspace".equals(config.id)) {
                     continue;
                 }
-                picks.add(config);
+                boolean isSlash = config.isTextAction() && config.text != null
+                        && config.text.trim().startsWith("/");
+                if (isSlash) {
+                    if (!"/".equals(config.text.trim())) {
+                        slashPicks.add(config);
+                    }
+                } else {
+                    regularPicks.add(config);
+                }
             }
         } catch (Exception ignored) {
             // 配置损坏时保留添加入口。
         }
+        java.util.List<ShortcutButtonConfig> picks = new java.util.ArrayList<>();
+        for (ShortcutButtonConfig config : regularPicks) {
+            if (picks.size() >= maxHomeShortcuts) break;
+            picks.add(config);
+        }
+        for (ShortcutButtonConfig config : slashPicks) {
+            if (picks.size() >= maxHomeShortcuts) break;
+            picks.add(config);
+        }
         for (ShortcutButtonConfig config : picks) {
             addHomeKey(homeShortcutGrid, config);
         }
-        if (picks.size() < 8) {
+        if (gridEditMode || picks.isEmpty()) {
             addPlusTile(homeShortcutGrid, true);
         }
     }
@@ -1445,27 +1238,70 @@ public final class MainActivity extends Activity {
                 () -> onGridButtonHeld(button, config),
                 () -> startDragFromRepeat(button, config));
 
+        int tileHeightDp = getResources().getConfiguration().screenHeightDp >= 780 ? 74 : 64;
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(Math.round(62 * Math.max(1f,
+        params.height = dp(Math.round(tileHeightDp * Math.max(1f,
                 getResources().getConfiguration().fontScale)));
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
         params.setMargins(dp(4), dp(4), dp(4), dp(4));
         grid.addView(button, params);
     }
 
+    /// 底部拇指快捷编辑栏：大尺寸退格（长按全删）、回车与 `/ 指令` 面板入口，无横向截断。
+    private View buildThumbEditRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button slashBtn = smallButton("/ 指令");
+        slashBtn.setTextSize(13);
+        slashBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        slashBtn.setTextColor(theme.text);
+        slashBtn.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        slashBtn.setContentDescription("打开全部斜杠指令与新增");
+        slashBtn.setOnClickListener(view -> showCommandSheet());
+        row.addView(slashBtn, new LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.MATCH_PARENT));
+
+        Button backspace = smallButton("⌫  退格");
+        backspace.setTextSize(14);
+        backspace.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        backspace.setTextColor(theme.text);
+        backspace.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        backspace.setContentDescription("退格。点按删除一个字符，长按全部删除");
+        backspace.setOnClickListener(view -> triggerVoiceEditAction(backspace, "退格", "BACKSPACE", "backspace"));
+        backspace.setOnLongClickListener(view -> {
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            triggerDeleteAll(backspace);
+            return true;
+        });
+        row.addView(backspace, margins(dp(8), 0, dp(8), 0, 0, LinearLayout.LayoutParams.MATCH_PARENT));
+        ((LinearLayout.LayoutParams) backspace.getLayoutParams()).weight = 1f;
+
+        Button enter = smallButton("↵  回车");
+        enter.setTextSize(14);
+        enter.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        enter.setTextColor(theme.text);
+        enter.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        enter.setContentDescription("发送回车键");
+        enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
+        row.addView(enter, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+
+        return row;
+    }
+
     private void addPlusTile(GridLayout grid, boolean compact) {
         LinearLayout add = new LinearLayout(this);
         add.setOrientation(LinearLayout.VERTICAL);
         add.setGravity(Gravity.CENTER);
-        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, compact ? 16 : 18);
+        GradientDrawable dashed = theme.shape(this, Color.TRANSPARENT, compact ? 14 : 18);
         dashed.setStroke(dp(1), theme.outline, dp(5), dp(4));
         add.setBackground(new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(theme.surfaceRaised), dashed, null));
-        TextView plus = text("＋", compact ? 18 : 22, theme.primary, Typeface.BOLD);
+        TextView plus = text("＋", compact ? 17 : 22, theme.primary, Typeface.BOLD);
         plus.setGravity(Gravity.CENTER);
         add.addView(plus);
-        TextView label = text("添加指令", compact ? 11 : 12, theme.muted, Typeface.NORMAL);
+        TextView label = text("添加指令", compact ? 10 : 12, theme.muted, Typeface.NORMAL);
         label.setGravity(Gravity.CENTER);
         add.addView(label, marginTop(dp(1)));
         add.setContentDescription("添加自定义快捷指令");
@@ -1474,14 +1310,14 @@ public final class MainActivity extends Activity {
 
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(Math.round((compact ? 62 : 88) * Math.max(1f,
+        params.height = dp(Math.round((compact ? 58 : 88) * Math.max(1f,
                 getResources().getConfiguration().fontScale)));
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        params.setMargins(dp(4), dp(4), dp(4), dp(4));
+        params.setMargins(dp(compact ? 3 : 4), dp(compact ? 3 : 4), dp(compact ? 3 : 4), dp(compact ? 3 : 4));
         grid.addView(add, params);
     }
 
-    // ---------- 指令栏（支持点按发送、长按拖动排序、编辑删除与一键新增 /指令） ----------
+    // ---------- 斜杠指令菜单 ----------
 
     private java.util.List<ShortcutButtonConfig> slashCommands() {
         java.util.List<ShortcutButtonConfig> commands = new java.util.ArrayList<>();
@@ -1498,128 +1334,6 @@ public final class MainActivity extends Activity {
         return commands;
     }
 
-    private Button iconKey(int resource, String description) {
-        Button button = new Button(this);
-        button.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.outline, 24));
-        Drawable glyph = getDrawable(resource).mutate();
-        glyph.setTint(theme.text);
-        glyph.setBounds(0, 0, dp(22), dp(22));
-        button.setCompoundDrawablesRelative(glyph, null, null, null);
-        button.setPadding(dp(12), 0, 0, 0);
-        button.setContentDescription(description);
-        button.setStateListAnimator(null);
-        installTouchFeedback(button);
-        return button;
-    }
-
-    /// 底部指令栏：“/”打开全部指令，中间横向滑动常用 /指令（可长按拖动调序、新增），右侧固定退格与回车。
-    private View buildCommandBar() {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
-        bar.setBackground(theme.shape(this, theme.surface, 16, 1, theme.outline));
-        Button all = smallButton("/");
-        all.setTextSize(17);
-        all.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        all.setTextColor(theme.onPrimary);
-        all.setBackground(theme.pressable(this, theme.primary, theme.primaryPressed, 12));
-        all.setContentDescription("全部斜杠指令与管理");
-        all.setOnClickListener(view -> showCommandSheet());
-        installTouchFeedback(all);
-        bar.addView(all, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        HorizontalScrollView chipsScroll = new HorizontalScrollView(this);
-        chipsScroll.setHorizontalScrollBarEnabled(false);
-        chipsScroll.setHorizontalFadingEdgeEnabled(true);
-        chipsScroll.setFadingEdgeLength(dp(20));
-        commandChipsContainer = new LinearLayout(this);
-        commandChipsContainer.setGravity(Gravity.CENTER_VERTICAL);
-        commandChipsContainer.setPadding(dp(6), 0, dp(10), 0);
-        refreshCommandBar();
-        chipsScroll.addView(commandChipsContainer);
-        bar.addView(chipsScroll, new LinearLayout.LayoutParams(0, -2, 1f));
-        View divider = new View(this);
-        divider.setBackgroundColor(theme.outline);
-        bar.addView(divider, margins(dp(2), 0, dp(2), 0, dp(1), dp(24)));
-        Button backspace = iconKey(R.drawable.ic_backspace, "退格。点按删除一个字符，长按全部删除");
-        backspace.setOnClickListener(view -> triggerVoiceEditAction(backspace, "退格", "BACKSPACE", "backspace"));
-        backspace.setOnLongClickListener(view -> {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            triggerDeleteAll(backspace);
-            return true;
-        });
-        bar.addView(backspace, new LinearLayout.LayoutParams(dp(46), dp(42)));
-        Button enter = iconKey(R.drawable.ic_enter, "回车");
-        enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
-        bar.addView(enter, new LinearLayout.LayoutParams(dp(46), dp(42)));
-        return bar;
-    }
-
-    private void refreshCommandBar() {
-        if (commandChipsContainer == null || configRepository == null) {
-            return;
-        }
-        commandChipsContainer.removeAllViews();
-        for (ShortcutButtonConfig config : slashCommands()) {
-            FrameLayout chipWrap = new FrameLayout(this);
-            chipWrap.setTag(config.id);
-            chipWrap.setOnDragListener((view, event) -> handleGridDrag(view, event));
-
-            Button chip = smallButton(config.text.trim());
-            chip.setAllCaps(false);
-            chip.setSingleLine(true);
-            chip.setTextSize(13);
-            chip.setTypeface(Typeface.MONOSPACE);
-            chip.setTextColor(theme.body);
-            chip.setBackground(theme.pressable(this, theme.background, theme.outline, 12));
-            chip.setPadding(dp(12), 0, dp(gridEditMode ? 22 : 12), 0);
-            chip.setContentDescription(config.label + "，发送 " + config.text.trim() + "，长按拖动调序");
-            chip.setOnClickListener(view -> {
-                if (gridEditMode) {
-                    openButtonEditor(config.id);
-                } else {
-                    triggerShortcut(chip, config);
-                }
-            });
-            TouchFeedback.installHoldable(chip, null, () -> {
-                chip.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                enableEditModeInPlace();
-                startGridButtonDrag(chipWrap, config);
-            }, null);
-            chipWrap.addView(chip, new FrameLayout.LayoutParams(-2, dp(38)));
-
-            if (gridEditMode) {
-                TextView badge = text("×", 11, Color.WHITE, Typeface.BOLD);
-                badge.setGravity(Gravity.CENTER);
-                badge.setBackground(roundRect(theme.danger, 10));
-                badge.setContentDescription("删除指令 " + config.label);
-                badge.setOnClickListener(view -> removeShortcutWithUndo(config));
-                FrameLayout.LayoutParams badgeParams = new FrameLayout.LayoutParams(dp(18), dp(18));
-                badgeParams.gravity = Gravity.TOP | Gravity.END;
-                badgeParams.topMargin = dp(2);
-                badgeParams.rightMargin = dp(2);
-                chipWrap.addView(badge, badgeParams);
-            }
-
-            commandChipsContainer.addView(chipWrap, margins(0, 0, dp(6), 0, -2, dp(38)));
-        }
-
-        Button addSlash = smallButton("＋ 指令");
-        addSlash.setAllCaps(false);
-        addSlash.setSingleLine(true);
-        addSlash.setTextSize(12);
-        addSlash.setTextColor(theme.primary);
-        addSlash.setBackground(theme.pressable(this, theme.background, theme.outline, 12));
-        addSlash.setPadding(dp(10), 0, dp(10), 0);
-        addSlash.setContentDescription("新增斜杠指令");
-        addSlash.setOnClickListener(view -> {
-            Intent intent = new Intent(this, ShortcutEditActivity.class);
-            intent.putExtra(ShortcutEditActivity.EXTRA_PRESET_SLASH, true);
-            startActivity(intent);
-        });
-        installTouchFeedback(addSlash);
-        commandChipsContainer.addView(addSlash, new LinearLayout.LayoutParams(-2, dp(38)));
-    }
-
     private void showCommandSheet() {
         java.util.List<ShortcutButtonConfig> commands = slashCommands();
         String target = targetDisplayName == null ? "当前电脑" : targetDisplayName;
@@ -1632,8 +1346,8 @@ public final class MainActivity extends Activity {
         if (commands.isEmpty()) {
             builder.setMessage("还没有 /指令。点击「＋ 新增 /指令」即可一键添加常用斜杠指令。");
         } else {
-            builder.setItems(labels, (dialog, which) -> triggerShortcut(computerCarousel != null
-                    ? computerCarousel : typelessButton, commands.get(which)));
+            builder.setItems(labels, (dialog, which) -> triggerShortcut(
+                    computerCardRow != null ? computerCardRow : typelessButton, commands.get(which)));
         }
         builder.setPositiveButton("＋ 新增 /指令", (dialog, which) -> {
                     Intent intent = new Intent(this, ShortcutEditActivity.class);
@@ -1645,114 +1359,20 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("关闭", null).show();
     }
 
-    // ---------- 刚刚：手机自己的操作记录（不含识别文字） ----------
-
-    private static final class RecentAction {
-        final String kind;
-        final String title;
-        final String target;
-        final long at;
-
-        RecentAction(String kind, String title, String target, long at) {
-            this.kind = kind;
-            this.title = title;
-            this.target = target;
-            this.at = at;
-        }
-    }
-
-    private static final java.util.ArrayDeque<RecentAction> RECENT_ACTIONS = new java.util.ArrayDeque<>();
-
-    private void recordRecent(String kind, String title) {
-        String target = targetDeviceManager == null ? null
-                : targetDeviceManager.find(targetDeviceManager.getActiveComputerId()) == null ? null
-                : targetDeviceManager.find(targetDeviceManager.getActiveComputerId()).slot + "号 "
-                + targetDeviceManager.find(targetDeviceManager.getActiveComputerId()).displayName;
-        RECENT_ACTIONS.addFirst(new RecentAction(kind, title, target, System.currentTimeMillis()));
-        while (RECENT_ACTIONS.size() > 6) RECENT_ACTIONS.removeLast();
-        saveRecentActions();
-        refreshRecentList();
-    }
-
-    /// 只保存操作名称、目标电脑名与时间（不含识别文字或音频），让“刚刚”在进程被系统回收后仍在。
-    private void saveRecentActions() {
-        org.json.JSONArray array = new org.json.JSONArray();
-        try {
-            for (RecentAction action : RECENT_ACTIONS) {
-                array.put(new JSONObject().put("kind", action.kind).put("title", action.title)
-                        .put("target", action.target == null ? JSONObject.NULL : action.target)
-                        .put("at", action.at));
-            }
-        } catch (org.json.JSONException ignored) {
-            return;
-        }
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                .putString("recent_actions", array.toString()).apply();
-    }
-
-    private void loadRecentActions() {
-        if (!RECENT_ACTIONS.isEmpty()) return;
-        try {
-            org.json.JSONArray array = new org.json.JSONArray(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                    .getString("recent_actions", "[]"));
-            for (int i = 0; i < array.length() && i < 6; i++) {
-                JSONObject item = array.getJSONObject(i);
-                RECENT_ACTIONS.addLast(new RecentAction(item.optString("kind", "keys"),
-                        item.optString("title", ""), item.isNull("target") ? null : item.optString("target"),
-                        item.optLong("at", 0)));
-            }
-        } catch (org.json.JSONException ignored) {
-            RECENT_ACTIONS.clear();
-        }
-    }
-
-    /// 最近动作列表只在受管听写里显示；只用共享模式后始终隐藏。
-    private void refreshRecentList() {
-        if (recentList != null) {
-            recentList.removeAllViews();
-            recentList.setVisibility(View.GONE);
-        }
-    }
-
     private void showHomeMenu(View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
         menu.getMenu().add(1, 1, 1, "全部快捷指令面板");
         menu.getMenu().add(1, 5, 2, "快捷键与布局管理");
         menu.getMenu().add(1, 3, 3, "管理电脑");
-        menu.getMenu().add(1, 4, 4, "首页样式 · " + homeStyle.title);
-        menu.getMenu().add(1, 2, 5, "设置");
+        menu.getMenu().add(1, 2, 4, "设置");
         menu.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == 1) showShortcutPanel();
             else if (item.getItemId() == 5) startActivity(new Intent(this, ShortcutSettingsActivity.class));
             else if (item.getItemId() == 3) showManageComputersDialog();
-            else if (item.getItemId() == 4) showHomeStylePicker(anchor);
             else if (item.getItemId() == 2) startActivity(new Intent(this, SettingsActivity.class));
             return true;
         });
         menu.show();
-    }
-
-    private void showHomeStylePicker(View source) {
-        if (isVoiceInteractionBusy()) {
-            showActionFeedback("请先结束语音，再切换首页 UI", theme.warning);
-            performResultHaptic(source, false);
-            return;
-        }
-        if (homeStyleDialog != null && homeStyleDialog.isShowing()) return;
-        homeStyleDialog = HomeStylePicker.show(this, theme, homeStyle, style -> {
-            if (homeStyle == style) return;
-            // Audio may have started remotely while the picker was open.
-            if (isVoiceInteractionBusy()) {
-                showActionFeedback("请先结束语音，再切换首页 UI", theme.warning);
-                performResultHaptic(source, false);
-                return;
-            }
-            // Rebind the existing controls; never recreate connection/audio owners.
-            style.save(this);
-            stopKeyRepeat();
-            setContentView(createInterface());
-            applyUiState();
-        });
     }
 
     private android.graphics.drawable.Drawable voiceButtonBackground(int color, int pressed) {
@@ -1810,26 +1430,9 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void triggerConfiguredGoal(Button source) {
-        if (targetComputerId == null || targetComputerId.isBlank()) {
-            showActionFeedback("请先连接电脑，再使用 Goal", theme.muted);
-            performResultHaptic(source, false);
-            showShortcutFailure(source);
-            return;
-        }
-        for (ShortcutButtonConfig config : configRepository.load()) {
-            if ("agentGoal".equals(config.id)) {
-                triggerShortcut(source, config);
-                return;
-            }
-        }
-        triggerShortcut(source, GOAL_FALLBACK);
-    }
-
     private void refreshAllShortcutViews() {
         refreshShortcutGrid();
         refreshHomeShortcuts();
-        refreshCommandBar();
         syncEditModeChrome();
     }
 
@@ -1936,7 +1539,6 @@ public final class MainActivity extends Activity {
         gridEditMode = true;
         syncEditModeChrome();
         updateExistingKeysEditMode();
-        refreshCommandBar();
     }
 
     private void updateExistingKeysEditMode() {
@@ -1970,9 +1572,9 @@ public final class MainActivity extends Activity {
         }
         if (homeEditButton != null) {
             homeEditButton.setText(gridEditMode ? "完成" : "编辑");
-            homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
+            homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.muted);
             homeEditButton.setBackground(theme.pressable(this,
-                    gridEditMode ? theme.primary : theme.surface, theme.outline, 14, 1, theme.outline));
+                    gridEditMode ? theme.primary : Color.TRANSPARENT, theme.surfaceRaised, 10));
         }
         if (homeShortcutSubtitle != null) {
             homeShortcutSubtitle.setText("✎ 拖动图标调序 · 点右上角 × 删除 · 点击图标改键");
@@ -2339,10 +1941,6 @@ public final class MainActivity extends Activity {
                             theme.success);
                     performResultHaptic(source, true);
                     showShortcutSuccess(source);
-                    recordRecent(config.isTextAction() && config.text != null
-                                    && config.text.trim().startsWith("/") ? "slash" : "keys",
-                            config.isTextAction() && config.text != null && config.text.trim().startsWith("/")
-                                    ? config.text.trim() : config.label);
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
@@ -2388,7 +1986,6 @@ public final class MainActivity extends Activity {
                             theme.success);
                     performResultHaptic(source, true);
                     TouchFeedback.result(source, true);
-                    recordRecent("keys", label);
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
@@ -2416,78 +2013,6 @@ public final class MainActivity extends Activity {
 
     private void refreshTargetSwitcher() {
         refreshComputerCards();
-        if (targetDeviceRow == null || targetDeviceManager == null) {
-            return;
-        }
-        targetDeviceRow.removeAllViews();
-        java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
-        targetDockRow.setVisibility(homeStyle != HomeStyle.CENTER && devices.size() > 1
-                ? View.VISIBLE : View.GONE);
-        if (devices.isEmpty()) {
-            TextView empty = text("添加电脑  +", 12,
-                    theme.muted, Typeface.NORMAL);
-            empty.setGravity(Gravity.CENTER);
-            empty.setBackground(theme.pressable(this, theme.surfaceRaised,
-                    theme.primaryContainer, 12));
-            empty.setPadding(dp(14), 0, dp(14), 0);
-            empty.setFocusable(true);
-            empty.setOnClickListener(view -> showDeviceList());
-            targetDeviceRow.addView(empty, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(48)));
-            return;
-        }
-
-        String activeComputerId = targetDeviceManager.getActiveComputerId();
-        for (TargetDeviceManager.Device device : devices) {
-            boolean selected = sameComputer(device.computerId, activeComputerId);
-            boolean online = isDeviceOnline(device.computerId);
-            boolean pairingRejected = Boolean.TRUE.equals(
-                    lanPairingRejected.get(device.computerId));
-            String sharedState = PhoneAudioService.getSnapshot().receiverStates.get(device.computerId);
-            String chipLabel = device.slot + "号";
-            if (sharedState != null) {
-                chipLabel += "\n" + sharedState.replace("正在", "").replace("电脑端", "");
-            } else if (pairingRejected) {
-                chipLabel += "\n重配对";
-            } else if (!online) {
-                chipLabel += "\n离线";
-            } else {
-                chipLabel += selected ? "\n当前" : "\n在线";
-            }
-            Button chip = smallButton(chipLabel);
-            chip.setAllCaps(false);
-            chip.setSingleLine(false);
-            chip.setMaxLines(2);
-            chip.setEllipsize(TextUtils.TruncateAt.END);
-            chip.setTextSize(10);
-            chip.setMinWidth(dp(48));
-            chip.setMinimumWidth(dp(48));
-            chip.setTextColor(selected ? theme.onPrimary : theme.text);
-            chip.setBackground(theme.shape(
-                    this,
-                    selected ? theme.primary : theme.surfaceRaised,
-                    12,
-                    0,
-                    selected ? theme.primaryContainer : theme.outline));
-            chip.setAlpha(1f);
-            // Offline entries remain actionable for diagnosis and removal.
-            chip.setEnabled(true);
-            chip.setContentDescription(device.slot + "号电脑 " + device.displayName
-                    + (sharedState == null ? "" : "，共享状态" + sharedState)
-                    + (pairingRejected ? "，配对已失效，请长按电脑卡片选「重新配对」（也可用 USB 连接一次自动修复）" : "")
-                    + (online ? selected ? "，当前快捷键目标" : "，在线" : "，离线")
-                    + "，长按删除这台电脑");
-            chip.setOnClickListener(view -> selectTargetDevice(device, chip));
-            chip.setOnLongClickListener(view -> {
-                confirmDeleteTargetDevice(device);
-                return true;
-            });
-            installTouchFeedback(chip);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    devices.size() <= 5 ? 0 : dp(64), dp(48), devices.size() <= 5 ? 1f : 0f);
-            params.rightMargin = targetDeviceRow.getChildCount() == devices.size() - 1 ? 0 : dp(4);
-            targetDeviceRow.addView(chip, params);
-        }
     }
 
     private void showDeviceList() {
@@ -2870,7 +2395,6 @@ public final class MainActivity extends Activity {
                 }
                 lastComputerCardsSignature = null;
                 refreshTargetSwitcher();
-                recordRecent("devices", "连接新电脑");
                 showActionFeedback("✓  已连接 " + saved.slot + "号电脑 · " + name, theme.success);
                 ConnectionMonitor.get(this).reset();
                 testConnection();
@@ -3011,7 +2535,6 @@ public final class MainActivity extends Activity {
         showActionFeedback("✓  已切换到 " + device.slot + "号电脑 · "
                 + device.displayName + " · " + channel, theme.success);
         performResultHaptic(source, true);
-        recordRecent("devices", "切换电脑 · " + channel);
     }
 
     /// 切换目标必须得到新电脑确认：立即单独探测（核对 computerId、证书与凭据），
@@ -3210,6 +2733,28 @@ public final class MainActivity extends Activity {
         return node.optBoolean("virtualCableSelected", false);
     }
 
+    private static boolean parseEngineCapturing(JSONObject health) {
+        if (health == null) return false;
+        JSONObject node = health.optJSONObject("voiceEngine");
+        if (node != null && node.optBoolean("capturing", false)) {
+            return true;
+        }
+        JSONObject typeless = health.optJSONObject("typeless");
+        return typeless != null && typeless.optBoolean("capturing", false);
+    }
+
+    private static boolean parseSupports16k(JSONObject health) {
+        if (health == null) return false;
+        org.json.JSONArray capabilities = health.optJSONArray("capabilities");
+        if (capabilities == null) return false;
+        for (int index = 0; index < capabilities.length(); index++) {
+            if ("sharedPcm16kV1".equals(capabilities.optString(index))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void testConnection() {
         if (!usbConnected && lanTargets.isEmpty()) {
             showConnection("正在检测电脑端…", theme.muted);
@@ -3240,6 +2785,9 @@ public final class MainActivity extends Activity {
                     JSONObject audio = health.optJSONObject("audio");
                     phoneAudioAvailable = audio != null
                             && audio.optBoolean("available", false);
+                    usbAudioStreaming = audio != null
+                            && audio.optBoolean("streaming", false);
+                    usbEngineCapturing = parseEngineCapturing(health);
                     typelessVirtualCableSelected = parseVirtualCableSelected(health);
                     usbEngineName = parseEngineDisplayName(health);
                     String healthForegroundApp = health.isNull("foregroundApp")
@@ -3296,9 +2844,10 @@ public final class MainActivity extends Activity {
                     throw new IllegalStateException("HTTP " + response);
                 }
             } catch (Exception exception) {
-                boolean wasConnected = usbConnected;
                 usbConnected = false;
                 phoneAudioAvailable = false;
+                usbAudioStreaming = false;
+                usbEngineCapturing = false;
                 typelessVirtualCableSelected = null;
                 usbEngineName = "Typeless";
                 usbForegroundApp = null;
@@ -3323,7 +2872,6 @@ public final class MainActivity extends Activity {
                 ConcurrentHashMap<String, LanTargetStatus> next =
                         new ConcurrentHashMap<>();
                 java.util.Map<String, String> goodAddresses = new java.util.HashMap<>();
-                java.util.List<Runnable> remoteUpdates = new java.util.ArrayList<>();
                 // 防抖：上一轮在线、本轮失败但仍在宽限期内的设备保持在线，
                 // 不再出现“Wi-Fi 在线/离线”来回跳动、按钮变灰。
                 for (java.util.Map.Entry<String, LanTargetStatus> entry
@@ -3406,9 +2954,6 @@ public final class MainActivity extends Activity {
                             && Boolean.TRUE.equals(lanPairingRejected.get(usbComputerId))) {
                         testConnection();
                     }
-                    for (Runnable remoteUpdate : remoteUpdates) {
-                        remoteUpdate.run();
-                    }
                     applyStoredTarget();
                 });
             } finally {
@@ -3433,7 +2978,10 @@ public final class MainActivity extends Activity {
                 parseEngineDisplayName(health),
                 lanForegroundApp == null || lanForegroundApp.isBlank()
                         || "null".equalsIgnoreCase(lanForegroundApp.trim())
-                        ? null : lanForegroundApp);
+                        ? null : lanForegroundApp,
+                parseEngineCapturing(health),
+                audio != null && audio.optBoolean("streaming", false),
+                parseSupports16k(health));
     }
 
     private static JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
@@ -3472,9 +3020,6 @@ public final class MainActivity extends Activity {
     }
 
     private void updateVoiceModeInterface() {
-        if (targetTitleText != null) {
-            targetTitleText.setText("快捷键到");
-        }
         typelessButton.setContentDescription("开启或关闭共享麦克风");
         updateVoiceControls();
     }
@@ -3488,10 +3033,8 @@ public final class MainActivity extends Activity {
             return;
         }
         voiceButtonCaption.setText(voiceButtonLabel());
-        if (computerCarousel != null) computerCarousel.setLocked(isVoiceInteractionBusy());
         updateDialogueCopy();
         refreshComputerCards();
-        refreshRecentList();
         PhoneAudioService.Snapshot state = PhoneAudioService.getSnapshot();
         boolean stopState = state.running;
         // 底部长条：共享中用成功色浅底。
@@ -3520,31 +3063,25 @@ public final class MainActivity extends Activity {
         boolean recording = state.running;
         boolean starting = sharedStartPending;
         boolean connected = !lanTargets.isEmpty() || usbConnected;
-        voiceStatusCaption.setText(recording ? "●  正在共享" : starting ? "●  正在连接"
-                : connected ? "●  准备好了" : "●  等待连接");
+        voiceStatusCaption.setText(recording ? "● 正在供音" : starting ? "● 正在连接"
+                : connected ? "● 准备就绪" : "● 等待连接");
         int chipInk = recording ? theme.success : starting ? theme.warning
                 : connected ? theme.success : theme.muted;
         int chipFill = recording ? theme.successContainer
                 : starting ? theme.warningContainer : theme.surfaceRaised;
         voiceStatusCaption.setTextColor(chipInk);
-        if (homeStyle == HomeStyle.CENTER) voiceStatusCaption.setBackground(roundRect(chipFill, 14));
+        voiceStatusCaption.setBackground(roundRect(chipFill, 10));
         voiceButtonCaption.setText(recording ? "正在共享声音" : "共享麦克风");
-        voiceHint.setText(starting ? "正在准备麦克风"
+        voiceHint.setText(starting ? "正在准备手机麦克风…"
+                : recording ? ("已供音 " + state.connected + "/" + state.total + " 台 · 在电脑按快捷键说话")
                 : !connected ? (targetDeviceManager != null && targetDeviceManager.list().isEmpty()
-                        ? "手机和电脑连同一个 Wi-Fi，电脑会出现在上方" : "左右滑动电脑卡片，选一台在线的电脑")
-                : "各台电脑用自己的快捷键开始和停止");
-        ((RoundVoiceButton) typelessButton).setBarLabel(state.running ? "共享中 · 点一下关闭"
-                : sharedStartPending ? "正在开启…" : "开启共享麦克风");
-        if (homeStyle == HomeStyle.CENTER) {
-            boolean activeOrAlert = recording || starting || !connected;
-            voiceStatusCaption.setVisibility(View.VISIBLE);
-            voiceButtonCaption.setVisibility(activeOrAlert ? View.VISIBLE : View.GONE);
-            voiceHint.setVisibility(View.VISIBLE);
-            if (voiceMeter != null) {
-                voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.GONE);
-            }
-        } else if (voiceMeter != null) {
-            voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.INVISIBLE);
+                        ? "手机与电脑连同一 Wi-Fi 自动配对" : "等待电脑上线（支持 Wi-Fi / USB）")
+                : "共享后各电脑用各自快捷键触发听写");
+        ((RoundVoiceButton) typelessButton).setBarLabel(state.running
+                ? "共享供音中 (" + state.connected + "/" + state.total + ") · 点击关闭"
+                : sharedStartPending ? "正在开启共享麦克风…" : "开启共享麦克风");
+        if (voiceMeter != null) {
+            voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.GONE);
         }
         if (voiceHalo != null) voiceHalo.setBackground(theme.shape(this, recording
                 ? theme.successContainer : Color.TRANSPARENT, 120));
@@ -3694,19 +3231,6 @@ public final class MainActivity extends Activity {
         return postEndpointWithRetry(PhoneDeckEndpoint.USB, endpoint, body, attempts);
     }
 
-    /// 最近一次被电脑明确拒绝（HTTP 4xx/5xx）时电脑给出的原因。
-    private volatile String lastRejectionReason;
-
-    /// 电脑处理并拒绝了请求；fromComputer 表示消息来自电脑（可直接展示）。
-    private static final class ComputerRejectedException extends IllegalStateException {
-        final boolean fromComputer;
-
-        ComputerRejectedException(String message, boolean fromComputer) {
-            super(message);
-            this.fromComputer = fromComputer;
-        }
-    }
-
     private boolean postEndpointWithRetry(
             PhoneDeckEndpoint connectionEndpoint,
             String endpoint,
@@ -3744,13 +3268,10 @@ public final class MainActivity extends Activity {
             String endpoint,
             JSONObject body) {
         long startedAt = SystemClock.elapsedRealtime();
-        int readTimeout = endpoint.equals("/api/dictation/stop") ? 12_000
-                : endpoint.startsWith("/api/dictation/") ? 7_000 : 1_800;
         try {
-            PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, readTimeout);
+            PhoneDeckHttp.postJson(connectionEndpoint, endpoint, body, 1_800);
             return PostAttemptResult.SUCCESS;
         } catch (PhoneDeckHttp.ResponseException exception) {
-            lastRejectionReason = exception.getMessage();
             Log.w("PhoneDeckNet", endpoint + " rejected via "
                     + connectionEndpoint.label + " +"
                     + (SystemClock.elapsedRealtime() - startedAt) + "ms: HTTP "
@@ -3815,8 +3336,7 @@ public final class MainActivity extends Activity {
                 + "。点击查看全部电脑");
         statusText.setTextColor(theme.text);
         statusDetailText.setTextColor(theme.muted);
-        statusDetailText.setVisibility(targetComputerId == null && homeStyle != HomeStyle.CENTER
-                ? View.GONE : View.VISIBLE);
+        statusDetailText.setVisibility(View.VISIBLE);
         statusDot.setBackground(roundRect(color, 20));
         updateDialogueCopy();
     }
@@ -3840,7 +3360,7 @@ public final class MainActivity extends Activity {
         actionFeedback.setVisibility(View.VISIBLE);
         actionFeedback.setTextColor(color);
         actionFeedback.setBackground(theme.shape(
-                this, theme.feedbackSurface(color), 14, homeStyle == HomeStyle.CENTER ? 0 : 1,
+                this, theme.feedbackSurface(color), 14, 0,
                 theme.mix(theme.outline, color, 0.35f)));
         if (message != null && !message.contains("正在") && !message.contains("编辑模式")) {
             mainHandler.postDelayed(hideActionFeedbackRunnable,
@@ -3878,7 +3398,6 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         nearbyExecutor.shutdownNow();
-        if (homeStyleDialog != null) homeStyleDialog.dismiss();
         if (shortcutDialog != null) shortcutDialog.dismiss();
         mainHandler.removeCallbacks(periodicHealthCheck);
         mainHandler.removeCallbacks(pendingLanCheck);
@@ -3910,40 +3429,15 @@ public final class MainActivity extends Activity {
         button.setTextSize(12);
         button.setTextColor(theme.text);
         button.setAllCaps(false);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
         button.setPadding(dp(4), 0, dp(4), 0);
         button.setBackground(theme.pressable(
                 this, theme.key, theme.mix(theme.key, theme.primary, 0.18f), 19));
         button.setStateListAnimator(null);
         installTouchFeedback(button);
-        return button;
-    }
-
-    private Button voiceEditButton(String label) {
-        Button button = smallButton(label);
-        if (homeStyle == HomeStyle.CENTER) {
-            button.setTextSize(13);
-            button.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
-            button.setSingleLine(true);
-            button.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.outline, 25));
-            int resource = "Goal".equals(label) ? R.drawable.ic_goal
-                    : "退格".equals(label) ? R.drawable.ic_backspace : R.drawable.ic_enter;
-            Drawable icon = getDrawable(resource).mutate();
-            icon.setTint(theme.text);
-            icon.setBounds(0, 0, dp(18), dp(18));
-            button.setCompoundDrawablesRelative(icon, null, null, null);
-            button.setCompoundDrawablePadding(dp(8));
-            button.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-                int inset = Math.max(dp(4), (right - left - dp(26)
-                        - (int) Math.ceil(button.getPaint().measureText(button.getText().toString()))) / 2);
-                button.setPadding(inset, 0, inset, 0);
-            });
-            return button;
-        }
-        button.setTextSize(14);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(theme.pressable(
-                this, theme.surfaceRaised,
-                theme.mix(theme.surface, theme.primary, 0.16f), 14));
         return button;
     }
 
@@ -3987,6 +3481,9 @@ public final class MainActivity extends Activity {
         final Boolean typelessVirtualCableSelected;
         final String engineName;
         final String foregroundApp;
+        final boolean engineCapturing;
+        final boolean audioStreaming;
+        final boolean supports16k;
         /// 本状态确认在线的时刻（elapsedRealtime），供离线判定宽限使用。
         final long lastOnlineAt;
 
@@ -3996,13 +3493,19 @@ public final class MainActivity extends Activity {
                 boolean phoneAudioAvailable,
                 Boolean typelessVirtualCableSelected,
                 String engineName,
-                String foregroundApp) {
+                String foregroundApp,
+                boolean engineCapturing,
+                boolean audioStreaming,
+                boolean supports16k) {
             this.endpoint = endpoint;
             this.protocolVersion = protocolVersion;
             this.phoneAudioAvailable = phoneAudioAvailable;
             this.typelessVirtualCableSelected = typelessVirtualCableSelected;
             this.engineName = engineName;
             this.foregroundApp = foregroundApp;
+            this.engineCapturing = engineCapturing;
+            this.audioStreaming = audioStreaming;
+            this.supports16k = supports16k;
             this.lastOnlineAt = android.os.SystemClock.elapsedRealtime();
         }
     }

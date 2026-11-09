@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
-Console.OutputEncoding = System.Text.Encoding.UTF8;
+try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch (IOException) { }
 // 实时音频线程（WASAPI/AUHAL 回调）不能被长时间阻塞式 GC 打断。
 System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
 
@@ -160,11 +160,21 @@ DesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configuratio
 
 void NoteHealthActivity(HttpContext context)
 {
-    // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
-    if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
+    var foreground = context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault();
+    if (foreground == "0")
     {
-        audioBridge.NotePhoneActivity();
+        return;
     }
+    // 8765 回环同样被托盘状态窗口与本机网页轮询；只有带手机前台头或 Android UA 的请求才算手机活动，
+    // 避免本机状态页轮询阻止常驻虚拟声卡输出在空闲后休眠。
+    if (context.Connection.LocalPort == 8765
+        && foreground is null
+        && context.Request.Headers.UserAgent.FirstOrDefault()?.StartsWith(
+            "Dalvik/", StringComparison.OrdinalIgnoreCase) != true)
+    {
+        return;
+    }
+    audioBridge.NotePhoneActivity();
 }
 
 object BuildHealth(HttpContext context)
@@ -833,7 +843,8 @@ internal static class KeyboardInput
                 return null;
             }
             // 只回传进程名，不读取窗口标题，避免泄露窗口内容。
-            return Process.GetProcessById((int)processId).ProcessName;
+            using var process = Process.GetProcessById((int)processId);
+            return process.ProcessName;
         }
         catch (Exception)
         {

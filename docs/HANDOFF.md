@@ -1,5 +1,40 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-08 手机端精简优化 + 全览仪表盘 UI/UX 重构已装机，电脑端构建通过
+
+- **手机端全览仪表盘与极简 UI/UX 重构（已在真实设备 `SM-G9880` 验证并 `adb install -r` 覆盖安装）**：
+  - **三台电脑同屏极简仪表盘**：将对话白首页原先只能看单张、需左右滑动的 `CardPager` 轮播替换为纵向全览仪表盘（`buildComputerStatusCard`），三台配对电脑同屏并列显示。仅当前选中的键盘目标卡片使用 `2dp` 主色边框与浅底色高亮，其余卡片采用无边框扁平卡片；去除重复的 `设为目标` 胶囊，右侧仅保留一个可点击的共享状态胶囊（`🎙 供音中` / `✓ 共享` / `＋ 共享`）；自动清洗主机名前缀/后缀（如 `wanglizoudeMacBook-Pro` → `MacBook Pro`）并过滤 Windows 系统噪音窗口（如 `dwm`、`explorer`）。
+  - **每台电脑实时遥测展示**：扩展 `LanTargetStatus` 与 USB 健康解析（新增 `engineCapturing`、`audioStreaming`、`supports16k`），每张电脑卡片一行紧凑展示在线通道、采样率、Typeless 听写/虚拟声卡状态与有效前台应用窗口。
+  - **填满中部空白的 4×3 对称无边框网格**：将用户高频的 8 个常规快捷指令与 4 个核心斜杠指令（`/plan`、`/goal`、`/compact`、`/clear`）合并为完整的 12 格（4 列 × 3 行）对称大按键网格，并使用 `weight=1` 纵向居中铺满屏幕中部区域；常规态隐藏孤立的第 9 格 `＋ 添加指令` 占位框（仅在点 `编辑` 时显示）；`ShortcutKeyView` 在紧凑模式下移除外层描边与副标题内部胶囊框，改为极简无边框圆角块。
+  - **顶栏与底部拇指区极简化**：顶栏精简为左侧 `言渡` + 右侧可点刷新的 `● x/y 在线` 胶囊与 `⋯` 菜单；底部移除繁琐的外层大框、冗余说明文案与截断的横向滚动条，改为三等分拇指编辑栏（`/ 指令`、`⌫ 退格`、`↵ 回车`）紧贴全宽 `开启共享麦克风` 主按钮。
+- **手机端部署与恢复验证（已在真实设备验证）**：
+  - 设备：Samsung `SM-G9880`（`R5CN404KQZR`，新 `UID 10853`），已安装本机编译的精简优化版 `outputs/personal-slim-20261107/Yandu-1.6.0-dev.22-optimized.apk`（装机版 SHA-256：`83baf9958298471055181837acc05bff830fda06d4beafde9b2fb26322401aa7`，清理遗留主题代码后最新产物 SHA-256：`c7d080f883c71ae749b89844052f3cc30b75dde232b55aa9f41f9171eb5d2f93`，证书 SHA-256：`653884d083fef50df1a57d74ca85b1d66904b43e8886bb2cf1f35933224847ef`）。
+  - 安装前使用 `Invoke-PairingMigration.ps1 -Mode Export` 与 `-Mode Verify` 导出并核对 3 台配对电脑、3 台共享组成员与默认目标（保存在本机忽略目录 `outputs/personal-slim-20261107/migration-source/`，同时备份旧 APK `installed-phone-before.apk` 及用户配置）。
+  - 安装后执行 `Invoke-PairingMigration.ps1 -Mode Import`、`Restore-EmulatorSettings.ps1` 与 `-Mode Verify`：`DeviceCount=3`、`SharedGroupCount=3`、`ActiveComputerPresent=true`、`DeviceVerified=true`；冷启动后核对 `files/shortcut-config.json`（SHA-256 `3bdad9ee94cdc5eeabb29f3fc5cf158874ccb3f4adff13c81c6727f45a621be5`）与 `shared_prefs/PhoneDeckSettings.xml`（SHA-256 `9352412c59ae48b8c1bf9ba706e3eed7971d70e971397d7eaa6b5c6131458c8b`）逐字节一致，已授予 `RECORD_AUDIO` 权限并正常启动进入主界面。
+- **电脑接收端与语音链路（Windows + macOS + Shared Audio，代码通过构建与测试，本机 Windows 控制台已热更新）**：
+  - **本机后台极简化为唯一单进程（`PhoneDeck.Server.exe`）**：将 `PhoneDeck.Server.csproj` 设为 `WinExe` 无窗口后台进程，`PhoneDeckDataDirectory.Get()` 在未设置环境变量时自动优先识别程序同目录 `data\`，使 `PhoneDeck.Server.exe` 无需 `PhoneDeck.ControlCenter.exe` 包装进程即可独立无黑框常驻运行（开机自启已直接指向 `PhoneDeck.Server.exe`）；关闭纯 Wi-Fi 下的 `usbWatchdog`（同时为 Windows/macOS 的 `UsbWatchdog` 增加无 USB 设备时的 15s 退避），彻底消除了后台 `PhoneDeck.ControlCenter.exe` 与 `adb.exe` 进程。现在整台电脑后台仅运行 **1 个 `PhoneDeck.Server.exe` 进程**，私有内存降至 **`15.6 MB`**（工作集 `58.5 MB`，相比原先 3 进程合计 `~100 MB` 私有内存 / `210 MB` 工作集降低 84%）。
+  - **修复“手机显示已连接但电脑无语音输入”（TCP 半开/僵尸流与重连 409 冲突）**：
+    - `PhoneAudioService.probeReceivers()` 与 `SharedAudioBroadcaster.reconnectIfReceiverStalled()`：原先 `HttpURLConnection` 写入 Android 内核 `SO_SNDBUF`（256–512 KB）在 Wi-Fi 半开断流后仍能继续无阻塞写入 5–16 秒，导致手机误以为“正在供音”而电脑端实际已断流。现由每 2 秒一次的 `/api/health` 交叉核对电脑端 `audio.streaming`、`audio.hasReceivedPcm` 与 `audio.lastPcmAgeMs`（Mac 端同步补齐这两个字段）；一旦发现流已建立满 1.5 秒而电脑端未收到音频或超过 3 秒无新 PCM，立即中断半开连接并自动重连。
+    - `PhoneAudioBridge.TrySupersede` 与 `MacPhoneAudioBridge.TrySupersedeLocked`：允许同一已认证手机（相同 `ownerId`）在新开共享会话时直接接管残留的旧共享流，并允许同一 `sessionId` 在 USB 与 Wi-Fi 间平滑切换，避免重连时被旧流阻塞返回 `409 Conflict`；断流超时（`stalled`）退出时跳过 480 ms 尾音等待，立即释放 `streamGate`。
+  - **常驻输出热路径与轮询进一步减负**：`TypelessSettingsReader.Read` 按配置文件的 `LastWriteTimeUtc` + `Length` 缓存解析结果与虚拟声卡校验（30s TTL），消除每 10 秒重复磁盘读取与 COM 枚举；`PhoneAudioBridge.FindVirtualCable` 在常驻 WASAPI 输出健康时直接返回缓存设备名，不再每 10 秒枚举全部音频端点；`ReceiverTray` 后台轮询周期放宽至 3 秒。
+  - **常驻虚拟声卡空闲休眠修复**：Windows 与 macOS 的 `NoteHealthActivity` 原先将不带 `X-PhoneDeck-Foreground` 的 `127.0.0.1:8765/api/health` 请求一律视作旧版手机前台活动，导致 Windows 托盘状态窗口（每 2.5 s）或本机状态页 `/admin/pairing`（每 1.5 s）轮询持续重置 `lastPhoneActivity`，使 WASAPI / Core Audio AUHAL 常驻输出永不进入 90 s 空闲休眠。现改为与 `PhonePresence.Observe` 一致：8765 回环入口仅在携带 `X-PhoneDeck-Foreground` 或 `Dalvik/` User-Agent 时计为手机活动。
+  - **macOS 实时音频热路径零堆分配与奇数字节对齐**：`Pcm16MonoToStereoConverter` 新增复用缓冲的 `ConvertSpan(ReadOnlySpan<byte>)`，消除 `MacPhoneAudioBridge.ActiveSession.WriteLive` 每 20 ms 一次的 `byte[]` 堆分配；`MacPhoneAudioBridge.StreamAsync` 补齐与 Windows 一致的 1 字节 `carry` 样本对齐，防止 48 kHz 流在 TCP 奇数字节分片时导致 `PcmSilenceCatchUp.Filter` 按错位样本判定静音。
+  - **Windows 共享音频免分配 LOH Pre-Roll**：`PhoneAudioBridge.StreamAsync` 在 `AudioStreamMode.Shared` 下不再分配 144 KB（直接进入大对象堆 LOH）的 `PreRollBuffer`，流启动即标为 `PlaybackReleased = true`。
+  - **Windows 进程句柄泄漏修复**：`KeyboardInput.ForegroundAppName()` 对 `Process.GetProcessById` 加 `using` 释放内核句柄。
+  - **macOS Typeless 配置缓存统一**：`Program.cs` 与 `MacVoiceEngines` 共用同一 `MacReceiverSettings` 实例并在连接设置变更时同步，消除双份 `LoadOrCreate` 与双份缓存；`MacTypelessConfiguration` 缓存 TTL 由 1 s 提升至 5 s 并复用已解析路径。
+  - **16 kHz → 48 kHz 升采样与静音检测加速**：`Pcm16kTo48kStream.DesignPhases` 预反转多相滤波器系数，使 `Push` 内层循环变为同向顺序 `ReadOnlySpan<float>` 点积（消除边界检查与下标减法）；`PcmLatency.IsSilent` 与 Android `SharedAudioPolicies.isSilent` 改用 64 位整数平方和比较，省去每 10 ms 块的浮点累加与 `Sqrt`。
+- **Android 端（已装机）**：
+  - **熄屏 / 后台零无效轮询与零 UI 重绘**：`MainActivity.onPause()` 停止 `periodicHealthCheck`、`pendingLanCheck`、注销 `PhoneAudioService` 进程内监听并释放界面级 `wifiLock`（共享供音期间由 `PhoneAudioService` 自身持有 `wifiLock` + `screenOffWifiLock`）；熄屏供音时 `SharedAudioBroadcaster` 跳过每 100 ms 的 `calculateLevel` 计算、`PhoneAudioService` 不再每 100 ms 向主线程投递回调与分配 `Snapshot`。
+  - **音频抽取与发包零冗余拷贝**：`Pcm16kDownsampler.process` 按精确样本数 `(samples + phase) / FACTOR * 2` 分配输出数组，消除每秒 50 次的 `Arrays.copyOf` 二次拷贝；`SharedAudioBroadcaster` 仅在存在 48 kHz 目标时才拷贝 48 kHz 帧；`setChunkedStreamingMode` 按单帧字节数的 2 倍设置分块大小，使两帧合包真正作为单个 HTTP chunk 刷出。
+  - **无线共享跳过多余 USB 探测**：`PhoneAudioService.probeReceivers()` 在共享组全部通过 Wi-Fi 探测成功且此前无 USB 目标时，跳过 `127.0.0.1:8765` 的回环健康请求。
+  - **死代码与遗留首页样式彻底清理**：删除已废弃的 `CardPager.java`、`HomeStyle.java`、`HomeStylePicker.java`，并移除 `MainActivity` 中约 440 行非全览仪表盘的旧主题分支（`voiceDock`、`targetDockRow`、`targetDeviceRow`、`voiceEditButton`、`triggerConfiguredGoal`）、受管听写遗留且始终隐藏的 `recentList` / `RECENT_ACTIONS`（此前每次按键与切换电脑仍序列化 JSON 写入 `SharedPreferences`）、未使用的 `remoteUpdates`、`ComputerRejectedException`、已废弃的 `/api/dictation/` 超时分支，以及 `SettingsActivity` 未使用的 `option` 方法。
+- **验证**：
+  - Windows：`PhoneDeck.Server`、`PhoneDeck.ControlCenter` Release 构建 0 error；`PhoneDeck.Server.Tests` 135/135 通过。
+  - macOS：`PhoneDeck.Receiver` Release 构建 0 error；`PhoneDeck.Receiver.Tests` 49/49 通过（新增奇数字节分片对齐测试）。
+  - Android：`testDebugUnitTest`（80/80）、`assembleDebug`、`lintDebug` 全部通过（0 error），已装入 `SM-G9880` 并完成配对与设置校验。
+  - 契约：`python contracts/tools/validate.py` C1–C7 全部通过。
+- **待办**：更新本机及另一台 Windows / Mac 接收端可执行文件，实机验证三台电脑 Wi-Fi 16 kHz 共享供音、Typeless 识别准确率及空闲后虚拟声卡自动休眠。
+
 ## 2026-11-06 Mac 接收端已换成新版（625a7bc），其余设备待装
 
 - **已完成（本 Mac）**：`~/Applications/PhoneDeck Receiver.app` 替换为 625a7bc 的 AOT 精简包，主程序 SHA-256 `e7171f83…`；旧包（`8bc17818…`，f29f03d）

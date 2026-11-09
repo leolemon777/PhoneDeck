@@ -3,10 +3,12 @@ using System.Text.RegularExpressions;
 
 internal sealed class UsbWatchdog : IDisposable
 {
-    /// <summary>没连上或刚恢复时每 2 秒检查；adb reverse 已在位时放宽到 10 秒（每次只启动一个 adb 进程）。</summary>
+    /// <summary>没连上或刚恢复时每 2 秒检查；连续未插入 USB 时退避到 15 秒；adb reverse 已在位时 10 秒。</summary>
     private const int CheckIntervalMilliseconds = 2_000;
     private const int HealthyIntervalMilliseconds = 10_000;
+    private const int NoDeviceBackoffMilliseconds = 15_000;
     private volatile bool lastCheckHealthy;
+    private volatile int consecutiveNoDeviceCount;
     private const string MutexName = @"Local\PhoneDeckUsbReconnect";
     private static readonly Regex ReverseEntryPattern = new(
         @"tcp:8765\s+tcp:8765", RegexOptions.Compiled);
@@ -105,9 +107,11 @@ internal sealed class UsbWatchdog : IDisposable
                 {
                     using var cancellationRegistration = token.Register(
                         static state => ((UsbWatchdog)state!).Wake(), this);
-                    if (wakeSignal.WaitOne(
-                            enabled && lastCheckHealthy
-                                ? HealthyIntervalMilliseconds : CheckIntervalMilliseconds))
+                    var sleepMs = !enabled ? CheckIntervalMilliseconds
+                        : lastCheckHealthy ? HealthyIntervalMilliseconds
+                        : consecutiveNoDeviceCount >= 2 ? NoDeviceBackoffMilliseconds
+                        : CheckIntervalMilliseconds;
+                    if (wakeSignal.WaitOne(sleepMs))
                     {
                         token.ThrowIfCancellationRequested();
                     }
@@ -153,8 +157,10 @@ internal sealed class UsbWatchdog : IDisposable
         // 没有设备时 reverse --list 直接失败（返回 null），不必再单独跑 get-state。
         if (RunAdb("reverse --list", token, out var listOutput, out _) is null)
         {
+            consecutiveNoDeviceCount = Math.Min(100, consecutiveNoDeviceCount + 1);
             return;
         }
+        consecutiveNoDeviceCount = 0;
         if (ReverseEntryPattern.IsMatch(listOutput))
         {
             // Keep the healthy path to one adb reverse query. Process launch

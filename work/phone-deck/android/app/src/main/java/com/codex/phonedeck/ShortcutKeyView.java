@@ -44,16 +44,23 @@ final class ShortcutKeyView extends FrameLayout {
         int accent = theme.shortcutAccent(config.color);
         boolean hasCustomColor = config.color != null && !config.color.isEmpty()
                 && !"slate".equals(config.color) && !"blue".equals(config.color);
-        baseSurface = command
-                ? theme.primaryContainer
-                : hasCustomColor
-                ? theme.mix(theme.surface, accent, theme.light ? 0.05f : 0.10f)
-                : theme.surface;
-        strokeColor = hasCustomColor
-                ? theme.mix(theme.outline, accent, theme.light ? 0.28f : 0.38f)
-                : theme.outline;
+        baseSurface = compact
+                ? (command
+                        ? theme.mix(theme.surface, theme.primaryContainer, 0.55f)
+                        : theme.surface)
+                : (command
+                        ? theme.primaryContainer
+                        : hasCustomColor
+                        ? theme.mix(theme.surface, accent, theme.light ? 0.05f : 0.10f)
+                        : theme.surface);
+        strokeColor = compact
+                ? Color.TRANSPARENT
+                : (hasCustomColor
+                        ? theme.mix(theme.outline, accent, theme.light ? 0.28f : 0.38f)
+                        : theme.outline);
         pressedSurface = theme.shortcutPressedColor(config.color);
-        setBackground(theme.pressable(context, baseSurface, pressedSurface, cornerRadius, 1, strokeColor));
+        setBackground(theme.pressable(context, baseSurface, pressedSurface, cornerRadius,
+                compact ? 0 : 1, strokeColor));
         setElevation(0);
 
         content = new LinearLayout(context);
@@ -62,8 +69,8 @@ final class ShortcutKeyView extends FrameLayout {
         addView(content, new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        TextView title = label(config.label, compact ? 14 : 15,
-                command ? theme.onPrimaryContainer : theme.text, Typeface.BOLD);
+        TextView title = label(config.label, compact ? 15 : 15,
+                command && !compact ? theme.onPrimaryContainer : theme.text, Typeface.BOLD);
         title.setGravity(compact ? Gravity.CENTER : Gravity.START);
         title.setMaxLines(compact ? 1 : 2);
         title.setEllipsize(TextUtils.TruncateAt.END);
@@ -73,25 +80,20 @@ final class ShortcutKeyView extends FrameLayout {
         String sub = compact
                 ? config.subtitle().replace(" + ", "+").replace("Backspace", "⌫")
                 : config.subtitle();
-        int pillText = hasCustomColor
-                ? theme.mix(theme.body, accent, theme.light ? 0.72f : 0.82f)
-                : (command ? theme.mix(theme.muted, theme.onPrimaryContainer, 0.20f) : theme.muted);
-        int pillFill = hasCustomColor
-                ? theme.mix(baseSurface, accent, theme.light ? 0.11f : 0.20f)
-                : theme.mix(baseSurface, theme.surfaceRaised, 0.55f);
-        TextView chord = label(sub, compact ? 10 : 11, pillText, Typeface.NORMAL);
+        int subColor = command
+                ? theme.primary
+                : (hasCustomColor && !compact
+                        ? theme.mix(theme.body, accent, theme.light ? 0.72f : 0.82f)
+                        : theme.muted);
+        TextView chord = label(sub, compact ? 11 : 11, subColor, Typeface.NORMAL);
         chord.setGravity(Gravity.CENTER);
         chord.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         chord.setMaxLines(1);
         chord.setEllipsize(TextUtils.TruncateAt.END);
-        if (compact) {
-            chord.setPadding(dp(7), dp(1), dp(7), dp(2));
-            chord.setBackground(theme.shape(context, pillFill, 6));
-        }
         LinearLayout.LayoutParams chordParams = new LinearLayout.LayoutParams(
                 compact ? LayoutParams.WRAP_CONTENT : LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT);
-        chordParams.topMargin = dp(compact ? 4 : 6);
+        chordParams.topMargin = dp(compact ? 3 : 6);
         content.addView(chord, chordParams);
 
         stateBadge = label("", 12, theme.onPrimary, Typeface.BOLD);
@@ -128,7 +130,7 @@ final class ShortcutKeyView extends FrameLayout {
             deleteBadge.setVisibility(View.GONE);
             deleteBadge.setOnClickListener(null);
             setBackground(theme.pressable(getContext(), baseSurface, pressedSurface,
-                    cornerRadius, 1, strokeColor));
+                    cornerRadius, strokeColor == Color.TRANSPARENT ? 0 : 1, strokeColor));
         }
     }
 

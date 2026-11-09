@@ -112,6 +112,10 @@ public final class PhoneAudioService extends Service {
         inProcessListener = listener;
     }
 
+    static boolean hasInProcessListener() {
+        return inProcessListener != null;
+    }
+
     private volatile Map<String, Integer> slotByComputer = java.util.Collections.emptyMap();
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -174,8 +178,12 @@ public final class PhoneAudioService extends Service {
         broadcaster = new SharedAudioBroadcaster(this, new SharedAudioBroadcaster.Listener() {
             @Override
             public void onLevel(String sessionId, int percent) {
+                if (inProcessListener == null || percent == lastLevel) {
+                    return;
+                }
                 handler.post(() -> {
-                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping) {
+                    if (!isCurrentAudioSession(sessionId) || !desiredRunning || stopping
+                            || percent == lastLevel) {
                         return;
                     }
                     lastLevel = percent;
@@ -442,6 +450,7 @@ public final class PhoneAudioService extends Service {
                 }
                 // 总数只表示显式共享组中的已配对电脑；未加入共享组的设备不应出现在
                 // “正在向 x/y 台电脑供音”的分母里。
+                final long probeStartedAt = android.os.SystemClock.elapsedRealtime();
                 Map<String, ConnectionMonitor.Outcome> outcomes =
                         ConnectionMonitor.get(this).probeAll(group, false);
                 if (ConnectionMonitor.isInvalidated(outcomes)) {
@@ -493,6 +502,14 @@ public final class PhoneAudioService extends Service {
                     goodAddresses.put(device.computerId, result.hostAddress);
                     SharedAudioReadiness readiness = sharedAudioReadiness(result.health);
                     if (readiness == SharedAudioReadiness.READY) {
+                        if (broadcaster != null && probeSessionId != null
+                                && isConnected(connectionSnapshot, device.computerId)
+                                && isReceiverAudioStalled(result.health, probeSessionId)
+                                && broadcaster.reconnectIfReceiverStalled(
+                                        device.computerId, probeSessionId, probeStartedAt,
+                                        "健康检查发现电脑端未收到语音，立即重连")) {
+                            allTargetsStreaming = false;
+                        }
                         SharedAudioBroadcaster.Target target = new SharedAudioBroadcaster.Target(
                                 device.computerId, device.displayName, result.endpoint,
                                 SharedAudioPolicies.wifiUploadRate(capabilityList(result.health)));
@@ -521,65 +538,92 @@ public final class PhoneAudioService extends Service {
                 }
 
                 // LAN is preferred. USB only fills the current directly connected computer.
-                try {
-                    JSONObject health = PhoneDeckHttp.getJson(
-                            PhoneDeckEndpoint.USB, "/api/health", 600, 800);
-                    String computerId = health.optString("computerId", "").trim();
-                    // USB is a transport fallback, never permission to expand the explicit group.
-                    TargetDeviceManager.Device usbDevice = deviceManager.find(computerId);
-                    if (usbDevice == null || !usbDevice.sharedGroup
-                            || !groupIds.contains(targetKey(computerId))) {
-                        removeUsbTargets(targets, nextRetained);
-                        computerId = "";
-                    } else {
-                        computerId = usbDevice.computerId;
+                // 共享组内所有电脑本轮都已通过 Wi-Fi 探测成功且此前无 USB 目标时，跳过本机 8765 探测。
+                boolean anyPreviousUsb = false;
+                for (SharedAudioBroadcaster.Target previous : previousTargets.values()) {
+                    if (isUsbTarget(previous)) {
+                        anyPreviousUsb = true;
+                        break;
                     }
-                    if (!computerId.isEmpty()) {
-                        reachable++;
-                        if (isSharedRequested(health)) {
-                            anyRequested = true;
+                }
+                if (!anyPreviousUsb) {
+                    for (RetainedTarget retained : previousRetained.values()) {
+                        if (retained != null && isUsbTarget(retained.target)) {
+                            anyPreviousUsb = true;
+                            break;
                         }
                     }
-                    if (!computerId.isEmpty()) {
-                        removeUsbTargets(targets, nextRetained);
-                        SharedAudioReadiness readiness = sharedAudioReadiness(health);
-                        if (readiness == SharedAudioReadiness.READY) {
-                            // LAN is preferred when its probe succeeded this round;
-                            // otherwise a verified USB health response may replace a
-                            // retained/stale LAN endpoint immediately.
-                            if (!freshLanTargets.contains(targetKey(computerId))) {
-                                SharedAudioBroadcaster.Target target =
-                                        new SharedAudioBroadcaster.Target(
-                                                computerId,
-                                                health.optString("displayName", "USB 电脑"),
-                                                PhoneDeckEndpoint.USB);
-                                targets.put(computerId, target);
-                                nextRetained.put(computerId,
-                                        new RetainedTarget(target, observedAt, 0));
-                                states.put(computerId, "连接中");
-                            }
-                        } else if (readiness == SharedAudioReadiness.UNKNOWN) {
-                            if (!freshLanTargets.contains(targetKey(computerId))) {
-                                retainUsbTargets(previousTargets, previousRetained, groupIds,
-                                        explicitRemovals, groupDevices, connectionSnapshot,
-                                        targets, nextRetained, states, observedAt);
-                            }
-                            states.putIfAbsent(computerId, "USB 连接检查暂不可用");
-                        } else if (!freshLanTargets.contains(targetKey(computerId))) {
-                            incompatible++;
-                            explicitRemovals.add(targetKey(computerId));
-                            removeTarget(targets, nextRetained, computerId);
-                            states.put(computerId, hasSharedCapability(health)
-                                    ? "配置错误" : "需要更新电脑端");
+                }
+                boolean shouldProbeUsb = anyPreviousUsb || freshLanTargets.size() < group.size();
+                if (shouldProbeUsb) {
+                    try {
+                        JSONObject health = PhoneDeckHttp.getJson(
+                                PhoneDeckEndpoint.USB, "/api/health", 600, 800);
+                        String computerId = health.optString("computerId", "").trim();
+                        // USB is a transport fallback, never permission to expand the explicit group.
+                        TargetDeviceManager.Device usbDevice = deviceManager.find(computerId);
+                        if (usbDevice == null || !usbDevice.sharedGroup
+                                || !groupIds.contains(targetKey(computerId))) {
+                            removeUsbTargets(targets, nextRetained);
+                            computerId = "";
+                        } else {
+                            computerId = usbDevice.computerId;
                         }
-                    }
-                } catch (Exception exception) {
-                    if (isExplicitPairingRejection(exception)) {
-                        removeUsbTargets(targets, nextRetained);
-                    } else {
-                        retainUsbTargets(previousTargets, previousRetained, groupIds,
-                                explicitRemovals, groupDevices, connectionSnapshot,
-                                targets, nextRetained, states, observedAt);
+                        if (!computerId.isEmpty()) {
+                            reachable++;
+                            if (isSharedRequested(health)) {
+                                anyRequested = true;
+                            }
+                        }
+                        if (!computerId.isEmpty()) {
+                            removeUsbTargets(targets, nextRetained);
+                            SharedAudioReadiness readiness = sharedAudioReadiness(health);
+                            if (readiness == SharedAudioReadiness.READY) {
+                                // LAN is preferred when its probe succeeded this round;
+                                // otherwise a verified USB health response may replace a
+                                // retained/stale LAN endpoint immediately.
+                                if (!freshLanTargets.contains(targetKey(computerId))) {
+                                    if (broadcaster != null && probeSessionId != null
+                                            && isConnected(connectionSnapshot, computerId)
+                                            && isReceiverAudioStalled(health, probeSessionId)
+                                            && broadcaster.reconnectIfReceiverStalled(
+                                                    computerId, probeSessionId, probeStartedAt,
+                                                    "USB 健康检查发现电脑端未收到语音，立即重连")) {
+                                        allTargetsStreaming = false;
+                                    }
+                                    SharedAudioBroadcaster.Target target =
+                                            new SharedAudioBroadcaster.Target(
+                                                    computerId,
+                                                    health.optString("displayName", "USB 电脑"),
+                                                    PhoneDeckEndpoint.USB);
+                                    targets.put(computerId, target);
+                                    nextRetained.put(computerId,
+                                            new RetainedTarget(target, observedAt, 0));
+                                    states.put(computerId, "连接中");
+                                }
+                            } else if (readiness == SharedAudioReadiness.UNKNOWN) {
+                                if (!freshLanTargets.contains(targetKey(computerId))) {
+                                    retainUsbTargets(previousTargets, previousRetained, groupIds,
+                                            explicitRemovals, groupDevices, connectionSnapshot,
+                                            targets, nextRetained, states, observedAt);
+                                }
+                                states.putIfAbsent(computerId, "USB 连接检查暂不可用");
+                            } else if (!freshLanTargets.contains(targetKey(computerId))) {
+                                incompatible++;
+                                explicitRemovals.add(targetKey(computerId));
+                                removeTarget(targets, nextRetained, computerId);
+                                states.put(computerId, hasSharedCapability(health)
+                                        ? "配置错误" : "需要更新电脑端");
+                            }
+                        }
+                    } catch (Exception exception) {
+                        if (isExplicitPairingRejection(exception)) {
+                            removeUsbTargets(targets, nextRetained);
+                        } else {
+                            retainUsbTargets(previousTargets, previousRetained, groupIds,
+                                    explicitRemovals, groupDevices, connectionSnapshot,
+                                    targets, nextRetained, states, observedAt);
+                        }
                     }
                 }
                 if (!WifiLinkPolicy.shouldApply(probeGeneration,
@@ -736,6 +780,35 @@ public final class PhoneAudioService extends Service {
                     && Boolean.TRUE.equals(entry.getValue())) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * Checks whether the receiver's {@code /api/health} audio snapshot proves
+     * that our active shared audio stream is missing or stalled on the PC side
+     * even though the local TCP send buffer has not yet filled up.
+     */
+    private static boolean isReceiverAudioStalled(JSONObject health, String expectedSessionId) {
+        if (health == null || expectedSessionId == null || expectedSessionId.isEmpty()) {
+            return false;
+        }
+        JSONObject audio = health.optJSONObject("audio");
+        if (audio == null) {
+            return false;
+        }
+        if (!audio.optBoolean("streaming", true)) {
+            return true;
+        }
+        String activeSession = audio.optString("sessionId", "").trim();
+        if (!activeSession.isEmpty() && !expectedSessionId.equals(activeSession)) {
+            return true;
+        }
+        if (!audio.isNull("hasReceivedPcm") && !audio.optBoolean("hasReceivedPcm", true)) {
+            return true;
+        }
+        if (!audio.isNull("lastPcmAgeMs") && audio.optLong("lastPcmAgeMs", 0L) >= 3_000L) {
+            return true;
         }
         return false;
     }

@@ -5,10 +5,12 @@ namespace PhoneDeck.MacReceiver;
 
 internal sealed class UsbWatchdog : IDisposable
 {
-    /// <summary>没连上或刚恢复时每 2 秒检查；adb reverse 已在位时放宽到 10 秒（每次只启动一个 adb 进程）。</summary>
+    /// <summary>没连上或刚恢复时每 2 秒检查；连续未插入 USB 时退避到 15 秒；adb reverse 已在位时 10 秒。</summary>
     private const int CheckIntervalMilliseconds = 2_000;
     private const int HealthyIntervalMilliseconds = 10_000;
+    private const int NoDeviceBackoffMilliseconds = 15_000;
     private bool lastCheckHealthy;
+    private int consecutiveNoDeviceCount;
     private static readonly Regex ReverseEntryPattern = new(
         @"tcp:8765\s+tcp:8765", RegexOptions.Compiled);
 
@@ -75,8 +77,11 @@ internal sealed class UsbWatchdog : IDisposable
             }
             try
             {
-                Task.Delay(enabled && lastCheckHealthy ? HealthyIntervalMilliseconds : CheckIntervalMilliseconds,
-                    token).Wait(token);
+                var sleepMs = !enabled ? CheckIntervalMilliseconds
+                    : lastCheckHealthy ? HealthyIntervalMilliseconds
+                    : consecutiveNoDeviceCount >= 2 ? NoDeviceBackoffMilliseconds
+                    : CheckIntervalMilliseconds;
+                Task.Delay(sleepMs, token).Wait(token);
             }
             catch (OperationCanceledException)
             {
@@ -92,8 +97,10 @@ internal sealed class UsbWatchdog : IDisposable
         var reverseList = RunAdb(["reverse", "--list"], out _);
         if (reverseList is null)
         {
+            consecutiveNoDeviceCount = Math.Min(100, consecutiveNoDeviceCount + 1);
             return;
         }
+        consecutiveNoDeviceCount = 0;
         if (ReverseEntryPattern.IsMatch(reverseList))
         {
             lastCheckHealthy = true;

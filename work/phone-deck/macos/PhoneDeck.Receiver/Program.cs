@@ -45,14 +45,13 @@ if (MacLaunch.ReceiverAlreadyRunning())
 }
 var receiverIdentity = ReceiverIdentity.LoadOrCreate();
 using var lanIdentity = LanIdentity.LoadOrCreate(receiverIdentity.ComputerId);
-var settings = MacReceiverSettings.LoadOrCreate();
+var settings = MacVoiceEngines.Catalog.ReceiverSettings;
 var keyboard = new MacKeyboardInput();
 using var audioBridge = new MacPhoneAudioBridge(
     new CoreAudioHalOutputFactory(settings.AudioDeviceUid),
     keepOutputWarm: Environment.GetEnvironmentVariable("PHONEDECK_WARM_AUDIO") != "0");
 // 常驻 BlackHole 输出放到后台预热，不阻塞 Kestrel 启动。
 // 常驻输出改为按需：手机请求到达时预热，手机空闲 90 秒后关闭（见 MacPhoneAudioBridge.WarmIdleMs）。
-using var engineController = new MacVoiceEngineController(keyboard);
 var inputProcessor = new InputCommandProcessor(keyboard);
 using var usbWatchdog = new UsbWatchdog(settings.AdbPath);
 using var lanDiscovery = new LanDiscoveryResponder(
@@ -179,7 +178,13 @@ app.Use(async (context, next) =>
 });
 MacDesktopConfigurationEndpoints.Map(app, receiverIdentity.ComputerId, configurationGate,
     () => audioBridge.IsStreaming,
-    () => settings, value => settings = value, usbWatchdog, lanDiscovery);
+    () => settings,
+    value =>
+    {
+        settings = value;
+        MacVoiceEngines.UpdateReceiverSettings(value);
+    },
+    usbWatchdog, lanDiscovery);
 
 NativePairingEndpoints.Map(app, new NativePairingHost(
     receiverIdentity.ComputerId,
@@ -198,11 +203,21 @@ NativePairingEndpoints.Map(app, new NativePairingHost(
 // 健康应答用 JsonObject 组装（原生编译不能序列化匿名对象），字段与旧版逐字一致。
 void NoteHealthActivity(HttpContext context)
 {
-    // 新版手机标明是否在前台；后台保活探测（"0"）不预热音频输出。旧版手机不带此头，按前台处理。
-    if (context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault() != "0")
+    var foreground = context.Request.Headers["X-PhoneDeck-Foreground"].FirstOrDefault();
+    if (foreground == "0")
     {
-        audioBridge.NotePhoneActivity();
+        return;
     }
+    // 8765 回环同样被本机状态网页轮询；只有带手机前台头或 Android UA 的请求才算手机活动，
+    // 避免本机状态页每 1.5 秒轮询阻止常驻虚拟声卡输出在空闲后休眠。
+    if (context.Connection.LocalPort == 8765
+        && foreground is null
+        && context.Request.Headers.UserAgent.FirstOrDefault()?.StartsWith(
+            "Dalvik/", StringComparison.OrdinalIgnoreCase) != true)
+    {
+        return;
+    }
+    audioBridge.NotePhoneActivity();
 }
 
 JsonObject BuildHealth(HttpContext context)
@@ -243,6 +258,8 @@ JsonObject BuildHealth(HttpContext context)
             // 多手机：会话 ID 只告诉所属手机；其他手机只看到“正在使用”。
             ["sessionId"] = audioBridge.IsStreamOwnedBy(requesterClientId) ? audioBridge.ActiveSessionId : null,
             ["mode"] = audioBridge.ActiveMode?.ToWireValue(),
+            ["hasReceivedPcm"] = audioBridge.HasReceivedPcm(requesterClientId),
+            ["lastPcmAgeMs"] = audioBridge.LastPcmAgeMs(requesterClientId),
             ["lastError"] = audio.Error
         },
         // 已删除受管听写；字段保留给旧版手机与契约，恒为未听写。
@@ -389,7 +406,7 @@ app.MapGet("/api/diagnostics", () =>
             ["id"] = engineProfile.Id,
             ["displayName"] = engineProfile.DisplayName,
             ["experimental"] = engineProfile.Experimental,
-            ["capturing"] = engineController.IsCapturing(),
+            ["capturing"] = MacVoiceEngineStateProbe.IsCapturing(engineProfile),
             ["microphone"] = MacVoiceEngines.MicrophoneDescription,
             ["settingsPath"] = readerConfig.SettingsPath,
             ["usesBlackHole"] = MacVoiceEngines.UsesVirtualCable,
@@ -493,7 +510,7 @@ app.MapPost("/api/input", async (InputCommand command, HttpContext context) =>
     {
         if (audioBridge.IsStreaming
             && string.Equals(command.Action, "typeless", StringComparison.Ordinal)
-            && engineController.IsCapturing() == true)
+            && MacVoiceEngineStateProbe.IsCapturing(MacVoiceEngines.Active) == true)
         {
             // 共享麦克风下通过手机快捷键结束听写：等待手机尾音经缓冲与虚拟声卡送达输入法后再发停止键。
             await Task.Delay(260, context.RequestAborted);

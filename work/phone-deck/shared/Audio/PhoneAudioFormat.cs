@@ -161,16 +161,16 @@ internal sealed class Pcm16kTo48kStream : Stream
         history[historyPosition] = sample;
         history[historyPosition + PhaseLength] = sample;
         historyPosition = (historyPosition + 1) % PhaseLength;
-        // history[historyPosition .. +PhaseLength) 为最旧 → 最新。
-        var window = history.AsSpan(historyPosition, PhaseLength);
+        // history[historyPosition .. +PhaseLength) 为最旧 → 最新；
+        // Phases[phase] 已按反向存放，故两者同向顺序点积。
+        ReadOnlySpan<float> window = history.AsSpan(historyPosition, PhaseLength);
         for (var phase = 0; phase < Factor; phase++)
         {
-            var coefficients = Phases[phase];
+            ReadOnlySpan<float> coefficients = Phases[phase];
             float sum = 0;
-            for (var j = 0; j < PhaseLength; j++)
+            for (var j = 0; j < window.Length; j++)
             {
-                // coefficients[j] 作用于 x[m - j]，window 末尾是 x[m]。
-                sum += coefficients[j] * window[PhaseLength - 1 - j];
+                sum += coefficients[j] * window[j];
             }
             var value = (int)MathF.Round(sum);
             value = Math.Clamp(value, short.MinValue, short.MaxValue);
@@ -180,7 +180,7 @@ internal sealed class Pcm16kTo48kStream : Stream
         return Factor * 2;
     }
 
-    /// <summary>原型低通 h[k]，拆成 3 个相位 h[p + 3j]，每相位归一化为直流增益 1。</summary>
+    /// <summary>原型低通 h[k]，拆成 3 个相位 h[p + 3j]，每相位归一化为直流增益 1，并按时间反向存放便于顺序点积。</summary>
     private static float[][] DesignPhases()
     {
         var prototype = KaiserLowPass(Taps, 8_000.0 / PhoneAudioFormat.BaselineRate, 7.0);
@@ -195,7 +195,7 @@ internal sealed class Pcm16kTo48kStream : Stream
             }
             for (var j = 0; j < PhaseLength; j++)
             {
-                coefficients[j] = (float)(prototype[phase + Factor * j] / sum);
+                coefficients[PhaseLength - 1 - j] = (float)(prototype[phase + Factor * j] / sum);
             }
             phases[phase] = coefficients;
         }

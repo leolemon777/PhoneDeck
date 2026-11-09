@@ -19,7 +19,7 @@ final class Pcm16kDownsampler {
     /** 输入 48 kHz 小端 PCM16 的前 count 字节（偶数），返回 16 kHz 小端 PCM16。 */
     byte[] process(byte[] pcm48, int count) {
         int samples = count / 2;
-        byte[] output = new byte[((samples + phase) / FACTOR + 1) * 2];
+        byte[] output = new byte[((samples + phase) / FACTOR) * 2];
         int written = 0;
         for (int index = 0; index + 1 < count; index += 2) {
             float sample = (short) ((pcm48[index] & 0xff) | (pcm48[index + 1] << 8));

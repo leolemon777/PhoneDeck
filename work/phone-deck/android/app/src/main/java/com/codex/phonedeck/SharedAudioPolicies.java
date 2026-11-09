@@ -88,18 +88,19 @@ final class SharedAudioPolicies {
 
     /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
     static final double SILENCE_RMS = 130;
+    private static final long SILENCE_SQUARE_THRESHOLD = (long) (SILENCE_RMS * SILENCE_RMS);
 
     static boolean isSilent(byte[] pcm) {
         int samples = pcm.length / 2;
         if (samples == 0) {
             return true;
         }
-        double sum = 0;
+        long sum = 0;
         for (int index = 0; index + 1 < pcm.length; index += 2) {
-            short sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
-            sum += (double) sample * sample;
+            long sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
+            sum += sample * sample;
         }
-        return Math.sqrt(sum / samples) < SILENCE_RMS;
+        return sum < SILENCE_SQUARE_THRESHOLD * samples;
     }
 
     /// 网络短暂卡顿时的有界队列：满了优先丢最旧的静音帧，没有静音才丢最旧帧，

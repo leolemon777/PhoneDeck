@@ -23,6 +23,7 @@ internal static class PcmLatency
     /// （作者 Mac 日志），轻声字被当静音跳过；已恢复原值。
     /// </summary>
     internal const double SilenceRms = 130;
+    private const long SilenceSquareThreshold = (long)(SilenceRms * SilenceRms);
 
     /// <summary>pre-roll 裁剪后在首个语音块前保留的静音。</summary>
     internal const int LeadInMs = 150;
@@ -52,13 +53,13 @@ internal static class PcmLatency
         {
             return true;
         }
-        double sum = 0;
+        long sum = 0;
         for (var index = 0; index + 1 < pcm.Length; index += 2)
         {
-            double sample = (short)(pcm[index] | (pcm[index + 1] << 8));
+            long sample = (short)(pcm[index] | (pcm[index + 1] << 8));
             sum += sample * sample;
         }
-        return Math.Sqrt(sum / samples) < SilenceRms;
+        return sum < SilenceSquareThreshold * samples;
     }
 
     /// <summary>

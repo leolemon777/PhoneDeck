@@ -245,6 +245,7 @@ internal sealed class MacPhoneAudioBridge : IDisposable
         }
 
         var buffer = new byte[16 * 1024];
+        var carry = 0;
         var drained = true;
         var stalled = false;
         using var stall = CancellationTokenSource.CreateLinkedTokenSource(session.Cancellation.Token);
@@ -254,19 +255,31 @@ internal sealed class MacPhoneAudioBridge : IDisposable
             {
                 // 每次读取重新计时：只有持续 stallTimeoutMs 收不到任何字节才判定断流。
                 stall.CancelAfter(stallTimeoutMs);
-                var count = await source.ReadAsync(buffer.AsMemory(), stall.Token);
+                var count = await source.ReadAsync(
+                    buffer.AsMemory(carry, buffer.Length - carry), stall.Token);
                 if (count == 0)
                 {
                     break;
                 }
-                lock (syncRoot)
+                var available = carry + count;
+                var completeBytes = available & ~1;
+                if (completeBytes > 0)
                 {
-                    if (!ReferenceEquals(active, session))
+                    lock (syncRoot)
                     {
-                        break;
+                        if (!ReferenceEquals(active, session))
+                        {
+                            break;
+                        }
+                        var aligned = buffer.AsSpan(0, completeBytes);
+                        session.CountReceived(aligned);
+                        session.WriteLive(aligned);
                     }
-                    session.CountReceived(buffer.AsSpan(0, count));
-                    session.WriteLive(buffer.AsSpan(0, count));
+                }
+                carry = available - completeBytes;
+                if (carry == 1)
+                {
+                    buffer[0] = buffer[completeBytes];
                 }
             }
         }
@@ -286,8 +299,8 @@ internal sealed class MacPhoneAudioBridge : IDisposable
             {
                 // Cancellation stops intake immediately, not playback of PCM that
                 // was already delivered.
-                // 被同会话新连接接管时由新连接继续供音，旧连接直接让出。
-                if (!session.Superseded)
+                // 被同会话新连接接管或断流超时时不再排空尾音，旧连接直接让出。
+                if (!session.Superseded && !stalled)
                     drained = await session.Output.DrainAsync(DrainMaxMs, OutputTailMs)
                         .WaitAsync(TimeSpan.FromMilliseconds(DrainMaxMs + OutputTailMs + 500));
             }
@@ -436,9 +449,36 @@ internal sealed class MacPhoneAudioBridge : IDisposable
     {
         lock (syncRoot)
         {
-            return active is not null && string.Equals(
-                PhoneStopReceipts.NormalizeOwner(active.OwnerId),
-                PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
+            return IsStreamOwnedByLocked(clientId);
+        }
+    }
+
+    private bool IsStreamOwnedByLocked(string? clientId) =>
+        active is not null && string.Equals(
+            PhoneStopReceipts.NormalizeOwner(active.OwnerId),
+            PhoneStopReceipts.NormalizeOwner(clientId), StringComparison.Ordinal);
+
+    internal bool? HasReceivedPcm(string? requesterClientId)
+    {
+        lock (syncRoot)
+        {
+            if (active is null || !IsStreamOwnedByLocked(requesterClientId))
+            {
+                return null;
+            }
+            return active.HasReceivedPcm;
+        }
+    }
+
+    internal long? LastPcmAgeMs(string? requesterClientId)
+    {
+        lock (syncRoot)
+        {
+            if (active is null || !IsStreamOwnedByLocked(requesterClientId) || active.LastPcmTick < 0)
+            {
+                return null;
+            }
+            return Math.Max(0, Environment.TickCount64 - active.LastPcmTick);
         }
     }
 
@@ -446,9 +486,17 @@ internal sealed class MacPhoneAudioBridge : IDisposable
     {
         var current = active;
         if (current is null || mode != AudioStreamMode.Shared
-            || current.Mode != AudioStreamMode.Shared
-            || !string.Equals(current.SessionId, sessionId, StringComparison.Ordinal)
-            || !string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal))
+            || current.Mode != AudioStreamMode.Shared)
+        {
+            return false;
+        }
+        var sameSession = string.Equals(current.SessionId, sessionId, StringComparison.Ordinal)
+            && (string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal)
+                || current.OwnerId is null
+                || ownerId is null);
+        var sameAuthenticatedPhone = !string.IsNullOrEmpty(ownerId)
+            && string.Equals(current.OwnerId, ownerId, StringComparison.Ordinal);
+        if (!sameSession && !sameAuthenticatedPhone)
         {
             return false;
         }
@@ -471,11 +519,14 @@ internal sealed class MacPhoneAudioBridge : IDisposable
         private long receivedBytes;
         private long digitalSilenceBytes;
         private int maxBufferedBytes;
+        internal long LastPcmTick { get; private set; } = -1;
+        internal bool HasReceivedPcm => receivedBytes > 0;
 
         /// <summary>统计收到的单声道 PCM16：总量与整块全零（Android 静默采集）的部分；调用方持有桥接锁。</summary>
         internal void CountReceived(ReadOnlySpan<byte> mono)
         {
             receivedBytes += mono.Length;
+            LastPcmTick = Environment.TickCount64;
             for (var offset = 0; offset + PcmLatency.BlockBytes <= mono.Length; offset += PcmLatency.BlockBytes)
             {
                 if (!mono.Slice(offset, PcmLatency.BlockBytes).ContainsAnyExcept((byte)0))
@@ -517,7 +568,7 @@ internal sealed class MacPhoneAudioBridge : IDisposable
                 filtered = new byte[mono.Length];
             }
             var count = CatchUp.Filter(mono, filtered, Output.BufferedBytes / 2);
-            var stereo = converter.Convert(filtered.AsSpan(0, count));
+            var stereo = converter.ConvertSpan(filtered.AsSpan(0, count));
             if (stereo.Length > 0)
             {
                 Output.Write(stereo);

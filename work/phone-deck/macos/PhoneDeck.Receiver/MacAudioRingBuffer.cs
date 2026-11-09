@@ -121,29 +121,38 @@ internal sealed class MacAudioRingBuffer
 internal sealed class Pcm16MonoToStereoConverter
 {
     private byte? pendingLowByte;
+    private byte[] stereoBuffer = Array.Empty<byte>();
 
-    internal byte[] Convert(ReadOnlySpan<byte> mono)
+    internal byte[] Convert(ReadOnlySpan<byte> mono) =>
+        ConvertSpan(mono).ToArray();
+
+    /// <summary>复用内部缓冲把单声道 PCM16 转为双声道切片，实时热路径零堆分配。</summary>
+    internal ReadOnlySpan<byte> ConvertSpan(ReadOnlySpan<byte> mono)
     {
         var sampleCount = (mono.Length + (pendingLowByte.HasValue ? 1 : 0)) / 2;
-        var stereo = new byte[sampleCount * 4];
+        var requiredBytes = sampleCount * 4;
+        if (stereoBuffer.Length < requiredBytes)
+        {
+            stereoBuffer = new byte[requiredBytes];
+        }
         var input = 0;
         var output = 0;
         if (pendingLowByte.HasValue && mono.Length > 0)
         {
-            WriteSample(stereo, ref output, pendingLowByte.Value, mono[0]);
+            WriteSample(stereoBuffer, ref output, pendingLowByte.Value, mono[0]);
             pendingLowByte = null;
             input = 1;
         }
         while (input + 1 < mono.Length)
         {
-            WriteSample(stereo, ref output, mono[input], mono[input + 1]);
+            WriteSample(stereoBuffer, ref output, mono[input], mono[input + 1]);
             input += 2;
         }
         if (input < mono.Length)
         {
             pendingLowByte = mono[input];
         }
-        return output == stereo.Length ? stereo : stereo[..output];
+        return stereoBuffer.AsSpan(0, output);
     }
 
     private static void WriteSample(byte[] target, ref int offset, byte low, byte high)

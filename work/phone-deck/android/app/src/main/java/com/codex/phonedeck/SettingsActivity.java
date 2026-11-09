@@ -576,28 +576,6 @@ public final class SettingsActivity extends Activity {
         return button;
     }
 
-    private LinearLayout option(String title, String detail, boolean tap) {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(18), dp(16), dp(16), dp(16));
-
-        LinearLayout copy = new LinearLayout(this);
-        copy.setOrientation(LinearLayout.VERTICAL);
-        row.addView(copy, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        copy.addView(text(title, 16, theme.text, Typeface.BOLD));
-        TextView detailText = text(detail, 13, theme.body, Typeface.NORMAL);
-        detailText.setLineSpacing(0, 1.15f);
-        copy.addView(detailText, topMargin(dp(4)));
-
-        TextView check = text(tap ? "✓" : "○", 20, theme.primary, Typeface.BOLD);
-        check.setGravity(Gravity.CENTER);
-        row.addView(check, new LinearLayout.LayoutParams(dp(36), dp(36)));
-        installPressFeedback(row);
-        return row;
-    }
-
     private TextView text(String value, int size, int color, int style) {
         TextView view = new TextView(this);
         view.setText(value);
