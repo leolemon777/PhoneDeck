@@ -1,5 +1,12 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-09：Mac 接收端名称与图标
+- 本轮仅处理当前个人共享麦克风版本的 macOS 显示身份：显示名改为「言渡接收端」，图标由 Android 的 `yandu-app-icon-1024.png` 生成 `.icns`；Bundle ID 和可执行文件名保持兼容。
+- 本机安装包保留 `86af070` 的现有可执行程序，更新 plist 和图标并重新 ad-hoc 签名；启动服务正常，健康接口报告 BlackHole 可用且共享流正在运行。电脑身份、客户端凭据、两份证书及 server-settings 修改前后 SHA-256 一致，USB watchdog 仍关闭。原包备份位于用户数据目录 backups 的 `PhoneDeck-Receiver-20261108-235750-pre-yandu.zip`。
+- 构建脚本用已有可执行程序模拟 publish 验证了图标生成、资源打包和签名；plist、zsh 语法与签名检查通过。当前环境缺少 .NET SDK，未重新编译或运行单元测试；安装包中的权限错误提示仍是旧文案，下次正常构建才会更新。
+- 11 月 9 日补充：系统设置此前缓存了失效条目且文件选择器误指向隐藏旧备份；旧条目移除、备份移出应用目录并刷新 Launch Services 后，本机应用改名为 `~/Applications/言渡接收端.app`，launchd 路径同步更新。重新添加后系统设置已实际显示言渡名称与话筒图标，开关为开；重启后 health 的 `accessibilityTrusted` 与 `input.available` 均为 true。真实输入仍待验证。构建脚本产物名仍为 `PhoneDeck Receiver.app`，手动安装到这台 Mac 更新时应继续使用现有言渡路径，避免产生第二份安装或破坏启动项。
+- 待办：Typeless 当前报告使用系统默认麦克风、未确认选中 BlackHole，需实机检查。不要将共享流状态视为识别成功。
+
 ## 2026-11-08 手机端精简优化 + 全览仪表盘 UI/UX 重构已装机，电脑端构建通过
 
 - **手机端全览仪表盘与极简 UI/UX 重构（已在真实设备 `SM-G9880` 验证并 `adb install -r` 覆盖安装）**：
