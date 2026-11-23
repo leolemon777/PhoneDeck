@@ -23,11 +23,11 @@
 
 言渡**不做语音识别**，只负责把手机的声音送进电脑，并替你按下语音输入软件的快捷键。识别由你电脑上已经在用的语音输入软件完成。
 
-- **三种说话方式**：点击（点一下开始，再点结束）、按住（按下说话，松开结束）、共享（麦克风常开，各台电脑用自己的快捷键）。
+- **共享麦克风**：手机麦克风常开，同时供给共享组里的各台电脑；每台电脑用自己的 Typeless 快捷键开始和停止。
 - **三种电脑模式**：听写、翻译、问答，跟随所选语音软件的能力。
 - **多台电脑**：同一 Wi-Fi 的电脑会自动出现在手机首页，点一下、核对四位校验码、在电脑上点「允许」即可连接，不用扫码。
 - **快捷键面板**：复制、粘贴、截图、F1 等，以及 `/plan`、`/goal`、`/compact` 这类给 AI 编程工具的文本指令，都可以在手机上自定义。
-- **八套配色**：墨白、暖纸、松绿、淡紫、陶土、雾蓝、墨白深色、极夜。
+- **四套配色**：苹果浅色 · 通透灰、苹果浅色 · 纯白、苹果深色 · 纯黑、苹果深色 · 深空灰；旧彩色主题自动迁移到浅色。
 
 ## 你需要准备
 
@@ -35,7 +35,7 @@
 |---|---|
 | 手机 | Android 8.0 及以上 |
 | 电脑 | Windows 10/11 x64，或 macOS 14.2 及以上（Apple Silicon；Intel 可自行构建） |
-| 语音输入软件 | 默认 [Typeless](https://www.typeless.com/)（付费）；也内置了豆包输入法、微信输入法的适配，其他软件可写 JSON 档案接入，见[语音引擎指南](docs/guides/VOICE_ENGINES.md) |
+| 语音输入软件 | 只支持 [Typeless](https://www.typeless.com/)（付费）；快捷键与麦克风从 Typeless 设置自动读取 |
 | 虚拟声卡（免费） | Windows：[VB-CABLE](https://vb-audio.com/Cable/)；Mac：[BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) |
 | 网络 | 手机和电脑在同一个 Wi-Fi；或者用 USB 线 |
 
@@ -61,7 +61,7 @@
 
 1. 安装 APK，打开「言渡」。
 2. 同一 Wi-Fi 下，首页会出现「附近 · 点按连接」的电脑卡片。点它，确认手机和电脑显示的四位校验码一致，在电脑上点「允许」。
-3. 连上后按下方的「按住 说话」说话，松开结束；也可以切到「点击」模式，点一下开始、再点一下结束。
+3. 连上后点下方的「开启共享麦克风」，然后在要输入的电脑上按 Typeless 快捷键说话。
 
 手机和电脑不在同一网段（比如隔了一层路由器）时，在「添加电脑 → 输入地址」里填电脑的局域网 IP。也可以用 USB 线连接：手机打开 USB 调试，电脑上需要有 [Android platform-tools](https://developer.android.com/tools/releases/platform-tools)（`adb`），接收端会自动建立并维持 `adb reverse` 通道。
 
@@ -75,7 +75,6 @@
 | Windows | 新版墨白托盘、「附近连接」允许流程、听写与快捷键（两台电脑） | 高 DPI 缩放、开机启动 |
 | macOS | 原生精简接收端：辅助功能授权后的听写、状态页、USB 与 Wi-Fi、「附近连接」允许流程 | 翻译 / 问答逐项实测、Intel |
 | 多台电脑 | 一台手机连 Mac + 两台 Windows，同一 Wi-Fi 自动发现，左右滑动切换 | 共享麦克风同时向多台电脑供音 |
-| iPhone | — | 原生客户端尚未开发；有一个实验性网页版，见 [iPhone 网页](docs/guides/IPHONE_PWA.md) |
 
 ## 隐私
 
@@ -126,15 +125,12 @@ PhoneDeck/
 │  ├─ windows/PhoneDeck.Server     # Windows 接收端
 │  ├─ windows/PhoneDeck.ControlCenter  # Windows 托盘
 │  ├─ macos/PhoneDeck.Receiver     # macOS 接收端
-│  ├─ shared/                      # 两端共用的接收端代码与状态页
-│  └─ desktop/                     # 实验路线：本地 Whisper 识别的 2.0 桌面版
+│  └─ shared/                      # 两端共用的接收端代码与状态页
 ├─ contracts/                      # 协议契约与校验脚本
-├─ scripts/                        # 构建、打包、发布与 Windows 辅助脚本
+├─ scripts/                        # 构建、版本同步与 Windows 辅助脚本
 ├─ docs/                           # 文档，目录见 docs/README.md
 └─ spec plan.markdown              # 产品规格与决策记录
 ```
-
-除了主线（原生 App + 接收端），仓库里还有两条实验路线：手机网页版（[说明](docs/guides/TYPELESS_PWA.md)）和自带本地 Whisper 识别、不需要语音软件的 2.0 桌面版（[说明](docs/guides/DESKTOP_QUICK_START.md)）。它们没有主线成熟，欢迎试用和改进。
 
 ## 安全边界
 
@@ -150,7 +146,7 @@ PhoneDeck/
 
 ## 许可证
 
-[MIT License](LICENSE)。语音引擎档案中的快捷键与进程名来自公开资料，Typeless、豆包、微信输入法、VB-CABLE、BlackHole 等商标和软件归各自所有者。
+[MIT License](LICENSE)。Typeless、VB-CABLE、BlackHole 等商标和软件归各自所有者。
 
 ## 社区
 

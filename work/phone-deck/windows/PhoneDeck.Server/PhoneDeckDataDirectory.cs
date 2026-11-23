@@ -5,6 +5,14 @@ internal static class PhoneDeckDataDirectory
     internal static string Get()
     {
         var configured = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            var adjacent = Path.Combine(AppContext.BaseDirectory, "data");
+            if (Directory.Exists(adjacent))
+            {
+                return Path.GetFullPath(adjacent);
+            }
+        }
         return Resolve(
             configured,
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));

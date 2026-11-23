@@ -5,9 +5,9 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 final class PhoneDeckLanClient {
@@ -25,20 +25,27 @@ final class PhoneDeckLanClient {
 
     static final class ProbeOutcome {
         final ProbeResult result;
-        /// 至少一个候选地址回了 401/403 或证书校验失败：网络是通的，
-        /// 但本地保存的配对令牌/证书指纹已失效，插一次 USB 可自动修复。
+        /// 候选地址明确返回 401/403；证书或电脑身份不匹配可能只是旧 IP
+        /// 被重新分配，不把它们推断成用户配对被撤销。
         final boolean pairingRejected;
+        /// Local executor contention is unknown, not a receiver failure.
+        final boolean skipped;
 
         ProbeOutcome(ProbeResult result, boolean pairingRejected) {
+            this(result, pairingRejected, false);
+        }
+
+        ProbeOutcome(ProbeResult result, boolean pairingRejected, boolean skipped) {
             this.result = result;
             this.pairingRejected = pairingRejected;
+            this.skipped = skipped;
         }
     }
 
     /// 并行探测的连接/读取超时：短超时让死地址快速失败，
-    /// 不再像串行探测那样每个地址最多拖 2.2 秒。
-    private static final int PROBE_CONNECT_TIMEOUT_MS = 600;
-    private static final int PROBE_READ_TIMEOUT_MS = 900;
+    /// 同时兼容随身 Wi-Fi / 热点在节电唤醒时的抖动。
+    private static final int PROBE_CONNECT_TIMEOUT_MS = 800;
+    private static final int PROBE_READ_TIMEOUT_MS = 1000;
 
     /// 共享地址探测池（守护线程）：直接移交、不排队。固定小线程池在多台电脑同时探测时
     /// 会让后一台的地址任务排在前一台未结束的任务之后，等不到截止时间被误判离线。
@@ -49,7 +56,7 @@ final class PhoneDeckLanClient {
                 Thread thread = new Thread(runnable, "PhoneDeck-LanProbe");
                 thread.setDaemon(true);
                 return thread;
-            }, new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     private PhoneDeckLanClient() {
     }
@@ -96,8 +103,8 @@ final class PhoneDeckLanClient {
         return paired;
     }
 
-    /// 并行探测全部候选地址，任一地址返回匹配的 computerId 即在线。
-    /// 顺序仅用于平局时优先选择（last-good → 与手机同子网 → 其余）。
+    /// 探测候选地址，任一地址返回匹配的 computerId 即在线。有上次可用地址时先只探测它，
+    /// 失败或 0.6 秒无应答再并行探测其余地址；否则全部并行（last-good → 与手机同子网 → 其余）。
     /// 同时收集“地址可达但配对被拒”信号，供上层提示重新配对。
     static ProbeOutcome probe(TargetDeviceManager.Device device, ExecutorService pool) {
         if (device == null || !device.hasLanPairing()) {
@@ -107,27 +114,103 @@ final class PhoneDeckLanClient {
         if (candidates.isEmpty()) {
             return new ProbeOutcome(null, false);
         }
-        BlockingQueue<ProbeResult> results = new ArrayBlockingQueue<>(candidates.size());
+        ExecutorCompletionService<ProbeResult> completed = new ExecutorCompletionService<>(pool);
+        List<Future<ProbeResult>> attempts = new ArrayList<>(candidates.size());
         java.util.concurrent.atomic.AtomicBoolean rejected =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
-        for (String address : candidates) {
-            pool.execute(() -> {
-                ProbeResult result = probeAddress(device, address, rejected);
-                if (result != null) {
-                    results.offer(result);
-                }
-            });
-        }
         long deadline = android.os.SystemClock.elapsedRealtime()
                 + PROBE_CONNECT_TIMEOUT_MS + PROBE_READ_TIMEOUT_MS + 400;
+        boolean admissionSkipped = false;
+        boolean lastGoodFirst = shouldProbeLastGoodFirst(device.lastGoodAddress, candidates);
+        long fanOutAt = android.os.SystemClock.elapsedRealtime() + LAST_GOOD_HEAD_START_MS;
         try {
-            ProbeResult first = results.poll(
-                    Math.max(1, deadline - android.os.SystemClock.elapsedRealtime()),
-                    TimeUnit.MILLISECONDS);
-            return new ProbeOutcome(first, rejected.get());
+            List<String> firstWave = lastGoodFirst ? candidates.subList(0, 1) : candidates;
+            for (String address : firstWave) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return new ProbeOutcome(null, rejected.get());
+                }
+                admissionSkipped |= !submitProbe(completed, attempts, device, address, rejected);
+            }
+            boolean fannedOut = !lastGoodFirst;
+            int outstanding = attempts.size();
+            while (true) {
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (!fannedOut && (outstanding == 0 || now >= fanOutAt)) {
+                    // 上次可用地址失败或 0.6 秒没应答，才去试其余旧地址。
+                    fannedOut = true;
+                    int before = attempts.size();
+                    for (String address : candidates.subList(1, candidates.size())) {
+                        admissionSkipped |= !submitProbe(completed, attempts, device, address, rejected);
+                    }
+                    outstanding += attempts.size() - before;
+                }
+                if (outstanding == 0) {
+                    break;
+                }
+                long waitUntil = fannedOut ? deadline : Math.min(deadline, fanOutAt);
+                long remainingMs = waitUntil - now;
+                if (remainingMs <= 0) {
+                    if (fannedOut) {
+                        break;
+                    }
+                    continue;
+                }
+                Future<ProbeResult> finished = completed.poll(remainingMs, TimeUnit.MILLISECONDS);
+                if (finished == null) {
+                    if (fannedOut) {
+                        break;
+                    }
+                    continue;
+                }
+                outstanding--;
+                try {
+                    ProbeResult result = finished.get();
+                    if (result != null) {
+                        return new ProbeOutcome(result, rejected.get());
+                    }
+                } catch (java.util.concurrent.ExecutionException
+                         | java.util.concurrent.CancellationException ignored) {
+                    // Failure of one address cannot hide another valid path.
+                }
+            }
+            // Refused/auth-failed addresses no longer consume the entire
+            // timeout when all candidates have already completed.
+            // If a valid address never got an execution slot, a stale address
+            // rejecting its token cannot prove the whole pairing is invalid.
+            return new ProbeOutcome(null, !admissionSkipped && rejected.get(), admissionSkipped);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return new ProbeOutcome(null, rejected.get());
+        } finally {
+            for (Future<ProbeResult> attempt : attempts) {
+                if (!attempt.isDone()) {
+                    attempt.cancel(true);
+                }
+            }
+        }
+    }
+
+    /// 先只探测上次可用地址的时长；正常情况下它几十毫秒内应答（复用 keep-alive），
+    /// 其余历史地址就不必每 2 秒各发一次连接——同网段的失效地址每次都会让手机发 ARP 广播。
+    static final long LAST_GOOD_HEAD_START_MS = 600;
+
+    /// 纯函数供单测：有多个候选且第一个就是上次可用地址时，先单独探测它。
+    static boolean shouldProbeLastGoodFirst(String lastGood, List<String> orderedCandidates) {
+        return lastGood != null && orderedCandidates != null && orderedCandidates.size() > 1
+                && lastGood.equals(orderedCandidates.get(0));
+    }
+
+    /// 提交一个地址探测；线程池满时返回 false（不能把套接字 I/O 挪到调用线程上）。
+    private static boolean submitProbe(ExecutorCompletionService<ProbeResult> completed,
+                                       List<Future<ProbeResult>> attempts,
+                                       TargetDeviceManager.Device device,
+                                       String address,
+                                       java.util.concurrent.atomic.AtomicBoolean rejected) {
+        try {
+            attempts.add(completed.submit(() -> probeAddress(device, address, rejected)));
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            return false;
         }
     }
 

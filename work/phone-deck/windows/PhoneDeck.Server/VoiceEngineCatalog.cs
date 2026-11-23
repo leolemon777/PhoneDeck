@@ -1,12 +1,9 @@
-/// <summary>内置与用户扩展的语音引擎档案集合，以及当前激活引擎的选择。
-/// 启动时加载一次；修改 voice-engines 目录或 voice-engine-settings.json 后需重启。</summary>
+/// <summary>语音引擎档案。只为作者自用、只支持 Typeless（2026-11-05 决策）：
+/// 快捷键与麦克风从 Typeless 自己的配置读取，shortcutOverrides 仍可手动覆盖。</summary>
 internal sealed class VoiceEngineCatalog
 {
     internal const string DefaultEngineId = "typeless";
 
-    // 内置档案。Typeless 是唯一经过真机验证的引擎；豆包/微信输入法的
-    // 快捷键与进程名来自公开资料，未经实装核实，均标记 experimental，
-    // 用户可用 data\voice-engines\*.json 按 id 覆盖修正。
     private const string TypelessProfileJson = """
         {
           // Typeless（typeless.com）：快捷键与麦克风从其配置文件自动读取。
@@ -22,43 +19,10 @@ internal sealed class VoiceEngineCatalog
         }
         """;
 
-    private const string DoubaoProfileJson = """
-        {
-          // 豆包客户端全局语音输入（Ctrl+D 唤醒）。豆包 Windows 版仍在内测，
-          // 新版本可能移除或修改该快捷键；失效时请用 voice-engine-settings.json
-          // 覆盖，或在本档案同目录放置修正后的 doubao.json。
-          "id": "doubao",
-          "displayName": "豆包",
-          "experimental": true,
-          "processNames": ["Doubao"],
-          "modes": [
-            { "id": "dictation", "label": "语音输入", "keys": "Ctrl+D", "trigger": "toggle" }
-          ]
-        }
-        """;
-
-    private const string WetypeProfileJson = """
-        {
-          // 微信输入法（WeType）Windows 2.1.3+ 支持语音输入，默认 Fn 键无法
-          // 程序注入，且其自定义快捷键必须以 Ctrl/Alt/Shift 开头。请先在微信
-          // 输入法设置中把语音快捷键改为如 Ctrl+Shift+V，再填入
-          // voice-engine-settings.json 的 shortcutOverrides。
-          "id": "wetype",
-          "displayName": "微信输入法",
-          "experimental": true,
-          "processNames": ["WeType", "微信输入法"],
-          "modes": [
-            { "id": "dictation", "label": "语音输入", "keys": null, "trigger": "hold" }
-          ]
-        }
-        """;
-
     /// <summary>内置档案（id, JSON）列表，供启动加载与单元测试使用。</summary>
     internal static readonly (string Id, string Json)[] BuiltinProfiles =
     {
-        (DefaultEngineId, TypelessProfileJson),
-        ("doubao", DoubaoProfileJson),
-        ("wetype", WetypeProfileJson)
+        (DefaultEngineId, TypelessProfileJson)
     };
 
     private readonly Dictionary<string, VoiceEngineProfile> profiles;
@@ -95,34 +59,6 @@ internal sealed class VoiceEngineCatalog
             var profile = VoiceEngineProfileJson.Parse(
                 builtin.Json, $"内置引擎档案 {builtin.Id}");
             profiles[profile.Id] = profile;
-        }
-
-        var extensionDirectory = Path.Combine(
-            PhoneDeckDataDirectory.Get(), "voice-engines");
-        if (Directory.Exists(extensionDirectory))
-        {
-            foreach (var file in Directory.GetFiles(extensionDirectory, "*.json")
-                         .OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var profile = VoiceEngineProfileJson.Parse(
-                        File.ReadAllText(file), $"扩展引擎档案 {Path.GetFileName(file)}");
-                    var replaced = profiles.ContainsKey(profile.Id);
-                    profiles[profile.Id] = profile;
-                    Console.WriteLine(
-                        $"语音引擎档案 {(replaced ? "已覆盖" : "已新增")}：{profile.Id}（{Path.GetFileName(file)}）");
-                }
-                catch (ArgumentException exception)
-                {
-                    Console.Error.WriteLine($"跳过无效的扩展引擎档案：{exception.Message}");
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine(
-                        $"读取扩展引擎档案 {Path.GetFileName(file)} 失败：{exception.Message}");
-                }
-            }
         }
 
         var settings = VoiceEngineSettings.LoadOrCreate();
@@ -194,6 +130,11 @@ internal static class VoiceEngines
     /// <summary>解析某模式的快捷键绑定串；优先级：手动覆盖 > 引擎配置文件 > 档案默认值。
     /// 返回 null 表示该模式未配置（受管听写会拒绝启动）。</summary>
     internal static string? ResolveBinding(string modeId)
+        => ResolveBinding(modeId, typelessSettings: null);
+
+    private static string? ResolveBinding(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings)
     {
         var mode = Active.FindMode(modeId)
             ?? throw new ArgumentException($"未知的语音引擎模式：{modeId}");
@@ -204,7 +145,8 @@ internal static class VoiceEngines
         }
         if (string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal))
         {
-            var fromSettings = TypelessSettingsReader.Read().BindingFor(modeId);
+            var fromSettings = (typelessSettings ?? TypelessSettingsReader.Read())
+                .BindingFor(modeId);
             if (!string.IsNullOrWhiteSpace(fromSettings))
             {
                 return fromSettings;
@@ -217,6 +159,11 @@ internal static class VoiceEngines
 
     internal static bool IsModeConfigured(string modeId) =>
         ResolveBinding(modeId) is not null;
+
+    private static bool IsModeConfigured(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
+        ResolveBinding(modeId, typelessSettings) is not null;
 
     /// <summary>把某模式的绑定串解析为修饰键在前的虚拟键码序列。</summary>
     internal static ushort[] ResolveKeysOrThrow(string modeId)
@@ -237,36 +184,57 @@ internal static class VoiceEngines
     internal static string[]? ModeKeyNames(string modeId) =>
         KeyboardInput.BindingKeyNames(ResolveBinding(modeId));
 
+    private static string[]? ModeKeyNames(
+        string modeId,
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
+        KeyboardInput.BindingKeyNames(ResolveBinding(modeId, typelessSettings));
+
     /// <summary>引擎所选麦克风描述；无可读配置的引擎返回 null。</summary>
     internal static string? MicrophoneDescription =>
+        GetMicrophoneDescription(typelessSettings: null);
+
+    private static string? GetMicrophoneDescription(
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
         string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal)
-            ? TypelessSettingsReader.Read().Microphone
+            ? (typelessSettings ?? TypelessSettingsReader.Read()).Microphone
             : null;
 
     /// <summary>引擎输入设备是否已选虚拟声卡；null 表示无法校验（不阻断，仅提示）。</summary>
     internal static bool? UsesVirtualCable =>
+        GetUsesVirtualCable(typelessSettings: null);
+
+    private static bool? GetUsesVirtualCable(
+        TypelessSettingsReader.TypelessConfigState? typelessSettings) =>
         string.Equals(Active.SettingsReader, "typeless", StringComparison.Ordinal)
-            ? TypelessSettingsReader.Read().UsesVirtualCable
+            ? (typelessSettings ?? TypelessSettingsReader.Read()).UsesVirtualCable
             : null;
 
     internal static VoiceEngineSnapshot BuildSnapshot(bool? capturing)
     {
         var engine = Active;
+        // A diagnostic snapshot must be internally consistent and should not
+        // parse Typeless' settings file once per mode/property.  The public
+        // no-argument helpers above intentionally keep their immediate-read
+        // behavior for button actions and configuration UI.
+        var typelessSettings = string.Equals(
+            engine.SettingsReader, "typeless", StringComparison.Ordinal)
+            ? TypelessSettingsReader.Read()
+            : null;
         var modes = engine.Modes
             .Select(mode => new EngineModeSnapshot(
                 mode.Id,
                 mode.Label ?? mode.Id,
                 TriggerFor(mode.Id),
-                IsModeConfigured(mode.Id),
-                ModeKeyNames(mode.Id)))
+                IsModeConfigured(mode.Id, typelessSettings),
+                ModeKeyNames(mode.Id, typelessSettings)))
             .ToArray();
         return new VoiceEngineSnapshot(
             engine.Id,
             engine.DisplayName,
             engine.Experimental,
             capturing,
-            MicrophoneDescription,
-            UsesVirtualCable,
+            GetMicrophoneDescription(typelessSettings),
+            GetUsesVirtualCable(typelessSettings),
             modes);
     }
 }

@@ -15,6 +15,8 @@ internal sealed class MacAudioRingBuffer
     private readonly byte[] data;
     private long writePosition;
     private long readPosition;
+    private long droppedBytes;
+    private int latencyCapBytes;
 
     internal MacAudioRingBuffer(int capacity)
     {
@@ -26,6 +28,19 @@ internal sealed class MacAudioRingBuffer
     }
 
     internal int Capacity => data.Length;
+
+    /// <summary>
+    /// 播放延迟上限（字节，0 为只受容量限制）。积压超过时读取端直接跳到最新的这一段，
+    /// 丢弃更旧的音频；与溢出处理一样只由读取端移动读位置，实时线程无锁。
+    /// </summary>
+    internal int LatencyCapBytes
+    {
+        get => Volatile.Read(ref latencyCapBytes);
+        set => Volatile.Write(ref latencyCapBytes, Math.Max(0, value));
+    }
+
+    /// <summary>溢出或超过延迟上限时被跳过、从未播放的字节累计（只增不减）。</summary>
+    internal long DroppedBytes => Volatile.Read(ref droppedBytes);
 
     internal int Count
     {
@@ -68,9 +83,12 @@ internal sealed class MacAudioRingBuffer
     {
         var write = Volatile.Read(ref writePosition);
         var read = Volatile.Read(ref readPosition);
-        if (write - read > data.Length)
+        var cap = LatencyCapBytes;
+        var limit = cap > 0 ? Math.Min(cap, data.Length) : data.Length;
+        if (write - read > limit)
         {
-            read = write - data.Length;
+            Volatile.Write(ref droppedBytes, droppedBytes + (write - limit - read));
+            read = write - limit;
         }
         var copied = (int)Math.Min(write - read, destination.Length);
         var index = (int)(read % data.Length);
@@ -103,29 +121,38 @@ internal sealed class MacAudioRingBuffer
 internal sealed class Pcm16MonoToStereoConverter
 {
     private byte? pendingLowByte;
+    private byte[] stereoBuffer = Array.Empty<byte>();
 
-    internal byte[] Convert(ReadOnlySpan<byte> mono)
+    internal byte[] Convert(ReadOnlySpan<byte> mono) =>
+        ConvertSpan(mono).ToArray();
+
+    /// <summary>复用内部缓冲把单声道 PCM16 转为双声道切片，实时热路径零堆分配。</summary>
+    internal ReadOnlySpan<byte> ConvertSpan(ReadOnlySpan<byte> mono)
     {
         var sampleCount = (mono.Length + (pendingLowByte.HasValue ? 1 : 0)) / 2;
-        var stereo = new byte[sampleCount * 4];
+        var requiredBytes = sampleCount * 4;
+        if (stereoBuffer.Length < requiredBytes)
+        {
+            stereoBuffer = new byte[requiredBytes];
+        }
         var input = 0;
         var output = 0;
         if (pendingLowByte.HasValue && mono.Length > 0)
         {
-            WriteSample(stereo, ref output, pendingLowByte.Value, mono[0]);
+            WriteSample(stereoBuffer, ref output, pendingLowByte.Value, mono[0]);
             pendingLowByte = null;
             input = 1;
         }
         while (input + 1 < mono.Length)
         {
-            WriteSample(stereo, ref output, mono[input], mono[input + 1]);
+            WriteSample(stereoBuffer, ref output, mono[input], mono[input + 1]);
             input += 2;
         }
         if (input < mono.Length)
         {
             pendingLowByte = mono[input];
         }
-        return output == stereo.Length ? stereo : stereo[..output];
+        return stereoBuffer.AsSpan(0, output);
     }
 
     private static void WriteSample(byte[] target, ref int offset, byte low, byte high)

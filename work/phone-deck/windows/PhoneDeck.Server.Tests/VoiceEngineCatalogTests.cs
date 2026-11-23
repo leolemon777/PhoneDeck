@@ -60,7 +60,7 @@ public sealed class VoiceEngineCatalogTests
     }
 
     [TestMethod]
-    public void LoadMergesExtensionDirectoryAndSelectsActiveEngine()
+    public void OnlyTypelessIsBuiltInAndExtensionFilesAreIgnored()
     {
         using var dataDirectory = new TempPhoneDeckDataDirectory();
         dataDirectory.WriteEngineFile("my-engine.json", """
@@ -71,15 +71,6 @@ public sealed class VoiceEngineCatalogTests
               "modes": [ { "id": "dictation", "keys": "F6" } ]
             }
             """);
-        // 覆盖内置 doubao 的默认快捷键。
-        dataDirectory.WriteEngineFile("doubao.json", """
-            {
-              "id": "doubao",
-              "displayName": "豆包（社区修正）",
-              "processNames": ["Doubao"],
-              "modes": [ { "id": "dictation", "keys": "Ctrl+Shift+D" } ]
-            }
-            """);
         dataDirectory.WriteSettings("""
             {
               "activeEngine": "myengine"
@@ -88,11 +79,11 @@ public sealed class VoiceEngineCatalogTests
 
         var catalog = VoiceEngineCatalog.Load();
 
-        Assert.AreEqual("myengine", catalog.Active.Id, "应按设置文件选择激活引擎");
-        Assert.AreEqual("我的引擎", catalog.Active.DisplayName);
-        Assert.IsNotNull(catalog.Find("typeless"), "内置档案必须保留");
-        Assert.AreEqual("豆包（社区修正）", catalog.Find("doubao")?.DisplayName,
-            "扩展档案按 id 覆盖内置档案");
+        Assert.AreEqual(VoiceEngineCatalog.DefaultEngineId, catalog.Active.Id, "只支持 Typeless");
+        Assert.AreEqual(1, catalog.Profiles.Count);
+        Assert.IsNull(catalog.Find("myengine"), "不再加载 voice-engines 扩展档案");
+        Assert.IsNull(catalog.Find("doubao"));
+        Assert.IsNull(catalog.Find("wetype"));
     }
 
     [TestMethod]
@@ -111,39 +102,19 @@ public sealed class VoiceEngineCatalogTests
     }
 
     [TestMethod]
-    public void LoadSkipsBrokenExtensionFilesButKeepsOthers()
-    {
-        using var dataDirectory = new TempPhoneDeckDataDirectory();
-        dataDirectory.WriteEngineFile("broken.json", "{ 这不是 JSON");
-        dataDirectory.WriteEngineFile("good.json", """
-            {
-              "id": "goodengine",
-              "displayName": "好的引擎",
-              "processNames": ["GoodEngine"],
-              "modes": [ { "id": "dictation", "keys": "F7" } ]
-            }
-            """);
-
-        var catalog = VoiceEngineCatalog.Load();
-
-        Assert.IsNull(catalog.Find("broken"));
-        Assert.IsNotNull(catalog.Find("goodengine"));
-    }
-
-    [TestMethod]
     public void ShortcutOverrideLookupIsCaseInsensitive()
     {
         var settings = new VoiceEngineSettings
         {
             ShortcutOverrides = new Dictionary<string, Dictionary<string, string>>
             {
-                ["WeType"] = new() { ["Dictation"] = "Ctrl+Shift+V" }
+                ["Typeless"] = new() { ["Dictation"] = "Ctrl+Shift+V" }
             }
         };
 
-        Assert.AreEqual("Ctrl+Shift+V", settings.ShortcutOverrideFor("wetype", "dictation"));
-        Assert.IsNull(settings.ShortcutOverrideFor("wetype", "translation"));
-        Assert.IsNull(settings.ShortcutOverrideFor("doubao", "dictation"));
+        Assert.AreEqual("Ctrl+Shift+V", settings.ShortcutOverrideFor("typeless", "dictation"));
+        Assert.IsNull(settings.ShortcutOverrideFor("typeless", "translation"));
+        Assert.IsNull(settings.ShortcutOverrideFor("other", "dictation"));
     }
 
     private sealed class TempPhoneDeckDataDirectory : IDisposable

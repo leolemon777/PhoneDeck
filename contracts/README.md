@@ -1,5 +1,12 @@
 # PhoneDeck 契约测试台（contracts/）
 
+> **2026-11-05 范围说明**：项目现在只为作者自用、只用 Typeless、只用共享麦克风。受管听写（`/api/dictation/*`、
+> `request.dictation`、`session-state` 状态机、`managedDictation` / `phoneStopV1` / `healthEventsV1` 能力）和
+> 开源发布规格（下文引用的 `docs/release/OPEN_SOURCE_RELEASE_SPEC.md` 已删除）**已不再实现**，相关契约与样本
+> 作为协议历史保留：两端一致性测试仍按文件名引用它们，Windows 测试需在 Windows/CI 上跑，改动前先确认。
+> 当前接收端在 health 中仍返回 `dictation.active=false` 以满足 `health.schema`；`X-PhoneDeck-Audio-Mode: managed` 返回 400。
+> 新增的 `sharedPcm16kV1` 与 `X-PhoneDeck-Audio-Rate` 见 `request.audio-stream` 与 `capability-policy`。
+
 按《开源可用性、全端兼容与发布验收规格》[docs/release/OPEN_SOURCE_RELEASE_SPEC.md](../docs/release/OPEN_SOURCE_RELEASE_SPEC.md)
 §16.1 建立：**先固定行为，再提取公共核心**。本目录只保存契约（JSON Schema、正/反样本、
 错误映射、状态转移、参数策略），四端（Android Java / Windows C# / macOS C# / 未来 iOS Swift）

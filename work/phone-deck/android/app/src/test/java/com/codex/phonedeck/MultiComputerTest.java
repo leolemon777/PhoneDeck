@@ -15,8 +15,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 一台手机 × 多台电脑：并行探测、单台退避、共享发现与结果复用（无真实网络）。 */
 public final class MultiComputerTest {
@@ -207,4 +213,305 @@ public final class MultiComputerTest {
         assertEquals("共享组还没有电脑，请在电脑列表中勾选",
                 MultiComputerStatus.summarize(Collections.emptyMap(), slots));
     }
+
+    @Test
+    public void timedOutProbeIsReleasedSoTheNextForcedRoundCanStartFresh() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            int call = probes.incrementAndGet();
+            if (call == 1) {
+                firstStarted.countDown();
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        ExecutorService caller = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "timeout-round-caller");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            Future<Map<String, ConnectionMonitor.Outcome>> firstRound =
+                    caller.submit(() -> monitor.probeAll(Collections.singletonList(pc), false));
+            assertTrue(firstStarted.await(1, TimeUnit.SECONDS));
+            Map<String, ConnectionMonitor.Outcome> timedOut =
+                    firstRound.get(5, TimeUnit.SECONDS);
+            assertFalse(timedOut.get("pc").online());
+
+            // The first round timed out and was cancelled/removed.  Force
+            // bypasses the independent offline backoff for this assertion.
+            Map<String, ConnectionMonitor.Outcome> secondRound =
+                    monitor.probeAll(Collections.singletonList(pc), true);
+            assertTrue(secondRound.get("pc").online());
+            assertTrue("第二轮必须启动新的探测", probes.get() >= 2);
+        } finally {
+            caller.shutdownNow();
+        }
+    }
+
+    @Test
+    public void oneTimedOutCallerDoesNotCancelAnotherSharedProbeWaiter() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                firstStarted.countDown();
+                long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2_600);
+                while (System.nanoTime() < deadline) {
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ignored) {
+                        // If the first caller incorrectly cancels the shared
+                        // Future, this worker deliberately keeps running; the
+                        // second caller will then observe the cancellation.
+                    }
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        try {
+            Future<Map<String, ConnectionMonitor.Outcome>> first = callers.submit(
+                    () -> monitor.probeAll(Collections.singletonList(pc), false));
+            assertTrue(firstStarted.await(1, TimeUnit.SECONDS));
+            Thread.sleep(300);
+            Future<Map<String, ConnectionMonitor.Outcome>> second = callers.submit(
+                    () -> monitor.probeAll(Collections.singletonList(pc), false));
+
+            Map<String, ConnectionMonitor.Outcome> firstResult = first.get(5, TimeUnit.SECONDS);
+            Map<String, ConnectionMonitor.Outcome> secondResult = second.get(5, TimeUnit.SECONDS);
+            assertTrue("过时调用不得把离线结果交给消费者",
+                    ConnectionMonitor.isInvalidated(firstResult));
+            assertTrue("仍在等待的共享调用必须收到原探测结果", secondResult.get("pc").online());
+            assertEquals("两个调用应共用一个探测", 1, probes.get());
+        } finally {
+            callers.shutdownNow();
+        }
+    }
+
+    @Test
+    public void resetInvalidatesOldRoundAndLateResultCannotPopulateCache() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        AtomicInteger probes = new AtomicInteger();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                firstStarted.countDown();
+                try {
+                    releaseFirst.await();
+                } catch (InterruptedException ignored) {
+                    // Deliberately keep the old worker alive to prove that a
+                    // late completion cannot update post-reset state.
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException ignoredAgain) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        ExecutorService caller = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "reset-round-caller");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            Future<Map<String, ConnectionMonitor.Outcome>> oldRound =
+                    caller.submit(() -> monitor.probeAll(Collections.singletonList(pc), true));
+            assertTrue(firstStarted.await(1, TimeUnit.SECONDS));
+
+            monitor.reset();
+            Map<String, ConnectionMonitor.Outcome> discarded = oldRound.get(1, TimeUnit.SECONDS);
+            assertTrue("reset 后旧轮次结果不得回传给调用方", discarded.isEmpty());
+            assertTrue("reset 后旧轮次必须标记为无效批次",
+                    ConnectionMonitor.isInvalidated(discarded));
+
+            Map<String, ConnectionMonitor.Outcome> fresh =
+                    monitor.probeAll(Collections.singletonList(pc), true);
+            assertTrue("reset 后应立即开启新探测", fresh.get("pc").online());
+            assertTrue("reset 后必须有新的探测调用", probes.get() >= 2);
+        } finally {
+            releaseFirst.countDown();
+            caller.shutdownNow();
+        }
+    }
+
+    @Test
+    public void slowDiscoveryCannotOverwriteNewerForcedOnlineProbe() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        CountDownLatch discoveryStarted = new CountDownLatch(1);
+        CountDownLatch releaseDiscovery = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                return new PhoneDeckLanClient.ProbeOutcome(null, false);
+            }
+            return online(device);
+        }, () -> {
+            discoveryStarted.countDown();
+            try {
+                releaseDiscovery.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return Collections.emptyMap();
+        }, (id, address) -> null, System::currentTimeMillis);
+
+        ExecutorService caller = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "slow-discovery-round-caller");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            Future<Map<String, ConnectionMonitor.Outcome>> staleRound = caller.submit(
+                    () -> monitor.probeAll(Collections.singletonList(pc), false));
+            assertTrue("第一轮应进入慢发现", discoveryStarted.await(1, TimeUnit.SECONDS));
+
+            Map<String, ConnectionMonitor.Outcome> newerRound =
+                    monitor.probeAll(Collections.singletonList(pc), true);
+            assertTrue("强制新轮次应成功上线", newerRound.get("pc").online());
+
+            releaseDiscovery.countDown();
+            Map<String, ConnectionMonitor.Outcome> staleResult =
+                    staleRound.get(5, TimeUnit.SECONDS);
+            assertTrue("旧轮次不得把自己的离线结果交给消费者",
+                    ConnectionMonitor.isInvalidated(staleResult));
+
+            Map<String, ConnectionMonitor.Outcome> cached =
+                    monitor.probeAll(Collections.singletonList(pc), false);
+            assertTrue("慢发现返回后缓存仍应保留新轮次在线结果",
+                    cached.get("pc").online());
+            assertEquals("旧发现不得再次触发探测", 2, probes.get());
+        } finally {
+            releaseDiscovery.countDown();
+            caller.shutdownNow();
+        }
+    }
+
+    @Test
+    public void twoCallersSharingFutureBothReceiveTheSameSuccess() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                firstStarted.countDown();
+                long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(800);
+                while (System.nanoTime() < deadline) {
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        try {
+            Future<Map<String, ConnectionMonitor.Outcome>> first = callers.submit(
+                    () -> monitor.probeAll(Collections.singletonList(pc), false));
+            assertTrue(firstStarted.await(1, TimeUnit.SECONDS));
+            Thread.sleep(100);
+            Future<Map<String, ConnectionMonitor.Outcome>> second = callers.submit(
+                    () -> monitor.probeAll(Collections.singletonList(pc), false));
+
+            Map<String, ConnectionMonitor.Outcome> firstResult =
+                    first.get(5, TimeUnit.SECONDS);
+            Map<String, ConnectionMonitor.Outcome> secondResult =
+                    second.get(5, TimeUnit.SECONDS);
+            assertFalse("共享 Future 的首个成功调用不应被后调用作废",
+                    ConnectionMonitor.isInvalidated(firstResult));
+            assertTrue("共享 Future 的首个调用应收到在线结果",
+                    firstResult.get("pc").online());
+            assertFalse("共享 Future 的后一个成功调用不应被误判过时",
+                    ConnectionMonitor.isInvalidated(secondResult));
+            assertTrue("共享 Future 的后一个调用应收到在线结果",
+                    secondResult.get("pc").online());
+            assertEquals("两个调用应共享一个底层探测", 1, probes.get());
+        } finally {
+            callers.shutdownNow();
+        }
+    }
+
+    @Test
+    public void interruptedCallerReleasesUnownedProbe() throws Exception {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        AtomicInteger probes = new AtomicInteger();
+        AtomicReference<Map<String, ConnectionMonitor.Outcome>> interruptedResult =
+                new AtomicReference<>();
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                firstStarted.countDown();
+                try {
+                    Thread.sleep(10_000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        Thread caller = new Thread(() -> interruptedResult.set(
+                monitor.probeAll(Collections.singletonList(pc), false)),
+                "interrupted-round-caller");
+        caller.setDaemon(true);
+        caller.start();
+        assertTrue(firstStarted.await(1, TimeUnit.SECONDS));
+        caller.interrupt();
+        caller.join(2_000);
+
+        assertNotNull("被中断的调用应结束并返回本轮结论", interruptedResult.get());
+        assertFalse(interruptedResult.get().get("pc").online());
+        Map<String, ConnectionMonitor.Outcome> fresh =
+                monitor.probeAll(Collections.singletonList(pc), true);
+        assertTrue("无 waiter 的旧 Future 释放后应允许新探测", fresh.get("pc").online());
+        assertTrue("中断后的强制轮次必须启动新探测", probes.get() >= 2);
+    }
+
+    @Test
+    public void duplicateComputerIdsDoNotLeaveAStaleSharedWaiter() {
+        TargetDeviceManager.Device pc = device("pc", 1, "10.0.0.5");
+        AtomicInteger probes = new AtomicInteger();
+        ConnectionMonitor monitor = new ConnectionMonitor(device -> {
+            if (probes.incrementAndGet() == 1) {
+                long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2_800);
+                while (System.nanoTime() < deadline) {
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ignored) {
+                        // Keep the first worker alive so a stale waiter would
+                        // be observable as an incorrectly shared second round.
+                    }
+                }
+            }
+            return online(device);
+        }, Collections::emptyMap, (id, address) -> null, System::currentTimeMillis);
+
+        Map<String, ConnectionMonitor.Outcome> first = monitor.probeAll(
+                Arrays.asList(pc, pc), false);
+        assertEquals("重复 computerId 只应产生一个结果条目", 1, first.size());
+        assertFalse(first.get("pc").online());
+        Map<String, ConnectionMonitor.Outcome> fresh = monitor.probeAll(
+                Collections.singletonList(pc), true);
+        assertTrue("重复输入不得把下轮错误地挂到旧 Future", fresh.get("pc").online());
+        assertTrue("下轮应启动新的底层探测", probes.get() >= 2);
+    }
+
 }

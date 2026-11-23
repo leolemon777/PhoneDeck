@@ -33,10 +33,6 @@ public final class ComputerSettingsActivity extends Activity {
     private final Map<String, RadioButton> engineChoices = new LinkedHashMap<>();
     private final List<View> controls = new ArrayList<>();
     private Switch usb, lan, autoStart;
-    private boolean desktopManaged;
-    private EditText displayNameField;
-    private Switch insertText;
-    private String languageId, tapShortcutId, holdShortcutId;
     private boolean pending, binding, voiceSelected = true, voiceDirty, connectionDirty;
     private int generation;
 
@@ -72,7 +68,7 @@ public final class ComputerSettingsActivity extends Activity {
     }
     private void shell() {
         controls.clear(); fields.clear(); engineChoices.clear(); identityCard = null;
-        saveButton = null; saveHint = null; displayNameField = null; insertText = null; generation++;
+        saveButton = null; saveHint = null; generation++;
         LinearLayout root = column(); root.setBackgroundColor(theme.background);
         LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(20), dp(12), dp(20), dp(12));
@@ -100,10 +96,10 @@ public final class ComputerSettingsActivity extends Activity {
     }
     private void notice(String message, int color) { status.setText(message); status.setTextColor(color); updateCompactLayout(); }
     private void list() {
-        selected = null; endpoint = null; snapshot = null; pending = false; desktopManaged = false;
+        selected = null; endpoint = null; snapshot = null; pending = false;
         voiceDirty = connectionDirty = false; shell();
         add(page, text("你的电脑", 28, theme.text, true), 12);
-        add(page, text("每台电脑有自己的名称、语音引擎与快捷键。主题和点击 / 按住习惯跟随手机。", 14, theme.muted, false), 8);
+        add(page, text("每台电脑有自己的名称与 Typeless 快捷键；主题跟随手机。", 14, theme.muted, false), 8);
         List<TargetDeviceManager.Device> known = devices.list();
         add(page, text(known.size() + " 台已配对设备", 12, theme.muted, true), 26);
         for (TargetDeviceManager.Device d : known) {
@@ -165,19 +161,16 @@ public final class ComputerSettingsActivity extends Activity {
                 else { target = PhoneDeckEndpoint.USB; health = PhoneDeckHttp.getJson(target, "/api/health"); }
                 requireTarget(health, d.computerId);
                 JSONArray capabilities = health.optJSONArray("capabilities");
-                boolean legacySupported = false, desktopSupported = false;
+                boolean supported = false;
                 if (capabilities != null) for (int i = 0; i < capabilities.length(); i++) {
-                    if ("phoneManagedSettingsV1".equals(capabilities.optString(i))) legacySupported = true;
-                    if ("desktopSettingsV1".equals(capabilities.optString(i))) desktopSupported = true;
+                    if ("phoneManagedSettingsV1".equals(capabilities.optString(i))) supported = true;
                 }
-                if (!legacySupported && !desktopSupported) throw new IOException("此接收器暂不支持手机配置，请升级到支持该功能的版本");
-                JSONObject data = PhoneDeckHttp.getJson(target, desktopSupported
-                        ? "/api/settings?targetComputerId=" + java.net.URLEncoder.encode(d.computerId, "UTF-8")
-                        : "/api/config/desktop"); requireTarget(data, d.computerId);
+                if (!supported) throw new IOException("此接收器暂不支持手机配置，请升级到支持该功能的版本");
+                JSONObject data = PhoneDeckHttp.getJson(target, "/api/config/desktop");
+                requireTarget(data, d.computerId);
                 PhoneDeckEndpoint resolved = target;
-                boolean modern = desktopSupported;
                 runOnUiThread(() -> { if (!valid(ticket)) return; endpoint = resolved; busy(false);
-                    desktopManaged = modern; render(data, "已连接 · 可以编辑设置"); });
+                    render(data, "已连接 · 可以编辑设置"); });
             } catch (Exception e) { failure(ticket, "暂时无法读取设置\n" + e.getMessage() + "\n恢复连接后，可点击右上角刷新。"); }
         });
     }
@@ -186,7 +179,6 @@ public final class ComputerSettingsActivity extends Activity {
         runOnUiThread(() -> { if (!valid(ticket)) return; busy(false); notice(message, theme.danger); });
     }
     private void render(JSONObject data, String message) {
-        if (desktopManaged) { renderDesktop(data, message); return; }
         binding = true; voiceDirty = connectionDirty = false; snapshot = data; shell(); identity();
         notice(data.optBoolean("busy") ? "正在供音或听写 · 停止后即可保存" : message, data.optBoolean("busy") ? theme.warning : theme.success);
         LinearLayout tabs = new LinearLayout(this); tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
@@ -195,8 +187,8 @@ public final class ComputerSettingsActivity extends Activity {
         tabs.addView(voiceTab, new LinearLayout.LayoutParams(0, -2, 1)); tabs.addView(connectionTab, new LinearLayout.LayoutParams(0, -2, 1));
         controls.add(voiceTab); controls.add(connectionTab); add(page, tabs, 20);
         voicePage = column(); connectionPage = column(); add(page, voicePage, 0); add(page, connectionPage, 0);
-        add(voicePage, text("使用哪款输入法？", 20, theme.text, true), 24);
-        add(voicePage, text("选择这台电脑已安装的语音输入软件。", 13, theme.muted, false), 6);
+        add(voicePage, text("输入法", 20, theme.text, true), 24);
+        add(voicePage, text("只支持 Typeless：快捷键和麦克风从 Typeless 设置自动读取。", 13, theme.muted, false), 6);
         engines = data.optJSONArray("engines");
         try { overrides = new JSONObject(data.getJSONObject("shortcutOverrides").toString()); }
         catch (JSONException e) { overrides = new JSONObject(); }
@@ -241,164 +233,17 @@ public final class ComputerSettingsActivity extends Activity {
         if (footer != null) footer.setPadding(dp(20), dp(compact ? 8 : 12), dp(20), dp(compact ? 8 : 16));
     }
 
-    /** Built-in cross-platform receiver settings; kept separate from legacy IME profiles. */
-    private void renderDesktop(JSONObject data, String message) {
-        binding = true; voiceDirty = connectionDirty = false; snapshot = data;
-        JSONObject settings = data.optJSONObject("settings");
-        if (settings == null) { binding = false; notice("电脑返回的配置不完整，请刷新", theme.danger); return; }
-        TargetDeviceManager.Device current = devices.find(selected.computerId);
-        if (current != null) selected = devices.upsert(current.computerId,
-                settings.optString("displayName", current.displayName), current.platform);
-        shell(); identity();
-        notice(data.optBoolean("busy") ? "正在听写 · 停止后即可保存" : message,
-                data.optBoolean("busy") ? theme.warning : theme.success);
-
-        LinearLayout tabs = new LinearLayout(this); tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
-        tabs.setBackground(theme.shape(this, theme.surfaceRaised, 12));
-        voiceTab = action("语音与快捷键", false, () -> selectTab(true));
-        connectionTab = action("连接与同步", false, () -> selectTab(false));
-        tabs.addView(voiceTab, new LinearLayout.LayoutParams(0, -2, 1));
-        tabs.addView(connectionTab, new LinearLayout.LayoutParams(0, -2, 1));
-        controls.add(voiceTab); controls.add(connectionTab); add(page, tabs, 20);
-        voicePage = column(); connectionPage = column(); add(page, voicePage, 0); add(page, connectionPage, 0);
-
-        LinearLayout nameCard = card(voicePage);
-        add(nameCard, text("电脑名称", 16, theme.text, true), 0);
-        displayNameField = new EditText(this); displayNameField.setSingleLine(true);
-        displayNameField.setTextColor(theme.text); displayNameField.setTextSize(16);
-        displayNameField.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)});
-        displayNameField.setText(settings.optString("displayName", selected.displayName));
-        displayNameField.setMinHeight(dp(52)); add(nameCard, displayNameField, 8); controls.add(displayNameField);
-        displayNameField.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            public void onTextChanged(CharSequence s, int start, int before, int count) { markDesktopDirty(); }
-            public void afterTextChanged(Editable s) { }
-        });
-
-        LinearLayout engine = card(voicePage);
-        add(engine, text("言渡内置识别", 18, theme.text, true), 0);
-        add(engine, text("在这台电脑本地识别，无需额外安装输入法或虚拟声卡。首次使用请在电脑下载语音模型。", 13, theme.muted, false), 6);
-        languageId = settings.optString("language", "auto");
-        tapShortcutId = settings.optString("tapShortcut", "Ctrl+Alt+Space");
-        holdShortcutId = settings.optString("holdShortcut", "Ctrl+Alt+V");
-        addChoice(engine, "识别语言", data.optJSONArray("languageOptions"), languageId, value -> languageId = value);
-
-        LinearLayout keys = card(voicePage);
-        add(keys, text("这台电脑的语音快捷键", 16, theme.text, true), 0);
-        add(keys, text("点击键开始 / 结束；按住键松开后结束。两种入口使用不同组合键，每台电脑可以各选一套。", 13, theme.muted, false), 6);
-        addChoice(keys, "开始 / 结束", data.optJSONArray("shortcutOptions"), tapShortcutId, value -> tapShortcutId = value);
-        addChoice(keys, "按住说话", data.optJSONArray("shortcutOptions"), holdShortcutId, value -> holdShortcutId = value);
-        String hotkeys = data.optString("hotkeysStatus", "unknown");
-        add(keys, text("ready".equals(hotkeys) ? "电脑快捷键已就绪"
-                : "wayland-custom-shortcut".equals(hotkeys)
-                    ? "Wayland：请在电脑的系统快捷键设置中绑定言渡命令，电脑页面会显示操作方式。"
-                    : "电脑快捷键尚未就绪：" + hotkeys + "。仍可使用手机按钮。",
-                12, "ready".equals(hotkeys) ? theme.success : theme.warning, false), 12);
-
-        LinearLayout insertion = card(voicePage);
-        insertText = new Switch(this); insertText.setText("识别后填入本机输入框");
-        insertText.setTextColor(theme.text); insertText.setTextSize(15); insertText.setMinHeight(dp(52));
-        insertText.setChecked(settings.optBoolean("autoInsert", true)); add(insertion, insertText, 0); controls.add(insertText);
-        insertText.setOnCheckedChangeListener((button, checked) -> markDesktopDirty());
-        add(insertion, text("仅填入开始说话时的输入框；焦点改变则保留文字记录。关闭后可在电脑复制结果。其他电脑收到同步文字时不会自动输入。", 12, theme.muted, false), 5);
-
-        LinearLayout connection = card(connectionPage);
-        add(connection, text("当前连接", 18, theme.text, true), 0);
-        add(connection, text(endpoint != null && endpoint.isLan()
-                ? "已配对的加密局域网连接" : "USB 连接已确认", 14, theme.success, false), 8);
-        String addresses = String.join("\n", selected.lanAddresses);
-        if (!addresses.isEmpty()) add(connection, text("电脑地址\n" + addresses, 13, theme.muted, false), 10);
-        add(connection, text("地址改变时会重新发现，仍按同一台电脑识别。新跨平台接收器保持运行即可，无需安装输入法驱动。", 12, theme.muted, false), 12);
-
-        LinearLayout sync = card(connectionPage);
-        Switch group = new Switch(this); group.setText("加入共享与文字同步组");
-        group.setTextColor(theme.text); group.setTextSize(15); group.setMinHeight(dp(52));
-        group.setChecked(selected.sharedGroup); add(sync, group, 0); controls.add(group);
-        add(sync, text("此组同时用于共享麦克风和最终文字同步。同步总开关在「设置 → 同步文字」；加入组不会切换当前输入电脑。此项保存在手机，切换后立即保存。", 12, theme.muted, false), 8);
-        group.setOnCheckedChangeListener((button, checked) -> {
-                if (devices.setSharedGroup(selected.computerId, checked)) {
-                selected = devices.find(selected.computerId);
-                Toast.makeText(this, checked ? "已加入共享与同步组" : "已移出共享与同步组", Toast.LENGTH_SHORT).show();
-            }
-        });
-        add(connectionPage, text("管理这台电脑的配置不会切换首页的输入目标。手机主题和点击 / 按住模式也保持你的选择。", 12, theme.muted, false), 20);
-
-        saveButton = action("保存到这台电脑", true, this::saveDesktop); controls.add(saveButton); add(footer, saveButton, 0);
-        saveHint = text("", 12, theme.muted, false); saveHint.setGravity(Gravity.CENTER); add(footer, saveHint, 7);
-        footer.setVisibility(View.VISIBLE); binding = false; selectTab(voiceSelected); updateCompactLayout();
-    }
-
-    private void markDesktopDirty() {
-        if (!binding) { voiceDirty = true; updateSave(); }
-    }
-
-    private void addChoice(LinearLayout parent, String title, JSONArray options, String initial,
-                           java.util.function.Consumer<String> selectedValue) {
-        add(parent, text(title, 13, theme.muted, true), 16);
-        final List<String> ids = new ArrayList<>(), labels = new ArrayList<>();
-        for (int i = 0; options != null && i < options.length(); i++) {
-            JSONObject option = options.optJSONObject(i);
-            if (option == null) continue;
-            ids.add(option.optString("id")); labels.add(option.optString("label", option.optString("id")));
-        }
-        final int[] index = {ids.indexOf(initial)};
-        Button choice = action(index[0] < 0 ? initial : labels.get(index[0]), false, () -> { });
-        choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); controls.add(choice); add(parent, choice, 6);
-        choice.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(title)
-                .setSingleChoiceItems(labels.toArray(new String[0]), index[0], (dialog, which) -> {
-                    index[0] = which; choice.setText(labels.get(which)); selectedValue.accept(ids.get(which));
-                    markDesktopDirty(); dialog.dismiss();
-                }).setNegativeButton("取消", null).show());
-    }
-
-    private void saveDesktop() {
-        if (pending || snapshot == null || endpoint == null || displayNameField == null) return;
-        if (tapShortcutId.equals(holdShortcutId)) {
-            notice("开始 / 结束和按住说话必须使用不同快捷键", theme.warning); return;
-        }
-        String name = displayNameField.getText().toString().trim();
-        if (name.isEmpty()) { displayNameField.setError("请输入电脑名称"); return; }
-        final String target = selected.computerId; final PhoneDeckEndpoint destination = endpoint;
-        JSONObject request = new JSONObject(), settings = new JSONObject();
-        try {
-            settings.put("displayName", name); settings.put("language", languageId);
-            settings.put("autoInsert", insertText.isChecked());
-            settings.put("tapShortcut", tapShortcutId); settings.put("holdShortcut", holdShortcutId);
-            request.put("targetComputerId", target); request.put("revision", snapshot.get("revision"));
-            request.put("settings", settings);
-        } catch (JSONException e) { notice("设置不完整，请刷新", theme.danger); return; }
-        busy(true); notice("正在保存到 " + selected.displayName + "…", theme.muted); int ticket = generation;
-        worker.execute(() -> {
-            try {
-                JSONObject response = PhoneDeckHttp.postJson(destination, "/api/settings", request, 5000);
-                requireTarget(response, target);
-                runOnUiThread(() -> {
-                    if (!valid(ticket)) return;
-                    busy(false); renderDesktop(response, "✓ 已保存到这台电脑，立即生效");
-                    Toast.makeText(this, "已保存到 " + selected.displayName, Toast.LENGTH_SHORT).show();
-                });
-            } catch (PhoneDeckHttp.ResponseException e) {
-                failure(ticket, e.status == 409
-                        ? "本次保存未生效：电脑正忙、配置已变化或快捷键不可用。\n" + e.getMessage() + "\n请停止听写并刷新后再试。"
-                        : "保存未确认\n" + e.getMessage() + "\n请刷新确认结果。");
-            } catch (Exception e) { failure(ticket, "保存未确认\n" + e.getMessage() + "\n请刷新确认结果。"); }
-        });
-    }
-    @Override public void onConfigurationChanged(Configuration configuration) {
-        super.onConfigurationChanged(configuration); updateCompactLayout();
-    }
     private void selectTab(boolean voice) {
         voiceSelected = voice; voicePage.setVisibility(voice ? View.VISIBLE : View.GONE); connectionPage.setVisibility(voice ? View.GONE : View.VISIBLE);
         voiceTab.setBackground(theme.shape(this, voice ? theme.surface : theme.surfaceRaised, 12));
         connectionTab.setBackground(theme.shape(this, voice ? theme.surfaceRaised : theme.surface, 12));
         voiceTab.setTextColor(voice ? theme.primary : theme.muted); connectionTab.setTextColor(voice ? theme.muted : theme.primary);
         voiceTab.setSelected(voice); connectionTab.setSelected(!voice);
-        if (desktopManaged) footer.setVisibility(voice ? View.VISIBLE : View.GONE);
         updateSave();
     }
     private void updateSave() {
         if (saveButton == null || footer.getVisibility() != View.VISIBLE) return;
-        saveButton.setText(pending ? "正在处理…" : desktopManaged ? "保存到这台电脑" : voiceSelected ? "保存输入法" : "保存连接设置");
+        saveButton.setText(pending ? "正在处理…" : voiceSelected ? "保存输入法" : "保存连接设置");
         saveHint.setText((voiceSelected ? voiceDirty : connectionDirty) ? "有未保存的修改 · 保存后立即生效" : "设置按电脑保存，无需重启接收器");
     }
     private void refreshChoices() {
@@ -445,7 +290,6 @@ public final class ComputerSettingsActivity extends Activity {
         }
     }
     private void save(boolean voice) {
-        if (desktopManaged) { saveDesktop(); return; }
         if (pending || snapshot == null || endpoint == null) return;
         capture(); JSONObject request = new JSONObject(); final String target = selected.computerId; final PhoneDeckEndpoint destination = endpoint;
         try {

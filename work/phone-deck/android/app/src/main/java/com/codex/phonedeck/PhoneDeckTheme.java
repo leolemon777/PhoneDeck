@@ -33,13 +33,17 @@ final class PhoneDeckTheme {
     static final String NATIVE_DARK = "native_dark";
     static final String NIGHT = "night";
 
-    /// 上一代彩色主题 ID → 新配色中最接近的一套（2026-10 换成设计稿配色时删除旧四套）。
+    /// 历史彩色及深色主题 ID：统一精简迁移至苹果生态浅色/深色。
     private static final java.util.Map<String, String> RETIRED_IDS = new java.util.HashMap<>();
     static {
-        RETIRED_IDS.put("forest_light", FOREST);
-        RETIRED_IDS.put("violet_light", VIOLET);
-        RETIRED_IDS.put("terracotta_light", CLAY);
-        RETIRED_IDS.put("ocean_light", MIST);
+        RETIRED_IDS.put("forest_light", NATIVE_LIGHT);
+        RETIRED_IDS.put("violet_light", NATIVE_LIGHT);
+        RETIRED_IDS.put("terracotta_light", NATIVE_LIGHT);
+        RETIRED_IDS.put("ocean_light", NATIVE_LIGHT);
+        RETIRED_IDS.put(FOREST, NATIVE_LIGHT);
+        RETIRED_IDS.put(VIOLET, NATIVE_LIGHT);
+        RETIRED_IDS.put(CLAY, NATIVE_LIGHT);
+        RETIRED_IDS.put(MIST, NATIVE_LIGHT);
     }
 
     /// 历史深色主题 ID：迁移时落深色，其余历史 ID 一律落浅色。
@@ -47,55 +51,39 @@ final class PhoneDeckTheme {
             "espresso", "cocoa", "mono", "ocean", "oled", "inkdark",
             "goldamber", "goldforest", "gptdark", "claudedark", "grokdark"));
 
-    /// 墨白：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_LIGHT = {
-            "#FFFFFF", "#F5F5F3", "#EBEAE6", "#E2E1DC", "#151515", "#63625C", "#151515",
-            "#FFFFFF", "#1E7A4C", "#E5F2EA", "#8F5400", "#FAEFD9", "#BF3324", "#FBE8E4"};
+    /// 苹果浅色（系统灰底 + 纯白卡片）：bg, sf, sf2, line, text, body, muted, primary, onPrimary, pContainer, onPContainer, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_IOS_LIGHT = {
+            "#F2F2F7", "#FFFFFF", "#E5E5EA", "#E5E5EA",
+            "#000000", "#3A3A3C", "#8E8E93",
+            "#000000", "#FFFFFF", "#E5E5EA", "#000000",
+            "#34C759", "#EBF9EE", "#FF9500", "#FFF5E5", "#FF3B30", "#FFECEB"};
 
-    /// 暖纸：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_PAPER = {
-            "#F7F3EA", "#EEE8DA", "#E4DCCB", "#E0D7C5", "#22201B", "#665F52", "#22201B",
-            "#F7F3EA", "#3B7546", "#E3EDDD", "#8A5300", "#F5E8CF", "#B23526", "#F6E1DA"};
+    /// 苹果纯白（纯白底 + 系统灰卡片）：bg, sf, sf2, line, text, body, muted, primary, onPrimary, pContainer, onPContainer, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_IOS_WHITE = {
+            "#FFFFFF", "#F2F2F7", "#E5E5EA", "#E5E5EA",
+            "#000000", "#3A3A3C", "#8E8E93",
+            "#000000", "#FFFFFF", "#F2F2F7", "#000000",
+            "#34C759", "#EBF9EE", "#FF9500", "#FFF5E5", "#FF3B30", "#FFECEB"};
 
-    /// 松绿：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_FOREST = {
-            "#F5F8F6", "#E7EFEA", "#D9E5DD", "#D3E0D8", "#12251B", "#4C6155", "#1D5A3C",
-            "#FFFFFF", "#1E7A4C", "#DDEFE4", "#8A5300", "#F6EBD4", "#B7352A", "#F8E4E0"};
+    /// 苹果深色（纯黑底 + 深灰卡片）：bg, sf, sf2, line, text, body, muted, primary, onPrimary, pContainer, onPContainer, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_IOS_DARK = {
+            "#000000", "#1C1C1E", "#2C2C2E", "#38383A",
+            "#FFFFFF", "#EBEBF5", "#8E8E93",
+            "#FFFFFF", "#000000", "#2C2C2E", "#FFFFFF",
+            "#30D158", "#14301F", "#FF9F0A", "#3A2B12", "#FF453A", "#3F1C17"};
 
-    /// 淡紫：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_VIOLET = {
-            "#FAF9FD", "#EFEDF8", "#E3E0F2", "#DEDAEF", "#1D1A2C", "#5B5573", "#4A3E8E",
-            "#FFFFFF", "#1F7A55", "#E2F1EA", "#8A5300", "#F6EBD4", "#B8342A", "#F8E4E1"};
-
-    /// 陶土：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_CLAY = {
-            "#FAF6F1", "#F1E8DE", "#E7DACB", "#E3D5C5", "#2A1F18", "#6A5A4D", "#9C4D2A",
-            "#FFFFFF", "#3B7546", "#E4EDDD", "#7D5A00", "#F3EACB", "#A3203A", "#F6DDE2"};
-
-    /// 雾蓝：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_MIST = {
-            "#F6F9FC", "#E8F0F7", "#DAE6F1", "#D3E0EC", "#132232", "#4C5F73", "#1E5C8B",
-            "#FFFFFF", "#1E7A55", "#DDF0E7", "#8A5300", "#F6EBD4", "#B8342A", "#F8E4E1"};
-
-    /// 墨白 · 深色：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_DARK = {
-            "#141413", "#1F1F1D", "#2B2B28", "#34342F", "#F1F0EB", "#A6A59E", "#F1F0EB",
-            "#141413", "#62C793", "#1B3226", "#E8AE52", "#3A2C14", "#F2806F", "#3E211C"};
-
-    /// 极夜：bg, sf, sf2, line, text, muted, ink, onInk, ok, okBg, warn, warnBg, rec, recBg。
-    private static final String[] PALETTE_NIGHT = {
-            "#0B0B0B", "#171717", "#242424", "#2C2C2C", "#FFFFFF", "#A8A8A8", "#FFFFFF",
-            "#0B0B0B", "#5FD39A", "#14301F", "#F0B44E", "#3A2B12", "#FF7A66", "#3F1C17"};
+    /// 苹果深空灰（石墨暗底 + 柔和层次）：bg, sf, sf2, line, text, body, muted, primary, onPrimary, pContainer, onPContainer, ok, okBg, warn, warnBg, rec, recBg。
+    private static final String[] PALETTE_IOS_SPACE = {
+            "#1C1C1E", "#2C2C2E", "#3A3A3C", "#48484A",
+            "#FFFFFF", "#EBEBF5", "#8E8E93",
+            "#FFFFFF", "#000000", "#3A3A3C", "#FFFFFF",
+            "#30D158", "#163522", "#FF9F0A", "#3D2E14", "#FF453A", "#421E19"};
 
     private static final PhoneDeckTheme[] THEMES = {
-            palette(NATIVE_LIGHT, "墨白", "纯白底，墨色话筒", true, PALETTE_LIGHT),
-            palette(PAPER, "暖纸", "米色纸面，深墨文字", true, PALETTE_PAPER),
-            palette(FOREST, "松绿", "浅绿底色，深松绿主色", true, PALETTE_FOREST),
-            palette(VIOLET, "淡紫", "瓷白底色，沉静紫", true, PALETTE_VIOLET),
-            palette(CLAY, "陶土", "燕麦暖底，陶土红棕", true, PALETTE_CLAY),
-            palette(MIST, "雾蓝", "清浅蓝底，深雾蓝", true, PALETTE_MIST),
-            palette(NATIVE_DARK, "墨白 · 深色", "暖黑底，米白话筒", false, PALETTE_DARK),
-            palette(NIGHT, "极夜", "纯黑底，适合 OLED 夜间", false, PALETTE_NIGHT)};
+            palette(NATIVE_LIGHT, "苹果浅色 · 通透灰", "系统灰底 (#F2F2F7) 配纯白卡片，层次分明", true, PALETTE_IOS_LIGHT),
+            palette(PAPER, "苹果浅色 · 纯白", "纯白底 (#FFFFFF) 配浅灰卡片，极致纯净", true, PALETTE_IOS_WHITE),
+            palette(NATIVE_DARK, "苹果深色 · 纯黑", "OLED 纯黑底 (#000000) 配深灰卡片", false, PALETTE_IOS_DARK),
+            palette(NIGHT, "苹果深色 · 深空灰", "深空灰底 (#1C1C1E)，柔和夜间暗色", false, PALETTE_IOS_SPACE)};
 
     final String id;
     final String name;
@@ -108,6 +96,7 @@ final class PhoneDeckTheme {
     final int voiceDock;
     final int outline;
     final int text;
+    final int body;
     final int muted;
     final int primary;
     final int primaryPressed;
@@ -136,6 +125,7 @@ final class PhoneDeckTheme {
             int voiceDock,
             int outline,
             int text,
+            int body,
             int muted,
             int primary,
             int primaryPressed,
@@ -162,6 +152,7 @@ final class PhoneDeckTheme {
         this.voiceDock = voiceDock;
         this.outline = outline;
         this.text = text;
+        this.body = body;
         this.muted = muted;
         this.primary = primary;
         this.primaryPressed = primaryPressed;
@@ -379,21 +370,50 @@ final class PhoneDeckTheme {
         return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }
 
-    /// 设计稿令牌 → 语义槽：卡片与键帽用底色，凹陷/分段用 sf，选中容器用 sf2；
-    /// 话筒、当前电脑卡与“正在采音”都用墨色 ink（采音状态靠光环与状态胶囊区分）。
+    /// 浮层毛玻璃效果（Apple Glassmorphism）：半透明表层 + Android 12+ 原生窗口背景模糊。
+    void applySheetGlass(Context context, android.view.Window window, int radiusDp) {
+        if (window == null) {
+            return;
+        }
+        int glassFill = withAlpha(surface, light ? 240 : 235);
+        window.setBackgroundDrawable(shape(context, glassFill, radiusDp, 1, outline));
+        window.setDimAmount(light ? 0.26f : 0.48f);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+                window.getAttributes().setBlurBehindRadius(dp(context, 22));
+                window.setBackgroundBlurRadius(dp(context, 28));
+            } catch ( Throwable ignored) {
+                // 部分 ROM 不支持窗口级模糊时回退为高通透半透明背景。
+            }
+        }
+    }
+
+    /// 苹果生态语义令牌映射：
+    /// 底面 bg / 卡片与键帽 sf / 次级表面 sf2 / 分割线 line；
+    /// 文字三层：标题 text (#000000) / 正文 body (#3A3A3C) / 辅助说明 muted (#8E8E93)；
+    /// 唯一主色 primary (#000000 纯黑控件 / 深色模式 #FFFFFF) + 适中饱和度状态色 success (#34C759) / warning (#FF9500) / danger (#FF3B30)。
     private static PhoneDeckTheme palette(String id, String name, String description, boolean light,
                                           String[] p) {
         int bg = Color.parseColor(p[0]);
-        int ink = Color.parseColor(p[6]);
-        int onInk = Color.parseColor(p[7]);
+        int sf = Color.parseColor(p[1]);
+        int sf2 = Color.parseColor(p[2]);
+        int line = Color.parseColor(p[3]);
+        int text = Color.parseColor(p[4]);
+        int body = Color.parseColor(p[5]);
+        int muted = Color.parseColor(p[6]);
+        int primary = Color.parseColor(p[7]);
+        int onPrimary = Color.parseColor(p[8]);
+        int pContainer = Color.parseColor(p[9]);
+        int onPContainer = Color.parseColor(p[10]);
         return new PhoneDeckTheme(id, name, description, light,
-                bg, bg, Color.parseColor(p[1]), bg, bg, Color.parseColor(p[3]),
-                Color.parseColor(p[4]), Color.parseColor(p[5]),
-                ink, blend(ink, bg, 0.18f), onInk, ink,
-                Color.parseColor(p[2]), Color.parseColor(p[4]),
-                ink, onInk,
-                Color.parseColor(p[8]), Color.parseColor(p[9]),
-                Color.parseColor(p[10]), Color.parseColor(p[11]),
-                Color.parseColor(p[12]), Color.parseColor(p[13]));
+                bg, sf, sf2, sf, bg, line,
+                text, body, muted,
+                primary, blend(primary, onPrimary, 0.20f), onPrimary, primary,
+                pContainer, onPContainer,
+                primary, onPrimary,
+                Color.parseColor(p[11]), Color.parseColor(p[12]),
+                Color.parseColor(p[13]), Color.parseColor(p[14]),
+                Color.parseColor(p[15]), Color.parseColor(p[16]));
     }
 }

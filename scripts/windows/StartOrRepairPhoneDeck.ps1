@@ -41,7 +41,7 @@ try {
     }
 
     $health = $null
-    for ($attempt = 0; $attempt -lt 20 -and $null -eq $health; $attempt++) {
+    for ($attempt = 0; $attempt -lt 40 -and $null -eq $health; $attempt++) {
         try {
             $health = Invoke-RestMethod `
                 -Uri 'http://127.0.0.1:8765/api/health' -TimeoutSec 2
@@ -53,20 +53,39 @@ try {
         throw '电脑端未能正常启动，请检查防火墙或端口占用。'
     }
 
-    $usbStatus = 'USB 未连接（不影响 Wi-Fi 使用）'
-    if (Test-Path -LiteralPath $adbPath) {
-        & $adbPath start-server *> $null
-        $deviceLines = @(& $adbPath devices)
-        $serial = $null
-        foreach ($line in $deviceLines) {
-            if ($line -match '^([^\s]+)\s+device$') {
-                $serial = $Matches[1]
-                break
+    $usbWatchdogEnabled = $false
+    $settingsFile = Join-Path $env:PHONEDECK_DATA_DIR 'server-settings.json'
+    if (Test-Path -LiteralPath $settingsFile) {
+        try {
+            $settingsJson = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
+            if ($null -ne $settingsJson.usbWatchdog) {
+                $usbWatchdogEnabled = [bool]$settingsJson.usbWatchdog
             }
+        } catch {
         }
-        if ($serial) {
-            & $adbPath -s $serial reverse tcp:8765 tcp:8765 *> $null
-            $usbStatus = "USB 已连接：$serial"
+    }
+
+    $usbStatus = 'USB 未启用（纯 Wi-Fi 模式）'
+    if ($usbWatchdogEnabled -and (Test-Path -LiteralPath $adbPath)) {
+        $usbStatus = 'USB 未连接（不影响 Wi-Fi 使用）'
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $adbPath start-server 2>&1 | Out-Null
+            $deviceLines = @(& $adbPath devices 2>&1)
+            $serial = $null
+            foreach ($line in $deviceLines) {
+                if ($line -match '^([^\s]+)\s+device$') {
+                    $serial = $Matches[1]
+                    break
+                }
+            }
+            if ($serial) {
+                & $adbPath -s $serial reverse tcp:8765 tcp:8765 2>&1 | Out-Null
+                $usbStatus = "USB 已连接：$serial"
+            }
+        } finally {
+            $ErrorActionPreference = $prevEap
         }
     }
 

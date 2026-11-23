@@ -59,9 +59,25 @@ public sealed class MdnsAdvertiserTests
         var sanitized = MdnsAdvertiser.SanitizeInstanceName(
             "id/with 非法字符.and.dots-" + new string('x', 80));
         Assert.IsTrue(sanitized.Length <= 63, "DNS 标签 ≤63");
-        Assert.IsFalse(sanitized.Contains('.') && false, "占位");
-        Assert.IsTrue(sanitized.All(c => char.IsLetterOrDigit(c) || c == '-'),
-            "仅字母数字与连字符：" + sanitized);
+        Assert.IsTrue(sanitized.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'),
+            "仅 ASCII 字母数字与连字符：" + sanitized);
         Assert.AreEqual("11111111-2222", MdnsAdvertiser.SanitizeInstanceName("11111111-2222"));
+    }
+
+    [TestMethod]
+    public void NonAsciiDisplayNameSerializesToDnsWireWithoutException()
+    {
+        var profile = MdnsAdvertiser.CreateProfile(
+            "0c24d2de-4dda-4d0e-b74d-56c489601d2e",
+            "往里走的COMPUTE",
+            "windows",
+            8766,
+            addresses: new[] { System.Net.IPAddress.Parse("192.168.0.100") });
+
+        foreach (var resource in profile.Resources)
+        {
+            var bytes = resource.ToByteArray();
+            Assert.IsTrue(bytes.Length > 0);
+        }
     }
 }

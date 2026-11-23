@@ -191,10 +191,10 @@ internal sealed class MacVoiceEngineSettings
                 File.WriteAllText(SettingsPath,
                     "{\n"
                     + "  // 语音引擎设置。改动后重启 PhoneDeck.Receiver 生效。\n"
-                    + "  // activeEngine：typeless / doubao / wetype 或 voice-engines 目录扩展档案的 id。\n"
+                    + "  // 只支持 Typeless；快捷键默认从 Typeless 自己的设置读取。\n"
                     + "  \"activeEngine\": \"typeless\",\n"
-                    + "  // shortcutOverrides：手动指定快捷键，优先级最高。例如：\n"
-                    + "  // \"shortcutOverrides\": { \"doubao\": { \"dictation\": \"Control+D\" } }\n"
+                    + "  // shortcutOverrides：读不到 Typeless 设置时手动指定快捷键，例如：\n"
+                    + "  // \"shortcutOverrides\": { \"typeless\": { \"dictation\": \"Fn\" } }\n"
                     + "  \"shortcutOverrides\": {}\n"
                     + "}\n");
             }
@@ -207,7 +207,7 @@ internal sealed class MacVoiceEngineSettings
     }
 }
 
-/// <summary>内置与扩展（~/…/PhoneDeck/voice-engines/*.json）引擎档案集合。</summary>
+/// <summary>语音引擎档案：只支持 Typeless（2026-11-05 决策，作者自用）。</summary>
 internal sealed class MacVoiceEngineCatalog
 {
     internal const string DefaultEngineId = "typeless";
@@ -226,32 +226,6 @@ internal sealed class MacVoiceEngineCatalog
                 { "id": "dictation", "label": "听写", "trigger": "toggle" },
                 { "id": "translation", "label": "翻译", "trigger": "toggle" },
                 { "id": "ask", "label": "问答", "trigger": "toggle" }
-              ]
-            }
-            """),
-        ("doubao", """
-            {
-              // 豆包 macOS 版语音输入默认按住 Fn；Fn 无法程序注入，
-              // 需在豆包设置中改为可注入的组合键后填入 shortcutOverrides。
-              "id": "doubao",
-              "displayName": "豆包",
-              "experimental": true,
-              "processNames": ["Doubao"],
-              "modes": [
-                { "id": "dictation", "label": "语音输入", "trigger": "hold" }
-              ]
-            }
-            """),
-        ("wetype", """
-            {
-              // 微信输入法（WeType）macOS 版语音输入默认 Fn，无法程序注入；
-              // 需在其设置中改为可注入的组合键后填入 shortcutOverrides。
-              "id": "wetype",
-              "displayName": "微信输入法",
-              "experimental": true,
-              "processNames": ["WeType", "微信输入法"],
-              "modes": [
-                { "id": "dictation", "label": "语音输入", "trigger": "hold" }
               ]
             }
             """)
@@ -285,6 +259,9 @@ internal sealed class MacVoiceEngineCatalog
         return new MacVoiceEngineCatalog(profiles, active, settings, ReceiverSettings);
     }
 
+    internal MacVoiceEngineCatalog WithReceiverSettings(MacReceiverSettings receiverSettings) =>
+        new(profiles, Active, Settings, receiverSettings);
+
     /// <summary>server-settings.json（含旧版 typelessSettingsPath/typelessShortcuts 覆盖）。</summary>
     internal MacReceiverSettings ReceiverSettings { get; }
 
@@ -302,34 +279,6 @@ internal sealed class MacVoiceEngineCatalog
             var profile = MacVoiceEngineProfileJson.Parse(
                 builtin.Json, $"内置引擎档案 {builtin.Id}");
             profiles[profile.Id] = profile;
-        }
-
-        var extensionDirectory = Path.Combine(
-            PhoneDeckDataDirectory.Get(), "voice-engines");
-        if (Directory.Exists(extensionDirectory))
-        {
-            foreach (var file in Directory.GetFiles(extensionDirectory, "*.json")
-                         .OrderBy(file => file, StringComparer.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    var profile = MacVoiceEngineProfileJson.Parse(
-                        File.ReadAllText(file), $"扩展引擎档案 {Path.GetFileName(file)}");
-                    var replaced = profiles.ContainsKey(profile.Id);
-                    profiles[profile.Id] = profile;
-                    Console.WriteLine(
-                        $"语音引擎档案 {(replaced ? "已覆盖" : "已新增")}：{profile.Id}（{Path.GetFileName(file)}）");
-                }
-                catch (ArgumentException exception)
-                {
-                    Console.Error.WriteLine($"跳过无效的扩展引擎档案：{exception.Message}");
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine(
-                        $"读取扩展引擎档案 {Path.GetFileName(file)} 失败：{exception.Message}");
-                }
-            }
         }
 
         var receiverSettings = MacReceiverSettings.LoadOrCreate();
@@ -371,6 +320,14 @@ internal static class MacVoiceEngines
             DesktopConfiguration.WriteAtomic(MacVoiceEngineSettings.SettingsPath, settings,
                 MacFileWriteJsonContext.Default.MacVoiceEngineSettings);
             Volatile.Write(ref configured, next);
+        }
+    }
+
+    internal static void UpdateReceiverSettings(MacReceiverSettings receiverSettings)
+    {
+        lock (ConfigurationLock)
+        {
+            Volatile.Write(ref configured, Catalog.WithReceiverSettings(receiverSettings));
         }
     }
 

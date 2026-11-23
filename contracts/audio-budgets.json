@@ -8,6 +8,8 @@
     "deviceRatesAccepted": [8000, 16000, 44100, 48000],
     "rule": "设备实际采样率≠48000 时必须在上传前重采样到 48 kHz/mono；实际采样率记录用于诊断（health/设备信息），不改变线上的 PCM 基线（MIC-04“实际设备采样率转换明确”）",
     "schemaField": "request.audio-stream.schema.json#/properties/audio/properties/deviceSampleRateHz",
+    "wifiSharedUploadHz": 16000,
+    "wifiSharedRule": "仅 Wi-Fi 共享供音、且接收端声明 sharedPcm16kV1 时：手机采 48 kHz 一次，Kaiser 窗 144 抽头抗混叠（约 7.4 kHz）抽取到 16 kHz 上传，接收端 144 抽头多相升采样回 48 kHz 后进入原播放缓冲；USB、受管听写与旧接收端保持 48 kHz 基线（PhoneAudioFormat.cs、Pcm16kDownsampler.java）",
     "status": "target（基线 current：48k/PCM16/mono 由 AGENTS 与 MIC-04 固定；转换语义为目标契约）"
   },
   "budgets": [

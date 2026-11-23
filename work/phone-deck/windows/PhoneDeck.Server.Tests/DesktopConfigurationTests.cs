@@ -44,15 +44,18 @@ public sealed class DesktopConfigurationTests
         {
             var catalog = VoiceEngineCatalog.Load();
             var revision = DesktopConfiguration.Revision(catalog.Settings);
-            DesktopVoiceRequest Request(string mode, string keys) => new("pc", "revision", "wetype",
-                new() { ["wetype"] = new() { [mode] = keys } });
+            DesktopVoiceRequest Request(string mode, string keys) => new("pc", "revision", "typeless",
+                new() { ["typeless"] = new() { [mode] = keys } });
             Assert.ThrowsExactly<ArgumentException>(() => DesktopConfiguration.ValidateVoice(catalog, Request("unknown", "Ctrl+V")));
             Assert.ThrowsExactly<ArgumentException>(() => DesktopConfiguration.ValidateVoice(catalog, Request("dictation", "RunAnyScript")));
             var request = Request("dictation", "Ctrl+Shift+V");
             var validated = DesktopConfiguration.ValidateVoice(catalog, request);
-            request.ShortcutOverrides!["wetype"]["dictation"] = "F1";
-            Assert.AreEqual("Ctrl+Shift+V", validated.ShortcutOverrides!["wetype"]["dictation"]);
-            Assert.AreEqual("wetype", catalog.WithSettings(validated).Active.Id);
+            request.ShortcutOverrides!["typeless"]["dictation"] = "F1";
+            Assert.AreEqual("Ctrl+Shift+V", validated.ShortcutOverrides!["typeless"]["dictation"]);
+            Assert.AreEqual("typeless", catalog.WithSettings(validated).Active.Id);
+            // 只支持 Typeless：其他引擎 id 一律拒绝。
+            Assert.ThrowsExactly<ArgumentException>(() => DesktopConfiguration.ValidateVoice(catalog,
+                new DesktopVoiceRequest("pc", "revision", "wetype", null)));
             Assert.AreEqual(revision, DesktopConfiguration.Revision(catalog.Settings));
         });
     }

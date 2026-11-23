@@ -9,6 +9,78 @@ final class SharedAudioPolicies {
     /// M1-B/MIC-10（V21 断言项）：共享组零可达目标的停采窗口（15s 提案，单调时钟）。
     static final long ZERO_TARGET_STOP_WINDOW_MS = 15_000;
 
+    /// 每条共享目标连接都由自己的看门狗监督。HttpURLConnection 的
+    /// getOutputStream()/write()/flush() 不保证受 readTimeout 约束，因此不能只
+    /// 依赖连接对象上的超时；这些预算也必须足够大，避免普通 Wi-Fi/TLS 抖动把
+    /// 一台电脑误判成坏连接。
+    static final long OUTPUT_OPEN_TIMEOUT_MS = 5_000;
+    static final long FIRST_WRITE_TIMEOUT_MS = 5_000;
+    static final long WRITE_PROGRESS_TIMEOUT_MS = 5_000;
+    static final long WATCHDOG_POLL_MS = 100;
+    static final long WATCHDOG_JOIN_TIMEOUT_MS = 250;
+    /// A blocked platform disconnect must not accumulate one task per retry.
+    /// Each sink has at most one daemon cleaner and a small bounded pending set.
+    static final int DISCONNECT_QUEUE_CAPACITY = 4;
+
+    /// 共享模式停止时只给每一台接收端一个有限的尾部收尾预算；慢端不能
+    /// 把手机停止共享拖成 8 秒或更久。其余目标仍独立完成各自的收尾。
+    static final long SHARED_FINISH_TIMEOUT_MS = 2_000;
+
+    /// 麦克风读取出错（来电、audioserver 重启、被抢占）时只重建采集，不拆连接。
+    /// 连续失败按下表退避；采集稳定 CAPTURE_STABLE_MS 后清零，超过表长才真正停止共享。
+    static final long[] CAPTURE_RETRY_BACKOFF_MS = {300, 600, 1_200, 2_000, 3_000, 3_000};
+    static final long CAPTURE_STABLE_MS = 5_000;
+
+    /** Backoff before capture retry {@code attempt} (1-based), or -1 to give up. */
+    static long captureRetryDelayMs(int attempt) {
+        return attempt >= 1 && attempt <= CAPTURE_RETRY_BACKOFF_MS.length
+                ? CAPTURE_RETRY_BACKOFF_MS[attempt - 1] : -1L;
+    }
+
+    static boolean watchdogExpired(long nowElapsed, long deadlineElapsed) {
+        return deadlineElapsed != Long.MIN_VALUE && nowElapsed >= deadlineElapsed;
+    }
+
+    static long watchdogSleepMs(long nowElapsed, long deadlineElapsed) {
+        long remaining = deadlineElapsed - nowElapsed;
+        if (remaining <= 0) {
+            return 0;
+        }
+        return Math.min(WATCHDOG_POLL_MS, remaining);
+    }
+
+    /// 接收端声明此能力后，Wi-Fi 共享供音改发 16 kHz（接收端入缓冲前还原 48 kHz）。
+    static final String WIFI_16K_CAPABILITY = "sharedPcm16kV1";
+
+    /// Wi-Fi 目标的上传采样率：接收端声明 sharedPcm16kV1 才用 16 kHz，否则保持 48 kHz 基线。
+    /// USB 目标不走这里，始终 48 kHz。
+    static int wifiUploadRate(java.util.Collection<String> capabilities) {
+        return capabilities != null && capabilities.contains(WIFI_16K_CAPABILITY)
+                ? Pcm16kDownsampler.OUTPUT_RATE : 48_000;
+    }
+
+    /// 所有目标都在正常供音时，连接检查放慢到这个间隔：音频在持续写入本身就证明连接是通的，
+    /// 检查只用来发现电脑下线或改地址；任何一台没连上就回到快节奏。
+    static final long STEADY_PROBE_INTERVAL_MS = 6_000;
+    static final long FAST_PROBE_INTERVAL_MS = 2_000;
+
+    static long probeIntervalMs(boolean allTargetsStreaming) {
+        return allTargetsStreaming ? STEADY_PROBE_INTERVAL_MS : FAST_PROBE_INTERVAL_MS;
+    }
+
+    /// 共享组非空且每台都已有成功写入的连接。
+    static boolean allStreaming(java.util.Collection<Boolean> groupConnected) {
+        if (groupConnected == null || groupConnected.isEmpty()) {
+            return false;
+        }
+        for (Boolean connected : groupConnected) {
+            if (!Boolean.TRUE.equals(connected)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static boolean shouldStopForZeroTargets(long emptySinceElapsed, long nowElapsed) {
         return emptySinceElapsed > 0L
                 && nowElapsed - emptySinceElapsed >= ZERO_TARGET_STOP_WINDOW_MS;
@@ -16,18 +88,19 @@ final class SharedAudioPolicies {
 
     /// 与接收端 PcmLatency 一致：RMS 低于约 -48 dBFS 视为静音。
     static final double SILENCE_RMS = 130;
+    private static final long SILENCE_SQUARE_THRESHOLD = (long) (SILENCE_RMS * SILENCE_RMS);
 
     static boolean isSilent(byte[] pcm) {
         int samples = pcm.length / 2;
         if (samples == 0) {
             return true;
         }
-        double sum = 0;
+        long sum = 0;
         for (int index = 0; index + 1 < pcm.length; index += 2) {
-            short sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
-            sum += (double) sample * sample;
+            long sample = (short) ((pcm[index] & 0xff) | (pcm[index + 1] << 8));
+            sum += sample * sample;
         }
-        return Math.sqrt(sum / samples) < SILENCE_RMS;
+        return sum < SILENCE_SQUARE_THRESHOLD * samples;
     }
 
     /// 网络短暂卡顿时的有界队列：满了优先丢最旧的静音帧，没有静音才丢最旧帧，
@@ -102,8 +175,18 @@ final class SharedAudioPolicies {
     }
 
     static final class ReconnectBackoff {
-        private static final long MAX_DELAY_MS = 30_000;
+        /// 上限 5 秒：Wi-Fi 短暂中断恢复后，这台电脑最多再等 5 秒就重新收到声音。
+        /// 原来的 30 秒会让探测已显示在线的电脑在退避睡眠里继续“没声音”半分钟；
+        /// 离线电脑每 5 秒一次连接尝试的开销可以忽略，彻底离线的目标仍由探测在 15 秒后移出。
+        static final long MAX_DELAY_MS = 5_000;
+        /// 只有连续实际写入一段时间后，才把失败退避恢复到初始值。
+        /// 仅拿到 HTTP OutputStream 不能证明接收端已经接受音频。
+        static final long STABLE_WRITE_WINDOW_MS = 5_000;
+        /// 共享音频正常约每 20--40 ms 写一次；超过此间隔视为连接没有持续供音。
+        static final long MAX_WRITE_GAP_MS = 1_000;
         private long delayMs = 500;
+        private long connectionStartedAt = Long.MIN_VALUE;
+        private long lastWriteAt = Long.MIN_VALUE;
 
         long nextDelayMs() {
             long result = delayMs;
@@ -113,6 +196,36 @@ final class SharedAudioPolicies {
 
         void reset() {
             delayMs = 500;
+        }
+
+        /// 标记一次新的连接尝试；此时不能重置退避，因为尚未写入任何音频。
+        void connectionOpened(long nowElapsed) {
+            // 稳定窗口从第一次成功写入开始，不能把 TLS/HTTP 建连时间算进去。
+            connectionStartedAt = Long.MIN_VALUE;
+            lastWriteAt = Long.MIN_VALUE;
+        }
+
+        /// 标记一次成功写入。只有连续写入达到稳定窗口后才恢复 500 ms 起步。
+        void frameWritten(long nowElapsed) {
+            if (connectionStartedAt == Long.MIN_VALUE) {
+                connectionStartedAt = nowElapsed;
+                lastWriteAt = nowElapsed;
+                return;
+            }
+            if (nowElapsed - lastWriteAt > MAX_WRITE_GAP_MS) {
+                // 连接虽未关闭，但长时间没有实际进度；重新开始稳定计时。
+                connectionStartedAt = nowElapsed;
+            }
+            lastWriteAt = nowElapsed;
+            if (nowElapsed - connectionStartedAt >= STABLE_WRITE_WINDOW_MS) {
+                reset();
+            }
+        }
+
+        /// 标记连接结束，避免下一轮把上一次的连接时长带进来。
+        void connectionClosed() {
+            connectionStartedAt = Long.MIN_VALUE;
+            lastWriteAt = Long.MIN_VALUE;
         }
     }
 }

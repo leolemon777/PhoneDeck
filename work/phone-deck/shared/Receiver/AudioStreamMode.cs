@@ -36,3 +36,6 @@ internal sealed class AudioStreamConflictException : InvalidOperationException
     {
     }
 }
+
+/// <summary>手机音频长流超过停滞阈值无数据：接收端已释放会话，调用方应中止该连接。</summary>
+internal sealed class AudioStreamStalledException(string message) : IOException(message);
