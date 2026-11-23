@@ -17,19 +17,23 @@ $action = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
     -Argument $arguments `
     -WorkingDirectory $PSScriptRoot
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 2) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 
 Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $action `
-    -Trigger $trigger `
+    -Trigger @($logonTrigger, $watchdogTrigger) `
     -Settings $settings `
-    -Description '登录 Windows 后自动启动 PhoneDeck Wi-Fi/USB 接收端。' `
+    -Description '登录 Windows 后自动启动并定期守护 PhoneDeck Wi-Fi/USB 接收端。' `
     -Force | Out-Null
 
 Start-ScheduledTask -TaskName $TaskName

@@ -83,9 +83,12 @@ public final class MainActivity extends Activity {
     private MicrophoneGlyphDrawable voiceIcon;
     private VoiceLevelView voiceMeter;
     private GridLayout shortcutGrid;
-    /// 对话白首页的“你的电脑”卡片区。
+    /// 首页顶部“按键目标”单选卡片区与底部“共享麦克风供音”多选区。
     private LinearLayout computerSection;
+    private LinearLayout computerSectionHeader;
     private LinearLayout computerCardRow;
+    private FrameLayout sharedDockChipsHost;
+    private TextView sharedDockMetaText;
     private TextView fleetSummaryBadge;
     private String lastComputerCardsSignature;
     /// 居中的卡片（停在哪台就是在跟哪台说话）：已连接电脑的 id；附近/添加卡片为 null。
@@ -455,6 +458,9 @@ public final class MainActivity extends Activity {
         voiceStatusCaption = null;
         voiceHint = null;
         fleetSummaryBadge = null;
+        computerSectionHeader = null;
+        sharedDockChipsHost = null;
+        sharedDockMetaText = null;
         homeShortcutGrid = null;
         homeEditButton = null;
         homeShortcutSubtitle = null;
@@ -531,7 +537,6 @@ public final class MainActivity extends Activity {
         statusDetailText = text("正在检测连接…", 11, theme.muted, Typeface.NORMAL);
 
         computerSection = buildComputerCarousel();
-        computerCardRow = (LinearLayout) computerSection.getChildAt(0);
         lastComputerCardsSignature = null;
 
         // 全部快捷指令二级抽屉面板
@@ -618,11 +623,12 @@ public final class MainActivity extends Activity {
         RoundVoiceButton voiceBar = (RoundVoiceButton) typelessButton;
         voiceBar.setTextSize(16);
         voiceBar.setLetterSpacing(0.05f);
-        int barHeight = dp(landscape || compact ? 50 : 56);
+        int barHeight = dp(landscape || compact ? 48 : 52);
 
         refreshShortcutGrid();
-        quickRow = buildQuickRow();
         View thumbEditRow = buildThumbEditRow();
+        quickRow = buildQuickRow(thumbEditRow, compact);
+        View audioDock = buildSharedAudioDock(voiceBar, barHeight);
         if (!landscape) {
             LinearLayout middle = new LinearLayout(this);
             middle.setOrientation(LinearLayout.VERTICAL);
@@ -635,7 +641,7 @@ public final class MainActivity extends Activity {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.CENTER_VERTICAL);
-            qrParams.setMargins(dp(16), dp(6), dp(16), dp(6));
+            qrParams.setMargins(dp(16), dp(6), dp(16), dp(4));
             quickHolder.addView(quickRow, qrParams);
             middle.addView(quickHolder, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -646,11 +652,8 @@ public final class MainActivity extends Activity {
 
             LinearLayout footer = new LinearLayout(this);
             footer.setOrientation(LinearLayout.VERTICAL);
-            footer.setGravity(Gravity.CENTER_HORIZONTAL);
             footer.setPadding(dp(16), dp(4), dp(16), dp(compact ? 10 : 14));
-            footer.addView(voiceMeter, margins(0, 0, 0, dp(6), dp(120), dp(10)));
-            footer.addView(thumbEditRow, new LinearLayout.LayoutParams(-1, dp(48)));
-            footer.addView(voiceBar, margins(0, dp(8), 0, 0, -1, barHeight));
+            footer.addView(audioDock, new LinearLayout.LayoutParams(-1, -2));
 
             LinearLayout page = new LinearLayout(this);
             page.setOrientation(LinearLayout.VERTICAL);
@@ -680,8 +683,7 @@ public final class MainActivity extends Activity {
             right.setOrientation(LinearLayout.VERTICAL);
             right.setPadding(dp(14), dp(8), dp(14), dp(10));
             right.addView(rightScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-            right.addView(thumbEditRow, margins(0, dp(6), 0, 0, -1, dp(46)));
-            right.addView(voiceBar, margins(0, dp(8), 0, 0, -1, barHeight));
+            right.addView(audioDock, margins(0, dp(8), 0, 0, -1, -2));
             View divider = new View(this);
             divider.setBackgroundColor(theme.outline);
             LinearLayout console = new LinearLayout(this);
@@ -695,16 +697,66 @@ public final class MainActivity extends Activity {
         return root;
     }
 
-    // ---------- 对话白（全览仪表盘版）：全部电脑状态一屏并列展示 ----------
+    // ---------- 顶部按键目标（单选）与底部共享麦克风供音坞（多选）上下分区 ----------
 
     private LinearLayout buildComputerCarousel() {
         LinearLayout section = new LinearLayout(this);
         section.setOrientation(LinearLayout.VERTICAL);
+
+        computerSectionHeader = new LinearLayout(this);
+        computerSectionHeader.setOrientation(LinearLayout.HORIZONTAL);
+        computerSectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+        computerSectionHeader.setPadding(dp(16), 0, dp(16), dp(6));
+        TextView sectionTitle = text("按键目标（单选）", 12, theme.muted, Typeface.BOLD);
+        computerSectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        Button addComputerBtn = smallButton("+ 添加电脑");
+        addComputerBtn.setTextSize(12);
+        addComputerBtn.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        addComputerBtn.setTextColor(theme.body);
+        addComputerBtn.setPadding(dp(11), 0, dp(11), 0);
+        addComputerBtn.setBackground(
+                theme.pressable(this, theme.surface, theme.surfaceRaised, 15, 1, theme.outline));
+        addComputerBtn.setContentDescription("添加电脑，查找附近同一 Wi-Fi 电脑或输入地址");
+        addComputerBtn.setOnClickListener(view -> showAddComputerHelp());
+        computerSectionHeader.addView(addComputerBtn, new LinearLayout.LayoutParams(-2, dp(30)));
+        section.addView(computerSectionHeader, new LinearLayout.LayoutParams(-1, -2));
+
         computerCardRow = new LinearLayout(this);
         computerCardRow.setOrientation(LinearLayout.VERTICAL);
         computerCardRow.setPadding(dp(16), dp(2), dp(16), dp(2));
         section.addView(computerCardRow, new LinearLayout.LayoutParams(-1, -2));
         return section;
+    }
+
+    private View buildSharedAudioDock(RoundVoiceButton voiceBar, int barHeight) {
+        LinearLayout dock = new LinearLayout(this);
+        dock.setOrientation(LinearLayout.VERTICAL);
+        dock.setPadding(dp(12), dp(11), dp(12), dp(12));
+        dock.setBackground(theme.shape(this, theme.surface, 22, 1, theme.outline));
+
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        topRow.setPadding(dp(2), 0, dp(2), 0);
+        TextView dockTitle = text("共享麦克风供音（可多选）", 12, theme.text, Typeface.BOLD);
+        topRow.addView(dockTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        if (voiceMeter.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) voiceMeter.getParent()).removeView(voiceMeter);
+        }
+        topRow.addView(voiceMeter, margins(0, 0, dp(8), 0, dp(96), dp(12)));
+
+        sharedDockMetaText = text("", 11, theme.muted, Typeface.NORMAL);
+        sharedDockMetaText.setSingleLine(true);
+        topRow.addView(sharedDockMetaText, new LinearLayout.LayoutParams(-2, -2));
+        dock.addView(topRow, new LinearLayout.LayoutParams(-1, -2));
+
+        sharedDockChipsHost = new FrameLayout(this);
+        dock.addView(sharedDockChipsHost, margins(0, dp(8), 0, dp(10), -1, -2));
+
+        dock.addView(voiceBar, new LinearLayout.LayoutParams(-1, barHeight));
+        return dock;
     }
 
     private void onComputerCardTap(String computerId) {
@@ -827,21 +879,67 @@ public final class MainActivity extends Activity {
         String signature = computerCardsSignature(devices);
         if (signature.equals(lastComputerCardsSignature) && computerCardRow.getChildCount() > 0) return;
         lastComputerCardsSignature = signature;
+
+        if (computerSectionHeader != null) {
+            computerSectionHeader.setVisibility(devices.isEmpty() ? View.GONE : View.VISIBLE);
+        }
+        java.util.Map<String, String> sharedStates = PhoneAudioService.getSnapshot().receiverStates;
+        refreshSharedAudioDockChips(devices, sharedStates);
+
         computerCardRow.removeAllViews();
         if (devices.isEmpty() && nearbyComputers.isEmpty()) {
             computerCardRow.addView(emptyComputerCard(), new LinearLayout.LayoutParams(-1, -2));
             return;
         }
         String activeId = targetDeviceManager.getActiveComputerId();
-        java.util.Map<String, String> sharedStates = PhoneAudioService.getSnapshot().receiverStates;
-        for (int i = 0; i < devices.size(); i++) {
-            TargetDeviceManager.Device device = devices.get(i);
-            boolean selected = sameComputer(device.computerId, activeId);
-            boolean confirming = sameComputer(device.computerId, confirmingComputerId);
-            View card = buildComputerStatusCard(
-                    device, selected, confirming, sharedStates.get(device.computerId));
-            int bottomMargin = (i < devices.size() - 1 || !nearbyComputers.isEmpty()) ? dp(8) : 0;
-            computerCardRow.addView(card, margins(0, 0, 0, bottomMargin, -1, -2));
+        boolean landscape = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        if (!devices.isEmpty()) {
+            if (landscape) {
+                for (int i = 0; i < devices.size(); i++) {
+                    TargetDeviceManager.Device device = devices.get(i);
+                    boolean selected = sameComputer(device.computerId, activeId);
+                    boolean confirming = sameComputer(device.computerId, confirmingComputerId);
+                    View card = buildComputerStatusCard(device, selected, confirming);
+                    int bottomMargin = (i < devices.size() - 1 || !nearbyComputers.isEmpty()) ? dp(8) : 0;
+                    computerCardRow.addView(card, margins(0, 0, 0, bottomMargin, -1, -2));
+                }
+            } else if (devices.size() <= 3) {
+                LinearLayout strip = new LinearLayout(this);
+                strip.setOrientation(LinearLayout.HORIZONTAL);
+                for (int i = 0; i < devices.size(); i++) {
+                    TargetDeviceManager.Device device = devices.get(i);
+                    boolean selected = sameComputer(device.computerId, activeId);
+                    boolean confirming = sameComputer(device.computerId, confirmingComputerId);
+                    View card = buildComputerStatusCard(device, selected, confirming);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+                    if (i < devices.size() - 1) {
+                        lp.rightMargin = dp(8);
+                    }
+                    strip.addView(card, lp);
+                }
+                int bottomMargin = !nearbyComputers.isEmpty() ? dp(8) : 0;
+                computerCardRow.addView(strip, margins(0, 0, 0, bottomMargin, -1, -2));
+            } else {
+                HorizontalScrollView stripScroll = new HorizontalScrollView(this);
+                stripScroll.setHorizontalScrollBarEnabled(false);
+                LinearLayout strip = new LinearLayout(this);
+                strip.setOrientation(LinearLayout.HORIZONTAL);
+                for (int i = 0; i < devices.size(); i++) {
+                    TargetDeviceManager.Device device = devices.get(i);
+                    boolean selected = sameComputer(device.computerId, activeId);
+                    boolean confirming = sameComputer(device.computerId, confirmingComputerId);
+                    View card = buildComputerStatusCard(device, selected, confirming);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(118), -2);
+                    if (i < devices.size() - 1) {
+                        lp.rightMargin = dp(8);
+                    }
+                    strip.addView(card, lp);
+                }
+                stripScroll.addView(strip, new FrameLayout.LayoutParams(-2, -2));
+                int bottomMargin = !nearbyComputers.isEmpty() ? dp(8) : 0;
+                computerCardRow.addView(stripScroll, margins(0, 0, 0, bottomMargin, -1, -2));
+            }
         }
         java.util.List<LanDiscoveryClient.DiscoveredComputer> nearbyList = sortedNearby();
         for (int i = 0; i < nearbyList.size(); i++) {
@@ -849,6 +947,127 @@ public final class MainActivity extends Activity {
             computerCardRow.addView(nearbyComputerCard(nearbyList.get(i)),
                     margins(0, 0, 0, bottomMargin, -1, -2));
         }
+    }
+
+    private void refreshSharedAudioDockChips(
+            java.util.List<TargetDeviceManager.Device> devices,
+            java.util.Map<String, String> sharedStates) {
+        PhoneAudioService.Snapshot snap = PhoneAudioService.getSnapshot();
+        int selectedCount = 0;
+        for (TargetDeviceManager.Device d : devices) {
+            if (d.sharedGroup) {
+                selectedCount++;
+            }
+        }
+        updateSharedDockMetaLabel(snap, devices.size(), selectedCount);
+        if (sharedDockChipsHost == null) {
+            return;
+        }
+        sharedDockChipsHost.removeAllViews();
+        if (devices.isEmpty()) {
+            sharedDockChipsHost.setVisibility(View.GONE);
+            return;
+        }
+        sharedDockChipsHost.setVisibility(View.VISIBLE);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        boolean equalColumns = devices.size() <= 3;
+        for (int i = 0; i < devices.size(); i++) {
+            TargetDeviceManager.Device device = devices.get(i);
+            View chip = buildSharedAudioChip(device, snap.running,
+                    sharedStates != null ? sharedStates.get(device.computerId) : null);
+            if (equalColumns) {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(36), 1f);
+                if (i < devices.size() - 1) {
+                    lp.rightMargin = dp(6);
+                }
+                row.addView(chip, lp);
+            } else {
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(36));
+                if (i < devices.size() - 1) {
+                    lp.rightMargin = dp(6);
+                }
+                row.addView(chip, lp);
+            }
+        }
+        if (equalColumns) {
+            sharedDockChipsHost.addView(row, new FrameLayout.LayoutParams(-1, -2));
+        } else {
+            HorizontalScrollView scroll = new HorizontalScrollView(this);
+            scroll.setHorizontalScrollBarEnabled(false);
+            scroll.addView(row, new FrameLayout.LayoutParams(-2, -2));
+            sharedDockChipsHost.addView(scroll, new FrameLayout.LayoutParams(-1, -2));
+        }
+    }
+
+    private void updateSharedDockMetaLabel(
+            PhoneAudioService.Snapshot snap, int totalDevices, int selectedCount) {
+        if (sharedDockMetaText == null) {
+            return;
+        }
+        if (snap.running) {
+            sharedDockMetaText.setText("供音 " + snap.connected + "/" + snap.total);
+            sharedDockMetaText.setTextColor(snap.connected > 0 ? theme.success : theme.warning);
+        } else if (sharedStartPending) {
+            sharedDockMetaText.setText("正在启动…");
+            sharedDockMetaText.setTextColor(theme.warning);
+        } else if (totalDevices == 0) {
+            sharedDockMetaText.setText("未配对电脑");
+            sharedDockMetaText.setTextColor(theme.muted);
+        } else if (selectedCount > 0) {
+            sharedDockMetaText.setText("已选 " + selectedCount + " 台");
+            sharedDockMetaText.setTextColor(theme.muted);
+        } else {
+            sharedDockMetaText.setText("点击勾选");
+            sharedDockMetaText.setTextColor(theme.muted);
+        }
+    }
+
+    private View buildSharedAudioChip(
+            TargetDeviceManager.Device device,
+            boolean micRunning,
+            String sharedState) {
+        boolean online = isDeviceOnline(device.computerId);
+        boolean streamingNow = device.sharedGroup && micRunning
+                && ((sharedState != null && sharedState.contains("正在供音"))
+                || isAudioStreamingFor(device.computerId));
+        String cleanName = device.nameLocked ? device.displayName : cleanComputerName(device.displayName);
+        String labelText = streamingNow
+                ? "🎙 " + cleanName
+                : device.sharedGroup ? "✓ " + cleanName : cleanName;
+        int ink;
+        int fill;
+        int stroke;
+        if (streamingNow) {
+            ink = theme.success;
+            fill = theme.successContainer;
+            stroke = theme.mix(theme.outline, theme.success, 0.45f);
+        } else if (device.sharedGroup) {
+            ink = online ? theme.success : theme.muted;
+            fill = online ? theme.successContainer : theme.surfaceRaised;
+            stroke = online ? theme.mix(theme.outline, theme.success, 0.45f) : theme.outline;
+        } else {
+            ink = theme.muted;
+            fill = theme.background;
+            stroke = theme.outline;
+        }
+        TextView chip = text(labelText, 12, ink,
+                device.sharedGroup ? Typeface.BOLD : Typeface.NORMAL);
+        chip.setGravity(Gravity.CENTER);
+        chip.setSingleLine(true);
+        chip.setEllipsize(TextUtils.TruncateAt.END);
+        chip.setPadding(dp(10), 0, dp(10), 0);
+        chip.setBackground(theme.pressable(this, fill, theme.surfaceRaised, 11, 1, stroke));
+        chip.setContentDescription((device.sharedGroup ? "移出共享麦克风供音：" : "加入共享麦克风供音：")
+                + device.displayName);
+        chip.setOnClickListener(view -> toggleSharedGroupFromCard(device));
+        chip.setOnLongClickListener(view -> {
+            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            showSharedGroupDialog();
+            return true;
+        });
+        installTouchFeedback(chip);
+        return chip;
     }
 
     private String platformLabel(String platform) {
@@ -922,12 +1141,11 @@ public final class MainActivity extends Activity {
                 || "idle".equals(lower);
     }
 
-    /// 极简全状态电脑卡片：无冗余边框与次要按钮，一眼区分当前目标、在线状态、虚拟声卡与前台窗口。
+    /// 单选按键目标卡片：专注展示连接通道、当前目标与前台窗口，供音开关独立在底部供音坞。
     private View buildComputerStatusCard(
             TargetDeviceManager.Device device,
             boolean selected,
-            boolean confirming,
-            String sharedState) {
+            boolean confirming) {
         LanTargetStatus lanStatus = lanTargets.get(device.computerId);
         boolean usbThis = usbConnected && sameComputer(device.computerId, usbComputerId);
         boolean online = lanStatus != null || usbThis;
@@ -936,24 +1154,25 @@ public final class MainActivity extends Activity {
         Boolean cableSelected = virtualCableSelectedFor(device.computerId);
         boolean hasAudioWarning = online && (!audioReady || Boolean.FALSE.equals(cableSelected));
         boolean capturing = isEngineCapturingFor(device.computerId);
-        boolean micRunning = PhoneAudioService.getSnapshot().running;
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(14), dp(11), dp(14), dp(11));
+        int padH = selected || confirming ? dp(9) : dp(10);
+        int padV = selected || confirming ? dp(8) : dp(9);
+        card.setPadding(padH, padV, padH, padV);
 
         int cardFill = selected || confirming
                 ? theme.mix(theme.surface, theme.primaryContainer, 0.35f)
                 : theme.surface;
-        int borderStroke = selected || confirming ? 2 : 0;
+        int borderStroke = selected || confirming ? 2 : 1;
         int borderColor = confirming ? theme.warning
                 : selected ? theme.primary
-                : Color.TRANSPARENT;
+                : theme.outline;
         card.setBackground(theme.pressable(
-                this, cardFill, theme.surfaceRaised, 16, borderStroke, borderColor));
+                this, cardFill, theme.surfaceRaised, 14, borderStroke, borderColor));
         card.setAlpha(online || selected || confirming || rejected ? 1f : 0.72f);
 
-        // 第一行：状态圆点 + 电脑名 +（当前标签）+ 右侧单个共享开关胶囊
+        // 第一行：在线状态点 + 通道文案 +（当前标签）
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -961,20 +1180,31 @@ public final class MainActivity extends Activity {
                 : online ? theme.success : theme.muted;
         View dot = new View(this);
         dot.setBackground(roundRect(dotColor, 20));
-        top.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
+        top.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
 
-        String cleanName = device.nameLocked ? device.displayName : cleanComputerName(device.displayName);
-        TextView nameView = text(
-                device.slot + " · " + cleanName,
-                15,
-                selected || online ? theme.text : theme.muted,
-                Typeface.BOLD);
-        nameView.setSingleLine(true);
-        nameView.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        nameParams.leftMargin = dp(8);
-        nameParams.rightMargin = dp(8);
-        top.addView(nameView, nameParams);
+        String channelLabel;
+        if (capturing) {
+            channelLabel = "听写中";
+        } else if (lanStatus != null && usbThis) {
+            channelLabel = "双通道";
+        } else if (lanStatus != null) {
+            channelLabel = "Wi-Fi";
+        } else if (usbThis) {
+            channelLabel = "USB";
+        } else if (rejected) {
+            channelLabel = "需重配";
+        } else {
+            channelLabel = "离线";
+        }
+        int channelInk = capturing ? theme.success
+                : (rejected || hasAudioWarning) ? theme.warning
+                : online ? theme.success : theme.muted;
+        TextView channelView = text(channelLabel, 10, channelInk, Typeface.BOLD);
+        channelView.setSingleLine(true);
+        channelView.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams channelParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        channelParams.leftMargin = dp(4);
+        top.addView(channelView, channelParams);
 
         if (selected || confirming) {
             TextView activeBadge = text(
@@ -983,88 +1213,48 @@ public final class MainActivity extends Activity {
                     confirming ? theme.warning : theme.onPrimary,
                     Typeface.BOLD);
             activeBadge.setSingleLine(true);
-            activeBadge.setPadding(dp(7), dp(2), dp(7), dp(2));
-            activeBadge.setBackground(roundRect(confirming ? theme.warningContainer : theme.primary, 8));
-            top.addView(activeBadge, margins(0, 0, dp(6), 0, -2, -2));
+            activeBadge.setPadding(dp(6), dp(1), dp(6), dp(1));
+            activeBadge.setBackground(roundRect(confirming ? theme.warningContainer : theme.primary, 999));
+            top.addView(activeBadge, margins(dp(4), 0, 0, 0, -2, -2));
         }
-
-        boolean streamingNow = device.sharedGroup && micRunning
-                && ((sharedState != null && sharedState.contains("正在供音"))
-                || isAudioStreamingFor(device.computerId));
-        String sharedLabel;
-        int sharedInk;
-        int sharedBg;
-        if (streamingNow) {
-            sharedLabel = "🎙 供音中";
-            sharedInk = theme.success;
-            sharedBg = theme.successContainer;
-        } else if (device.sharedGroup) {
-            sharedLabel = "✓ 共享";
-            sharedInk = online ? theme.success : theme.muted;
-            sharedBg = online
-                    ? theme.mix(theme.surfaceRaised, theme.successContainer, 0.55f)
-                    : theme.surfaceRaised;
-        } else {
-            sharedLabel = "未共享";
-            sharedInk = theme.muted;
-            sharedBg = theme.surfaceRaised;
-        }
-        TextView sharedPill = text(sharedLabel, 11, sharedInk, Typeface.BOLD);
-        sharedPill.setSingleLine(true);
-        sharedPill.setPadding(dp(8), dp(3), dp(8), dp(3));
-        sharedPill.setBackground(theme.pressable(this, sharedBg, theme.outline, 10));
-        sharedPill.setContentDescription((device.sharedGroup ? "移出共享组：" : "加入共享组：") + device.displayName);
-        sharedPill.setOnClickListener(view -> toggleSharedGroupFromCard(device));
-        top.addView(sharedPill, new LinearLayout.LayoutParams(-2, -2));
 
         card.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-        // 第二行：极简状态行（连接通道 · 语音状态 · 活动应用）
-        java.util.List<String> telemetry = new java.util.ArrayList<>();
-        if (lanStatus != null && usbThis) {
-            telemetry.add("Wi-Fi + USB");
-        } else if (lanStatus != null) {
-            telemetry.add("Wi-Fi");
-        } else if (usbThis) {
-            telemetry.add("USB");
-        } else if (rejected) {
-            telemetry.add("配对失效 · 点按重配");
-        } else {
-            telemetry.add("离线");
-        }
+        String cleanName = device.nameLocked ? device.displayName : cleanComputerName(device.displayName);
+        TextView nameView = text(
+                device.slot + " · " + cleanName,
+                13,
+                selected || online ? theme.text : theme.muted,
+                Typeface.BOLD);
+        nameView.setSingleLine(true);
+        nameView.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(nameView, margins(0, dp(3), 0, 0, -1, -2));
 
-        if (online) {
-            if (capturing) {
-                telemetry.add("🔴 正在听写");
-            } else if (!audioReady) {
-                telemetry.add("声卡未就绪");
+        String subLine;
+        if (rejected) {
+            subLine = "点按重配";
+        } else if (online) {
+            if (!audioReady) {
+                subLine = "声卡未就绪";
             } else if (Boolean.FALSE.equals(cableSelected)) {
-                telemetry.add("Typeless 未选虚拟麦");
+                subLine = "未选虚拟麦";
             } else {
-                telemetry.add("就绪");
+                String fg = foregroundAppFor(device.computerId);
+                subLine = !isSystemNoiseWindow(fg) ? fg.trim() : platformLabel(device.platform);
             }
-            String fg = foregroundAppFor(device.computerId);
-            if (!isSystemNoiseWindow(fg)) {
-                telemetry.add(fg.trim());
-            }
+        } else {
+            subLine = platformLabel(device.platform);
         }
-
-        String telemetryLine = String.join("  ·  ", telemetry);
-        int telemetryColor = capturing ? theme.success
-                : (rejected || hasAudioWarning) ? theme.warning
-                : online ? theme.muted : theme.muted;
-        TextView detailView = text(
-                telemetryLine,
-                12,
-                telemetryColor,
-                capturing ? Typeface.BOLD : Typeface.NORMAL);
+        int subColor = (rejected || hasAudioWarning) ? theme.warning
+                : selected ? theme.body : theme.muted;
+        TextView detailView = text(subLine, 11, subColor, Typeface.NORMAL);
         detailView.setSingleLine(true);
         detailView.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(detailView, margins(dp(16), dp(3), 0, 0, -1, -2));
+        card.addView(detailView, margins(0, dp(2), 0, 0, -1, -2));
 
         final String tappedId = device.computerId;
         card.setContentDescription(device.slot + "号电脑 " + device.displayName + "，"
-                + (selected ? "当前目标，" : "") + sharedLabel + "，" + telemetryLine);
+                + (selected ? "当前按键目标，" : "") + channelLabel + "，" + subLine);
         card.setFocusable(true);
         card.setOnClickListener(view -> onComputerCardTap(tappedId));
         card.setOnLongClickListener(view -> {
@@ -1131,30 +1321,34 @@ public final class MainActivity extends Activity {
 
     // ---------- 快捷与指令矩阵（4×3 完整对称网格：含常用按键与常用斜杠指令，无孤立空位） ----------
 
-    private View buildQuickRow() {
+    private View buildQuickRow(View thumbEditRow, boolean compact) {
         LinearLayout section = new LinearLayout(this);
         section.setOrientation(LinearLayout.VERTICAL);
 
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("快捷指令", 14, theme.muted, Typeface.BOLD);
+        TextView title = text("快捷指令与编辑键", 12, theme.muted, Typeface.BOLD);
         headerRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
 
         homeEditButton = smallButton(gridEditMode ? "完成" : "编辑");
         homeEditButton.setTextSize(12);
-        homeEditButton.setTextColor(gridEditMode ? theme.primary : theme.muted);
-        homeEditButton.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 10));
-        homeEditButton.setPadding(dp(10), dp(2), dp(10), dp(2));
+        homeEditButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
+        homeEditButton.setBackground(theme.pressable(this,
+                gridEditMode ? theme.primary : theme.surface, theme.surfaceRaised, 15, 1,
+                gridEditMode ? theme.primary : theme.outline));
+        homeEditButton.setPadding(dp(11), 0, dp(11), 0);
         homeEditButton.setOnClickListener(view -> toggleGridEditMode());
-        headerRow.addView(homeEditButton, new LinearLayout.LayoutParams(-2, dp(30)));
+        headerRow.addView(homeEditButton, new LinearLayout.LayoutParams(-2, dp(28)));
 
         Button allBtn = smallButton("全部 ›");
         allBtn.setTextSize(12);
-        allBtn.setTextColor(theme.muted);
-        allBtn.setBackground(theme.pressable(this, Color.TRANSPARENT, theme.surfaceRaised, 10));
-        allBtn.setPadding(dp(8), dp(2), dp(4), dp(2));
+        allBtn.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        allBtn.setTextColor(theme.body);
+        allBtn.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 15, 1, theme.outline));
+        allBtn.setPadding(dp(11), 0, dp(9), 0);
         allBtn.setOnClickListener(view -> showShortcutPanel());
-        headerRow.addView(allBtn, new LinearLayout.LayoutParams(-2, dp(30)));
+        headerRow.addView(allBtn, margins(dp(6), 0, 0, 0, -2, dp(28)));
 
         section.addView(headerRow, new LinearLayout.LayoutParams(-1, -2));
 
@@ -1170,6 +1364,8 @@ public final class MainActivity extends Activity {
         homeShortcutGrid.setColumnCount(4);
         homeShortcutGrid.setUseDefaultMargins(false);
         section.addView(homeShortcutGrid, margins(dp(-4), dp(4), dp(-4), 0, -1, -2));
+
+        section.addView(thumbEditRow, margins(0, dp(8), 0, 0, -1, dp(compact ? 42 : 44)));
 
         refreshHomeShortcuts();
         return section;
@@ -1238,7 +1434,7 @@ public final class MainActivity extends Activity {
                 () -> onGridButtonHeld(button, config),
                 () -> startDragFromRepeat(button, config));
 
-        int tileHeightDp = getResources().getConfiguration().screenHeightDp >= 780 ? 74 : 64;
+        int tileHeightDp = getResources().getConfiguration().screenHeightDp >= 780 ? 68 : 60;
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
         params.height = dp(Math.round(tileHeightDp * Math.max(1f,
@@ -1248,7 +1444,7 @@ public final class MainActivity extends Activity {
         grid.addView(button, params);
     }
 
-    /// 底部拇指快捷编辑栏：大尺寸退格（长按全删）、回车与 `/ 指令` 面板入口，无横向截断。
+    /// 键盘区底部快捷编辑栏：大尺寸退格（长按全删）、回车与 `/ 指令` 面板入口，无横向截断。
     private View buildThumbEditRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1258,16 +1454,16 @@ public final class MainActivity extends Activity {
         slashBtn.setTextSize(13);
         slashBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         slashBtn.setTextColor(theme.text);
-        slashBtn.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        slashBtn.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 13, 1, theme.outline));
         slashBtn.setContentDescription("打开全部斜杠指令与新增");
         slashBtn.setOnClickListener(view -> showCommandSheet());
         row.addView(slashBtn, new LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.MATCH_PARENT));
 
         Button backspace = smallButton("⌫  退格");
-        backspace.setTextSize(14);
+        backspace.setTextSize(13);
         backspace.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        backspace.setTextColor(theme.text);
-        backspace.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        backspace.setTextColor(theme.body);
+        backspace.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 13, 1, theme.outline));
         backspace.setContentDescription("退格。点按删除一个字符，长按全部删除");
         backspace.setOnClickListener(view -> triggerVoiceEditAction(backspace, "退格", "BACKSPACE", "backspace"));
         backspace.setOnLongClickListener(view -> {
@@ -1279,10 +1475,10 @@ public final class MainActivity extends Activity {
         ((LinearLayout.LayoutParams) backspace.getLayoutParams()).weight = 1f;
 
         Button enter = smallButton("↵  回车");
-        enter.setTextSize(14);
+        enter.setTextSize(13);
         enter.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        enter.setTextColor(theme.text);
-        enter.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 14));
+        enter.setTextColor(theme.body);
+        enter.setBackground(theme.pressable(this, theme.surface, theme.surfaceRaised, 13, 1, theme.outline));
         enter.setContentDescription("发送回车键");
         enter.setOnClickListener(view -> triggerVoiceEditAction(enter, "回车", "ENTER", "enter"));
         row.addView(enter, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
@@ -1572,9 +1768,10 @@ public final class MainActivity extends Activity {
         }
         if (homeEditButton != null) {
             homeEditButton.setText(gridEditMode ? "完成" : "编辑");
-            homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.muted);
+            homeEditButton.setTextColor(gridEditMode ? theme.onPrimary : theme.body);
             homeEditButton.setBackground(theme.pressable(this,
-                    gridEditMode ? theme.primary : Color.TRANSPARENT, theme.surfaceRaised, 10));
+                    gridEditMode ? theme.primary : theme.surface, theme.surfaceRaised, 15, 1,
+                    gridEditMode ? theme.primary : theme.outline));
         }
         if (homeShortcutSubtitle != null) {
             homeShortcutSubtitle.setText("✎ 拖动图标调序 · 点右上角 × 删除 · 点击图标改键");
@@ -2191,10 +2388,14 @@ public final class MainActivity extends Activity {
                 .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) ->
                         targetDeviceManager.setSharedGroup(
                                 devices.get(which).computerId, isChecked))
-                .setPositiveButton("完成", (dialog, which) -> showActionFeedback(
-                        PhoneAudioService.getSnapshot().running
-                                ? "✓ 共享组已更新，下一轮探测生效" : "✓ 共享组已更新",
-                        theme.success))
+                .setPositiveButton("完成", (dialog, which) -> {
+                    lastComputerCardsSignature = null;
+                    refreshComputerCards();
+                    showActionFeedback(
+                            PhoneAudioService.getSnapshot().running
+                                    ? "✓ 共享组已更新，下一轮探测生效" : "✓ 共享组已更新",
+                            theme.success);
+                })
                 .setNegativeButton("取消", null).show();
     }
 
@@ -3082,6 +3283,16 @@ public final class MainActivity extends Activity {
                 : sharedStartPending ? "正在开启共享麦克风…" : "开启共享麦克风");
         if (voiceMeter != null) {
             voiceMeter.setVisibility(recording || starting ? View.VISIBLE : View.GONE);
+        }
+        if (targetDeviceManager != null) {
+            java.util.List<TargetDeviceManager.Device> devices = targetDeviceManager.list();
+            int selectedCount = 0;
+            for (TargetDeviceManager.Device d : devices) {
+                if (d.sharedGroup) {
+                    selectedCount++;
+                }
+            }
+            updateSharedDockMetaLabel(state, devices.size(), selectedCount);
         }
         if (voiceHalo != null) voiceHalo.setBackground(theme.shape(this, recording
                 ? theme.successContainer : Color.TRANSPARENT, 120));

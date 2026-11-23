@@ -1,5 +1,22 @@
 # PhoneDeck 项目交接说明
 
+## 2026-11-20 Windows 单进程后台自愈守护与启动脚本加固（已部署验证）
+
+- **Windows 自启与掉线守护加固（`scripts/windows/StartOrRepairPhoneDeck.ps1`、`scripts/windows/Install-PhoneDeckAutostart.ps1`）**：
+  - 将健康检查等待上限从 5 秒（20 × 250ms）延长至 10 秒（40 × 250ms），避免冷启动高负载时误判超时。
+  - 读取 `data/server-settings.json` 中的 `usbWatchdog` 配置：纯 Wi-Fi 模式下（`usbWatchdog: false`）跳过 `adb.exe start-server`，消除 PowerShell 5.1 `$ErrorActionPreference = 'Stop'` 下因 `adb` 向 `stderr` 输出守护进程提示导致的 `LastTaskResult = 1` 异常退出，同时避免后台驻留多余 `adb.exe` 进程。
+  - 计划任务 `PhoneDeck Receiver Auto Start` 在 `AtLogOn` 登录触发基础上新增每 2 分钟一次的静默巡检触发器（`MultipleInstances = IgnoreNew`），弥补移除 `PhoneDeck.ControlCenter.exe` 托盘进程后单进程 `PhoneDeck.Server.exe` 被系统更新或外部安装程序终止后的自动拉起能力。
+
+## 2026-11-14 Android 首页上下分区重构（源码，待装机验证）
+
+- **手机端 `MainActivity.java` 首页三分区重构（代码通过构建与测试，尚未安装到真实设备验证）**：
+  - **顶部「按键目标（单选）」横向卡片条**：新增分区标题与外显 `+ 添加电脑` 边框胶囊（直达 `showAddComputerHelp`），竖屏 1–3 台电脑等宽横排（4 台及以上可横滑，横屏保留左栏纵排），移除卡片内嵌的 22dp `sharedPill`，点卡片只单选切换按键目标，消除误触改供音。
+  - **中部「快捷指令与编辑键」一体区**：`编辑` 与 `全部 ›` 升级为带 `1dp` 描边的 `surface` 胶囊按钮；`4×3` 纯文字快捷指令网格与底部 `/ 指令`、`⌫ 退格`、`↵ 回车` 拇指编辑栏收归同一按键区。
+  - **底部「共享麦克风供音（可多选）」独立供音坞**：新增圆角 `surface` 底座卡片（`buildSharedAudioDock`），集中放置多台电脑供音勾选胶囊（`36dp` 高度，支持点按增减共享组、长按打开批量弹窗）、供音状态提示与动态 `VoiceLevelView`（空闲态隐藏电平条避免误读，录音/启动态显示），并与 `开启共享麦克风` 主按钮合并在拇指区；全量复用 `PhoneDeckTheme` 语义色板，兼容内置 4 套主题与横竖屏。
+- **验证**：
+  - Android：`.\gradlew.bat :app:assembleDebug :app:lintDebug :app:testDebugUnitTest --no-daemon` 全部通过（0 error；仅为“代码通过构建与单元测试”，未在真实手机安装验收）。
+- **待办**：确认同签名后执行 `adb install -r` 覆盖安装至作者 `SM-G9880`，实机核对单手触控、多机供音勾选胶囊与横竖屏布局；按需继续改版 `ShortcutSettingsActivity` 快捷键排序、隐藏与新增页。
+
 ## 2026-11-08 手机端精简优化 + 全览仪表盘 UI/UX 重构已装机，电脑端构建通过
 
 - **手机端全览仪表盘与极简 UI/UX 重构（已在真实设备 `SM-G9880` 验证并 `adb install -r` 覆盖安装）**：
